@@ -1,3 +1,13 @@
+---
+description: How to author the Live Sets used to learn the .als format and test the importer, series by series
+read_when: making test sets, corpus, new series, what to save in Live, test files
+type: howto
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/als/tests/corpus.rs
+---
+
 # Making the `.als` test corpus
 
 How to author the Live Sets we use to learn the `.als` format and to test the importer. Read

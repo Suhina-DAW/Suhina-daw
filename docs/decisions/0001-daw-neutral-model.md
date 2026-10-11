@@ -1,3 +1,13 @@
+---
+description: Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit
+read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
+type: decision
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/model/src/lib.rs
+---
+
 # 0001: A DAW-neutral project model
 
 - **Status:** accepted

@@ -1,3 +1,14 @@
+---
+description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement
+read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
+type: spec
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/engine/src/launcher.rs
+  - crates/session/tests/launcher.rs
+---
+
 # Clip launching
 
 - **Sources:** the behaviour of the Session View as the public Live 12 manual describes it

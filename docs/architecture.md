@@ -1,3 +1,18 @@
+---
+description: How the crates, threads and commands fit together, from a file to the speakers, and where new code goes
+read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
+type: system
+status: current
+last_verified: 2026-10-11
+covers:
+  - Cargo.toml
+  - crates/*/Cargo.toml
+  - crates/engine/src/lib.rs
+  - crates/session/src/lib.rs
+  - apps/loopwerk-cli/src/play.rs
+  - crates/automation/src/server.rs
+---
+
 # Architecture
 
 How Loopwerk's parts fit together: the layers, how a project gets from a file to the speakers,
