@@ -17,8 +17,9 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # Changes that touch only documentation skip the checks; no code reads these files. The jobs
-  # below still run and pass with their steps skipped, because main requires them by name.
+  # Changes that touch only documentation skip the build jobs entirely; no code reads these
+  # files. main requires only the `ci` job at the end, which passes when the others passed or
+  # were skipped.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -45,6 +46,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request is checked out as a merge commit; its first parent is the base.
+          fetch-depth: 2
+      - name: Front matter, covered paths and docs/INDEX.md
+        run: python3 scripts/docs.py check
+      # Warnings only: documents that describe code this pull request changes, left unchanged.
+      - name: Documents that describe the changed code
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/docs.py impact HEAD^1
       - name: No hidden or bidirectional Unicode characters
         run: |
           if git grep -nIP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' -- . ':!*.lock'; then
@@ -65,42 +75,66 @@ jobs:
 
   fmt:
     needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
-        if: needs.changes.outputs.code == 'true'
         with:
           components: rustfmt
       - run: cargo fmt --all --check
-        if: needs.changes.outputs.code == 'true'
 
   check:
     name: clippy and tests (${{ matrix.os }})
     needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
-        if: env.CODE == 'true'
       - name: Install ALSA headers (cpal)
-        if: env.CODE == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
-        if: env.CODE == 'true'
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-        if: env.CODE == 'true'
       # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
       # stays off here.
       - run: cargo clippy --workspace --all-targets -- -D warnings
-        if: env.CODE == 'true'
       - run: cargo test --workspace
-        if: env.CODE == 'true'
+
+  # Not part of `ci`: a macOS failure is reported but does not block merging.
+  check-macos:
+    name: clippy and tests (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
+      # stays off here.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # The one check main requires. Fails if any job it depends on failed or was cancelled.
+  ci:
+    if: always()
+    needs: [changes, docs, fmt, check]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::A required job failed or was cancelled."
+          exit 1
+      - run: echo "All required jobs passed or were skipped."

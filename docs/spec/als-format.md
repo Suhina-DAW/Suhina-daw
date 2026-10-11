@@ -1,3 +1,14 @@
+---
+description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices
+read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state
+type: spec
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/als/src/lib.rs
+  - crates/als/tests/synthetic.rs
+---
+
 # Live Set (`.als`) format
 
 What we have learned about the Live Set format, from Live Sets we authored ourselves (see

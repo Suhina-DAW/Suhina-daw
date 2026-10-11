@@ -1,3 +1,18 @@
+---
+description: How the crates, threads and commands fit together, from a file to the speakers, and where new code goes
+read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
+type: system
+status: current
+last_verified: 2026-10-11
+covers:
+  - Cargo.toml
+  - crates/*/Cargo.toml
+  - crates/engine/src/lib.rs
+  - crates/session/src/lib.rs
+  - apps/loopwerk-cli/src/play.rs
+  - crates/automation/src/server.rs
+---
+
 # Architecture
 
 How Loopwerk's parts fit together: the layers, how a project gets from a file to the speakers,
@@ -61,7 +76,8 @@ The engine does not run them yet (see *Planned parts*).
    samples in memory, so playback never reads the disk.
 3. **Build the renderer.** `Renderer::with_audio` turns the project into flat, sorted lists the
    audio thread can walk without searching: note events, audio events, one stretch voice per
-   warped clip placement, the prepared launcher clips and the per-track gains (group and master
+   warped clip placement (two stretchers each, so a fresh one takes over before every strong
+   onset and transients stay on the grid; ADR 0003), the prepared launcher clips and the per-track gains (group and master
    chain included). Every buffer the renderer will ever need is allocated here.
 4. **Play.** `Renderer::process` fills one block of interleaved stereo. It never allocates,
    locks, blocks or does I/O. Offline rendering (`render_offline*`, `render_launches`) calls the

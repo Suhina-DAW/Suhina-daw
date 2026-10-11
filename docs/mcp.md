@@ -1,3 +1,14 @@
+---
+description: The MCP server for agents: tools, file roots, errors and how to run it
+read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp
+type: system
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/automation/src/server.rs
+  - crates/automation/src/workspace.rs
+---
+
 # MCP server
 
 `loopwerk-cli mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) on
