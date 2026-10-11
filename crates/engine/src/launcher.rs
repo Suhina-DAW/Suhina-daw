@@ -72,10 +72,11 @@ pub enum LaunchCommand {
     SetQuantization(Quantization),
     /// Every track plays its arrangement clips again.
     BackToArrangement,
-    /// Turns the metronome on or off; `gain` is its level (linear, 0.5 is -6 dB).
+    /// Turns the metronome on or off; `gain` is its level (linear, 0.5 is -6 dB), or `None` to
+    /// keep the level it has.
     SetMetronome {
         on: bool,
-        gain: f32,
+        gain: Option<f32>,
     },
 }
 

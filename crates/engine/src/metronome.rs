@@ -27,10 +27,13 @@ impl Metronome {
         Self { on: false, gain: 0.5, last_beat: None, sounding: None, sample_rate: f64::from(sample_rate) }
     }
 
-    /// Turns the click on or off, at `gain` (linear; non-finite or negative is silence).
-    pub(crate) fn set(&mut self, on: bool, gain: f32) {
+    /// Turns the click on or off, at `gain` (linear; non-finite or negative is silence), or at
+    /// the level it had.
+    pub(crate) fn set(&mut self, on: bool, gain: Option<f32>) {
         self.on = on;
-        self.gain = if gain.is_finite() { gain.max(0.0) } else { 0.0 };
+        if let Some(gain) = gain {
+            self.gain = if gain.is_finite() { gain.max(0.0) } else { 0.0 };
+        }
     }
 
     pub(crate) fn on(&self) -> bool {

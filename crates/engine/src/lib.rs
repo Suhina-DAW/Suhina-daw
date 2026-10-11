@@ -1235,7 +1235,7 @@ mod tests {
         let mut project = Project::default();
         project.transport.time_signature = TimeSignature { numerator: 3, denominator: 4 };
         let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
-        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: 0.5 });
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
         renderer.handle(LaunchCommand::Play);
         let out = blocks(&mut renderer, 200, 480, |_| {});
         assert_eq!(onsets(&out), [1, 24_001, 48_001, 72_001]);
@@ -1244,7 +1244,7 @@ mod tests {
         assert!((bar - 1_600.0).abs() < 50.0 && (beat - 1_000.0).abs() < 50.0, "{bar} Hz, {beat} Hz");
         assert!(rms(&out, 0, 2_400) > 0.05);
         // Off: silence, including through a restart.
-        renderer.handle(LaunchCommand::SetMetronome { on: false, gain: 0.5 });
+        renderer.handle(LaunchCommand::SetMetronome { on: false, gain: None });
         renderer.handle(LaunchCommand::Stop);
         renderer.handle(LaunchCommand::Play);
         assert!(blocks(&mut renderer, 200, 480, |_| {}).iter().all(|s| *s == 0.0));
@@ -1255,7 +1255,7 @@ mod tests {
         let mut project = Project::default();
         let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
         let mut controller = renderer.controller();
-        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: 0.5 });
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
         renderer.handle(LaunchCommand::Play);
         let mut out = blocks(&mut renderer, 75, 480, |_| {});
         project.transport.tempo_bpm = 60.0;

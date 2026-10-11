@@ -278,5 +278,13 @@ fn the_metronome_is_a_transport_command() {
     assert!(peaks.iter().all(|p| (0.2..0.26).contains(p)), "{peaks:?}");
     assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["metronome"], true);
     assert!(!session.can_undo());
+    // Off and on again without a level keeps -12 dB.
+    assert_eq!(
+        run(&mut session, "transport.setMetronome", json!({ "on": false })).unwrap(),
+        json!({ "metronome": false })
+    );
+    run(&mut session, "transport.setMetronome", json!({ "on": true })).unwrap();
+    let peaks = beat_peaks(&mut renderer, 2);
+    assert!(peaks.iter().all(|p| (0.2..0.26).contains(p)), "{peaks:?}");
     assert!(run(&mut session, "transport.setMetronome", json!({ "on": true, "db": 7 })).is_err());
 }

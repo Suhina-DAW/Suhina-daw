@@ -203,7 +203,11 @@ static COMMANDS: &[CommandSpec] = &[
         label: "Turn the metronome on or off: a click on every beat while playing, higher on the bar",
         params: &[
             param("on", ParamType::Bool, "true turns the click on"),
-            optional("db", ParamType::Decibels, "click level in dB, at most +6; -6 by default"),
+            optional(
+                "db",
+                ParamType::Decibels,
+                "click level in dB, at most +6; keeps the current level (-6 at first) if left out",
+            ),
         ],
         kind: CommandKind::Transport,
         run: set_metronome,
@@ -394,13 +398,23 @@ fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError
 
 fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let on = params.get("on").and_then(Value::as_bool).ok_or("on must be true or false")?;
-    let db = if params.get("db").is_some() { number_or_neg_infinity(params, "db")? } else { -6.0 };
-    if db > 6.0 {
-        return Err(format!("db must be at most +6, got {db}").into());
+    // Without a level the metronome keeps the one it has (-6 dB to begin with).
+    let gain = match params.get("db") {
+        None => None,
+        Some(_) => {
+            let db = number_or_neg_infinity(params, "db")?;
+            if db > 6.0 {
+                return Err(format!("db must be at most +6, got {db}").into());
+            }
+            Some(if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) })
+        }
+    };
+    send(session, LaunchCommand::SetMetronome { on, gain: gain.map(|g| g as f32) })?;
+    let mut result = json!({ "metronome": on });
+    if let Some(gain) = gain {
+        result["db"] = json!(to_db(gain));
     }
-    let gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) };
-    send(session, LaunchCommand::SetMetronome { on, gain: gain as f32 })?;
-    Ok(json!({ "metronome": on, "db": to_db(gain) }))
+    Ok(result)
 }
 
 fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
