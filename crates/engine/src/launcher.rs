@@ -524,14 +524,7 @@ fn plan_clip(
                 let stretch = (region.warped && region.stretch != loopwerk_model::StretchMode::Repitch)
                     .then(|| {
                         let stretched = loopwerk_model::Clip { length: stretch_beats, ..placed.clone() };
-                        StretchVoice::new(
-                            &stretched,
-                            region,
-                            data.clone(),
-                            audio.analysis.get(&region.file),
-                            tempo,
-                            sample_rate,
-                        )
+                        StretchVoice::new(&stretched, region, data.clone(), tempo, sample_rate)
                     })
                     .flatten();
                 let region_gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };

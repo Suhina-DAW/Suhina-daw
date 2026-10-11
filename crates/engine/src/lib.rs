@@ -21,7 +21,6 @@ pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Qua
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use stretch::StretchVoice;
-pub use stretch::{AudioAnalysis, analyze_audio};
 
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
 const MAX_VOICES: usize = 64;
@@ -479,24 +478,22 @@ impl Graph {
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                             // Warped clips are time-stretched as they play; the rest, and clips
                             // the stretcher cannot handle, are re-pitched.
-                            if region.warped && region.stretch != loopwerk_model::StretchMode::Repitch {
-                                let analysis = audio.analysis.get(&region.file);
-                                if let Some(voice) =
-                                    StretchVoice::new(clip, region, data.clone(), analysis, bpm, sample_rate)
-                                {
-                                    let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
-                                    let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
-                                    let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
-                                    stretch_voices.push((voice, start, end.saturating_sub(start)));
-                                    stretch_events.push(StretchEvent {
-                                        start,
-                                        end,
-                                        gain_left: gains.0 * gain,
-                                        gain_right: gains.1 * gain,
-                                        column,
-                                    });
-                                    continue;
-                                }
+                            if region.warped
+                                && region.stretch != loopwerk_model::StretchMode::Repitch
+                                && let Some(voice) = StretchVoice::new(clip, region, data.clone(), bpm, sample_rate)
+                            {
+                                let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
+                                let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
+                                stretch_voices.push((voice, start, end.saturating_sub(start)));
+                                stretch_events.push(StretchEvent {
+                                    start,
+                                    end,
+                                    gain_left: gains.0 * gain,
+                                    gain_right: gains.1 * gain,
+                                    column,
+                                });
+                                continue;
                             }
                             let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
                             audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
@@ -923,7 +920,6 @@ mod tests {
             project_with(vec![ContentLane { target: None, data: LaneData::Audio(region) }], vec![clip(0.0, beats)], 1);
         project.transport.tempo_bpm = bpm;
         let mut pool = AudioPool::new();
-        pool.analysis.insert("sine.wav".into(), analyze_audio(&data));
         pool.files.insert("sine.wav".into(), std::sync::Arc::new(data));
         (project, pool)
     }

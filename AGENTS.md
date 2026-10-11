@@ -55,7 +55,7 @@ crates/
   engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
            and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
-  media    L2 finds, decodes and analyses a project's audio files (symphonia) into the engine's AudioPool
+  media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool
   session  L2 open project, undo history, the command registry (ADR 0002) and the attached player
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)

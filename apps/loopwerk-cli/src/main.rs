@@ -165,12 +165,7 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
                 eprintln!("warning: {warning}");
             }
             if !audio.files.is_empty() {
-                eprintln!(
-                    "audio: {} files decoded, {} analysed for stretching, in {:.1} s",
-                    audio.files.len(),
-                    audio.analysis.len(),
-                    started.elapsed().as_secs_f64()
-                );
+                eprintln!("audio: {} files decoded in {:.1} s", audio.files.len(), started.elapsed().as_secs_f64());
             }
             (import.project, audio)
         }

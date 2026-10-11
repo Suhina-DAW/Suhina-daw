@@ -1,11 +1,12 @@
 ---
 description: Real-time time-stretching of warped audio, stretch modes and backends, with measurements
-read_when: warp, time-stretch, stretch mode, keylock, timestretch, Rubber Band, audio crackles, CPU load
+read_when: warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality
 type: decision
 status: current
 last_verified: 2026-10-11
 covers:
   - crates/engine/src/stretch.rs
+  - crates/stretch/src/lib.rs
   - crates/media/src/lib.rs
 ---
 
@@ -15,7 +16,8 @@ covers:
 - **Date:** 2026-10-11
 - **Task:** LOOP-3
 - **Amended:** 2026-10-11 (LOOP-31: transients on the grid; LOOP-27: arrangement clips stretched
-  ahead on a worker thread, decision 6)
+  ahead on a worker thread, decision 6; the backend changed from timestretch to our port of
+  Signalsmith Stretch, decisions 2-5)
 
 ## Context
 
@@ -37,7 +39,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
 |---|---|---|---|
 | timestretch (robmorgan/timestretch-rs) | MIT | pure Rust | Real-time engine: no allocation on the audio path, `forbid(unsafe_code)`, tempo changes at exact output frames, gapless loop re-anchoring. Quality gated in CI against Rubber Band. DJ-oriented: keylock profile within ±20 %, full-range profile 0.25×–2×. |
 | Rubber Band | GPL-2.0-or-later | C++ | The reference for quality at any ratio (R3 engine). Needs a C++ compiler and FFI. |
-| Signalsmith Stretch | MIT | C++ | High quality; the Rust wrapper needs bindgen and libclang. |
+| Signalsmith Stretch | MIT | C++ | Polyphonic, quality reported close to Rubber Band R3; about 1000 lines plus an STFT, small enough to port. The Rust wrappers need a C++ toolchain. |
 | Bungee | MPL-2.0 | C++ | Small, little-used Rust bindings. |
 
 ## Decision
@@ -47,46 +49,45 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    Format importers map their own codes to these; Live's `WarpMode` 4 (Complex) maps to
    `Smooth`. Codes not yet observed in our corpus map to `Smooth` with a warning.
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
-   stretch voice when the renderer is built: a timestretch engine plus a playlist that says
-   which part of the file plays when and how fast (warp marker segments and loop jumps, at the
-   project tempo). The voice copies source frames into the stretcher's ring, schedules rate
-   changes at exact frames and runs the stretcher; it never allocates (AGENTS.md rule 3). Where
-   it runs: decision 6. Offline rendering runs the same voices (rule 4), and the output does not depend on
-   the block size. A tempo change only means a new playlist, not new audio.
+   stretch voice when the renderer is built: a `loopwerk_stretch::Stretch` plus a playlist that
+   says which part of the file plays when and how fast (warp marker segments and loop jumps, at
+   the project tempo). The stretcher reads the playlist as one continuous input stream; each call
+   covers one stretch of constant speed, and the speed is the ratio of the input it is given to
+   the output it makes. It never allocates once built (AGENTS.md rule 3). Where it runs:
+   decision 6. Offline rendering runs the same voices (rule 4). A tempo change only means a new
+   playlist, not new audio.
    - The stretcher runs at the **file's** sample rate, so the pitch is kept against the file's
-     own pitch; its output is read at the project rate with linear interpolation.
-   - Audio that already plays at its own speed everywhere (within 0.01 %) skips the stretcher
-     and is read directly.
-   - **Transients stay on the grid.** A stretcher places transients exactly only right after it
-     starts; later they drift by up to half its grain (keylock: up to ~9 ms early when slowing
-     down), so a stretched drum loop flams against unstretched ones and against the vocals. Each
-     voice therefore has two stretchers: shortly before every strong onset of the file (from the
-     pre-analysis) the idle one is restarted at exactly the right source frame and the voice
-     crossfades into it (`ANCHOR_LEAD`, `ANCHOR_FADE`). The restart's start-up is spread over the
-     frames before it, so voices whose onsets fall on the same beat do not all pay for it in one
-     audio block, and the first start-up happens when the renderer is built.
-   - The full-range profile reports no pipeline delay, but its phase vocoder slews its rate from
-     1× after a reset and its window delay is missing from its source-position map: measured,
-     output lands about `31 ms × (1 − 1/rate)` late. A restart feeds a preroll, runs until the
-     stretcher reports the start point playing and corrects by that measured amount.
-3. **Loading a project decodes and analyses.** `loopwerk-media` decodes every file on all cores
-   and computes the stretcher's pre-analysis (onsets, beat grid) once per file that a warped clip
-   plays. A disk cache for the analysis, as Live has, comes later.
+     own pitch; its output is read at the project rate with linear interpolation. Transpose is
+     the stretcher's own pitch shift.
+   - Audio that already plays at its own speed and pitch everywhere (within 0.01 %) skips the
+     stretcher and is read directly. Segments slower than 0.25x or faster than 4x re-pitch the
+     clip.
+   - **Timing.** The input runs ahead of what is heard by `input_latency + speed *
+     output_latency`. The voice feeds each call up to exactly that point for the speed playing,
+     so a speed change (a new warp segment) is evened out over one call instead of shifting the
+     clip. Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
+     with no drift; the timestretch backend needed restarts before every onset and measured
+     corrections to get there (see the measurements).
+3. **Loading a project only decodes.** `loopwerk-media` decodes every file on all cores. The
+   stretcher needs no pre-analysis.
 4. **Modes choose backends behind one interface.** Now:
 
    | Mode | Backend |
    |---|---|
    | `Repitch` | none (read the file faster or slower) |
-   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | timestretch: keylock profile while every segment stays within ±20 % of the file's speed (it keeps the pitch there, bass included beyond about ±2 %, at a low and even cost), the full-range profile beyond that (0.25×–2×); outside that range the clip is re-pitched |
+   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | `loopwerk-stretch`, our pure-Rust port of Signalsmith Stretch 1.3.2 (MIT), 120 ms blocks 30 ms apart; outside 0.25x-4x the clip is re-pitched |
 
    The modes all map to the same backend for now; they are kept in the model so projects keep
    the user's intent and later backends can tell them apart.
-5. **Rubber Band comes later, as an isolated FFI crate.** Calling C++ needs `unsafe`, which the
-   workspace forbids. When we add Rubber Band for `HighQuality`, it gets one crate
-   (`crates/rubberband`) with `unsafe` allowed only there, a `SAFETY:` comment on every block
-   and a safe interface for the rest of the code, as PhotoCraft does for its tablet crate. That
-   exception is recorded in AGENTS.md when it is made. Owner decisions 2026-10-11: timestretch
-   first, Rubber Band afterwards; real-time stretching now rather than pre-rendering.
+5. **Backend history and what comes next.** The first backend was timestretch (owner decision
+   2026-10-11: timestretch first, Rubber Band later). Its keylock profile, used within 20 % of
+   the file's speed, sounded harsh on larger tempo changes. In a listening test of the same stems
+   at 100 bpm (from 120), its phase-vocoder profile and the Signalsmith port sounded about the
+   same and both far better. The owner chose the Signalsmith port (2026-10-11): it is pure Rust
+   without `unsafe`, has transpose built in, keeps transients on the grid by itself and opens a
+   set without an analysis pass. Rubber Band stays possible for `HighQuality` as an isolated FFI
+   crate (`crates/rubberband`, `unsafe` allowed only there, recorded in AGENTS.md when made), if
+   a later listening test shows a difference worth it.
 6. **Arrangement clips are stretched ahead of the audio thread.** Their stretch voices live on a
    worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
    per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
@@ -98,6 +99,17 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    check that both give the same samples. Launched clips' voices still run on the audio thread.
 
 ## Measurements (2026-10-11, the warped-vocal project: 80 s, 58 warped clips, 25 files)
+
+With the Signalsmith port (current):
+
+| | timestretch (before) | Signalsmith port |
+|---|---|---|
+| Opening the set (decode, plus analysis before) | 2.8-7.8 s | 0.4 s |
+| Offline render of the 80 s set | about 22 s | 11.5 s |
+| Real time on the worker: audio thread's load / 99th-percentile block / underruns | 2 % / under 1 ms / none | 3 % / 1.3 ms / none (single blocks of 11-15 ms in the paced test were the test thread being preempted, as before) |
+| Transient error at 0.95x / 0.7x / changing speed | 1.7 / 5 / 2.4 ms, with restarts and corrections | 1.2 / 2.3 / 1 ms, none needed |
+
+The rest of this section is the timestretch backend's history.
 
 | | Pre-render at load (first try) | Real time, full-range profile only | Real time, as decided |
 |---|---|---|---|

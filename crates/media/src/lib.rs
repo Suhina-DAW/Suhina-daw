@@ -1,13 +1,12 @@
-//! Audio files for a project: finds the files its audio clips refer to, decodes them into memory
-//! with symphonia (MPL-2.0) and analyses the files that warped clips play for the engine's
-//! real-time stretcher (ADR 0003), so the engine can play them without touching the disk.
+//! Audio files for a project: finds the files its audio clips refer to and decodes them into
+//! memory with symphonia (MPL-2.0), so the engine can play them without touching the disk.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use loopwerk_engine::model::{LaneData, Project, StretchMode};
-pub use loopwerk_engine::{AudioAnalysis, AudioData, AudioPool, analyze_audio};
+use loopwerk_engine::model::{LaneData, Project};
+pub use loopwerk_engine::{AudioData, AudioPool};
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
@@ -19,8 +18,7 @@ use symphonia::core::meta::MetadataOptions;
 /// stereo f32 at 48 kHz).
 const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
 
-/// Loads every audio file the project uses: decodes it and, for files that warped clips play,
-/// computes the stretcher's analysis. Same as [`decode_project_audio`].
+/// Loads every audio file the project uses. Same as [`decode_project_audio`].
 pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
     decode_project_audio(project, project_dir)
 }
@@ -30,41 +28,34 @@ pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, 
 /// path is tried. Files that cannot be found or decoded are reported in the returned warnings and
 /// left out.
 pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
-    // Each file once, with where to look for it and whether a warped clip stretches it.
-    let mut wanted: Vec<(String, Vec<PathBuf>, bool)> = Vec::new();
+    // Each file once, with where to look for it.
+    let mut wanted: Vec<(String, Vec<PathBuf>)> = Vec::new();
     for content in &project.contents {
         for lane in &content.lanes {
             let LaneData::Audio(region) = &lane.data else { continue };
-            let stretched = region.warped && region.stretch != StretchMode::Repitch;
-            if let Some(entry) = wanted.iter_mut().find(|(file, _, _)| *file == region.file) {
-                entry.2 |= stretched;
+            if wanted.iter().any(|(file, _)| *file == region.file) {
                 continue;
             }
             let mut candidates = vec![project_dir.join(&region.file)];
             if let Some(absolute) = &region.absolute_file {
                 candidates.push(PathBuf::from(absolute));
             }
-            wanted.push((region.file.clone(), candidates, stretched));
+            wanted.push((region.file.clone(), candidates));
         }
     }
 
     let next = AtomicUsize::new(0);
     let threads = std::thread::available_parallelism().map_or(1, usize::from).clamp(1, 16).min(wanted.len().max(1));
-    type Decoded = Result<(AudioData, Option<AudioAnalysis>), String>;
+    type Decoded = Result<AudioData, String>;
     let decoded: Vec<(String, Decoded)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| {
                     let mut done = Vec::new();
-                    while let Some((file, candidates, stretched)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    while let Some((file, candidates)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
                         let result = match candidates.iter().find(|p| p.is_file()) {
                             None => Err(format!("audio file {file} not found")),
-                            Some(path) => decode_file(path)
-                                .map(|data| {
-                                    let analysis = stretched.then(|| analyze_audio(&data));
-                                    (data, analysis)
-                                })
-                                .map_err(|e| format!("audio file {}: {e}", path.display())),
+                            Some(path) => decode_file(path).map_err(|e| format!("audio file {}: {e}", path.display())),
                         };
                         done.push((file.clone(), result));
                     }
@@ -79,10 +70,7 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
     let mut warnings = Vec::new();
     for (file, result) in decoded {
         match result {
-            Ok((data, analysis)) => {
-                if let Some(analysis) = analysis {
-                    pool.analysis.insert(file.clone(), analysis);
-                }
+            Ok(data) => {
                 pool.files.insert(file, Arc::new(data));
             }
             Err(e) => warnings.push(e),
