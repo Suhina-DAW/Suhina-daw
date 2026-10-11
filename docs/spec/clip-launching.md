@@ -1,8 +1,12 @@
 # Clip launching
 
-- **Sources:** the public Ableton Live 12 manual (chapters *Session View* and *Launching Clips*),
-  observation of Live 12 Suite 12.4.6, and the Live Set fields in [`als-format.md`](als-format.md)
-  (scenes, clip slots, stop buttons, scene tempo, clip markers).
+- **Sources:** the behaviour of the Session View as the public Live 12 manual describes it
+  (launching clips and scenes, launch quantisation, stop buttons, scene tempo), and the Live Set
+  fields in [`als-format.md`](als-format.md) (scenes, clip slots, `HasStop`, scene tempo, clip
+  markers; corpus series 1 and 4).
+- **Observed with:** nothing yet. The launch behaviour has not been checked against Live 12.4.6
+  by listening or watching; every statement marked **(hypothesis)** needs that check (see
+  *To observe* below). The Live Set fields come from the corpus and are observed.
 - **Status:** first version, implemented in `crates/engine/src/launcher.rs` (ROADMAP M4).
   Follow actions, per-clip launch quantisation and launch modes (trigger, gate, toggle, repeat)
   are not specified yet; they need a corpus series of their own.
@@ -29,21 +33,22 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
    once. Until then the column shows the launch as queued; a later launch in the same column
    replaces the queued one.
 3. **Launching starts the transport.** If the transport is stopped, launching a clip or scene
-   starts it at beat 0 and the launch happens immediately.
+   starts it at beat 0 and the launch happens immediately. **(hypothesis)**
 4. **Playing a clip.** A launched clip plays from its start marker. With its loop on, it plays to
    the loop end, then repeats the loop region until it is stopped or replaced. With its loop off,
    it plays from the start marker to the end marker once and the column stops.
 5. **Scenes.** Launching a scene launches, in every column, the slot in that scene's row:
    a clip is launched; an empty slot with a stop button stops the column; an empty slot without
    one leaves the column as it is. If the scene has a tempo, the project tempo changes to it at
-   the launch moment.
+   the launch moment. **(hypothesis:** at the quantised launch moment, not when the scene is
+   triggered.**)**
 6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
    quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
    transport stops everything at once, and clears queued launches.
 7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored.
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
-   track to the arrangement.
+   track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
 
 ## Loopwerk decisions
 
@@ -59,6 +64,19 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `launcher.state`), sent to the audio thread through a
   lock-free queue and applied at the start of the next audio block.
+
+## To observe
+
+Checks in Live 12.4.6 that would turn the hypotheses above into observations (a corpus series
+with a screen recording or notes, no audio from Live needed):
+
+- With the transport stopped, launch a clip: does it start at once, and does the bar count
+  start from it?
+- Launch a scene with a tempo while another scene plays: does the tempo change when the scene is
+  triggered or at the quantised launch?
+- Launch a clip on a track that has arrangement clips, then stop it: does the track stay silent
+  until "Back to Arrangement"?
+- Global quantisation: where it is stored in the Live Set, and its default in a new set.
 
 ## Not yet
 
