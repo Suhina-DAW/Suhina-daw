@@ -89,7 +89,7 @@ Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu)
 
 ## Community
 
-- Discord: TODO
+- Discord: <https://discord.gg/ccQWu8rRcf>
 
 ## License
 
