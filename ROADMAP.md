@@ -104,8 +104,8 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
 - **Slice to a new MIDI track.** Cut an audio clip into slices (at warp markers, transients,
   bars or a note grid), put each slice on its own pad of a sampler or drum rack on a new MIDI
   track, and write a MIDI clip that plays the slices back in their original rhythm, warped
-  timing kept if asked. Needs the sampler and drum rack devices; transients come from the
-  stretcher's analysis that `media` already computes. Slicing presets are our own.
+  timing kept if asked. Needs the sampler and drum rack devices and an onset detector of our
+  own. Slicing presets are our own.
 - **Convert to a new MIDI track:** four narrow detectors instead of one that tries to write
   every note of a mix, since each narrow task is far more reliable.
   - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
@@ -127,8 +127,7 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
   checked first. Also offered on its own, as separating stems to new audio tracks.
 - **Dropping audio onto a MIDI track** asks which conversion to run (drums, bass, melody,
   chords), and writes the result where the audio was dropped.
-- **Order:** after the sampler and drum rack exist; slicing first (smallest, reuses the
-  stretcher's analysis), then drums, bass, melody and chords, then stem separation. An ADR comes
+- **Order:** after the sampler and drum rack exist; slicing first (smallest), then drums, bass, melody and chords, then stem separation. An ADR comes
   before the detectors.
 - **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
   can be compared note by note.
@@ -211,6 +210,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
 - A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- A metronome (`transport.setMetronome`, off by default): a click on every beat while the
+  transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
+  Count-in comes with recording.
 - Warped launched clips are time-stretched like arrangement clips, and re-pitched after a tempo
   change.
 - Transport commands (`clip.launch`, `scene.launch`, `track.stop`, `launcher.*`,
@@ -223,15 +225,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 
 ### M5 Audio (in progress)
 - Audio files (WAV, AIFF, FLAC, MP3, Ogg Vorbis) are decoded in parallel when a set opens.
-- Audio clips play with clip gain, loops and fades; unwarped clips also with transpose.
+- Audio clips play with clip gain, transpose, loops and fades; on warped clips transpose changes
+  the pitch only.
 - Warped clips are **time-stretched in real time** along their warp markers and keep their
-  pitch ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips
-  opens in 3.1 s.
-- Stretched transients stay on the grid: a fresh stretcher takes over before every strong onset,
-  so stretched drum loops no longer flam against unstretched ones (within 2 ms, measured with
-  click tests).
+  pitch, with our pure-Rust port of Signalsmith Stretch
+  ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips opens
+  in 0.4 s. Transients stay within 2 ms of the warp markers, so stretched drum loops do not flam
+  against unstretched ones.
 - Arrangement clips are stretched 0.5 s ahead on a worker thread; the audio thread only copies
   their frames (2 % of one core on the same set, worst block 1–8 ms of its 10.7 ms).
-- Still to do: transpose on warped clips; launched clips stretched ahead too; a disk cache for
-  the stretcher's analysis; Rubber Band as
-  the `HighQuality` stretch mode.
+- Still to do: launched clips stretched ahead too; formant shifting for transposed vocals;
+  Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.

@@ -10,8 +10,6 @@ use std::sync::Arc;
 
 use loopwerk_model::{AudioRegion, Clip};
 
-use crate::stretch::AudioAnalysis;
-
 /// Decoded audio, interleaved f32.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioData {
@@ -51,8 +49,6 @@ impl AudioData {
 pub struct AudioPool {
     /// Decoded files, keyed by the `file` string of the project's audio regions.
     pub files: HashMap<String, Arc<AudioData>>,
-    /// Stretcher pre-analysis of the files that warped clips play, keyed the same way.
-    pub analysis: HashMap<String, AudioAnalysis>,
 }
 
 impl AudioPool {

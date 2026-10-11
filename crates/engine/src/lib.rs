@@ -5,6 +5,7 @@
 mod ahead;
 mod audio;
 mod launcher;
+mod metronome;
 mod stretch;
 mod swap;
 
@@ -20,7 +21,6 @@ pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Qua
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use stretch::StretchVoice;
-pub use stretch::{AudioAnalysis, analyze_audio};
 
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
 const MAX_VOICES: usize = 64;
@@ -156,6 +156,7 @@ pub struct Renderer {
     swap: swap::SwapState,
     /// Stretch underruns counted by graphs swapped out.
     underruns_before: u64,
+    metronome: metronome::Metronome,
 }
 
 impl Renderer {
@@ -191,6 +192,7 @@ impl Renderer {
             audio: Arc::new(audio.clone()),
             swap: swap::SwapState::default(),
             underruns_before: 0,
+            metronome: metronome::Metronome::new(sample_rate),
         })
     }
 
@@ -267,6 +269,9 @@ impl Renderer {
         // The transport changes only through commands, which are applied above.
         let running = self.running;
         for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
+            // The click for this frame's beat, read before the launcher moves the beat on.
+            let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
+            let click = self.metronome.frame(self.running, beat, bar_beats);
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running
@@ -305,8 +310,8 @@ impl Renderer {
                 right += sample as f32 * voice.gain_right;
             }
             let (audio_left, audio_right) = if self.running { self.audio_frame(time) } else { (0.0, 0.0) };
-            *out_left = left + audio_left + launched_left;
-            *out_right = right + audio_right + launched_right;
+            *out_left = left + audio_left + launched_left + click;
+            *out_right = right + audio_right + launched_right + click;
             self.position += 1;
         }
         if running {
@@ -473,24 +478,22 @@ impl Graph {
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                             // Warped clips are time-stretched as they play; the rest, and clips
                             // the stretcher cannot handle, are re-pitched.
-                            if region.warped && region.stretch != loopwerk_model::StretchMode::Repitch {
-                                let analysis = audio.analysis.get(&region.file);
-                                if let Some(voice) =
-                                    StretchVoice::new(clip, region, data.clone(), analysis, bpm, sample_rate)
-                                {
-                                    let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
-                                    let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
-                                    let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
-                                    stretch_voices.push((voice, start, end.saturating_sub(start)));
-                                    stretch_events.push(StretchEvent {
-                                        start,
-                                        end,
-                                        gain_left: gains.0 * gain,
-                                        gain_right: gains.1 * gain,
-                                        column,
-                                    });
-                                    continue;
-                                }
+                            if region.warped
+                                && region.stretch != loopwerk_model::StretchMode::Repitch
+                                && let Some(voice) = StretchVoice::new(clip, region, data.clone(), bpm, sample_rate)
+                            {
+                                let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
+                                let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
+                                stretch_voices.push((voice, start, end.saturating_sub(start)));
+                                stretch_events.push(StretchEvent {
+                                    start,
+                                    end,
+                                    gain_left: gains.0 * gain,
+                                    gain_right: gains.1 * gain,
+                                    column,
+                                });
+                                continue;
                             }
                             let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
                             audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
@@ -917,7 +920,6 @@ mod tests {
             project_with(vec![ContentLane { target: None, data: LaneData::Audio(region) }], vec![clip(0.0, beats)], 1);
         project.transport.tempo_bpm = bpm;
         let mut pool = AudioPool::new();
-        pool.analysis.insert("sine.wav".into(), analyze_audio(&data));
         pool.files.insert("sine.wav".into(), std::sync::Arc::new(data));
         (project, pool)
     }
@@ -1214,5 +1216,52 @@ mod tests {
         assert!(rms(&out, 40_000, 70_000) > 0.1);
         // The same file positions as without the edit (to rounding).
         assert!(max_diff(&out, &original) < 1e-6);
+    }
+
+    /// Zero crossings per second of the left channel over frames `from..to`.
+    fn hz_between(out: &[f32], from: usize, to: usize) -> f64 {
+        let left: Vec<f32> = out[from * 2..to * 2].iter().step_by(2).copied().collect();
+        let ups = left.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        ups as f64 / ((to - from) as f64 / f64::from(SR))
+    }
+
+    #[test]
+    fn the_metronome_clicks_on_every_beat_and_marks_the_bar() {
+        // An empty project in 3/4 at 120 bpm: 24 000 frames to a beat.
+        let mut project = Project::default();
+        project.transport.time_signature = TimeSignature { numerator: 3, denominator: 4 };
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
+        renderer.handle(LaunchCommand::Play);
+        let out = blocks(&mut renderer, 200, 480, |_| {});
+        assert_eq!(onsets(&out), [1, 24_001, 48_001, 72_001]);
+        // The bar's first beat is higher than the others.
+        let (bar, beat) = (hz_between(&out, 0, 2_000), hz_between(&out, 24_000, 26_000));
+        assert!((bar - 1_600.0).abs() < 50.0 && (beat - 1_000.0).abs() < 50.0, "{bar} Hz, {beat} Hz");
+        assert!(rms(&out, 0, 2_400) > 0.05);
+        // Off: silence, including through a restart.
+        renderer.handle(LaunchCommand::SetMetronome { on: false, gain: None });
+        renderer.handle(LaunchCommand::Stop);
+        renderer.handle(LaunchCommand::Play);
+        assert!(blocks(&mut renderer, 200, 480, |_| {}).iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn the_metronome_follows_a_tempo_edit() {
+        let mut project = Project::default();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
+        renderer.handle(LaunchCommand::Play);
+        let mut out = blocks(&mut renderer, 75, 480, |_| {});
+        project.transport.tempo_bpm = 60.0;
+        controller.update(&project).unwrap();
+        out.extend(blocks(&mut renderer, 300, 480, |_| {}));
+        // As with notes: the swap at frame 43 200 is beat 1.8; beat 2 comes 0.2 s later at 60 bpm.
+        // The beat clock adds up per frame, so a click may land a frame late.
+        let found = onsets(&out);
+        for (got, expected) in found.iter().zip([1, 24_001, 52_801, 100_801]) {
+            assert!(got.abs_diff(expected) <= 1, "{found:?}");
+        }
     }
 }

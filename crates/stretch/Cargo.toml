@@ -1,0 +1,16 @@
+[package]
+name = "loopwerk-stretch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Time-stretching and pitch-shifting: a pure-Rust port of Signalsmith Stretch (MIT)"
+
+[dependencies]
+rustfft = "6.4"  # MIT OR Apache-2.0, pure Rust
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+hound.workspace = true

@@ -124,6 +124,7 @@ commands (scenes count from 1; a track is its name or id):
   stop <track>          stop a track's clip
   stopall               stop every clip
   play / stop           start the transport from the beginning / stop everything now
+  metronome on|off [db] click on every beat, e.g. metronome on -12
   quant <value>         launch quantisation: none, 8 bars ... 1 bar, 1/2 ... 1/32, triplets as 1/8T
   back                  tracks that launched clips play their arrangement again
   state                 what is playing and queued
@@ -271,6 +272,14 @@ fn parse_line(line: &str) -> Result<Line, String> {
         }
         ["unmute", track @ ..] if !track.is_empty() => {
             command("track.setMute", json!({ "track": track_value(track), "mute": false }))
+        }
+        ["metronome" | "click", state, db @ ..] if matches!(*state, "on" | "off") && db.len() <= 1 => {
+            let mut params = json!({ "on": *state == "on" });
+            if let Some(db) = db.first() {
+                let db: f64 = db.parse().map_err(|_| format!("{db:?} is not a level in dB"))?;
+                params["db"] = json!(db);
+            }
+            command("transport.setMetronome", params)
         }
         ["undo"] => command("edit.undo", json!({})),
         ["redo"] => command("edit.redo", json!({})),
@@ -458,6 +467,10 @@ mod tests {
         assert_eq!(parse_line("mute 2"), cmd("track.setMute", json!({ "track": 2, "mute": true })));
         assert_eq!(parse_line("unmute Bass"), cmd("track.setMute", json!({ "track": "Bass", "mute": false })));
         assert_eq!(parse_line("undo"), cmd("edit.undo", json!({})));
+        assert_eq!(parse_line("metronome on"), cmd("transport.setMetronome", json!({ "on": true })));
+        assert_eq!(parse_line("click off"), cmd("transport.setMetronome", json!({ "on": false })));
+        assert_eq!(parse_line("metronome on -12"), cmd("transport.setMetronome", json!({ "on": true, "db": -12.0 })));
+        assert!(parse_line("metronome loud").is_err());
         assert!(parse_line("tempo fast").is_err());
         assert_eq!(
             parse_line("track.setMute {\"track\": 1, \"mute\": true}"),

@@ -21,7 +21,7 @@ are changing (*Code and its documents*).
 | [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
-| [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, keylock, timestretch, Rubber Band, audio crackles, CPU load | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
+| [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
 | [0004: Built-in devices](decisions/0004-built-in-devices.md) | decision | current | device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance | The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate |
 | [0005: Edits while playing](decisions/0005-edits-while-playing.md) | decision | current | edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26 | How edits reach an engine that is already playing — a new graph built off the audio thread and swapped in at an exact frame |
 | [0007: Several open projects](decisions/0007-several-open-projects.md) | decision | current | tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId | Several projects open at once like tabs, one active; where commands go, which project plays, and what is left for later |
@@ -62,6 +62,7 @@ Change this code, and check these documents.
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `scripts/test-signal.py` | [Making the `.als` test corpus](spec/als-corpus.md) |

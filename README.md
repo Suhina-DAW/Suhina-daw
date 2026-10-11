@@ -59,6 +59,9 @@ With `--launcher` the set starts stopped and Loopwerk reads one command per line
 | `quant 1/4` | launch quantisation: `none`, `8 bars` … `1 bar`, or a note value from `1/2` to `1/32`, `T` for triplets (`1/8T`) |
 | `back` | return every track to the arrangement |
 | `state`, `grid` | what is playing and queued; the scenes and clips |
+| `metronome on`, `metronome on -12`, `metronome off` | a click on every beat, higher on the bar; level in dB (−6 by default) |
+| `tempo 100`, `vol Bass -6`, `mute Bass`, `unmute Bass` | edits, heard while playing |
+| `undo`, `redo` | undo or redo the last edit |
 | `track.setMute {"track": 1, "mute": true}` | any command by id, with JSON parameters |
 | `help`, `quit` | |
 

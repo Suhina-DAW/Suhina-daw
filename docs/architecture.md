@@ -31,7 +31,7 @@ L3  automation            apps/loopwerk-cli          (planned) UI
       MCP server, renders     render, play, mcp
         |                       |
 L2  session ----------------- media
-      commands, undo,           finds, decodes, analyses
+      commands, undo,           finds and decodes
       the player                audio files
         |        \              |
 L1  als           engine -------+
@@ -49,9 +49,10 @@ The engine does not run them yet (see *Planned parts*).
 | Crate | Owns | Depends on |
 |---|---|---|
 | `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation. No behaviour beyond that. | nothing |
+| `stretch` | Time-stretching and pitch-shifting DSP for interleaved audio: a pure-Rust port of Signalsmith Stretch (MIT), behind every stretch mode except `Repitch` ([ADR 0003](decisions/0003-time-stretching.md)). | nothing (rustfft) |
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
 | `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), group and master gain. Never touches files. | model |
-| `media` | Finding a project's audio files, decoding them (symphonia) on all cores and analysing the ones warped clips play, into an `AudioPool`. | engine |
+| `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`. | engine |
 | `session` | An open project with its undo history (`Session`), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over the open projects, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
 | `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
@@ -76,9 +77,8 @@ The engine does not run them yet (see *Planned parts*).
 
 1. **Import.** A format crate reads the file into a `Project`. Anything it does not understand
    becomes a warning; the project still opens.
-2. **Load audio.** `media` decodes every file the project's audio clips use and computes the
-   stretcher's analysis for files that warped clips play. The result, an `AudioPool`, holds the
-   samples in memory, so playback never reads the disk.
+2. **Load audio.** `media` decodes every file the project's audio clips use. The result, an
+   `AudioPool`, holds the samples in memory, so playback never reads the disk.
 3. **Build the renderer.** `Renderer::with_audio` turns the project into flat, sorted lists the
    audio thread can walk without searching: note events, audio events, one stretch voice per
    warped clip placement (two stretchers each, so a fresh one takes over before every strong

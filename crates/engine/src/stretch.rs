@@ -1,82 +1,47 @@
 //! Real-time time-stretching of warped audio clips (ADR 0003).
 //!
-//! Each warped clip placement gets a [`StretchVoice`]: a timestretch engine built when the
-//! renderer is built, fed from the decoded file in memory and run inside `process`. Its playlist
-//! says which part of the file plays when and how fast (warp marker segments, loop jumps), so the
-//! voice only copies source frames, schedules rate changes at exact frames and runs the stretcher.
-//! Nothing here allocates once the voice exists (AGENTS.md rule 3).
+//! Each warped clip placement gets a [`StretchVoice`]: a [`loopwerk_stretch::Stretch`] built with
+//! the renderer and fed from the decoded file in memory. Its playlist says which part of the file
+//! plays when and how fast (warp marker segments, loop jumps). The stretcher reads the playlist
+//! as one continuous input stream; each call covers one stretch of constant speed, and the speed
+//! is the ratio of the input it is given to the output it makes. Nothing here allocates once the
+//! voice exists (AGENTS.md rule 3).
 //!
 //! The stretcher runs at the file's sample rate, so pitch is kept against the file's own pitch;
-//! its output is then read at the project's sample rate with linear interpolation.
-//!
-//! Every voice has two stretchers ("lanes"). Shortly before each strong onset the idle lane is
-//! restarted at exactly the right source frame and the voice crossfades into it, so transients
-//! land on the grid instead of drifting by up to half a stretcher grain (ADR 0003).
+//! its output is then read at the project's sample rate with linear interpolation. Transpose is
+//! the stretcher's own pitch shift.
 
 use std::sync::Arc;
 
 use loopwerk_model::{AudioRegion, Clip, StretchMode};
-use timestretch::PreAnalysisArtifact;
-use timestretch::engine::{
-    Engine, EngineConfig, EngineController, EngineProcessor, EngineProfile, MAX_PENDING_RETARGETS, SourceProducer,
-};
+use loopwerk_stretch::Stretch;
 
 use crate::audio::AudioData;
 
-/// A file's pre-analysis (onsets, beat grid), computed once per file when a project loads and
-/// shared by every voice that plays it.
-#[derive(Debug, Clone)]
-pub struct AudioAnalysis(Arc<PreAnalysisArtifact>);
-
-/// Analyses a decoded file for the stretcher. Takes about 0.5 s per 80 s of audio; call it off
-/// the audio thread.
-pub fn analyze_audio(data: &AudioData) -> AudioAnalysis {
-    let channels = usize::from(data.channels.max(1));
-    let mid = if channels == 1 { data.samples.clone() } else { timestretch::downmix_to_mid(&data.samples, channels) };
-    AudioAnalysis(Arc::new(timestretch::analyze(&mid, data.sample_rate)))
-}
-
-/// Stretcher frames processed per call; also the stretcher's block size.
+/// Stretcher frames made per call.
 const CHUNK_FRAMES: usize = 1024;
-/// Speeds the keylock profile keeps the pitch for (timestretch's DJ range).
-const KEYLOCK_RATES: std::ops::RangeInclusive<f64> = 0.8..=1.2;
-/// Speeds this close to 1 play without a stretcher.
+/// Speeds this close to 1 play without a stretcher (when not transposed).
 const UNITY_TOLERANCE: f64 = 1e-4;
-/// Speeds the full-range profile handles.
-const WIDE_RATES: std::ops::RangeInclusive<f64> = 0.25..=2.0;
+/// Speeds the stretcher is given; a clip with a segment outside them is re-pitched.
+const RATES: std::ops::RangeInclusive<f64> = 0.25..=4.0;
 /// Most playlist pieces per clip, so a malformed clip cannot exhaust memory.
 const MAX_PIECES: usize = 100_000;
-/// A stretcher keeps transients exactly in place only just after it starts; later they drift by up
-/// to half its grain (several ms), so layered drums flam. A voice therefore restarts a fresh
-/// stretcher this many frames before each strong onset and crossfades into it.
-const ANCHOR_LEAD: u64 = 384;
-/// Crossfade from the running stretcher into the fresh one, in stretcher frames.
-const ANCHOR_FADE: u64 = 192;
-/// Closest two restarts may be, in stretcher frames: keylock, and the phase vocoder, whose start-up
-/// is several times longer.
-const ANCHOR_MIN_GAP: u64 = 2_048;
-const WIDE_MIN_GAP: u64 = 12_288;
-/// Weakest onset (the analysis' normalised strength) that gets a restart.
-const ANCHOR_MIN_STRENGTH: f32 = 0.1;
-/// File frames the phase-vocoder profile is fed before a start point: two analysis windows plus
-/// its rate settling.
-const WIDE_PREROLL: usize = 4_096;
-/// The phase vocoder's window delay, as measured by the click tests below.
-const WIDE_DELAY_SECONDS: f64 = 0.031;
 
 /// A stretch of the playlist: from `out_start` seconds after the clip starts, play file frames
-/// `src_start..src_end` at `rate` times their own speed.
+/// `src_start..src_end` at `rate` times their own speed. `stream_start` is where the piece begins
+/// in the stretcher's input stream (all pieces' file frames, one after another).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Piece {
     out_start: f64,
     src_start: f64,
     src_end: f64,
     rate: f64,
+    stream_start: f64,
 }
 
 /// Works out which part of the file plays when, from the clip's offset, loop and length and the
 /// region's warp markers at `tempo_bpm`. `None` when the clip cannot be stretched (fewer than two
-/// usable warp markers, or a speed outside what the stretcher handles).
+/// usable warp markers, or a speed that is not a finite positive number).
 fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64) -> Option<(Vec<Piece>, f64)> {
     let mut markers: Vec<(f64, f64)> = region
         .warp_markers
@@ -99,6 +64,7 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
     let mut pieces = Vec::new();
     let mut beat = clip.offset;
     let mut played = 0.0;
+    let mut stream = 0.0;
     let mut max_rate: f64 = 0.0;
     while played < clip.length - 1e-9 && pieces.len() < MAX_PIECES {
         let next_marker = markers.iter().map(|m| m.0).find(|b| *b > beat + 1e-9);
@@ -113,7 +79,8 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
             return None;
         }
         max_rate = max_rate.max(rate).max(1.0 / rate);
-        pieces.push(Piece { out_start: played * seconds_per_beat, src_start, src_end, rate });
+        pieces.push(Piece { out_start: played * seconds_per_beat, src_start, src_end, rate, stream_start: stream });
+        stream += src_end - src_start;
         played += next - beat;
         beat = next;
         if let Some(r) = loop_range
@@ -135,147 +102,17 @@ fn seconds_at(markers: &[(f64, f64)], beat: f64) -> f64 {
     a.1 + (beat - a.0) * (b.1 - a.1) / (b.0 - a.0)
 }
 
-/// A running stretcher with its own feed and rate-change cursors. A voice has two: one plays, and
-/// the other is restarted before each strong onset (see [`ANCHOR_LEAD`]).
-struct Lane {
-    controller: EngineController,
-    processor: EngineProcessor,
-    source: SourceProducer,
-    /// Feed cursor: current piece and the next file frame to push.
-    feed_piece: usize,
-    feed_frame: usize,
-    /// Frames of silence still to feed before the playlist, where the preroll would start before
-    /// the file does.
-    pad: usize,
-    /// The first rate change this lane schedules, and the next one.
-    first_retarget: usize,
-    next_retarget: usize,
-    /// Voice frame this lane started at, and the stretcher output frame that plays it.
-    origin: u64,
-    base: u64,
-}
-
-impl Lane {
-    fn build(config: EngineConfig) -> Option<Self> {
-        let handles = Engine::build(config).ok()?;
-        Some(Self {
-            controller: handles.controller,
-            processor: handles.processor,
-            source: handles.source,
-            feed_piece: 0,
-            feed_frame: 0,
-            pad: 0,
-            first_retarget: 0,
-            next_retarget: 0,
-            origin: 0,
-            base: 0,
-        })
-    }
-
-    /// Pushes playlist audio into the stretcher's ring until it is full or the playlist ends.
-    fn feed(&mut self, pieces: &[Piece], data: &AudioData, zeros: &[f32]) {
-        let channels = usize::from(data.channels);
-        let file_frames = data.frames();
-        while self.pad > 0 {
-            let frames = self.pad.min(zeros.len() / channels);
-            let pushed = self.source.push(zeros.get(..frames * channels).unwrap_or_default());
-            if pushed == 0 {
-                return;
-            }
-            self.pad -= pushed;
-        }
-        while self.source.free_frames() > 0 {
-            let Some(piece) = pieces.get(self.feed_piece) else { return };
-            let end = piece.src_end.max(0.0) as usize;
-            if self.feed_frame >= end {
-                self.feed_piece += 1;
-                if let Some(next) = pieces.get(self.feed_piece) {
-                    let start = next.src_start.max(0.0) as usize;
-                    if start != self.feed_frame {
-                        // A loop jump: re-anchor so the analysis stays aligned.
-                        self.feed_frame = start;
-                        self.source.set_track_position(start as u64);
-                    }
-                }
-                continue;
-            }
-            let until = end.min(self.feed_frame + 8_192);
-            let pushed = if self.feed_frame >= file_frames {
-                // Past the end of the file: silence keeps the timeline.
-                let frames = (until - self.feed_frame).min(zeros.len() / channels);
-                self.source.push(zeros.get(..frames * channels).unwrap_or_default())
-            } else {
-                let until = until.min(file_frames);
-                self.source.push(data.samples.get(self.feed_frame * channels..until * channels).unwrap_or_default())
-            };
-            if pushed == 0 {
-                return;
-            }
-            self.feed_frame += pushed;
-        }
-    }
-
-    /// Schedules the coming rate changes, a few at a time (the stretcher queues at most 8).
-    /// `retargets` are in voice frames; the stretcher counts from this lane's start.
-    fn schedule(&mut self, retargets: &[(u64, f64)]) {
-        let (origin, base) = (self.origin, self.base);
-        let local = |at: u64| at.saturating_sub(origin) + base;
-        let delivered = self.controller.delivered_frames();
-        let horizon = delivered + 4 * CHUNK_FRAMES as u64;
-        while let Some(&(at, rate)) = retargets.get(self.next_retarget) {
-            let pending = retargets
-                .get(self.first_retarget..self.next_retarget)
-                .map_or(0, |r| r.iter().filter(|(a, _)| local(*a) > delivered).count());
-            if local(at) > horizon || pending >= MAX_PENDING_RETARGETS / 2 {
-                return;
-            }
-            self.controller.set_tempo_rate_at(rate, local(at));
-            self.next_retarget += 1;
-        }
-    }
-
-    /// Feeds, schedules and runs the stretcher for `out.len() / channels` frames.
-    fn process(
-        &mut self,
-        out: &mut [f32],
-        pieces: &[Piece],
-        data: &AudioData,
-        zeros: &[f32],
-        retargets: &[(u64, f64)],
-    ) {
-        self.feed(pieces, data, zeros);
-        self.schedule(retargets);
-        self.processor.process(out);
-    }
-}
-
 /// One warped clip placement being stretched in real time.
 pub(crate) struct StretchVoice {
     data: Arc<AudioData>,
     pieces: Vec<Piece>,
-    lanes: [Lane; 2],
-    active: usize,
-    /// Rate changes as (voice frame, rate).
-    retargets: Vec<(u64, f64)>,
-    /// Voice frames at which the idle lane restarts, and the next one.
-    restarts: Vec<u64>,
-    next_restart: usize,
-    /// Crossfade frames still to go from the active lane into the other one.
-    fade_left: u64,
-    /// How a lane starts: run off this many frames of pipeline delay (keylock), or, when
-    /// `preroll` is not zero, feed that many file frames ahead of the start point and run until
-    /// the stretcher reports the start point playing (phase vocoder, which must also settle on
-    /// its rate after a reset).
-    latency: usize,
-    preroll: usize,
-    /// The idle lane is starting up for the next restart; what is left of a keylock start-up and
-    /// the rate it starts at.
-    priming: bool,
-    prime_left: usize,
-    prime_rate: f64,
-    /// Voice frames before a restart over which its start-up is spread.
-    prep_window: u64,
-    /// Stretched frames produced so far: the voice's own clock, at the file's sample rate.
+    stretch: Stretch,
+    channels: usize,
+    /// Stretcher output frames per second of the clip (the file's sample rate).
+    file_rate: f64,
+    /// Input-stream frames given to the stretcher so far.
+    fed: f64,
+    /// Stretcher frames produced so far: the voice's own clock, at the file's sample rate.
     produced: u64,
     /// Stretched audio at the file's rate, waiting to be read; `fifo_read` is the next unread
     /// frame and `fifo_position` the fractional read position within it.
@@ -285,18 +122,17 @@ pub(crate) struct StretchVoice {
     fifo_position: f64,
     /// File frames per project frame.
     step: f64,
+    input: Vec<f32>,
     chunk: Vec<f32>,
-    incoming: Vec<f32>,
-    zeros: Vec<f32>,
 }
 
 impl StretchVoice {
-    /// Builds the voice for one clip placement. Allocates; call it off the audio thread.
+    /// Builds the voice for one clip placement, ready to play from the clip's start. Allocates;
+    /// call it off the audio thread.
     pub(crate) fn new(
         clip: &Clip,
         region: &AudioRegion,
         data: Arc<AudioData>,
-        analysis: Option<&AudioAnalysis>,
         tempo_bpm: f64,
         sample_rate: u32,
     ) -> Option<Self> {
@@ -304,188 +140,132 @@ impl StretchVoice {
         if !(1..=8).contains(&channels) || data.frames() == 0 || !(8_000..=192_000).contains(&data.sample_rate) {
             return None;
         }
-        let (pieces, max_rate) = playlist(clip, region, &data, tempo_bpm)?;
-        let rates_ok = |range: &std::ops::RangeInclusive<f64>| pieces.iter().all(|p| range.contains(&p.rate));
-        // Audio that already plays at its own speed needs no stretcher: the caller reads it directly.
-        if rates_ok(&(1.0 - UNITY_TOLERANCE..=1.0 + UNITY_TOLERANCE)) {
+        if region.stretch == StretchMode::Repitch {
             return None;
         }
-        // Within ±20 % the time-domain keylock keeps the pitch (bass included beyond ~2 %) at a low,
-        // even cost; the full-range phase vocoder is for larger changes (ADR 0003).
-        let profile = match region.stretch {
-            StretchMode::Repitch => return None,
-            _ if rates_ok(&KEYLOCK_RATES) => EngineProfile::Keylock,
-            _ if rates_ok(&WIDE_RATES) => EngineProfile::WideKeylock,
-            _ => return None,
-        };
-        let config = || EngineConfig {
-            sample_rate: data.sample_rate,
-            channels,
-            profile,
-            initial_tempo_rate: pieces.first().map_or(1.0, |p| p.rate),
-            max_block_frames: CHUNK_FRAMES,
-            source_capacity_frames: (CHUNK_FRAMES as f64 * max_rate.max(1.0) * 8.0) as usize + 8_192,
-            pre_analysis: analysis.map(|a| a.0.clone()),
-        };
-        let lanes = [Lane::build(config())?, Lane::build(config())?];
-        // The keylock places transients exactly only right after a reset, so it starts with no
-        // preroll; the phase vocoder needs a full analysis window and ~30 ms to settle on its rate.
-        let latency = lanes[0].processor.pipeline_latency_frames();
-        let preroll = if profile == EngineProfile::WideKeylock { WIDE_PREROLL } else { 0 };
+        let (pieces, max_rate) = playlist(clip, region, &data, tempo_bpm)?;
+        let pitch = 2f64.powf(region.transpose / 12.0);
+        let pitch = if pitch.is_finite() && pitch > 0.0 { pitch } else { 1.0 };
+        // Audio that already plays at its own speed and pitch needs no stretcher: the caller reads
+        // it directly.
+        if pitch == 1.0 && pieces.iter().all(|p| (p.rate - 1.0).abs() <= UNITY_TOLERANCE) {
+            return None;
+        }
+        if !pieces.iter().all(|p| RATES.contains(&p.rate)) {
+            return None;
+        }
         let file_rate = f64::from(data.sample_rate);
-        let retargets = pieces
-            .windows(2)
-            .filter_map(|w| match w {
-                [a, b] if (a.rate - b.rate).abs() > 1e-12 => Some(((b.out_start * file_rate).round() as u64, b.rate)),
-                _ => None,
-            })
-            .collect();
-        // The phase vocoder's start-up is several times longer, so it restarts less often.
-        let min_gap = if preroll == 0 { ANCHOR_MIN_GAP } else { WIDE_MIN_GAP };
-        let restarts = analysis.map(|a| restarts(&pieces, &a.0, file_rate, min_gap)).unwrap_or_default();
+        let mut stretch = Stretch::new(channels, file_rate as f32);
+        if pitch != 1.0 {
+            stretch.set_transpose_factor(pitch as f32, 0.0);
+        }
         let step = file_rate / f64::from(sample_rate.max(1));
+        // Input for one chunk at the fastest speed, or for a seek (which wants up to one block
+        // plus the output latency at that speed).
+        let input_frames = (CHUNK_FRAMES as f64 * max_rate).ceil() as usize
+            + stretch.block_samples() * 2
+            + (max_rate * stretch.output_latency() as f64).ceil() as usize
+            + 2;
         // Room for one project block of up to CHUNK_FRAMES frames at any step, plus a chunk.
         let fifo_frames = (CHUNK_FRAMES as f64 * step.max(1.0)) as usize + 2 * CHUNK_FRAMES + 4;
         let mut voice = Self {
             data,
             pieces,
-            lanes,
-            active: 0,
-            retargets,
-            restarts,
-            next_restart: 0,
-            fade_left: 0,
-            latency,
-            preroll,
-            priming: false,
-            prime_left: 0,
-            prime_rate: 1.0,
-            prep_window: min_gap - ANCHOR_FADE - 64,
+            stretch,
+            channels,
+            file_rate,
+            fed: 0.0,
             produced: 0,
             fifo: vec![0.0; fifo_frames * channels],
             fifo_len: 0,
             fifo_read: 0,
             fifo_position: 0.0,
             step,
+            input: vec![0.0; input_frames * channels],
             chunk: vec![0.0; CHUNK_FRAMES * channels],
-            incoming: vec![0.0; CHUNK_FRAMES * channels],
-            zeros: vec![0.0; 256 * channels],
         };
-        // The first lane starts up here, off the audio thread, so clips that start together do
-        // not all start up in one block.
-        voice.begin_lane(0, 0);
-        voice.prime(0, 0, 0);
+        voice.seek(0);
         Some(voice)
     }
 
-    fn channels(&self) -> usize {
-        usize::from(self.data.channels)
-    }
-
     /// Rewinds the voice to the clip's first frame, for a transport restart or a relaunch.
-    /// Never allocates; runs the first lane's start-up (its pipeline delay, or the phase
-    /// vocoder's preroll) on the calling thread.
+    /// Never allocates.
     pub(crate) fn restart(&mut self) {
         self.seek(0);
     }
 
     /// Moves the voice so that its next frame is `frames` project frames after the clip's start.
-    /// Never allocates; runs a lane's start-up on the calling thread.
+    /// Never allocates; runs the stretcher's start-up on the calling thread.
     pub(crate) fn seek(&mut self, frames: u64) {
-        // Voice frames are the stretcher's own frames; `step` of them pass per project frame.
         let at = (frames as f64 * self.step).round() as u64;
-        self.active = 0;
-        self.next_restart = self.restarts.partition_point(|r| *r <= at);
-        self.fade_left = 0;
-        self.priming = false;
+        let index = self.piece_at(at);
+        let Some(piece) = self.pieces.get(index).copied() else { return };
+        let into_piece = (at as f64 - piece.out_start * self.file_rate).max(0.0);
+        let stream = (piece.stream_start + into_piece * piece.rate).floor();
+        let length = self.stretch.output_seek_length(piece.rate as f32);
+        let channels = self.channels;
+        let mut input = std::mem::take(&mut self.input);
+        let length = length.min(input.len() / channels);
+        if let Some(buffer) = input.get_mut(..length * channels) {
+            self.read_stream(stream, buffer);
+            self.stretch.output_seek(buffer);
+        }
+        self.input = input;
+        self.fed = stream + length as f64;
         self.produced = at;
         self.fifo_len = 0;
         self.fifo_read = 0;
         self.fifo_position = 0.0;
-        self.begin_lane(0, at);
-        self.prime(0, 0, 0);
     }
 
-    /// Resets lane `index` and points it at voice frame `at`: it is fed from [`Self::preroll`] file
-    /// frames before the point the playlist plays then, at that piece's rate. [`Self::prime`] then
-    /// runs off its start-up so that its next output frame is `at`.
-    fn begin_lane(&mut self, index: usize, at: u64) {
-        let file_rate = f64::from(self.data.sample_rate);
-        let piece_index = self.pieces.iter().rposition(|p| (p.out_start * file_rate).round() as u64 <= at).unwrap_or(0);
-        let Some(piece) = self.pieces.get(piece_index).copied() else { return };
-        let into_piece = at as f64 - piece.out_start * file_rate;
-        let src = (piece.src_start + into_piece.max(0.0) * piece.rate).max(0.0).round() as usize;
-        let first_retarget = self.retargets.partition_point(|r| r.0 <= at);
-        let preroll = self.preroll;
-        let from_file = preroll.min(src);
-        self.prime_left = if preroll == 0 { self.latency } else { 0 };
-        self.prime_rate = piece.rate;
-        let Some(lane) = self.lanes.get_mut(index) else { return };
-        lane.processor.reset();
-        lane.controller.set_tempo_rate(piece.rate);
-        lane.feed_piece = piece_index;
-        lane.feed_frame = src - from_file;
-        lane.pad = preroll - from_file;
-        lane.source.set_track_position((src - from_file) as u64);
-        lane.first_retarget = first_retarget;
-        lane.next_retarget = first_retarget;
-        lane.origin = at;
+    /// Where in the input stream voice frame `at` plays.
+    fn stream_at(&self, at: u64) -> f64 {
+        let Some(piece) = self.pieces.get(self.piece_at(at)) else { return 0.0 };
+        piece.stream_start + (at as f64 - piece.out_start * self.file_rate).max(0.0) * piece.rate
     }
 
-    /// Runs off part of lane `index`'s start-up, discarding its output: the share `frames / until`
-    /// of what is left, or all of it when `until` is 0. True once the lane is ready to play.
-    ///
-    /// The keylock's start-up is its pipeline delay. For the phase vocoder the stretcher's own map
-    /// from output to source frames says when the start point plays; its window delay is not in
-    /// that map, and measured, its output lands `WIDE_DELAY_SECONDS * (1 - 1 / rate)` late, so that
-    /// much more (or less) is run off.
-    fn prime(&mut self, index: usize, frames: u64, until: u64) -> bool {
-        let channels = self.channels();
-        let file_rate = f64::from(self.data.sample_rate);
-        let (preroll, rate) = (self.preroll, self.prime_rate);
-        let Self { lanes, pieces, data, zeros, incoming, prime_left, .. } = self;
-        let Some(lane) = lanes.get_mut(index) else { return true };
-        let mut budget = None;
-        // Bounded, so a stretcher that never reports the start point cannot stall the audio thread.
-        for _ in 0..64 {
-            lane.feed(pieces, data, zeros);
-            let ahead = if preroll == 0 {
-                *prime_left
-            } else {
-                let window = WIDE_DELAY_SECONDS * file_rate * (1.0 - 1.0 / rate);
-                let ahead = (preroll as f64 - lane.controller.source_position()) / rate + window;
-                if ahead < 1.0 { 0 } else { ahead as usize }
-            };
-            if ahead == 0 {
-                lane.base = lane.controller.delivered_frames();
-                return true;
+    /// How far the input must run ahead of what is heard, at `rate`: the stretcher analyses a block
+    /// `input_latency` frames behind its input and is heard `output_latency` frames after that.
+    fn lead(&self, rate: f64) -> f64 {
+        self.stretch.input_latency() as f64 + rate * self.stretch.output_latency() as f64
+    }
+
+    /// The piece playing at voice frame `at` (the last one past the end).
+    fn piece_at(&self, at: u64) -> usize {
+        let file_rate = self.file_rate;
+        self.pieces.iter().rposition(|p| (p.out_start * file_rate).round() as u64 <= at).unwrap_or(0)
+    }
+
+    /// Fills `out` (interleaved) with the input stream from frame `from` on. Past the playlist
+    /// the file carries on; past the file there is silence.
+    fn read_stream(&self, from: f64, out: &mut [f32]) {
+        let channels = self.channels;
+        let file_frames = self.data.frames();
+        let mut index = self.pieces.partition_point(|p| p.stream_start <= from).saturating_sub(1);
+        for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
+            let position = from + i as f64;
+            while let Some(next) = self.pieces.get(index + 1)
+                && next.stream_start <= position
+            {
+                index += 1;
             }
-            let left = *budget.get_or_insert(if until == 0 {
-                usize::MAX
-            } else {
-                (ahead as u64 * frames).div_ceil(until) as usize
-            });
-            if left == 0 {
-                return false;
+            let file_frame = self.pieces.get(index).map_or(-1.0, |p| p.src_start + (position - p.stream_start));
+            let file_frame = file_frame.floor();
+            for (c, s) in frame.iter_mut().enumerate() {
+                *s = if file_frame >= 0.0 && (file_frame as usize) < file_frames {
+                    self.data.samples.get(file_frame as usize * channels + c).copied().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
             }
-            let run = ahead.min(left).min(CHUNK_FRAMES);
-            if let Some(scratch) = incoming.get_mut(..run * channels) {
-                lane.processor.process(scratch);
-            }
-            *prime_left = prime_left.saturating_sub(run);
-            budget = Some(left - run);
         }
-        lane.base = lane.controller.delivered_frames();
-        true
     }
 
-    /// Runs the stretcher for up to one chunk, restarting and crossfading lanes at the restart
-    /// points, and appends the output to the FIFO.
+    /// Runs the stretcher for up to one chunk, at one speed, and appends the output to the FIFO.
     fn run_chunk(&mut self) {
-        let channels = self.channels();
+        let channels = self.channels;
         // Make room by dropping frames that have been read.
         if self.fifo_read > 0 {
-            // Reading may have run past what was produced (a stall plays silence); drop that too.
             let read = self.fifo_read.min(self.fifo_len);
             if let Some(unread) = self.fifo.get(read * channels..self.fifo_len * channels) {
                 let unread = unread.len();
@@ -499,60 +279,32 @@ impl StretchVoice {
         if frames == 0 {
             return;
         }
-        if self.fade_left == 0 {
-            while self.restarts.get(self.next_restart).is_some_and(|r| *r < self.produced) {
-                self.next_restart += 1;
-                self.priming = false;
-            }
-            if let Some(at) = self.restarts.get(self.next_restart).copied() {
-                let idle = 1 - self.active;
-                let until = at - self.produced;
-                // The idle lane's start-up is spread over the frames before its restart, so voices
-                // whose restarts fall on the same beat do not all pay for them in one block.
-                if !self.priming && until <= self.prep_window {
-                    self.begin_lane(idle, at);
-                    self.priming = true;
-                }
-                if !self.priming {
-                    frames = frames.min(until - self.prep_window);
-                } else if until == 0 {
-                    self.prime(idle, 0, 0);
-                    self.priming = false;
-                    self.next_restart += 1;
-                    self.fade_left = ANCHOR_FADE;
-                } else {
-                    frames = frames.min(until);
-                    self.prime(idle, frames, until);
-                }
+        // One speed per call: stop at the next piece.
+        let index = self.piece_at(self.produced);
+        if let Some(next) = self.pieces.get(index + 1) {
+            let boundary = (next.out_start * self.file_rate).round() as u64;
+            if boundary > self.produced {
+                frames = frames.min(boundary - self.produced);
             }
         }
-        if self.fade_left > 0 {
-            frames = frames.min(self.fade_left);
-        }
+        let rate = self.pieces.get(index).map_or(1.0, |p| p.rate);
+        // Feed up to where the input should be once these frames are out. The lead depends on the
+        // speed, so a speed change is evened out over the next call instead of shifting the
+        // timing for good.
+        let fed = (self.stream_at(self.produced + frames) + self.lead(rate)).max(self.fed);
+        let input_frames = ((fed.floor() - self.fed.floor()).max(0.0) as usize).min(self.input.len() / channels);
         let frames = frames as usize;
-        let Self { lanes, pieces, data, zeros, retargets, chunk, incoming, active, fade_left, .. } = self;
-        let [first, second] = lanes;
-        let (playing, next) = if *active == 0 { (first, second) } else { (second, first) };
-        let (Some(out), Some(fresh)) = (chunk.get_mut(..frames * channels), incoming.get_mut(..frames * channels))
-        else {
-            return;
-        };
-        playing.process(out, pieces, data, zeros, retargets);
-        if *fade_left > 0 {
-            next.process(fresh, pieces, data, zeros, retargets);
-            let done = ANCHOR_FADE - *fade_left;
-            for (i, (o, f)) in out.chunks_exact_mut(channels).zip(fresh.chunks_exact(channels)).enumerate() {
-                // Both lanes play the same audio, so a linear crossfade keeps the level.
-                let gain = ((done + i as u64 + 1) as f32 / ANCHOR_FADE as f32).min(1.0);
-                for (o, f) in o.iter_mut().zip(f) {
-                    *o += (*f - *o) * gain;
-                }
-            }
-            *fade_left -= frames as u64;
-            if *fade_left == 0 {
-                *active = 1 - *active;
-            }
+        let mut input = std::mem::take(&mut self.input);
+        let mut chunk = std::mem::take(&mut self.chunk);
+        if let (Some(input_buffer), Some(output)) =
+            (input.get_mut(..input_frames * channels), chunk.get_mut(..frames * channels))
+        {
+            self.read_stream(self.fed.floor(), input_buffer);
+            self.stretch.process(input_buffer, output);
         }
+        self.input = input;
+        self.chunk = chunk;
+        self.fed = fed;
         let at = self.fifo_len * channels;
         if let (Some(dst), Some(src)) =
             (self.fifo.get_mut(at..at + frames * channels), self.chunk.get(..frames * channels))
@@ -565,7 +317,7 @@ impl StretchVoice {
 
     /// Renders the next `out.len() / 2` project frames as interleaved stereo into `out`.
     pub(crate) fn render(&mut self, out: &mut [f32]) {
-        let channels = self.channels();
+        let channels = self.channels;
         for frame in out.as_chunks_mut::<2>().0 {
             // Linear interpolation needs this frame and the next.
             while self.fifo_len < self.fifo_read + 2 {
@@ -588,32 +340,6 @@ impl StretchVoice {
             self.fifo_position -= whole;
         }
     }
-}
-
-/// Voice frames at which a fresh lane takes over: [`ANCHOR_LEAD`] before each strong onset of the
-/// file where the playlist plays it, at least `min_gap` apart.
-fn restarts(pieces: &[Piece], analysis: &PreAnalysisArtifact, file_rate: f64, min_gap: u64) -> Vec<u64> {
-    let mut onsets = Vec::new();
-    for (i, &onset) in analysis.transient_onsets.iter().enumerate() {
-        if analysis.transient_strengths.get(i).copied().unwrap_or(1.0) < ANCHOR_MIN_STRENGTH {
-            continue;
-        }
-        let onset = onset as f64;
-        for piece in pieces.iter().filter(|p| p.src_start <= onset && onset < p.src_end) {
-            if onsets.len() < MAX_PIECES {
-                onsets.push((piece.out_start * file_rate + (onset - piece.src_start) / piece.rate).round() as u64);
-            }
-        }
-    }
-    onsets.sort_unstable();
-    let mut restarts: Vec<u64> = Vec::new();
-    for onset in onsets {
-        let Some(at) = onset.checked_sub(ANCHOR_LEAD).filter(|at| *at > 0) else { continue };
-        if restarts.last().is_none_or(|last| at >= last + min_gap) {
-            restarts.push(at);
-        }
-    }
-    restarts
 }
 
 #[cfg(test)]
@@ -662,16 +388,16 @@ mod tests {
         // Beats 0–4 = 0–2 s, beats 4–6 = 2–4 s; loop beats 2–6; play 8 beats from beat 3.
         let r = region(&[(0.0, 0.0), (4.0, 2.0), (6.0, 4.0)], StretchMode::Smooth);
         let (pieces, _) = playlist(&clip(8.0, 3.0, Some((2.0, 6.0))), &r, &data, 120.0).unwrap();
-        let summary: Vec<(f64, f64, f64, f64)> =
-            pieces.iter().map(|p| (p.out_start, p.src_start, p.src_end, p.rate)).collect();
+        let summary: Vec<(f64, f64, f64, f64, f64)> =
+            pieces.iter().map(|p| (p.out_start, p.src_start, p.src_end, p.rate, p.stream_start)).collect();
         assert_eq!(
             summary,
             [
-                (0.0, 1500.0, 2000.0, 1.0), // beat 3–4
-                (0.5, 2000.0, 4000.0, 2.0), // beat 4–6, twice as fast
-                (1.5, 1000.0, 2000.0, 1.0), // loop back to beat 2–4
-                (2.5, 2000.0, 4000.0, 2.0), // beat 4–6
-                (3.5, 1000.0, 1500.0, 1.0), // beat 2–3, clip ends
+                (0.0, 1500.0, 2000.0, 1.0, 0.0),    // beat 3–4
+                (0.5, 2000.0, 4000.0, 2.0, 500.0),  // beat 4–6, twice as fast
+                (1.5, 1000.0, 2000.0, 1.0, 2500.0), // loop back to beat 2–4
+                (2.5, 2000.0, 4000.0, 2.0, 3500.0), // beat 4–6
+                (3.5, 1000.0, 1500.0, 1.0, 5500.0), // beat 2–3, clip ends
             ]
         );
     }
@@ -704,20 +430,14 @@ mod tests {
         found
     }
 
-    /// Renders a warped click clip and returns how far each click lands from where the warp
-    /// markers put it, in milliseconds.
-    fn click_errors(markers: &[(f64, f64)], length_beats: f64) -> Vec<f64> {
-        seek_click_errors(markers, length_beats, 0.0)
-    }
-
-    /// Like [`click_errors`], playing from `seek` seconds into the clip.
-    fn seek_click_errors(markers: &[(f64, f64)], length_beats: f64, seek: f64) -> Vec<f64> {
+    /// Renders a warped click clip (transposed by `transpose`, from `seek` seconds into it) and
+    /// returns how far each click lands from where the warp markers put it, in milliseconds.
+    fn click_errors(markers: &[(f64, f64)], length_beats: f64, seek: f64, transpose: f64) -> Vec<f64> {
         let sr = 48_000;
         let data = clicks(0.5, 40.0, sr);
-        let r = region(markers, StretchMode::Smooth);
+        let r = AudioRegion { transpose, ..region(markers, StretchMode::Smooth) };
         let c = clip(length_beats, 0.0, None);
-        let analysis = analyze_audio(&data);
-        let mut voice = StretchVoice::new(&c, &r, data, Some(&analysis), 120.0, sr).unwrap();
+        let mut voice = StretchVoice::new(&c, &r, data, 120.0, sr).unwrap();
         let skipped = (seek * f64::from(sr)) as usize;
         if skipped > 0 {
             voice.seek(skipped as u64);
@@ -746,39 +466,89 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_voice_can_start_anywhere_in_its_clip() {
-        // Seek into the middle of a beat, of a rate segment, and past a loop-free segment change.
-        for seek in [3.3, 9.87, 16.01] {
-            let errors = seek_click_errors(
-                &[(0.0, 0.0), (8.0, 3.9), (16.0, 8.1), (24.0, 11.9), (32.0, 16.2), (48.0, 23.8)],
-                46.0,
-                seek,
-            );
-            assert!(errors.len() >= 10, "seek {seek}: {} clicks found", errors.len());
-            assert!(worst(&errors) < 3.0, "seek {seek}: {errors:?}");
-        }
-        // The phase vocoder too.
-        let errors = seek_click_errors(&[(0.0, 0.0), (64.0, 48.0)], 30.0, 7.4);
-        let mean = errors.iter().sum::<f64>() / errors.len() as f64;
-        assert!(errors.len() >= 10 && mean.abs() < 7.0, "{errors:?}");
-    }
-
     fn worst(errors: &[f64]) -> f64 {
         errors.iter().fold(0.0f64, |w, x| w.max(x.abs()))
     }
 
+    const SEGMENTS: [(f64, f64); 6] = [(0.0, 0.0), (8.0, 3.9), (16.0, 8.1), (24.0, 11.9), (32.0, 16.2), (48.0, 23.8)];
+
+    #[test]
+    fn transients_stay_on_the_grid() {
+        for (markers, limit) in [
+            (vec![(0.0, 0.0), (64.0, 30.4)], 3.0), // 0.95x
+            (vec![(0.0, 0.0), (64.0, 33.6)], 3.0), // 1.05x
+            (vec![(0.0, 0.0), (64.0, 22.4)], 4.0), // 0.7x
+            (vec![(0.0, 0.0), (64.0, 48.0)], 4.0), // 1.5x
+            (SEGMENTS.to_vec(), 3.0),              // changing speed
+        ] {
+            let errors = click_errors(&markers, 46.0, 0.0, 0.0);
+            assert!(errors.len() >= 30, "{markers:?}: {} clicks found", errors.len());
+            assert!(worst(&errors) < limit, "{markers:?}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn a_voice_can_start_anywhere_in_its_clip() {
+        // Seek into the middle of a beat, of a speed segment, and just past a segment change.
+        for seek in [3.3, 9.87, 16.01] {
+            let errors = click_errors(&SEGMENTS, 46.0, seek, 0.0);
+            assert!(errors.len() >= 10, "seek {seek}: {} clicks found", errors.len());
+            assert!(worst(&errors) < 4.0, "seek {seek}: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn transposed_clips_keep_transients_on_the_grid() {
+        for transpose in [-7.0, -3.0, 2.0, 7.0] {
+            let errors = click_errors(&[(0.0, 0.0), (64.0, 30.4)], 46.0, 0.0, transpose);
+            assert!(errors.len() >= 40, "{transpose} st: {} clicks found", errors.len());
+            assert!(worst(&errors) < 4.0, "{transpose} st: {errors:?}");
+        }
+    }
+
+    /// Renders a warped sine clip and returns (frequency in Hz, frames with sound) at 48 kHz.
+    fn transposed(hz: f64, markers: &[(f64, f64)], beats: f64, transpose: f64) -> (f64, usize) {
+        let sr = 48_000;
+        let data = sine(hz, 20.0, 44_100);
+        let r = AudioRegion { transpose, ..region(markers, StretchMode::Smooth) };
+        let mut voice = StretchVoice::new(&clip(beats, 0.0, None), &r, data, 120.0, sr).unwrap();
+        let frames = (beats * 0.5 * f64::from(sr)) as usize;
+        let mut out = vec![0.0; frames * 2];
+        for block in out.chunks_mut(512 * 2) {
+            voice.render(block);
+        }
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        let middle = &left[left.len() / 4..left.len() * 3 / 4];
+        let ups = middle.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        let sounding = left.iter().rposition(|s| s.abs() > 0.05).map_or(0, |i| i + 1);
+        (ups as f64 / (middle.len() as f64 / f64::from(sr)), sounding)
+    }
+
+    #[test]
+    fn transpose_shifts_pitch_but_not_time_on_warped_clips() {
+        // 8 beats at 120 bpm = 4 s, the file playing at its own speed, then at 0.9x.
+        for (markers, transpose, expected) in [
+            (vec![(0.0, 0.0), (8.0, 4.0)], 12.0, 880.0),
+            (vec![(0.0, 0.0), (8.0, 4.0)], -5.0, 440.0 * 2f64.powf(-5.0 / 12.0)),
+            (vec![(0.0, 0.0), (8.0, 3.6)], 7.0, 440.0 * 2f64.powf(7.0 / 12.0)),
+            (vec![(0.0, 0.0), (8.0, 3.6)], 0.0, 440.0),
+        ] {
+            let (hz, sounding) = transposed(440.0, &markers, 8.0, transpose);
+            assert!((hz - expected).abs() < expected * 0.01, "{transpose} st: {hz:.1} Hz, expected {expected:.1}");
+            // The clip still fills its 4 s.
+            assert!(sounding > 4 * 48_000 - 2_000, "{transpose} st: sound ends at frame {sounding}");
+        }
+    }
+
     #[test]
     fn plays_through_at_any_device_rate_and_block_size() {
-        // A 48 kHz file on 44.1 kHz and 96 kHz devices, with restarts, in odd block sizes.
+        // A 48 kHz file on 44.1 kHz and 96 kHz devices, in odd block sizes.
         let data = clicks(0.25, 40.0, 48_000);
-        let analysis = analyze_audio(&data);
         for markers in [vec![(0.0, 0.0), (64.0, 30.4)], vec![(0.0, 0.0), (64.0, 45.0)]] {
             let r = region(&markers, StretchMode::Smooth);
             for (device_rate, block) in [(44_100, 441), (44_100, 448), (96_000, 37), (22_050, 1000)] {
                 let mut voice =
-                    StretchVoice::new(&clip(60.0, 0.0, None), &r, data.clone(), Some(&analysis), 120.0, device_rate)
-                        .unwrap();
+                    StretchVoice::new(&clip(60.0, 0.0, None), &r, data.clone(), 120.0, device_rate).unwrap();
                 let mut out = vec![0.0; block * 2];
                 for _ in 0..(30 * device_rate as usize / block) {
                     voice.render(&mut out);
@@ -788,42 +558,16 @@ mod tests {
     }
 
     #[test]
-    fn keylock_keeps_transients_on_the_grid() {
-        for markers in [
-            vec![(0.0, 0.0), (64.0, 30.4)],
-            vec![(0.0, 0.0), (64.0, 33.6)],
-            vec![(0.0, 0.0), (8.0, 3.9), (16.0, 8.1), (24.0, 11.9), (32.0, 16.2), (48.0, 23.8)],
-        ] {
-            let errors = click_errors(&markers, 46.0);
-            assert!(errors.len() >= 40, "{} clicks found", errors.len());
-            // Without the restarts transients drift up to ~9 ms, enough to flam against other tracks.
-            assert!(worst(&errors) < 3.0, "{markers:?}: {errors:?}");
-        }
-    }
-
-    #[test]
-    fn phase_vocoder_keeps_transients_near_the_grid() {
-        for rate in [0.6, 0.75, 1.3, 1.5] {
-            let errors = click_errors(&[(0.0, 0.0), (64.0, 32.0 * rate)], 30.0);
-            assert!(errors.len() >= 15, "{} clicks found", errors.len());
-            let mean = errors.iter().sum::<f64>() / errors.len() as f64;
-            // Its window smears clicks by a few ms either way; without the corrections the clicks
-            // land 10-30 ms off, depending on the rate.
-            assert!(mean.abs() < 7.0, "rate {rate}: mean {mean:.1} ms, {errors:?}");
-        }
-    }
-
-    #[test]
     fn unusable_clips_get_no_voice() {
         let data = sine(440.0, 1.0, 48_000);
         let one_marker = region(&[(0.0, 0.0)], StretchMode::Smooth);
-        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &one_marker, data.clone(), None, 120.0, 48_000).is_none());
+        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &one_marker, data.clone(), 120.0, 48_000).is_none());
         let unity = region(&[(0.0, 0.0), (2.0, 1.0)], StretchMode::Smooth);
-        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &unity, data.clone(), None, 120.0, 48_000).is_none());
+        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &unity, data.clone(), 120.0, 48_000).is_none());
         let repitch = region(&[(0.0, 0.0), (2.0, 0.9)], StretchMode::Repitch);
-        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &repitch, data.clone(), None, 120.0, 48_000).is_none());
-        // 1 beat holding 0.02 s at 120 bpm: 0.04× speed, outside the stretcher's range.
+        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &repitch, data.clone(), 120.0, 48_000).is_none());
+        // 1 beat holding 0.02 s at 120 bpm: 0.04x speed, too slow to stretch.
         let extreme = region(&[(0.0, 0.0), (1.0, 0.02)], StretchMode::Smooth);
-        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &extreme, data, None, 120.0, 48_000).is_none());
+        assert!(StretchVoice::new(&clip(1.0, 0.0, None), &extreme, data, 120.0, 48_000).is_none());
     }
 }
