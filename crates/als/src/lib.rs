@@ -12,7 +12,8 @@ use std::path::Path;
 use loopwerk_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
-    LoopRange, Note, Project, Scene, Send, Slot, TimeSignature, Track, TrackId, Transport, ValidationError, WarpMarker,
+    LoopRange, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
+    ValidationError, WarpMarker,
 };
 use roxmltree::Node;
 
@@ -544,6 +545,16 @@ impl Reader {
 
         let coarse = number(clip, &["PitchCoarse"]).unwrap_or(0.0);
         let fine = number(clip, &["PitchFine"]).unwrap_or(0.0);
+        let stretch = match value(clip, &["WarpMode"]) {
+            // Observed: Live showed "Complex" for a clip saved with WarpMode 4 (docs/spec/als-format.md).
+            Some("4") | None => StretchMode::Smooth,
+            Some(code) => {
+                self.warn(format!(
+                    "track {track}: audio clip {clip_name:?} uses warp mode {code}, not mapped yet; using Smooth"
+                ));
+                StretchMode::Smooth
+            }
+        };
         Some(AudioRegion {
             file: file.to_string(),
             absolute_file: absolute.map(str::to_string),
@@ -551,6 +562,7 @@ impl Reader {
             channels: None,
             duration_seconds,
             warped: boolean(clip, &["IsWarped"]).unwrap_or(true),
+            stretch,
             warp_markers,
             gain: number(clip, &["SampleVolume"]).filter(|g| *g >= 0.0).unwrap_or(1.0),
             transpose: coarse + fine / 100.0,

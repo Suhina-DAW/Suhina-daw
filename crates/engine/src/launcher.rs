@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use loopwerk_model::{LaneData, Project, TimeSignature};
 
-use crate::audio::{AudioEvent, AudioPool};
+use crate::audio::{AudioEvent, AudioPool, Timing};
+use crate::stretch::StretchVoice;
 use crate::{AUDIO_HEADROOM, Renderer, start_voice, track_gains};
 
 /// Commands that can wait in the queue between two audio blocks.
@@ -20,6 +21,9 @@ const QUEUE_CAPACITY: usize = 256;
 const STOP_FADE_SECONDS: f64 = 0.005;
 /// Length given to looping audio clips, in beats: long enough to be endless in practice.
 const ENDLESS_BEATS: f64 = 10_000_000.0;
+/// Length given to looping time-stretched clips, in beats (over an hour at 120 bpm); their
+/// playlist is prepared up front, so it cannot be endless. After it they fall back to re-pitch.
+const STRETCH_LOOP_BEATS: f64 = 8_192.0;
 /// Monitor value for "no slot".
 const NONE: u32 = u32::MAX;
 /// Monitor value for "a stop is queued".
@@ -169,16 +173,20 @@ struct PlanNote {
     gain_right: f32,
 }
 
-#[derive(Debug, Clone)]
 struct PlanAudio {
-    /// Placed at frame 0 at the project tempo.
+    /// Placed at frame 0 at the project tempo; reads the file directly (re-pitch).
     event: AudioEvent,
     /// Warped audio follows the launcher's tempo; unwarped audio plays at file speed.
     follows_tempo: bool,
+    /// The time-stretched voice of a warped clip, used while the tempo is the project tempo it
+    /// was prepared for (ADR 0003).
+    stretch: Option<StretchVoice>,
+    /// Beats the stretch voice covers; after that the clip is re-pitched.
+    stretch_beats: f64,
+    stretch_gains: (f32, f32),
 }
 
 /// A slot's clip, ready to play.
-#[derive(Debug, Clone)]
 struct ClipPlan {
     offset: f64,
     length: f64,
@@ -208,7 +216,6 @@ impl ClipPlan {
     }
 }
 
-#[derive(Debug, Clone)]
 struct SlotPlan {
     clip: Option<ClipPlan>,
     has_stop: bool,
@@ -224,6 +231,9 @@ struct Playing {
     next_note: usize,
     /// Frames of fade-out left, while stopping.
     fade_left: f64,
+    /// Whether this playback uses the clip's stretch voices; it stops using them for good when
+    /// the tempo changes.
+    stretched: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -232,13 +242,13 @@ struct Pending {
     action: Queued,
 }
 
-#[derive(Debug, Clone)]
 struct Column {
     slots: Vec<SlotPlan>,
     playing: Option<Playing>,
     fading: Option<Playing>,
     pending: Option<Pending>,
-    overrides_arrangement: bool,
+    /// The frame from which the track plays launched clips instead of its arrangement.
+    overrides_since: Option<u64>,
 }
 
 pub(crate) struct Launcher {
@@ -248,6 +258,8 @@ pub(crate) struct Launcher {
     bar_beats: f64,
     beat: f64,
     tempo_bpm: f64,
+    /// The project tempo, which stretch voices are prepared for.
+    project_tempo_bpm: f64,
     pending_tempo: Option<(f64, f64)>,
     frames_per_beat_at_build: f64,
     stop_fade_frames: f64,
@@ -279,7 +291,7 @@ impl Launcher {
                 playing: None,
                 fading: None,
                 pending: None,
-                overrides_arrangement: false,
+                overrides_since: None,
             })
             .collect();
         Self {
@@ -295,6 +307,7 @@ impl Launcher {
             bar_beats: bar_beats(project.transport.time_signature),
             beat: 0.0,
             tempo_bpm: tempo,
+            project_tempo_bpm: tempo,
             pending_tempo: None,
             frames_per_beat_at_build: frames_per_beat,
             stop_fade_frames: (STOP_FADE_SECONDS * f64::from(sample_rate)).max(1.0),
@@ -304,7 +317,12 @@ impl Launcher {
 
     /// Whether the track behind `column` plays launched clips instead of its arrangement.
     pub(crate) fn overrides(&self, column: u32) -> bool {
-        self.columns.get(column as usize).is_some_and(|c| c.overrides_arrangement)
+        self.columns.get(column as usize).is_some_and(|c| c.overrides_since.is_some())
+    }
+
+    /// Like [`Launcher::overrides`], at frame `position` of the block just rendered.
+    pub(crate) fn overrides_at(&self, column: u32, position: u64) -> bool {
+        self.columns.get(column as usize).and_then(|c| c.overrides_since).is_some_and(|since| since <= position)
     }
 
     /// The beat a launch issued now happens at.
@@ -343,7 +361,7 @@ impl Launcher {
                 a.store(queued, Ordering::Relaxed);
             }
             if let Some(a) = m.overrides.get(i) {
-                a.store(column.overrides_arrangement, Ordering::Relaxed);
+                a.store(column.overrides_since.is_some(), Ordering::Relaxed);
             }
         }
     }
@@ -391,7 +409,7 @@ fn plan_clip(
                 }
             }
             LaneData::Audio(region) => {
-                let Some(data) = audio.get(&region.file) else { continue };
+                let Some(data) = audio.files.get(&region.file) else { continue };
                 // Placed at frame 0; a looping clip is given an endless length.
                 let placed = loopwerk_model::Clip {
                     start: 0.0,
@@ -400,11 +418,32 @@ fn plan_clip(
                 };
                 let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                 let tempo = project.transport.tempo_bpm;
-                if let Some(event) =
-                    AudioEvent::new(&placed, region, data.clone(), frames_per_beat, tempo, gains, sample_rate)
-                {
-                    audio_plans.push(PlanAudio { event, follows_tempo: region.warped });
-                }
+                let timing = Timing { frames_per_beat, tempo_bpm: tempo, sample_rate };
+                let Some(event) = AudioEvent::new(&placed, region, data.clone(), timing, gains) else { continue };
+                // Warped clips are time-stretched like arrangement clips; the stretch voice gets
+                // the region gain, the direct reader has it already.
+                let stretch_beats = if loop_range.is_some() { STRETCH_LOOP_BEATS } else { clip.length };
+                let stretch = (region.warped && region.stretch != loopwerk_model::StretchMode::Repitch)
+                    .then(|| {
+                        let stretched = loopwerk_model::Clip { length: stretch_beats, ..placed.clone() };
+                        StretchVoice::new(
+                            &stretched,
+                            region,
+                            data.clone(),
+                            audio.analysis.get(&region.file),
+                            tempo,
+                            sample_rate,
+                        )
+                    })
+                    .flatten();
+                let region_gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
+                audio_plans.push(PlanAudio {
+                    event,
+                    follows_tempo: region.warped,
+                    stretch,
+                    stretch_beats,
+                    stretch_gains: (gains.0 * region_gain, gains.1 * region_gain),
+                });
             }
         }
     }
@@ -480,7 +519,7 @@ impl Renderer {
             LaunchCommand::SetQuantization(q) => self.launcher.quantization = q,
             LaunchCommand::BackToArrangement => {
                 for column in &mut self.launcher.columns {
-                    column.overrides_arrangement = false;
+                    column.overrides_since = None;
                 }
             }
         }
@@ -499,6 +538,9 @@ impl Renderer {
         self.next_event = 0;
         self.next_audio = 0;
         self.active_audio_count = 0;
+        for event in &mut self.stretch_events {
+            event.voice.restart();
+        }
         self.launcher.beat = 0.0;
         self.launcher.monitor.running.store(true, Ordering::Relaxed);
     }
@@ -550,17 +592,35 @@ impl Renderer {
             let launcher = &mut self.launcher;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
+            let fade_in = self.fade_frames;
+            let (tempo, project_tempo) = (launcher.tempo_bpm, launcher.project_tempo_bpm);
             let Some(column) = launcher.columns.get_mut(index) else { continue };
             for state in [&mut column.playing, &mut column.fading] {
                 let Some(p) = state.as_mut() else { continue };
-                let Some(plan) = column.slots.get(p.slot).and_then(|s| s.clip.as_ref()) else {
+                let Some(plan) = column.slots.get_mut(p.slot).and_then(|s| s.clip.as_mut()) else {
                     *state = None;
                     continue;
                 };
                 let gain = if p.fade_left > 0.0 { (p.fade_left / fade_total) as f32 } else { 1.0 };
-                for a in &plan.audio {
-                    let at = if a.follows_tempo { p.elapsed_beats * fpb } else { p.elapsed_frames };
-                    let (l, r) = a.event.sample_elapsed(at);
+                if p.stretched && tempo != project_tempo {
+                    p.stretched = false;
+                }
+                for a in &mut plan.audio {
+                    let (l, r) = match a.stretch.as_mut() {
+                        Some(voice) if p.stretched && p.elapsed_beats < a.stretch_beats => {
+                            let mut frame = [0.0f32; 2];
+                            voice.render(&mut frame);
+                            // The same fades as the direct reader: in at the start, out at a
+                            // clip end.
+                            let until_end = a.event.end as f64 - p.elapsed_frames;
+                            let fade = (p.elapsed_frames / fade_in).min(until_end / fade_in).clamp(0.0, 1.0) as f32;
+                            (frame[0] * a.stretch_gains.0 * fade, frame[1] * a.stretch_gains.1 * fade)
+                        }
+                        _ => {
+                            let at = if a.follows_tempo { p.elapsed_beats * fpb } else { p.elapsed_frames };
+                            a.event.sample_elapsed(at)
+                        }
+                    };
                     out.0 += l * gain;
                     out.1 += r * gain;
                 }
@@ -609,8 +669,18 @@ impl Renderer {
                 column.fading = Some(old);
             }
             if let Queued::Launch(slot) = pending.action
-                && let Some(plan) = column.slots.get(slot).and_then(|s| s.clip.as_ref())
+                && let Some(plan) = column.slots.get_mut(slot).and_then(|s| s.clip.as_mut())
             {
+                // A stretch voice can play one launch at a time: a relaunch of the clip that
+                // is fading out cuts its fade short.
+                if column.fading.is_some_and(|f| f.slot == slot) {
+                    column.fading = None;
+                }
+                for a in &mut plan.audio {
+                    if let Some(voice) = a.stretch.as_mut() {
+                        voice.restart();
+                    }
+                }
                 column.playing = Some(Playing {
                     slot,
                     elapsed_beats: 0.0,
@@ -618,8 +688,9 @@ impl Renderer {
                     last_clip_beat: plan.offset,
                     next_note: plan.first_note_from(plan.offset),
                     fade_left: 0.0,
+                    stretched: self.launcher.tempo_bpm == self.launcher.project_tempo_bpm,
                 });
-                column.overrides_arrangement = true;
+                column.overrides_since = Some(self.position);
             }
             self.release_column(index);
         }
@@ -995,7 +1066,8 @@ mod tests {
         // A one-second ramp: the sample value tells the file position in seconds.
         let samples = (0..SR).map(|i| i as f32 / SR as f32).collect();
         let mut audio = AudioPool::new();
-        audio.insert("ramp.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples }));
+        audio.files.insert("ramp.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples }));
+        // Warped at the file's own speed, so it is read directly rather than stretched.
         let region = AudioRegion {
             file: "ramp.wav".into(),
             absolute_file: None,
@@ -1003,6 +1075,7 @@ mod tests {
             channels: Some(1),
             duration_seconds: Some(1.0),
             warped: true,
+            stretch: StretchMode::Smooth,
             warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 1.0 }],
             gain: 1.0,
             transpose: 0.0,
@@ -1025,6 +1098,112 @@ mod tests {
         // After half a beat the loop wraps to its start.
         assert!((left(BEAT / 2 + BEAT / 4) - 0.125).abs() < 0.01, "{}", left(BEAT / 2 + BEAT / 4));
         assert!((left(BEAT + BEAT / 2 + BEAT / 4) - 0.125).abs() < 0.01);
+    }
+
+    /// A project whose only slot loops a 440 Hz sine warped to play at 0.9 times its speed.
+    fn stretched_sine() -> (Project, AudioPool) {
+        let samples = (0..2 * SR as usize)
+            .map(|i| (std::f64::consts::TAU * 440.0 * i as f64 / f64::from(SR)).sin() as f32 * 0.5)
+            .collect();
+        let mut audio = AudioPool::new();
+        audio.files.insert("sine.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples }));
+        let region = AudioRegion {
+            file: "sine.wav".into(),
+            absolute_file: None,
+            sample_rate: Some(SR),
+            channels: Some(1),
+            duration_seconds: Some(2.0),
+            warped: true,
+            stretch: StretchMode::Smooth,
+            // Two beats (1 s at 120 bpm) play 0.9 s of the file.
+            warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 0.9 }],
+            gain: 1.0,
+            transpose: 0.0,
+        };
+        let content = ClipContent {
+            id: ContentId(1),
+            name: "sine".into(),
+            length: 2.0,
+            lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
+            extensions: Extensions::default(),
+        };
+        (project(vec![content], vec![vec![with(clip(1, 2.0, true))]]), audio)
+    }
+
+    /// Upward zero crossings per second in the left channel of `out[from..to]` (frames).
+    fn hz(out: &[f32], from: usize, to: usize) -> f64 {
+        let left: Vec<f32> = out[2 * from..2 * to].iter().step_by(2).copied().collect();
+        let crossings = left.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        crossings as f64 * f64::from(SR) / (to - from) as f64
+    }
+
+    #[test]
+    fn launched_warped_clips_are_stretched_and_keep_their_pitch() {
+        let (p, audio) = stretched_sine();
+        let launches = [
+            (0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
+            (1.0, LaunchCommand::Stop),
+            (1.5, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
+        ];
+        let out = render_launches(&p, &audio, SR, &launches, 2.5).unwrap();
+        // Read directly at 0.9 times its speed the sine would sound at 396 Hz.
+        let first = hz(&out, SR as usize / 5, 4 * SR as usize / 5);
+        assert!((first - 440.0).abs() < 8.0, "{first} Hz");
+        // Relaunched after a stop, the rewound voice plays again from the start.
+        let again = hz(&out, 17 * SR as usize / 10, 23 * SR as usize / 10);
+        assert!((again - 440.0).abs() < 8.0, "{again} Hz");
+        // Between the stop and the relaunch: silence once the fade is over.
+        assert!(out[2 * (11 * SR as usize / 10)..2 * (14 * SR as usize / 10)].iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn after_a_tempo_change_warped_clips_follow_by_re_pitching() {
+        let (mut p, audio) = stretched_sine();
+        p.launcher.scenes[0].tempo_bpm = Some(60.0);
+        let launches = [(0.0, LaunchCommand::LaunchScene { scene: 0 })];
+        let out = render_launches(&p, &audio, SR, &launches, 2.0).unwrap();
+        // At half the tempo the direct reader plays the file at 0.9 x 0.5 = 0.45 times its speed:
+        // 198 Hz. (Keeping the pitch at another tempo needs real-time retargeting, LOOP-4.)
+        let pitch = hz(&out, SR as usize / 5, 9 * SR as usize / 5);
+        assert!((pitch - 198.0).abs() < 6.0, "{pitch} Hz");
+    }
+
+    #[test]
+    fn stretched_arrangement_clips_rewind_with_the_transport_and_give_way_to_launches() {
+        let (mut p, audio) = stretched_sine();
+        let looped = p.launcher.columns[0].slots[0].clip.clone().unwrap();
+        p.arrangement.lanes.push(ArrangementLane {
+            name: String::new(),
+            track: Some(TrackId(1)),
+            clips: vec![Clip { length: 16.0, ..looped }],
+        });
+        // A second scene with a silent clip, to take the track over without sound of its own.
+        p.contents.push(notes(2, Vec::new()));
+        p.launcher.scenes.push(Scene::default());
+        p.launcher.columns[0].slots.push(with(clip(2, 1.0, true)));
+        let mut renderer = Renderer::with_audio(&p, &audio, SR).unwrap();
+        let half = SR as usize / 2;
+        let mut first = vec![0.0f32; 2 * half];
+        renderer.process(&mut first);
+        assert!((hz(&first, half / 4, half) - 440.0).abs() < 10.0);
+
+        // Stop and play again: the stretched clip starts over, sample for sample.
+        renderer.handle(LaunchCommand::Stop);
+        let mut gap = vec![0.0f32; 2 * 4800];
+        renderer.process(&mut gap);
+        renderer.handle(LaunchCommand::Play);
+        let mut again = vec![0.0f32; 2 * half];
+        renderer.process(&mut again);
+        let diff = first.iter().zip(&again).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+        assert!(diff < 1e-4, "restart differs by {diff}");
+
+        // Launching the silent clip at the next bar takes the track over: silence from there.
+        renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 1 });
+        let mut rest = vec![0.0f32; 2 * 2 * SR as usize];
+        renderer.process(&mut rest);
+        let bar = BAR - half;
+        assert!(rest[..2 * (bar - 10)].iter().any(|s| s.abs() > 0.1));
+        assert!(rest[2 * bar..].iter().all(|s| *s == 0.0), "the arrangement clip still sounds");
     }
 
     #[test]

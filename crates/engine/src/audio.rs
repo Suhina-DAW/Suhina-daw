@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use loopwerk_model::{AudioRegion, Clip};
 
+use crate::stretch::AudioAnalysis;
+
 /// Decoded audio, interleaved f32.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioData {
@@ -44,8 +46,20 @@ impl AudioData {
     }
 }
 
-/// Decoded files, keyed by the `file` string of the project's audio regions.
-pub type AudioPool = HashMap<String, Arc<AudioData>>;
+/// The audio a project needs, prepared before playback.
+#[derive(Debug, Clone, Default)]
+pub struct AudioPool {
+    /// Decoded files, keyed by the `file` string of the project's audio regions.
+    pub files: HashMap<String, Arc<AudioData>>,
+    /// Stretcher pre-analysis of the files that warped clips play, keyed the same way.
+    pub analysis: HashMap<String, AudioAnalysis>,
+}
+
+impl AudioPool {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 /// How a beat in the clip maps to seconds in the file.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +88,14 @@ impl TimeMap {
     }
 }
 
+/// The project timing an audio event is resolved against.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Timing {
+    pub frames_per_beat: f64,
+    pub tempo_bpm: f64,
+    pub sample_rate: u32,
+}
+
 /// One audio clip placement, resolved to frames.
 #[derive(Debug, Clone)]
 pub(crate) struct AudioEvent {
@@ -97,11 +119,10 @@ impl AudioEvent {
         clip: &Clip,
         region: &AudioRegion,
         data: Arc<AudioData>,
-        frames_per_beat: f64,
-        tempo_bpm: f64,
+        timing: Timing,
         gains: (f32, f32),
-        sample_rate: u32,
     ) -> Option<Self> {
+        let Timing { frames_per_beat, tempo_bpm, sample_rate } = timing;
         let finite = [clip.start, clip.length, clip.offset, frames_per_beat, tempo_bpm].iter().all(|v| v.is_finite());
         if !finite || clip.length <= 0.0 || frames_per_beat <= 0.0 || data.frames() == 0 {
             return None;
@@ -196,6 +217,7 @@ mod tests {
             channels: Some(1),
             duration_seconds: Some(1.0),
             warped,
+            stretch: StretchMode::Smooth,
             warp_markers: markers.iter().map(|&(time, audio_time)| WarpMarker { time, audio_time }).collect(),
             gain: 1.0,
             transpose,
@@ -220,7 +242,14 @@ mod tests {
     }
 
     fn event(clip: &Clip, region: &AudioRegion) -> AudioEvent {
-        AudioEvent::new(clip, region, ramp(), 60.0 / 120.0 * f64::from(SR), 120.0, (1.0, 1.0), SR).unwrap()
+        AudioEvent::new(
+            clip,
+            region,
+            ramp(),
+            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR },
+            (1.0, 1.0),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -261,17 +290,35 @@ mod tests {
         assert_eq!(e.sample(e.start + (3.0 * e.frames_per_beat) as u64), (0.0, 0.0));
         let fpb = 24_000.0;
         assert!(
-            AudioEvent::new(&clip(0.0, 0.0, None), &region(false, &[], 0.0), ramp(), fpb, 120.0, (1.0, 1.0), SR)
-                .is_none()
+            AudioEvent::new(
+                &clip(0.0, 0.0, None),
+                &region(false, &[], 0.0),
+                ramp(),
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                (1.0, 1.0)
+            )
+            .is_none()
         );
         assert!(
-            AudioEvent::new(&clip(f64::NAN, 0.0, None), &region(false, &[], 0.0), ramp(), fpb, 120.0, (1.0, 1.0), SR)
-                .is_none()
+            AudioEvent::new(
+                &clip(f64::NAN, 0.0, None),
+                &region(false, &[], 0.0),
+                ramp(),
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                (1.0, 1.0)
+            )
+            .is_none()
         );
         let empty = Arc::new(AudioData { sample_rate: 1000, channels: 2, samples: Vec::new() });
         assert!(
-            AudioEvent::new(&clip(1.0, 0.0, None), &region(false, &[], 0.0), empty, fpb, 120.0, (1.0, 1.0), SR)
-                .is_none()
+            AudioEvent::new(
+                &clip(1.0, 0.0, None),
+                &region(false, &[], 0.0),
+                empty,
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                (1.0, 1.0)
+            )
+            .is_none()
         );
     }
 }

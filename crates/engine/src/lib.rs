@@ -4,6 +4,7 @@
 
 mod audio;
 mod launcher;
+mod stretch;
 
 use std::fmt;
 
@@ -13,6 +14,8 @@ use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use stretch::StretchVoice;
+pub use stretch::{AudioAnalysis, analyze_audio};
 
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
 const MAX_VOICES: usize = 64;
@@ -23,6 +26,8 @@ const MAX_AUDIO_VOICES: usize = 64;
 const AUDIO_HEADROOM: f32 = 4.0;
 /// Voice and event tag for "not on a launcher column".
 const NO_COLUMN: u32 = u32::MAX;
+/// Project frames rendered per stretch-voice call.
+const STRETCH_BLOCK: usize = 1024;
 /// Release time after note-off, in seconds.
 const RELEASE_SECONDS: f64 = 0.05;
 /// Attack time, in seconds; long enough to avoid a click at note-on.
@@ -58,6 +63,17 @@ impl fmt::Display for RenderError {
 }
 
 impl std::error::Error for RenderError {}
+
+/// A warped clip placement and its stretcher. `start` and `end` are arrangement frames.
+struct StretchEvent {
+    start: u64,
+    end: u64,
+    voice: StretchVoice,
+    gain_left: f32,
+    gain_right: f32,
+    /// The launcher column of the clip's track, or `NO_COLUMN`.
+    column: u32,
+}
 
 /// A note with its position resolved to sample frames and its mix resolved from the channel.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +119,10 @@ pub struct Renderer {
     /// Indices into `audio_events` that are playing; the first `active_audio_count` are valid.
     active_audio: [usize; MAX_AUDIO_VOICES],
     active_audio_count: usize,
+    /// Warped clips stretched as they play (ADR 0003), mixed block by block.
+    stretch_events: Vec<StretchEvent>,
+    stretch_scratch: Vec<f32>,
+    fade_frames: f64,
     /// Frames rendered since the renderer was built.
     position: u64,
     /// The frame at which the transport last started; arrangement time is `position - origin`.
@@ -141,6 +161,7 @@ impl Renderer {
         };
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
+        let mut stretch_events = Vec::new();
         for lane in &project.arrangement.lanes {
             for clip in lane.clips.iter().filter(|c| c.enabled) {
                 let Some(content) = project.content(clip.content) else { continue };
@@ -157,10 +178,31 @@ impl Renderer {
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
-                            let Some(data) = audio.get(&region.file) else { continue };
+                            let Some(data) = audio.files.get(&region.file) else { continue };
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
+                            // Warped clips are time-stretched as they play; the rest, and clips
+                            // the stretcher cannot handle, are re-pitched.
+                            if region.warped && region.stretch != loopwerk_model::StretchMode::Repitch {
+                                let analysis = audio.analysis.get(&region.file);
+                                if let Some(voice) =
+                                    StretchVoice::new(clip, region, data.clone(), analysis, bpm, sample_rate)
+                                {
+                                    let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
+                                    let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                    stretch_events.push(StretchEvent {
+                                        start: to_frame(clip.start),
+                                        end: to_frame(clip.start + clip.length),
+                                        voice,
+                                        gain_left: gains.0 * gain,
+                                        gain_right: gains.1 * gain,
+                                        column,
+                                    });
+                                    continue;
+                                }
+                            }
+                            let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
                             audio_events.extend(
-                                AudioEvent::new(clip, region, data.clone(), frames_per_beat, bpm, gains, sample_rate)
+                                AudioEvent::new(clip, region, data.clone(), timing, gains)
                                     .map(|event| ArrangedAudio { event, column }),
                             );
                         }
@@ -173,7 +215,13 @@ impl Renderer {
 
         let release = (RELEASE_SECONDS * f64::from(sample_rate)) as u64;
         let notes_end = events.iter().map(|e| e.end.saturating_add(release)).max().unwrap_or(0);
-        let length = audio_events.iter().map(|a| a.event.end).max().unwrap_or(0).max(notes_end);
+        let length = audio_events
+            .iter()
+            .map(|a| a.event.end)
+            .chain(stretch_events.iter().map(|e: &StretchEvent| e.end))
+            .max()
+            .unwrap_or(0)
+            .max(notes_end);
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
             return Err(RenderError::TooLong { seconds });
@@ -188,6 +236,9 @@ impl Renderer {
             next_audio: 0,
             active_audio: [0; MAX_AUDIO_VOICES],
             active_audio_count: 0,
+            stretch_events,
+            stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
+            fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
             position: 0,
             origin: 0,
             running: true,
@@ -224,6 +275,9 @@ impl Renderer {
         self.drain_commands();
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
+        let block_start = self.position;
+        // The transport changes only through commands, which are applied above.
+        let running = self.running;
         for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.position - self.origin;
@@ -266,6 +320,48 @@ impl Renderer {
             *out_left = left + audio_left + launched_left;
             *out_right = right + audio_right + launched_right;
             self.position += 1;
+        }
+        if running {
+            self.mix_stretched(out, block_start);
+        }
+    }
+
+    /// Adds the stretched clips that overlap the block starting at frame `block_start` to `out`.
+    /// Clips on a track that plays launched clips keep running, so they stay in time, but are
+    /// not heard.
+    fn mix_stretched(&mut self, out: &mut [f32], block_start: u64) {
+        // Arrangement time of the block's first frame.
+        let time_start = block_start - self.origin;
+        let time_end = time_start + (out.len() / 2) as u64;
+        let fade_frames = self.fade_frames;
+        let scratch = &mut self.stretch_scratch;
+        let launcher = &self.launcher;
+        for event in &mut self.stretch_events {
+            if event.end <= time_start || event.start >= time_end {
+                continue;
+            }
+            let mut time = event.start.max(time_start);
+            let to = event.end.min(time_end);
+            while time < to {
+                let frames = ((to - time) as usize).min(STRETCH_BLOCK);
+                let Some(chunk) = scratch.get_mut(..frames * 2) else { return };
+                event.voice.render(chunk);
+                for (k, [left, right]) in chunk.as_chunks::<2>().0.iter().enumerate() {
+                    let frame = time + k as u64;
+                    if launcher.overrides_at(event.column, frame - time_start + block_start) {
+                        continue;
+                    }
+                    let since_start = (frame - event.start) as f64;
+                    let until_end = (event.end - frame) as f64;
+                    let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
+                    let at = ((frame - time_start) * 2) as usize;
+                    if let Some([l, r]) = out.get_mut(at..at + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok()) {
+                        *l += left * event.gain_left * fade;
+                        *r += right * event.gain_right * fade;
+                    }
+                }
+                time += frames as u64;
+            }
         }
     }
 
@@ -697,6 +793,82 @@ mod tests {
         // A routing cycle is silence, not a hang.
         project.channels[1].output = Some(ChannelId(1));
         assert_eq!(render_offline(&project, SR, 256), Ok(Vec::new()));
+    }
+
+    /// A warped audio clip of a sine at `hz` (44.1 kHz file) whose warp markers put `seconds` of
+    /// audio on `beats` beats, played by a 48 kHz renderer at `bpm`.
+    fn stretched_project(hz: f64, seconds: f64, beats: f64, bpm: f64, mode: StretchMode) -> (Project, AudioPool) {
+        let file_rate = 44_100u32;
+        let frames = (seconds * f64::from(file_rate)) as usize;
+        let samples = (0..frames)
+            .map(|i| (std::f64::consts::TAU * hz * i as f64 / f64::from(file_rate)).sin() as f32 * 0.5)
+            .collect();
+        let data = AudioData { sample_rate: file_rate, channels: 1, samples };
+        let region = AudioRegion {
+            file: "sine.wav".into(),
+            absolute_file: None,
+            sample_rate: Some(file_rate),
+            channels: Some(1),
+            duration_seconds: Some(seconds),
+            warped: true,
+            stretch: mode,
+            warp_markers: vec![
+                WarpMarker { time: 0.0, audio_time: 0.0 },
+                WarpMarker { time: beats, audio_time: seconds },
+            ],
+            gain: 1.0,
+            transpose: 0.0,
+        };
+        let mut project =
+            project_with(vec![ContentLane { target: None, data: LaneData::Audio(region) }], vec![clip(0.0, beats)], 1);
+        project.transport.tempo_bpm = bpm;
+        let mut pool = AudioPool::new();
+        pool.analysis.insert("sine.wav".into(), analyze_audio(&data));
+        pool.files.insert("sine.wav".into(), std::sync::Arc::new(data));
+        (project, pool)
+    }
+
+    /// Upward zero crossings per second over the middle half of the left channel.
+    fn frequency(out: &[f32]) -> f64 {
+        let left: Vec<f32> = out.as_chunks::<2>().0.iter().map(|f| f[0]).collect();
+        let middle = &left[left.len() / 4..left.len() * 3 / 4];
+        let ups = middle.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        ups as f64 / (middle.len() as f64 / f64::from(SR))
+    }
+
+    #[test]
+    fn warped_audio_is_stretched_in_time_not_pitch() {
+        // 4 s of audio on 8 beats at 100 bpm lasts 4.8 s: 0.83× speed, pitch must stay 440 Hz.
+        let (project, pool) = stretched_project(440.0, 4.0, 8.0, 100.0, StretchMode::Smooth);
+        let out = render_offline_with_audio(&project, &pool, SR, 512).unwrap();
+        assert!((out.len() as f64 / 2.0 / f64::from(SR) - 4.8).abs() < 0.01);
+        let hz = frequency(&out);
+        assert!((hz - 440.0).abs() < 440.0 * 0.01, "{hz} Hz");
+
+        // Re-pitch for comparison: the same clip plays 0.83× lower.
+        let (project, pool) = stretched_project(440.0, 4.0, 8.0, 100.0, StretchMode::Repitch);
+        let hz = frequency(&render_offline_with_audio(&project, &pool, SR, 512).unwrap());
+        assert!((hz - 440.0 * 100.0 / 120.0).abs() < 440.0 * 0.01, "{hz} Hz");
+    }
+
+    #[test]
+    fn rhythmic_mode_keeps_pitch_within_its_range() {
+        // 2 s on 4 beats at 126 bpm: 1.05× speed.
+        let (project, pool) = stretched_project(330.0, 2.0, 4.0, 126.0, StretchMode::Rhythmic);
+        let hz = frequency(&render_offline_with_audio(&project, &pool, SR, 512).unwrap());
+        assert!((hz - 330.0).abs() < 330.0 * 0.02, "{hz} Hz");
+    }
+
+    #[test]
+    fn stretched_audio_does_not_depend_on_the_block_size() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        let reference = render_offline_with_audio(&project, &pool, SR, 1024).unwrap();
+        for block in [64, 333, 4096] {
+            let out = render_offline_with_audio(&project, &pool, SR, block).unwrap();
+            assert_eq!(out.len(), reference.len());
+            let worst = out.iter().zip(&reference).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+            assert!(worst < 1e-4, "block {block}: differs by {worst}");
+        }
     }
 
     #[test]
