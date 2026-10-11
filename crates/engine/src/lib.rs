@@ -6,11 +6,13 @@ mod ahead;
 mod audio;
 mod launcher;
 mod stretch;
+mod swap;
 
 use std::fmt;
+use std::sync::Arc;
 
 use ahead::AheadReader;
-pub use ahead::{StretchThread, StretchWorker};
+pub use ahead::StretchWorker;
 use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
 use launcher::Launcher;
@@ -112,30 +114,45 @@ struct ArrangedAudio {
 
 /// Plays a project: its arrangement from the start, and launcher clips as they are launched
 /// (see [`Renderer::handle`]). Build it once, then call [`Renderer::process`] block by block.
-pub struct Renderer {
-    sample_rate: u32,
+/// Everything a renderer derives from the project. An edit builds a new one off the audio thread
+/// and the renderer swaps it in (ADR 0005).
+pub(crate) struct Graph {
     events: Vec<NoteEvent>,
-    next_event: usize,
-    voices: [Voice; MAX_VOICES],
     audio_events: Vec<ArrangedAudio>,
-    next_audio: usize,
-    /// Indices into `audio_events` that are playing; the first `active_audio_count` are valid.
-    active_audio: [usize; MAX_AUDIO_VOICES],
-    active_audio_count: usize,
     /// Warped clips stretched as they play (ADR 0003), rendered ahead and mixed block by block.
     stretch_events: Vec<StretchEvent>,
     ahead: AheadReader,
+    length: u64,
+    launcher: Launcher,
+    frames_per_beat: f64,
+}
+
+pub struct Renderer {
+    sample_rate: u32,
+    graph: Box<Graph>,
+    next_event: usize,
+    voices: [Voice; MAX_VOICES],
+    next_audio: usize,
+    /// Indices into the graph's `audio_events` that are playing; the first `active_audio_count`
+    /// are valid.
+    active_audio: [usize; MAX_AUDIO_VOICES],
+    active_audio_count: usize,
     /// The stretch voices are at their first frame and nothing has played them since.
     stretch_fresh: bool,
     stretch_scratch: Vec<f32>,
     fade_frames: f64,
     /// Frames rendered since the renderer was built.
     position: u64,
-    /// The frame at which the transport last started; arrangement time is `position - origin`.
+    /// The frame at which the transport last started or the tempo last changed, and the
+    /// arrangement frame playing then: arrangement time is `position - origin + time_at_origin`.
     origin: u64,
+    time_at_origin: u64,
     running: bool,
-    length: u64,
-    launcher: Launcher,
+    /// What the graph was built from, so a controller can build the next one (ADR 0005).
+    audio: Arc<AudioPool>,
+    swap: swap::SwapState,
+    /// Stretch underruns counted by graphs swapped out.
+    underruns_before: u64,
 }
 
 impl Renderer {
@@ -146,6 +163,265 @@ impl Renderer {
 
     /// A renderer that also plays audio clips whose files are in `audio`.
     pub fn with_audio(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
+        let graph = Graph::build(project, audio, sample_rate)?;
+        graph.launcher.monitor.running.store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(Self {
+            sample_rate,
+            graph,
+            next_event: 0,
+            voices: [Voice::default(); MAX_VOICES],
+            next_audio: 0,
+            active_audio: [0; MAX_AUDIO_VOICES],
+            active_audio_count: 0,
+            stretch_fresh: true,
+            stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
+            fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
+            position: 0,
+            origin: 0,
+            time_at_origin: 0,
+            running: true,
+            audio: Arc::new(audio.clone()),
+            swap: swap::SwapState::default(),
+            underruns_before: 0,
+        })
+    }
+
+    /// A renderer whose transport is stopped: silent until it receives [`LaunchCommand::Play`]
+    /// or a launch.
+    pub fn stopped(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
+        let mut renderer = Self::with_audio(project, audio, sample_rate)?;
+        renderer.running = false;
+        renderer.graph.launcher.monitor.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        Ok(renderer)
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Length of the arrangement including release tails, in frames.
+    pub fn length(&self) -> u64 {
+        self.graph.length
+    }
+
+    /// The arrangement frame playing now.
+    fn time(&self) -> u64 {
+        self.position - self.origin + self.time_at_origin
+    }
+
+    /// Whether the transport is running.
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
+    /// Takes the worker that renders stretched clips ahead, to run it on its own thread
+    /// ([`StretchWorker::spawn`]) so that the audio thread only copies their frames. Without
+    /// this the renderer stretches them itself as it goes, as offline rendering does. `None` once
+    /// taken.
+    pub fn take_stretch_worker(&mut self) -> Option<StretchWorker> {
+        self.graph.ahead.take_worker()
+    }
+
+    /// Frames of stretched clips that were not ready in time and played as silence.
+    pub fn stretch_underruns(&self) -> u64 {
+        self.underruns_before + self.graph.ahead.underruns()
+    }
+
+    /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
+    /// Commands from a [`Controller`] are applied first. Never allocates.
+    pub fn process(&mut self, out: &mut [f32]) {
+        self.receive_swap();
+        let frames = (out.len() / 2) as u64;
+        match self.swap_at() {
+            // A new graph takes over within this block: the frames before it are the old one's.
+            Some(at) if at < self.position + frames => {
+                let split = ((at.saturating_sub(self.position) * 2) as usize).min(out.len());
+                let (before, after) = out.split_at_mut(split);
+                if !before.is_empty() {
+                    self.process_block(before);
+                }
+                self.apply_swap();
+                self.process_block(after);
+            }
+            _ => self.process_block(out),
+        }
+        self.publish_position();
+    }
+
+    fn process_block(&mut self, out: &mut [f32]) {
+        self.drain_commands();
+        // A rewind moves along even while the transport is stopped, so the stretched clips are
+        // ready again by the next start.
+        self.graph.ahead.service();
+        let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
+        let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
+        let block_start = self.position;
+        // The transport changes only through commands, which are applied above.
+        let running = self.running;
+        for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
+            let (launched_left, launched_right) = self.launcher_frame();
+            let time = self.time();
+            while self.running
+                && let Some(event) = self.graph.events.get(self.next_event)
+            {
+                if event.start > time {
+                    break;
+                }
+                let event = *event;
+                self.next_event += 1;
+                if !self.graph.launcher.overrides(event.column) {
+                    let end = self.position + event.end.saturating_sub(event.start);
+                    let gains = (event.gain_left, event.gain_right);
+                    let (voices, position, sample_rate) = (&mut self.voices, self.position, self.sample_rate);
+                    start_voice(voices, position, sample_rate, end, event.frequency, gains, event.column);
+                }
+            }
+
+            let mut left = 0.0f32;
+            let mut right = 0.0f32;
+            for voice in self.voices.iter_mut().filter(|v| v.active) {
+                let age = (self.position - voice.started_at) as f64;
+                let envelope = if self.position < voice.end {
+                    (age / attack).min(1.0)
+                } else {
+                    let released = (self.position - voice.end) as f64;
+                    if released >= release {
+                        voice.active = false;
+                        continue;
+                    }
+                    ((voice.end - voice.started_at) as f64 / attack).min(1.0) * (1.0 - released / release)
+                };
+                let sample = (voice.phase * std::f64::consts::TAU).sin() * envelope;
+                voice.phase = (voice.phase + voice.phase_step).fract();
+                left += sample as f32 * voice.gain_left;
+                right += sample as f32 * voice.gain_right;
+            }
+            let (audio_left, audio_right) = if self.running { self.audio_frame(time) } else { (0.0, 0.0) };
+            *out_left = left + audio_left + launched_left;
+            *out_right = right + audio_right + launched_right;
+            self.position += 1;
+        }
+        if running {
+            self.mix_stretched(out, block_start);
+        }
+    }
+
+    /// Adds the stretched clips that overlap the block starting at frame `block_start` to `out`.
+    /// Clips on a track that plays launched clips keep running, so they stay in time, but are
+    /// not heard.
+    fn mix_stretched(&mut self, out: &mut [f32], block_start: u64) {
+        // Arrangement time of the block's first frame.
+        let time_start = block_start - self.origin + self.time_at_origin;
+        let time_end = time_start + (out.len() / 2) as u64;
+        let fade_frames = self.fade_frames;
+        let scratch = &mut self.stretch_scratch;
+        let launcher = &self.graph.launcher;
+        let ahead = &mut self.graph.ahead;
+        self.stretch_fresh = false;
+        for (index, event) in self.graph.stretch_events.iter().enumerate() {
+            if event.end <= time_start || event.start >= time_end {
+                continue;
+            }
+            let mut time = event.start.max(time_start);
+            let to = event.end.min(time_end);
+            while time < to {
+                let frames = ((to - time) as usize).min(STRETCH_BLOCK);
+                let Some(chunk) = scratch.get_mut(..frames * 2) else { return };
+                ahead.read(index, time - event.start, chunk);
+                for (k, [left, right]) in chunk.as_chunks::<2>().0.iter().enumerate() {
+                    let frame = time + k as u64;
+                    if launcher.overrides_at(event.column, frame - time_start + block_start) {
+                        continue;
+                    }
+                    let since_start = (frame - event.start) as f64;
+                    let until_end = (event.end - frame) as f64;
+                    let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
+                    let at = ((frame - time_start) * 2) as usize;
+                    if let Some([l, r]) = out.get_mut(at..at + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok()) {
+                        *l += left * event.gain_left * fade;
+                        *r += right * event.gain_right * fade;
+                    }
+                }
+                time += frames as u64;
+            }
+        }
+    }
+
+    /// Starts arrangement audio clips that begin at arrangement frame `time`, mixes the playing
+    /// ones and drops the ones that have ended.
+    fn audio_frame(&mut self, time: u64) -> (f32, f32) {
+        while let Some(arranged) = self.graph.audio_events.get(self.next_audio) {
+            if arranged.event.start > time {
+                break;
+            }
+            if arranged.event.end > time
+                && let Some(slot) = self.active_audio.get_mut(self.active_audio_count)
+            {
+                *slot = self.next_audio;
+                self.active_audio_count += 1;
+            }
+            self.next_audio += 1;
+        }
+        let (mut left, mut right) = (0.0f32, 0.0f32);
+        let mut i = 0;
+        while i < self.active_audio_count {
+            let index = self.active_audio.get(i).copied().unwrap_or(usize::MAX);
+            match self.graph.audio_events.get(index) {
+                Some(arranged) if time < arranged.event.end => {
+                    if !self.graph.launcher.overrides(arranged.column) {
+                        let (l, r) = arranged.event.sample(time);
+                        left += l;
+                        right += r;
+                    }
+                    i += 1;
+                }
+                _ => {
+                    // Ended: move the last active entry into this slot.
+                    self.active_audio_count -= 1;
+                    let last = self.active_audio.get(self.active_audio_count).copied().unwrap_or(usize::MAX);
+                    if let Some(slot) = self.active_audio.get_mut(i) {
+                        *slot = last;
+                    }
+                }
+            }
+        }
+        (left, right)
+    }
+}
+
+/// Starts a sine voice at frame `position` that ends at frame `end`, stealing the oldest voice
+/// when all are busy.
+fn start_voice(
+    voices: &mut [Voice; MAX_VOICES],
+    position: u64,
+    sample_rate: u32,
+    end: u64,
+    frequency: f64,
+    (gain_left, gain_right): (f32, f32),
+    column: u32,
+) {
+    let slot = match voices.iter().position(|v| !v.active) {
+        Some(free) => free,
+        None => voices.iter().enumerate().min_by_key(|(_, v)| v.started_at).map_or(0, |(i, _)| i),
+    };
+    if let Some(voice) = voices.get_mut(slot) {
+        *voice = Voice {
+            active: true,
+            started_at: position,
+            end: end.max(position + 1),
+            phase: 0.0,
+            phase_step: frequency / f64::from(sample_rate),
+            gain_left,
+            gain_right,
+            column,
+        };
+    }
+}
+
+impl Graph {
+    /// Builds the graph for `project`: validates it and prepares every event and voice. Allocates;
+    /// call it off the audio thread.
+    pub(crate) fn build(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Box<Self>, RenderError> {
         if !(8_000..=384_000).contains(&sample_rate) {
             return Err(RenderError::InvalidSampleRate(sample_rate));
         }
@@ -235,232 +511,15 @@ impl Renderer {
             return Err(RenderError::TooLong { seconds });
         }
 
-        Ok(Self {
-            sample_rate,
+        Ok(Box::new(Graph {
             events,
-            next_event: 0,
-            voices: [Voice::default(); MAX_VOICES],
             audio_events,
-            next_audio: 0,
-            active_audio: [0; MAX_AUDIO_VOICES],
-            active_audio_count: 0,
             stretch_events,
             ahead: AheadReader::new(stretch_voices, sample_rate),
-            stretch_fresh: true,
-            stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
-            fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
-            position: 0,
-            origin: 0,
-            running: true,
             length,
             launcher: Launcher::new(project, audio, sample_rate),
-        })
-    }
-
-    /// A renderer whose transport is stopped: silent until it receives [`LaunchCommand::Play`]
-    /// or a launch.
-    pub fn stopped(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
-        let mut renderer = Self::with_audio(project, audio, sample_rate)?;
-        renderer.running = false;
-        Ok(renderer)
-    }
-
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    /// Length of the arrangement including release tails, in frames.
-    pub fn length(&self) -> u64 {
-        self.length
-    }
-
-    /// Whether the transport is running.
-    pub fn running(&self) -> bool {
-        self.running
-    }
-
-    /// Takes the worker that renders stretched clips ahead, to run it on its own thread
-    /// ([`StretchWorker::spawn`]) so that the audio thread only copies their frames. Without
-    /// this the renderer stretches them itself as it goes, as offline rendering does. `None` once
-    /// taken.
-    pub fn take_stretch_worker(&mut self) -> Option<StretchWorker> {
-        self.ahead.take_worker()
-    }
-
-    /// Frames of stretched clips that were not ready in time and played as silence.
-    pub fn stretch_underruns(&self) -> u64 {
-        self.ahead.underruns()
-    }
-
-    /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
-    /// Commands from a [`Controller`] are applied first. Never allocates.
-    pub fn process(&mut self, out: &mut [f32]) {
-        self.drain_commands();
-        // A rewind moves along even while the transport is stopped, so the stretched clips are
-        // ready again by the next start.
-        self.ahead.service();
-        let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
-        let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
-        let block_start = self.position;
-        // The transport changes only through commands, which are applied above.
-        let running = self.running;
-        for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
-            let (launched_left, launched_right) = self.launcher_frame();
-            let time = self.position - self.origin;
-            while self.running
-                && let Some(event) = self.events.get(self.next_event)
-            {
-                if event.start > time {
-                    break;
-                }
-                let event = *event;
-                self.next_event += 1;
-                if !self.launcher.overrides(event.column) {
-                    let end = self.position + event.end.saturating_sub(event.start);
-                    let gains = (event.gain_left, event.gain_right);
-                    let (voices, position, sample_rate) = (&mut self.voices, self.position, self.sample_rate);
-                    start_voice(voices, position, sample_rate, end, event.frequency, gains, event.column);
-                }
-            }
-
-            let mut left = 0.0f32;
-            let mut right = 0.0f32;
-            for voice in self.voices.iter_mut().filter(|v| v.active) {
-                let age = (self.position - voice.started_at) as f64;
-                let envelope = if self.position < voice.end {
-                    (age / attack).min(1.0)
-                } else {
-                    let released = (self.position - voice.end) as f64;
-                    if released >= release {
-                        voice.active = false;
-                        continue;
-                    }
-                    ((voice.end - voice.started_at) as f64 / attack).min(1.0) * (1.0 - released / release)
-                };
-                let sample = (voice.phase * std::f64::consts::TAU).sin() * envelope;
-                voice.phase = (voice.phase + voice.phase_step).fract();
-                left += sample as f32 * voice.gain_left;
-                right += sample as f32 * voice.gain_right;
-            }
-            let (audio_left, audio_right) = if self.running { self.audio_frame(time) } else { (0.0, 0.0) };
-            *out_left = left + audio_left + launched_left;
-            *out_right = right + audio_right + launched_right;
-            self.position += 1;
-        }
-        if running {
-            self.mix_stretched(out, block_start);
-        }
-    }
-
-    /// Adds the stretched clips that overlap the block starting at frame `block_start` to `out`.
-    /// Clips on a track that plays launched clips keep running, so they stay in time, but are
-    /// not heard.
-    fn mix_stretched(&mut self, out: &mut [f32], block_start: u64) {
-        // Arrangement time of the block's first frame.
-        let time_start = block_start - self.origin;
-        let time_end = time_start + (out.len() / 2) as u64;
-        let fade_frames = self.fade_frames;
-        let scratch = &mut self.stretch_scratch;
-        let launcher = &self.launcher;
-        let ahead = &mut self.ahead;
-        self.stretch_fresh = false;
-        for (index, event) in self.stretch_events.iter().enumerate() {
-            if event.end <= time_start || event.start >= time_end {
-                continue;
-            }
-            let mut time = event.start.max(time_start);
-            let to = event.end.min(time_end);
-            while time < to {
-                let frames = ((to - time) as usize).min(STRETCH_BLOCK);
-                let Some(chunk) = scratch.get_mut(..frames * 2) else { return };
-                ahead.read(index, time - event.start, chunk);
-                for (k, [left, right]) in chunk.as_chunks::<2>().0.iter().enumerate() {
-                    let frame = time + k as u64;
-                    if launcher.overrides_at(event.column, frame - time_start + block_start) {
-                        continue;
-                    }
-                    let since_start = (frame - event.start) as f64;
-                    let until_end = (event.end - frame) as f64;
-                    let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
-                    let at = ((frame - time_start) * 2) as usize;
-                    if let Some([l, r]) = out.get_mut(at..at + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok()) {
-                        *l += left * event.gain_left * fade;
-                        *r += right * event.gain_right * fade;
-                    }
-                }
-                time += frames as u64;
-            }
-        }
-    }
-
-    /// Starts arrangement audio clips that begin at arrangement frame `time`, mixes the playing
-    /// ones and drops the ones that have ended.
-    fn audio_frame(&mut self, time: u64) -> (f32, f32) {
-        while let Some(arranged) = self.audio_events.get(self.next_audio) {
-            if arranged.event.start > time {
-                break;
-            }
-            if arranged.event.end > time
-                && let Some(slot) = self.active_audio.get_mut(self.active_audio_count)
-            {
-                *slot = self.next_audio;
-                self.active_audio_count += 1;
-            }
-            self.next_audio += 1;
-        }
-        let (mut left, mut right) = (0.0f32, 0.0f32);
-        let mut i = 0;
-        while i < self.active_audio_count {
-            let index = self.active_audio.get(i).copied().unwrap_or(usize::MAX);
-            match self.audio_events.get(index) {
-                Some(arranged) if time < arranged.event.end => {
-                    if !self.launcher.overrides(arranged.column) {
-                        let (l, r) = arranged.event.sample(time);
-                        left += l;
-                        right += r;
-                    }
-                    i += 1;
-                }
-                _ => {
-                    // Ended: move the last active entry into this slot.
-                    self.active_audio_count -= 1;
-                    let last = self.active_audio.get(self.active_audio_count).copied().unwrap_or(usize::MAX);
-                    if let Some(slot) = self.active_audio.get_mut(i) {
-                        *slot = last;
-                    }
-                }
-            }
-        }
-        (left, right)
-    }
-}
-
-/// Starts a sine voice at frame `position` that ends at frame `end`, stealing the oldest voice
-/// when all are busy.
-fn start_voice(
-    voices: &mut [Voice; MAX_VOICES],
-    position: u64,
-    sample_rate: u32,
-    end: u64,
-    frequency: f64,
-    (gain_left, gain_right): (f32, f32),
-    column: u32,
-) {
-    let slot = match voices.iter().position(|v| !v.active) {
-        Some(free) => free,
-        None => voices.iter().enumerate().min_by_key(|(_, v)| v.started_at).map_or(0, |(i, _)| i),
-    };
-    if let Some(voice) = voices.get_mut(slot) {
-        *voice = Voice {
-            active: true,
-            started_at: position,
-            end: end.max(position + 1),
-            phase: 0.0,
-            phase_step: frequency / f64::from(sample_rate),
-            gain_left,
-            gain_right,
-            column,
-        };
+            frames_per_beat,
+        }))
     }
 }
 
@@ -992,10 +1051,117 @@ mod tests {
         let mut offline = Renderer::with_audio(&project, &pool, SR).unwrap();
         let reference = blocks(&mut offline, 100, 441, |_| {});
         let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
-        let thread = renderer.take_stretch_worker().unwrap().spawn().unwrap();
+        let mut controller = renderer.controller();
+        controller.run_stretch_worker(&mut renderer).unwrap();
         // Paced like a device: one 10 ms block every 10 ms.
         let out = blocks(&mut renderer, 100, 441, |_| std::thread::sleep(std::time::Duration::from_millis(10)));
-        assert_eq!(thread.underruns(), 0);
+        assert_eq!(controller.stretch_underruns(), 0);
         assert_eq!(max_diff(&reference, &out), 0.0);
+    }
+
+    /// RMS of the left channel over frames `from..to`.
+    fn rms(out: &[f32], from: usize, to: usize) -> f64 {
+        let left: Vec<f64> = out[from * 2..to * 2].iter().step_by(2).map(|s| f64::from(*s)).collect();
+        (left.iter().map(|s| s * s).sum::<f64>() / left.len() as f64).sqrt()
+    }
+
+    /// Frame where an update sent after `blocks` blocks of 480 frames takes over.
+    fn swap_frame(blocks: usize) -> usize {
+        blocks * 480 + (0.15 * f64::from(SR)) as usize
+    }
+
+    #[test]
+    fn an_edit_is_heard_from_the_frame_it_takes_over() {
+        // Read directly (re-pitch), and stretched.
+        for mode in [StretchMode::Repitch, StretchMode::Smooth] {
+            let (project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, mode);
+            let mut edited = project.clone();
+            edited.channels[0].volume = 0.5;
+            let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+            let mut controller = renderer.controller();
+            let mut out = blocks(&mut renderer, 50, 480, |_| {});
+            controller.update(&edited).unwrap();
+            out.extend(blocks(&mut renderer, 100, 480, |_| {}));
+            let at = swap_frame(50);
+            let ratio = rms(&out, at, at + 9_600) / rms(&out, at - 9_600, at);
+            assert!((ratio - 0.5).abs() < 0.01, "{mode:?}: level changed by {ratio}");
+            let mut original = Renderer::with_audio(&project, &pool, SR).unwrap();
+            let original = blocks(&mut original, 150, 480, |_| {});
+            assert_eq!(max_diff(&out[..at * 2], &original[..at * 2]), 0.0, "{mode:?}: before the swap");
+            if mode == StretchMode::Repitch {
+                // Read directly, the edited project's own render is the oracle, sample for sample.
+                let mut reference = Renderer::with_audio(&edited, &pool, SR).unwrap();
+                let reference = blocks(&mut reference, 150, 480, |_| {});
+                assert_eq!(max_diff(&out[at * 2..], &reference[at * 2..]), 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_playhead_keeps_its_beat_when_the_tempo_changes() {
+        // A short note on every beat, at 120 bpm (24 000 frames per beat).
+        let notes = (0..8).map(|b| note(f64::from(b), 0.05, 69)).collect();
+        let project = project_with(untargeted(notes), vec![clip(0.0, 8.0)], 1);
+        let mut slower = project.clone();
+        slower.transport.tempo_bpm = 60.0;
+        let mut renderer = Renderer::with_audio(&project, &AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        let mut out = blocks(&mut renderer, 75, 480, |_| {});
+        controller.update(&slower).unwrap();
+        out.extend(blocks(&mut renderer, 300, 480, |_| {}));
+        // The swap is at frame 43 200, beat 1.8; beat 2 then comes 0.2 beats of 60 bpm later.
+        let at = swap_frame(75);
+        assert_eq!(at, 43_200);
+        let expected = [1, 24_001, at + 9_601, at + 9_601 + 48_000, at + 9_601 + 96_000];
+        assert_eq!(onsets(&out)[..5], expected);
+    }
+
+    #[test]
+    fn a_launched_clip_plays_on_through_an_edit() {
+        let (mut project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Smooth);
+        // The clip goes to the launcher instead of the arrangement; a second, silent track gets
+        // the edit.
+        let looped = Clip {
+            loop_range: Some(LoopRange { start: 0.0, end: 8.0 }),
+            ..project.arrangement.lanes[0].clips[0].clone()
+        };
+        project.arrangement.lanes[0].clips.clear();
+        project.launcher.columns =
+            vec![LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(looped), has_stop: true }] }];
+        project.launcher.scenes = vec![Scene::default()];
+        let mut edited = project.clone();
+        edited.transport.time_signature = project.transport.time_signature;
+        edited.tracks[0].name = "renamed".into();
+        let render = |update: bool| {
+            let mut renderer = Renderer::stopped(&project, &pool, SR).unwrap();
+            let mut controller = renderer.controller();
+            renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 0 });
+            let mut out = blocks(&mut renderer, 50, 480, |_| {});
+            if update {
+                controller.update(&edited).unwrap();
+            }
+            out.extend(blocks(&mut renderer, 100, 480, |_| {}));
+            out
+        };
+        let (plain, edited_out) = (render(false), render(true));
+        assert!(rms(&plain, 30_000, 40_000) > 0.1);
+        // The playing clip keeps its stretch voice: not a sample differs.
+        assert_eq!(max_diff(&plain, &edited_out), 0.0);
+    }
+
+    #[test]
+    fn an_edit_while_stopped_is_heard_from_the_next_start() {
+        let (project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Smooth);
+        let mut edited = project.clone();
+        edited.channels[0].volume = 0.25;
+        let mut renderer = Renderer::stopped(&project, &pool, SR).unwrap();
+        let mut controller = renderer.controller();
+        controller.update(&edited).unwrap();
+        blocks(&mut renderer, 2, 480, |_| {});
+        renderer.handle(LaunchCommand::Play);
+        let out = blocks(&mut renderer, 50, 480, |_| {});
+        let mut reference = Renderer::with_audio(&edited, &pool, SR).unwrap();
+        let reference = blocks(&mut reference, 50, 480, |_| {});
+        assert_eq!(max_diff(&out, &reference), 0.0);
     }
 }

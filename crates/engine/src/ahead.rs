@@ -68,8 +68,8 @@ struct Reader {
     next: u64,
 }
 
-/// Renders stretched clips ahead into the rings the [`AheadReader`] reads. Run it on its own
-/// thread with [`StretchWorker::spawn`].
+/// Renders stretched clips ahead into the rings the [`AheadReader`] reads. A
+/// [`crate::Controller`] runs it on its own thread (`Controller::run_stretch_worker`).
 pub struct StretchWorker {
     writers: Vec<Writer>,
     shared: Arc<Shared>,
@@ -119,21 +119,6 @@ impl StretchWorker {
         while self.work() {}
     }
 
-    /// Runs the worker on its own thread until the returned handle is dropped.
-    pub fn spawn(mut self) -> std::io::Result<StretchThread> {
-        let stop = Arc::new(AtomicBool::new(false));
-        let shared = Arc::clone(&self.shared);
-        let stop_flag = Arc::clone(&stop);
-        let handle = std::thread::Builder::new().name("loopwerk-stretch".into()).spawn(move || {
-            while !stop_flag.load(Ordering::Relaxed) {
-                if !self.work() {
-                    std::thread::sleep(IDLE);
-                }
-            }
-        })?;
-        Ok(StretchThread { stop, handle: Some(handle), shared })
-    }
-
     /// Moves every voice to arrangement frame `to`: the clips playing there to that point, the
     /// later ones to their start.
     fn move_to(&mut self, to: u64) {
@@ -147,17 +132,46 @@ impl StretchWorker {
     }
 }
 
-/// A running [`StretchWorker`]; dropping it stops the thread.
-pub struct StretchThread {
+/// Workers that can wait to join the thread.
+const INBOX: usize = 8;
+
+/// A thread running [`StretchWorker`]s, one per graph (ADR 0005): a worker joins through
+/// [`StretchThread::add`] and leaves once its graph has been dropped. Dropping the handle stops
+/// the thread.
+pub(crate) struct StretchThread {
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    shared: Arc<Shared>,
+    inbox: Producer<StretchWorker>,
 }
 
 impl StretchThread {
-    /// Frames the audio thread needed that the worker had not rendered yet (heard as silence).
-    pub fn underruns(&self) -> u64 {
-        self.shared.underruns.load(Ordering::Relaxed)
+    pub(crate) fn spawn() -> std::io::Result<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = Arc::clone(&stop);
+        let (inbox, mut incoming) = RingBuffer::<StretchWorker>::new(INBOX);
+        let handle = std::thread::Builder::new().name("loopwerk-stretch".into()).spawn(move || {
+            let mut workers: Vec<StretchWorker> = Vec::new();
+            while !stop_flag.load(Ordering::Relaxed) {
+                while let Ok(worker) = incoming.pop() {
+                    workers.push(worker);
+                }
+                // A worker whose reader (its graph) is gone has nobody to render for.
+                workers.retain(|w| Arc::strong_count(&w.shared) > 1);
+                let mut did = false;
+                for worker in &mut workers {
+                    did |= worker.work();
+                }
+                if !did {
+                    std::thread::sleep(IDLE);
+                }
+            }
+        })?;
+        Ok(Self { stop, handle: Some(handle), inbox })
+    }
+
+    /// Hands a graph's worker to the thread.
+    pub(crate) fn add(&mut self, worker: StretchWorker) -> Result<(), String> {
+        self.inbox.push(worker).map_err(|_| "the stretch worker thread is not taking new work".to_string())
     }
 }
 
