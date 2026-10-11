@@ -12,7 +12,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | in progress |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 after | |
 | M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look | |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
 
 ## Built-in devices
 

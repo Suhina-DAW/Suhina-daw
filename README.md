@@ -20,6 +20,13 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 - CLAP plug-in hosting, every plug-in sandboxed in its own process.
 - Every action available headlessly: CLI and MCP for automation and agents.
 
+## Downloads
+
+Tagged versions build the headless command-line tool `loopwerk-cli` for Linux (x86_64), Windows
+(x64) and macOS (universal) and attach them to a GitHub Release. The binaries are not signed yet,
+so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
+How a release is made: [`docs/releasing.md`](docs/releasing.md).
+
 ## Try it
 
 ```sh
@@ -39,6 +46,9 @@ cargo run --release -p loopwerk-cli -- mcp --read-root path/to/projects --write-
 `--demo` instead of a file uses a small built-in project.
 
 ## Building
+
+On Linux, install the ALSA headers first (`libasound2-dev` on Debian and Ubuntu,
+`alsa-lib-devel` on Fedora).
 
 ```sh
 cargo build --release
