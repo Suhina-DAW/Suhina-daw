@@ -87,6 +87,10 @@ Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu)
 | [`docs/spec/`](docs/spec/) | The Live Set format as observed, and how to author test sets |
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 
+## Community
+
+- Discord: <https://discord.gg/ccQWu8rRcf>
+
 ## License
 
 Loopwerk is free software, licensed under the [GNU General Public License v3.0 or later](LICENSE).
