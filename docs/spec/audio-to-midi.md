@@ -1,3 +1,11 @@
+---
+description: How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave
+read_when: slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track
+type: spec
+status: planned
+last_verified: 2026-10-11
+---
+
 # Audio to MIDI
 
 - **Sources:** the owner's screenshots of Live 12.4 (2026-10-11): the audio clip context menu,
