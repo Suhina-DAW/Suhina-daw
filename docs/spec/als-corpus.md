@@ -1,11 +1,12 @@
 ---
-description: How to author the Live Sets used to learn the .als format and test the importer, series by series
-read_when: making test sets, corpus, new series, what to save in Live, test files
+description: How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces
+read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal
 type: howto
 status: current
 last_verified: 2026-10-11
 covers:
   - crates/als/tests/corpus.rs
+  - scripts/test-signal.py
 ---
 
 # Making the `.als` test corpus
@@ -111,6 +112,237 @@ sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 | 60 | `60-group-track.als` | Select the headers of 3-Audio and 4-loopwerk-demo (Ctrl-click) and press `Ctrl+G`. |
 | 61 | `61-audio-warp-off.als` | Session audio clip on 4-loopwerk-demo: Warp off. |
 | 62 | `62-audio-unwarped-loop-start.als` | Move the loop **Position** to about one second. Log the exact value Live shows. |
+
+## Series 6: built-in devices
+
+Teaches the importer how Live stores the parameters of its own devices, so they can be mapped
+onto Loopwerk's devices (ROADMAP › Built-in devices, step 1), and gives a bounce of each
+setting to compare Loopwerk's sound with. It works differently from series 1–4 in three ways:
+
+- **Its own project:** `corpus/devices/`, so device files do not mix with the format series.
+- **Every file starts from the device's default file,** not from the previous file. Then a
+  diff against the default shows exactly one parameter, and a wrong step spoils one file, not
+  the rest of the series.
+- **Every file gets a bounce:** a WAV of the test signal through the device, with the same name.
+
+### Setup (once)
+
+1. Write the test signal (8 s, one second per section; the sections are listed in
+   [`scripts/test-signal.py`](../../scripts/test-signal.py)):
+
+   ```sh
+   python scripts/test-signal.py corpus/devices/test-signal.wav
+   ```
+
+2. In Live: File › New Live Set. Delete every track except one audio track, and the return
+   tracks. Tempo 120, 4/4. At 120 bpm the 8-second signal is exactly 4 bars.
+3. In Arrangement View, drag `corpus/devices/test-signal.wav` from your file manager to bar 1
+   of the audio track. Open the clip and turn **Warp off**, so it plays at its own speed.
+4. File › Save Live Set As… → `corpus/devices/100-base.als`. Live creates the project folder
+   `corpus/devices/100-base Project/`; save every later device set into that same folder.
+5. Bounce it, as described next, to `corpus/devices/bounces/100-base.wav`.
+
+### Bouncing
+
+File › Export Audio/Video, with the same settings every time:
+
+| Setting | Value |
+|---|---|
+| Rendered Track | Master |
+| Render Start / Length | `1.1.1` / `4.0.0` |
+| File Type | WAV |
+| Sample Rate | 48000 |
+| Bit Depth | 24 |
+| Normalize, Convert to Mono, Create Analysis File | off |
+| Dither | No Dither |
+
+Save it into `corpus/devices/bounces/` under the set's name with `.wav` instead of `.als`.
+
+### For each device
+
+1. Open `100-base.als`. From Live's browser (Audio Effects) drag the **device itself** onto the
+   audio track. Never a preset from the device's folder, never one from a Pack.
+2. Save As the device's default file (`110-utility-default.als` and so on) and bounce it.
+3. For each row of the device's table:
+   1. Open the default file (File › Open Recent). If a row says "from 200", open that file
+      instead.
+   2. Make the one change. **Type** values into the field where you can (click the control,
+      type `-12`, Enter), so the stored number is exact. A row that says *drag* means turning
+      the control all the way to its end.
+   3. Save As the row's file name, then bounce under the same name.
+   4. Write the value Live **shows** into the log. Live's displayed value and its stored value
+      often differ (a percentage stored as 0..1, decibels stored as a gain); that difference
+      is what the mapping has to learn.
+4. Never save over the default file. If you did, delete it and redo step 2.
+
+**Example,** row 111 of Utility: open `110-utility-default.als`, click Utility's Gain, type `-12`,
+press Enter, Save As `111-utility-gain-minus12.als`, Export Audio/Video to
+`bounces/111-utility-gain-minus12.wav`, and log `-12.0 dB`.
+
+When the series is done, the folder looks like this:
+
+```text
+corpus/devices/
+  test-signal.wav
+  README.md                      the log (template below)
+  100-base Project/
+    100-base.als
+    110-utility-default.als
+    111-utility-gain-minus12.als
+    ...
+  bounces/
+    100-base.wav
+    110-utility-default.wav
+    111-utility-gain-minus12.wav
+    ...
+```
+
+### Utility (110–134)
+
+| # | File name | Change from `110-utility-default.als` |
+|---|---|---|
+| 110 | `110-utility-default.als` | Utility added, nothing changed. |
+| 111 | `111-utility-gain-minus12.als` | Gain: type `-12`. |
+| 112 | `112-utility-gain-plus6.als` | Gain: type `6`. |
+| 113 | `113-utility-gain-inf.als` | Gain: drag fully down, until it shows -inf. |
+| 114 | `114-utility-gain-max.als` | Gain: drag fully up. |
+| 115 | `115-utility-balance-50l.als` | Balance: type `50L`. |
+| 116 | `116-utility-balance-100r.als` | Balance: type `100R`. |
+| 117 | `117-utility-width-0.als` | Width: type `0`. |
+| 118 | `118-utility-width-200.als` | Width: type `200`. |
+| 119 | `119-utility-width-max.als` | Width: drag fully up. |
+| 120 | `120-utility-midside-mid.als` | Switch Width to Mid/Side mode (log how), then drag fully to Mid. |
+| 121 | `121-utility-midside-centre.als` | Mid/Side mode, left in the middle. |
+| 122 | `122-utility-midside-side.als` | Mid/Side mode, drag fully to Side. |
+| 123 | `123-utility-mono.als` | Mono on. |
+| 124 | `124-utility-bassmono-120.als` | Bass Mono on, frequency `120`. |
+| 125 | `125-utility-bassmono-min.als` | Bass Mono on, frequency dragged fully down. |
+| 126 | `126-utility-bassmono-max.als` | Bass Mono on, frequency dragged fully up. |
+| 127 | `127-utility-phase-left.als` | Invert the left channel's phase. |
+| 128 | `128-utility-phase-right.als` | Invert the right channel's phase. |
+| 129 | `129-utility-phase-both.als` | Invert both. |
+| 130 | `130-utility-channel-left.als` | Channel mode: Left. |
+| 131 | `131-utility-channel-right.als` | Channel mode: Right. |
+| 132 | `132-utility-channel-swap.als` | Channel mode: Swap. |
+| 133 | `133-utility-dc.als` | DC filter on. |
+| 134 | `134-utility-mute.als` | Mute on. |
+
+### Auto Pan-Tremolo (140–164)
+
+| # | File name | Change from `140-autopan-default.als` |
+|---|---|---|
+| 140 | `140-autopan-default.als` | Auto Pan-Tremolo added, nothing changed. Log the default mode, rate and phase. |
+| 141 | `141-autopan-amount-0.als` | Amount: type `0`. |
+| 142 | `142-autopan-amount-100.als` | Amount: type `100`. |
+| 143 | `143-autopan-rate-0.1hz.als` | Rate in hertz: type `0.1`. |
+| 144 | `144-autopan-rate-10hz.als` | Rate: type `10`. |
+| 145 | `145-autopan-rate-max.als` | Rate: drag fully up. |
+| 146 | `146-autopan-sync-1bar.als` | Switch the rate to beat sync, choose 1 bar. |
+| 147 | `147-autopan-sync-1-4.als` | Beat sync, 1/4. |
+| 148 | `148-autopan-sync-1-8-dotted.als` | Beat sync, dotted 1/8 (log how Live names it). |
+| 149 | `149-autopan-sync-1-16-triplet.als` | Beat sync, triplet 1/16. |
+| 150–156 | `150-autopan-shape-<name>.als` | One file per waveform other than the default, in Live's order; `<name>` as Live shows it, in lower case (`150-autopan-shape-triangle.als`). |
+| 157 | `157-autopan-phase-0.als` | Phase: type `0`. |
+| 158 | `158-autopan-phase-90.als` | Phase: type `90`. |
+| 159 | `159-autopan-offset-90.als` | Offset: type `90`. |
+| 160 | `160-autopan-offset-270.als` | Offset: type `270`. |
+| 161 | `161-autopan-shaping-50.als` | Shaping: type `50`. |
+| 162 | `162-autopan-shaping-100.als` | Shaping: type `100`. |
+| 163 | `163-autopan-invert.als` | Invert on. |
+| 164 | `164-autopan-mode-other.als` | Switch the Pan/Tremolo mode to the one that is not the default. |
+
+### EQ Three (170–187)
+
+| # | File name | Change from `170-eq3-default.als` |
+|---|---|---|
+| 170 | `170-eq3-default.als` | EQ Three added, nothing changed. Log FreqLo and FreqHi. |
+| 171 | `171-eq3-low-minus12.als` | GainLo: type `-12`. |
+| 172 | `172-eq3-low-inf.als` | GainLo: drag fully down (-inf). |
+| 173 | `173-eq3-low-max.als` | GainLo: drag fully up. |
+| 174–176 | `174-eq3-mid-minus12.als`, `175-eq3-mid-inf.als`, `176-eq3-mid-max.als` | The same for GainMid. |
+| 177–179 | `177-eq3-high-minus12.als`, `178-eq3-high-inf.als`, `179-eq3-high-max.als` | The same for GainHi. |
+| 180 | `180-eq3-kill-low.als` | Low band switch off (the kill). |
+| 181 | `181-eq3-kill-mid.als` | Mid band switch off. |
+| 182 | `182-eq3-kill-high.als` | High band switch off. |
+| 183 | `183-eq3-freqlo-min.als` | FreqLo: drag fully down. |
+| 184 | `184-eq3-freqlo-max.als` | FreqLo: drag fully up. |
+| 185 | `185-eq3-freqhi-min.als` | FreqHi: drag fully down. |
+| 186 | `186-eq3-freqhi-max.als` | FreqHi: drag fully up. |
+| 187 | `187-eq3-slope-other.als` | Slope: the one that is not the default (24 or 48 dB/oct). |
+
+### Vinyl Distortion (190–208)
+
+| # | File name | Change |
+|---|---|---|
+| 190 | `190-vinyl-default.als` | Vinyl Distortion added, nothing changed. Log which sections are on. |
+| 191 | `191-vinyl-tracing-off.als` | Tracing section off. |
+| 192 | `192-vinyl-tracing-drive-min.als` | Tracing Drive: drag fully down. |
+| 193 | `193-vinyl-tracing-drive-max.als` | Tracing Drive: drag fully up. |
+| 194 | `194-vinyl-tracing-freq-min.als` | Tracing Freq: drag fully down. |
+| 195 | `195-vinyl-tracing-freq-1k.als` | Tracing Freq: type `1000`. |
+| 196 | `196-vinyl-tracing-freq-max.als` | Tracing Freq: drag fully up. |
+| 197 | `197-vinyl-tracing-width-min.als` | Tracing Width: drag fully down. |
+| 198 | `198-vinyl-tracing-width-max.als` | Tracing Width: drag fully up. |
+| 200 | `200-vinyl-pinch-on.als` | Pinch section on. |
+| 201 | `201-vinyl-pinch-drive-max.als` | From 200: Pinch Drive fully up. |
+| 202 | `202-vinyl-pinch-freq-1k.als` | From 200: Pinch Freq `1000`. |
+| 203 | `203-vinyl-pinch-width-max.als` | From 200: Pinch Width fully up. |
+| 204 | `204-vinyl-pinch-mono.als` | From 200: pinch Stereo/Mono switch to Mono. |
+| 205 | `205-vinyl-hard.als` | Soft/Hard switch to Hard. |
+| 206 | `206-vinyl-crackle-volume-max.als` | Crackle Volume fully up. |
+| 207 | `207-vinyl-crackle-density-min.als` | From 206: Crackle Density fully down. |
+| 208 | `208-vinyl-crackle-density-max.als` | From 206: Crackle Density fully up. |
+
+Crackle is random: two bounces of the same set do not match sample for sample. Bounce 206–208
+twice (the second as `206-vinyl-crackle-volume-max-b.wav` and so on), so the density can be
+measured from two takes.
+
+### Overdrive (220–233)
+
+| # | File name | Change from `220-overdrive-default.als` |
+|---|---|---|
+| 220 | `220-overdrive-default.als` | Overdrive added, nothing changed. |
+| 221 | `221-overdrive-filter-freq-min.als` | Filter Freq: drag fully down. |
+| 222 | `222-overdrive-filter-freq-max.als` | Filter Freq: drag fully up. |
+| 223 | `223-overdrive-filter-width-min.als` | Filter Width: drag fully down. |
+| 224 | `224-overdrive-filter-width-max.als` | Filter Width: drag fully up. |
+| 225 | `225-overdrive-drive-0.als` | Drive: type `0`. |
+| 226 | `226-overdrive-drive-50.als` | Drive: type `50`. |
+| 227 | `227-overdrive-drive-100.als` | Drive: type `100`. |
+| 228 | `228-overdrive-tone-0.als` | Tone: type `0`. |
+| 229 | `229-overdrive-tone-100.als` | Tone: type `100`. |
+| 230 | `230-overdrive-dynamics-0.als` | Dynamics: type `0`. |
+| 231 | `231-overdrive-dynamics-100.als` | Dynamics: type `100`. |
+| 232 | `232-overdrive-drywet-0.als` | Dry/Wet: type `0`. |
+| 233 | `233-overdrive-drywet-50.als` | Dry/Wet: type `50`. |
+
+If a control is named differently in your Live version, or a row's value cannot be typed, do
+what is closest and say so in the log; the diff shows what was really stored.
+
+### Log
+
+`corpus/devices/README.md`:
+
+```markdown
+Live version: Live 12.x.x <edition>
+OS:
+Author:
+Date:
+
+| File | Done | Value Live shows | Bounce | Notes |
+|---|---|---|---|---|
+| 100-base.als | | | | |
+| 110-utility-default.als | | | | |
+| 111-utility-gain-minus12.als | | -12.0 dB | | |
+```
+
+### Extract and diff a device file
+
+```sh
+scripts/als-extract.sh corpus/devices/
+P="corpus/devices/100-base Project"
+git diff --no-index "$P/110-utility-default.als.xml" "$P/111-utility-gain-minus12.als.xml"
+```
 
 ## Tips from the first run
 

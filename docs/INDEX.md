@@ -27,7 +27,7 @@ are changing (*Code and its documents*).
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
-| [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files | How to author the Live Sets used to learn the .als format and test the importer, series by series |
+| [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
 
 ## Code and its documents
 
@@ -52,3 +52,4 @@ Change this code, and check these documents.
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
+| `scripts/test-signal.py` | [Making the `.als` test corpus](spec/als-corpus.md) |
