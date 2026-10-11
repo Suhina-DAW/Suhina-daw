@@ -197,7 +197,7 @@ corpus/devices/
     ...
 ```
 
-### Utility (110–134)
+### Utility (110–135)
 
 | # | File name | Change from `110-utility-default.als` |
 |---|---|---|
@@ -211,21 +211,20 @@ corpus/devices/
 | 117 | `117-utility-width-0.als` | Width: type `0`. |
 | 118 | `118-utility-width-200.als` | Width: type `200`. |
 | 119 | `119-utility-width-max.als` | Width: drag fully up. |
-| 120 | `120-utility-midside-mid.als` | Switch Width to Mid/Side mode (log how), then drag fully to Mid. |
-| 121 | `121-utility-midside-centre.als` | Mid/Side mode, left in the middle. |
-| 122 | `122-utility-midside-side.als` | Mid/Side mode, drag fully to Side. |
+| 120–122 | `120-utility-midside-mid.als`, `121-utility-midside-centre.als`, `122-utility-midside-side.als` | **Only if** Width has a Mid/Side mode (look in its right-click menu): fully Mid, middle, fully Side. Live 12.4's panel shows none; if there is none, skip these and log it. |
 | 123 | `123-utility-mono.als` | Mono on. |
 | 124 | `124-utility-bassmono-120.als` | Bass Mono on, frequency `120`. |
 | 125 | `125-utility-bassmono-min.als` | Bass Mono on, frequency dragged fully down. |
 | 126 | `126-utility-bassmono-max.als` | Bass Mono on, frequency dragged fully up. |
-| 127 | `127-utility-phase-left.als` | Invert the left channel's phase. |
-| 128 | `128-utility-phase-right.als` | Invert the right channel's phase. |
+| 127 | `127-utility-phase-left.als` | Ø L on. |
+| 128 | `128-utility-phase-right.als` | Ø R on. |
 | 129 | `129-utility-phase-both.als` | Invert both. |
-| 130 | `130-utility-channel-left.als` | Channel mode: Left. |
-| 131 | `131-utility-channel-right.als` | Channel mode: Right. |
-| 132 | `132-utility-channel-swap.als` | Channel mode: Swap. |
+| 130 | `130-utility-channel-left.als` | Input channel menu (shows Stereo): Left. |
+| 131 | `131-utility-channel-right.als` | Input channel menu: Right. |
+| 132 | `132-utility-channel-swap.als` | Input channel menu: Swap. |
 | 133 | `133-utility-dc.als` | DC filter on. |
 | 134 | `134-utility-mute.als` | Mute on. |
+| 135 | `135-utility-bassmono-listen.als` | Bass Mono on, and the headphones button next to its frequency on. |
 
 ### Auto Pan-Tremolo (140–164)
 
