@@ -18,10 +18,14 @@ From top to bottom:
    - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
    - view switches (Session / Arrangement)
 3. **Main area**, left to right:
-   - **Browser** (collapsible): a search field; a sidebar of collections (user colour tags), the
-     library (sounds, drums, instruments, audio effects, MIDI effects, modulators, plug-ins,
-     clips, samples, grooves, tunings, templates) and places (user folders); a results list with
-     filters; a tag field and an item count below it.
+   - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
+     collections (user colour tags), library categories and places (user folders); a results
+     tree; tags and an item count below it. **Loopwerk's structure** (see the design brief):
+     search with a shortcut; category filters as buttons (all, samples, MIDI, instruments,
+     effects, presets, plug-ins); a sidebar of places only (Pinned, Recent, Folders, add folder);
+     a file tree with expandable folders, type icons and length or duration; colour tags as dots
+     on rows; a preview strip with play, waveform, playhead, duration, BPM and key; tags and the
+     selection count at the bottom.
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
