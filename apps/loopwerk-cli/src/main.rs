@@ -12,20 +12,24 @@ use loopwerk_session::Session;
 
 const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
-       loopwerk-cli play (<project.als> | --demo) [--scene <n>]
-       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>]
+       loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
+       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
-  play      play a project once on the default audio output
+  play      play a project once on the default audio output, or with --launcher launch its
+            clips and scenes by typing commands
   mcp       serve the Model Context Protocol on stdin/stdout for agents; files can be read only
-            below --read-root and written only below --write-root (no root, no access)
+            below --read-root and written only below --write-root (no root, no access); with
+            --audio, opened projects play on the default output so agents can launch clips
 
 options:
   <project.als>      a Live Set to import
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
+  --launcher         play only: start stopped and read launcher commands (scene 2, clip Bass 1,
+                     stop Bass, quit, help) from standard input
   --sample-rate      sample rate in Hz (render only; default 48000)";
 
 #[derive(Debug)]
@@ -39,6 +43,7 @@ struct Args {
     source: Source,
     output: Option<PathBuf>,
     scene: Option<usize>,
+    launcher: bool,
     sample_rate: u32,
 }
 
@@ -57,7 +62,7 @@ fn main() -> ExitCode {
                 Command::Render => render(&a),
                 Command::Play => {
                     let (project, audio) = load_project(&a)?;
-                    play::play(&project, &audio)
+                    if a.launcher { play::launcher(project, &audio) } else { play::play(&project, &audio) }
                 }
             });
             match result {
@@ -94,6 +99,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
     let mut output = None;
     let mut sample_rate = 48_000;
     let mut scene = None;
+    let mut launcher = false;
     let mut source = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -114,6 +120,10 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
                 scene = Some(n.checked_sub(1).ok_or("scenes are numbered from 1")?);
                 None
             }
+            "--launcher" => {
+                launcher = true;
+                None
+            }
             other if other.starts_with('-') => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
             path => Some(Source::Als(PathBuf::from(path))),
         };
@@ -129,10 +139,14 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         (Command::Play, Some(_)) => return Err(format!("play does not write a file; use render\n\n{USAGE}")),
         _ => {}
     }
+    if launcher && (command != Command::Play || scene.is_some()) {
+        return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
+    }
     Ok(Args {
         source: source.ok_or(format!("missing project: give a .als file or --demo\n\n{USAGE}"))?,
         output,
         scene,
+        launcher,
         sample_rate,
     })
 }
@@ -180,16 +194,21 @@ fn render(args: &Args) -> Result<(), String> {
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut read_root = None;
     let mut write_root = None;
+    let mut audio = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--read-root" => read_root = Some(PathBuf::from(it.next().ok_or("--read-root needs a folder")?)),
             "--write-root" => write_root = Some(PathBuf::from(it.next().ok_or("--write-root needs a folder")?)),
+            "--audio" => audio = true,
             other => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    let mut server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    if audio {
+        server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -310,6 +329,9 @@ mod tests {
         assert!(parse_args(&args(&["a.als", "--scene", "3"]), Command::Play).is_ok());
         assert!(parse_args(&args(&["--demo", "-o", "x.wav"]), Command::Play).is_err());
         assert!(parse_args(&args(&[]), Command::Play).is_err());
+        assert!(parse_args(&args(&["a.als", "--launcher"]), Command::Play).unwrap().launcher);
+        assert!(parse_args(&args(&["a.als", "--launcher", "--scene", "1"]), Command::Play).is_err());
+        assert!(parse_args(&args(&["a.als", "--launcher", "-o", "x.wav"]), Command::Render).is_err());
     }
 
     #[test]

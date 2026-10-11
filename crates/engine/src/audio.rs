@@ -181,6 +181,20 @@ impl AudioEvent {
         let (left, right) = self.data.stereo_at(seconds);
         (left * self.gain_left * fade, right * self.gain_right * fade)
     }
+
+    /// Like [`AudioEvent::sample`] for an event placed at frame 0, at a fractional number of
+    /// frames since it started; silence outside `0..end`. Launched clips use this, since their
+    /// position follows the launcher clock rather than a fixed frame.
+    pub(crate) fn sample_elapsed(&self, elapsed_frames: f64) -> (f32, f32) {
+        let until_end = self.end as f64 - elapsed_frames;
+        if !(elapsed_frames >= 0.0 && until_end > 0.0) {
+            return (0.0, 0.0);
+        }
+        let fade = (elapsed_frames / self.fade_frames).min(until_end / self.fade_frames).min(1.0) as f32;
+        let seconds = self.map.seconds(self.clip_beat(elapsed_frames / self.frames_per_beat));
+        let (left, right) = self.data.stereo_at(seconds);
+        (left * self.gain_left * fade, right * self.gain_right * fade)
+    }
 }
 
 #[cfg(test)]

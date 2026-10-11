@@ -3,12 +3,15 @@
 //! so the same `process` call can later run on the audio thread.
 
 mod audio;
+mod launcher;
 mod stretch;
 
 use std::fmt;
 
 use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
+use launcher::Launcher;
+pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use stretch::StretchVoice;
@@ -21,6 +24,8 @@ const MAX_AUDIO_VOICES: usize = 64;
 /// Audio clips play at unity gain (0 dB) on a centred track: this undoes the headroom scaling
 /// that `track_gains` applies for the sine voices.
 const AUDIO_HEADROOM: f32 = 4.0;
+/// Voice and event tag for "not on a launcher column".
+const NO_COLUMN: u32 = u32::MAX;
 /// Project frames rendered per stretch-voice call.
 const STRETCH_BLOCK: usize = 1024;
 /// Release time after note-off, in seconds.
@@ -59,13 +64,15 @@ impl fmt::Display for RenderError {
 
 impl std::error::Error for RenderError {}
 
-/// A warped clip placement and its stretcher.
+/// A warped clip placement and its stretcher. `start` and `end` are arrangement frames.
 struct StretchEvent {
     start: u64,
     end: u64,
     voice: StretchVoice,
     gain_left: f32,
     gain_right: f32,
+    /// The launcher column of the clip's track, or `NO_COLUMN`.
+    column: u32,
 }
 
 /// A note with its position resolved to sample frames and its mix resolved from the channel.
@@ -76,6 +83,8 @@ struct NoteEvent {
     frequency: f64,
     gain_left: f32,
     gain_right: f32,
+    /// The launcher column of the note's track, or `NO_COLUMN`.
+    column: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -87,15 +96,25 @@ struct Voice {
     phase_step: f64,
     gain_left: f32,
     gain_right: f32,
+    /// The launcher column whose track this voice plays on, or `NO_COLUMN`.
+    column: u32,
 }
 
-/// Plays a project's arrangement. Build it once, then call [`Renderer::process`] block by block.
+/// An arrangement audio clip and the launcher column of its track.
+#[derive(Debug, Clone)]
+struct ArrangedAudio {
+    event: AudioEvent,
+    column: u32,
+}
+
+/// Plays a project: its arrangement from the start, and launcher clips as they are launched
+/// (see [`Renderer::handle`]). Build it once, then call [`Renderer::process`] block by block.
 pub struct Renderer {
     sample_rate: u32,
     events: Vec<NoteEvent>,
     next_event: usize,
     voices: [Voice; MAX_VOICES],
-    audio_events: Vec<AudioEvent>,
+    audio_events: Vec<ArrangedAudio>,
     next_audio: usize,
     /// Indices into `audio_events` that are playing; the first `active_audio_count` are valid.
     active_audio: [usize; MAX_AUDIO_VOICES],
@@ -104,8 +123,13 @@ pub struct Renderer {
     stretch_events: Vec<StretchEvent>,
     stretch_scratch: Vec<f32>,
     fade_frames: f64,
+    /// Frames rendered since the renderer was built.
     position: u64,
+    /// The frame at which the transport last started; arrangement time is `position - origin`.
+    origin: u64,
+    running: bool,
     length: u64,
+    launcher: Launcher,
 }
 
 impl Renderer {
@@ -126,6 +150,15 @@ impl Renderer {
         project.validate().map_err(RenderError::InvalidProject)?;
 
         let frames_per_beat = 60.0 / bpm * f64::from(sample_rate);
+        let column_of = |track: TrackId| {
+            project
+                .launcher
+                .columns
+                .iter()
+                .position(|c| c.track == track)
+                .and_then(|i| u32::try_from(i).ok())
+                .unwrap_or(NO_COLUMN)
+        };
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
@@ -135,10 +168,15 @@ impl Renderer {
                 for content_lane in &content.lanes {
                     let Some(track) = content_lane.target.or(lane.track) else { continue };
                     let Some((gain_left, gain_right)) = track_gains(project, track) else { continue };
+                    let column = column_of(track);
                     match &content_lane.data {
-                        LaneData::Notes(_) => {
-                            collect_notes(clip, content_lane, frames_per_beat, gain_left, gain_right, &mut events)
-                        }
+                        LaneData::Notes(_) => collect_notes(
+                            clip,
+                            content_lane,
+                            frames_per_beat,
+                            (gain_left, gain_right, column),
+                            &mut events,
+                        ),
                         LaneData::Audio(region) => {
                             let Some(data) = audio.files.get(&region.file) else { continue };
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
@@ -157,30 +195,29 @@ impl Renderer {
                                         voice,
                                         gain_left: gains.0 * gain,
                                         gain_right: gains.1 * gain,
+                                        column,
                                     });
                                     continue;
                                 }
                             }
-                            audio_events.extend(AudioEvent::new(
-                                clip,
-                                region,
-                                data.clone(),
-                                audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate },
-                                gains,
-                            ));
+                            let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
+                            audio_events.extend(
+                                AudioEvent::new(clip, region, data.clone(), timing, gains)
+                                    .map(|event| ArrangedAudio { event, column }),
+                            );
                         }
                     }
                 }
             }
         }
         events.sort_by_key(|e| e.start);
-        audio_events.sort_by_key(|e| e.start);
+        audio_events.sort_by_key(|a| a.event.start);
 
         let release = (RELEASE_SECONDS * f64::from(sample_rate)) as u64;
         let notes_end = events.iter().map(|e| e.end.saturating_add(release)).max().unwrap_or(0);
         let length = audio_events
             .iter()
-            .map(|e| e.end)
+            .map(|a| a.event.end)
             .chain(stretch_events.iter().map(|e: &StretchEvent| e.end))
             .max()
             .unwrap_or(0)
@@ -203,8 +240,19 @@ impl Renderer {
             stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
             fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
             position: 0,
+            origin: 0,
+            running: true,
             length,
+            launcher: Launcher::new(project, audio, sample_rate),
         })
+    }
+
+    /// A renderer whose transport is stopped: silent until it receives [`LaunchCommand::Play`]
+    /// or a launch.
+    pub fn stopped(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
+        let mut renderer = Self::with_audio(project, audio, sample_rate)?;
+        renderer.running = false;
+        Ok(renderer)
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -216,20 +264,37 @@ impl Renderer {
         self.length
     }
 
+    /// Whether the transport is running.
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
     /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
-    /// Never allocates.
+    /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
+        self.drain_commands();
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
+        // The transport changes only through commands, which are applied above.
+        let running = self.running;
         for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
-            while let Some(event) = self.events.get(self.next_event) {
-                if event.start > self.position {
+            let (launched_left, launched_right) = self.launcher_frame();
+            let time = self.position - self.origin;
+            while self.running
+                && let Some(event) = self.events.get(self.next_event)
+            {
+                if event.start > time {
                     break;
                 }
                 let event = *event;
                 self.next_event += 1;
-                self.start_voice(&event);
+                if !self.launcher.overrides(event.column) {
+                    let end = self.position + event.end.saturating_sub(event.start);
+                    let gains = (event.gain_left, event.gain_right);
+                    let (voices, position, sample_rate) = (&mut self.voices, self.position, self.sample_rate);
+                    start_voice(voices, position, sample_rate, end, event.frequency, gains, event.column);
+                }
             }
 
             let mut left = 0.0f32;
@@ -251,53 +316,63 @@ impl Renderer {
                 left += sample as f32 * voice.gain_left;
                 right += sample as f32 * voice.gain_right;
             }
-            let (audio_left, audio_right) = self.audio_frame();
-            *out_left = left + audio_left;
-            *out_right = right + audio_right;
+            let (audio_left, audio_right) = if self.running { self.audio_frame(time) } else { (0.0, 0.0) };
+            *out_left = left + audio_left + launched_left;
+            *out_right = right + audio_right + launched_right;
             self.position += 1;
         }
-        self.mix_stretched(out, block_start);
+        if running {
+            self.mix_stretched(out, block_start);
+        }
     }
 
-    /// Adds the stretched clips that overlap the block starting at `block_start` to `out`.
+    /// Adds the stretched clips that overlap the block starting at frame `block_start` to `out`.
+    /// Clips on a track that plays launched clips keep running, so they stay in time, but are
+    /// not heard.
     fn mix_stretched(&mut self, out: &mut [f32], block_start: u64) {
-        let block_end = block_start + (out.len() / 2) as u64;
+        // Arrangement time of the block's first frame.
+        let time_start = block_start - self.origin;
+        let time_end = time_start + (out.len() / 2) as u64;
         let fade_frames = self.fade_frames;
         let scratch = &mut self.stretch_scratch;
+        let launcher = &self.launcher;
         for event in &mut self.stretch_events {
-            if event.end <= block_start || event.start >= block_end {
+            if event.end <= time_start || event.start >= time_end {
                 continue;
             }
-            let mut position = event.start.max(block_start);
-            let to = event.end.min(block_end);
-            while position < to {
-                let frames = ((to - position) as usize).min(STRETCH_BLOCK);
+            let mut time = event.start.max(time_start);
+            let to = event.end.min(time_end);
+            while time < to {
+                let frames = ((to - time) as usize).min(STRETCH_BLOCK);
                 let Some(chunk) = scratch.get_mut(..frames * 2) else { return };
                 event.voice.render(chunk);
                 for (k, [left, right]) in chunk.as_chunks::<2>().0.iter().enumerate() {
-                    let frame = position + k as u64;
+                    let frame = time + k as u64;
+                    if launcher.overrides_at(event.column, frame - time_start + block_start) {
+                        continue;
+                    }
                     let since_start = (frame - event.start) as f64;
                     let until_end = (event.end - frame) as f64;
                     let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
-                    let at = ((frame - block_start) * 2) as usize;
+                    let at = ((frame - time_start) * 2) as usize;
                     if let Some([l, r]) = out.get_mut(at..at + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok()) {
                         *l += left * event.gain_left * fade;
                         *r += right * event.gain_right * fade;
                     }
                 }
-                position += frames as u64;
+                time += frames as u64;
             }
         }
     }
 
-    /// Starts audio clips that begin at the current frame, mixes the playing ones and drops the
-    /// ones that have ended.
-    fn audio_frame(&mut self) -> (f32, f32) {
-        while let Some(event) = self.audio_events.get(self.next_audio) {
-            if event.start > self.position {
+    /// Starts arrangement audio clips that begin at arrangement frame `time`, mixes the playing
+    /// ones and drops the ones that have ended.
+    fn audio_frame(&mut self, time: u64) -> (f32, f32) {
+        while let Some(arranged) = self.audio_events.get(self.next_audio) {
+            if arranged.event.start > time {
                 break;
             }
-            if event.end > self.position
+            if arranged.event.end > time
                 && let Some(slot) = self.active_audio.get_mut(self.active_audio_count)
             {
                 *slot = self.next_audio;
@@ -310,10 +385,12 @@ impl Renderer {
         while i < self.active_audio_count {
             let index = self.active_audio.get(i).copied().unwrap_or(usize::MAX);
             match self.audio_events.get(index) {
-                Some(event) if self.position < event.end => {
-                    let (l, r) = event.sample(self.position);
-                    left += l;
-                    right += r;
+                Some(arranged) if time < arranged.event.end => {
+                    if !self.launcher.overrides(arranged.column) {
+                        let (l, r) = arranged.event.sample(time);
+                        left += l;
+                        right += r;
+                    }
                     i += 1;
                 }
                 _ => {
@@ -328,23 +405,34 @@ impl Renderer {
         }
         (left, right)
     }
+}
 
-    fn start_voice(&mut self, event: &NoteEvent) {
-        let slot = match self.voices.iter().position(|v| !v.active) {
-            Some(free) => free,
-            None => self.voices.iter().enumerate().min_by_key(|(_, v)| v.started_at).map_or(0, |(i, _)| i),
+/// Starts a sine voice at frame `position` that ends at frame `end`, stealing the oldest voice
+/// when all are busy.
+fn start_voice(
+    voices: &mut [Voice; MAX_VOICES],
+    position: u64,
+    sample_rate: u32,
+    end: u64,
+    frequency: f64,
+    (gain_left, gain_right): (f32, f32),
+    column: u32,
+) {
+    let slot = match voices.iter().position(|v| !v.active) {
+        Some(free) => free,
+        None => voices.iter().enumerate().min_by_key(|(_, v)| v.started_at).map_or(0, |(i, _)| i),
+    };
+    if let Some(voice) = voices.get_mut(slot) {
+        *voice = Voice {
+            active: true,
+            started_at: position,
+            end: end.max(position + 1),
+            phase: 0.0,
+            phase_step: frequency / f64::from(sample_rate),
+            gain_left,
+            gain_right,
+            column,
         };
-        if let Some(voice) = self.voices.get_mut(slot) {
-            *voice = Voice {
-                active: true,
-                started_at: self.position,
-                end: event.end.max(self.position + 1),
-                phase: 0.0,
-                phase_step: event.frequency / f64::from(self.sample_rate),
-                gain_left: event.gain_left,
-                gain_right: event.gain_right,
-            };
-        }
     }
 }
 
@@ -369,6 +457,39 @@ pub fn render_offline_with_audio(
     let mut out = vec![0.0f32; total];
     for block in out.chunks_mut(block_frames.max(1).saturating_mul(2)) {
         renderer.process(block);
+    }
+    Ok(out)
+}
+
+/// Renders `seconds` of the project offline, starting with the transport stopped and applying
+/// each launch command at its time in seconds (in order). This is the same path a live
+/// [`Controller`] drives, so launcher behaviour renders offline exactly as it plays.
+pub fn render_launches(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    commands: &[(f64, LaunchCommand)],
+    seconds: f64,
+) -> Result<Vec<f32>, RenderError> {
+    if !(seconds.is_finite() && seconds >= 0.0) || seconds > MAX_RENDER_SECONDS {
+        return Err(RenderError::TooLong { seconds });
+    }
+    let mut renderer = Renderer::stopped(project, audio, sample_rate)?;
+    let frame_of = |at: f64| (at.max(0.0) * f64::from(sample_rate)).round() as usize;
+    let total = frame_of(seconds);
+    let mut out = vec![0.0f32; total.saturating_mul(2)];
+    let mut done = 0;
+    let mut pending = commands.iter().peekable();
+    while done < total {
+        while let Some((_, command)) = pending.next_if(|(at, _)| frame_of(*at) <= done) {
+            renderer.handle(*command);
+        }
+        let next = pending.peek().map_or(total, |(at, _)| frame_of(*at));
+        let end = next.clamp(done + 1, total).min(done + 512);
+        if let Some(block) = out.get_mut(done * 2..end * 2) {
+            renderer.process(block);
+        }
+        done = end;
     }
     Ok(out)
 }
@@ -412,8 +533,7 @@ fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
     frames_per_beat: f64,
-    gain_left: f32,
-    gain_right: f32,
+    (gain_left, gain_right, column): (f32, f32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
     let LaneData::Notes(notes) = &lane.data else { return };
@@ -440,6 +560,7 @@ fn collect_notes(
                 frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
                 gain_left: gain_left * note.velocity.clamp(0.0, 1.0),
                 gain_right: gain_right * note.velocity.clamp(0.0, 1.0),
+                column,
             });
         }
     };

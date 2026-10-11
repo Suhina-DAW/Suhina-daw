@@ -17,32 +17,90 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  fmt:
+  # Changes that touch only documentation skip the checks; no code reads these files. The jobs
+  # below still run and pass with their steps skipped, because main requires them by name.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # A pull request is checked out as a merge commit, so its first parent is the current base.
+      - id: diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: |
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(git diff --name-only "$BASE" HEAD \
+            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$' || true)
+          if [ -n "$code" ]; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
+
+  # Runs on every change, documentation included.
+  docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: No hidden or bidirectional Unicode characters
+        run: |
+          if git grep -nIP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' -- . ':!*.lock'; then
+            echo "::error::Hidden or bidirectional Unicode characters found (listed above)."
+            exit 1
+          fi
+      - name: No Live project or library files
+        run: |
+          if git ls-files | grep -Ei '\.(als|alc|adg|adv|agr|ams|amxd|asd|alp)$'; then
+            echo "::error::Live files are not committed; test sets stay in corpus/ (see CONTRIBUTING.md)."
+            exit 1
+          fi
+      - name: Links between repository files resolve
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress "**/*.md"
+          fail: true
+
+  fmt:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.code == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.changes.outputs.code == 'true'
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+        if: needs.changes.outputs.code == 'true'
 
   check:
     name: clippy and tests (${{ matrix.os }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+        if: env.CODE == 'true'
       - name: Install ALSA headers (cpal)
-        if: runner.os == 'Linux'
+        if: env.CODE == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
+        if: env.CODE == 'true'
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        if: env.CODE == 'true'
       # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
       # stays off here.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+        if: env.CODE == 'true'
       - run: cargo test --workspace
+        if: env.CODE == 'true'

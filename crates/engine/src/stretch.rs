@@ -382,6 +382,22 @@ impl StretchVoice {
         usize::from(self.data.channels)
     }
 
+    /// Rewinds the voice to the clip's first frame, for a transport restart or a relaunch.
+    /// Never allocates; runs the first lane's start-up (its pipeline delay, or the phase
+    /// vocoder's preroll) on the calling thread.
+    pub(crate) fn restart(&mut self) {
+        self.active = 0;
+        self.next_restart = 0;
+        self.fade_left = 0;
+        self.priming = false;
+        self.produced = 0;
+        self.fifo_len = 0;
+        self.fifo_read = 0;
+        self.fifo_position = 0.0;
+        self.begin_lane(0, 0);
+        self.prime(0, 0, 0);
+    }
+
     /// Resets lane `index` and points it at voice frame `at`: it is fed from [`Self::preroll`] file
     /// frames before the point the playlist plays then, at that piece's rate. [`Self::prime`] then
     /// runs off its start-up so that its next output frame is `at`.
