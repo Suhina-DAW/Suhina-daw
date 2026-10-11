@@ -615,10 +615,12 @@ name = "loopwerk-cli"
 version = "0.0.1"
 dependencies = [
  "cpal",
+ "hound",
  "loopwerk-als",
  "loopwerk-automation",
  "loopwerk-engine",
  "loopwerk-media",
+ "loopwerk-plugins",
  "loopwerk-session",
  "serde_json",
  "tokio",

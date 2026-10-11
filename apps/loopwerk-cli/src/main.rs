@@ -14,6 +14,7 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>)
+       loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -25,6 +26,9 @@ commands:
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
             folders shows where scans look, add-folder and remove-folder change that
+  plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
+            in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
+            that many seconds of silence for reverbs and delays to ring out (default 2)
 
 options:
   <project.als>      a Live Set to import
@@ -76,6 +80,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("plugin") => match plugin(args.get(1..).unwrap_or_default()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Some("plugins") => match plugins(args.get(1..).unwrap_or_default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -196,6 +207,85 @@ fn render(args: &Args) -> Result<(), String> {
 }
 
 /// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
+/// `plugin run <plug-in> <in> <out> [--tail <seconds>]`.
+fn plugin(args: &[String]) -> Result<(), String> {
+    let mut words = args.iter().map(String::as_str);
+    let (Some("run"), Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next(), words.next())
+    else {
+        return Err(format!(
+            "usage: loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
+
+{USAGE}"
+        ));
+    };
+    let mut tail = 2.0f64;
+    while let Some(word) = words.next() {
+        match word {
+            "--tail" => {
+                tail = words
+                    .next()
+                    .and_then(|t| t.parse::<f64>().ok())
+                    .filter(|t| t.is_finite() && (0.0..=600.0).contains(t))
+                    .ok_or("--tail needs seconds, from 0 to 600")?;
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+
+    let mut library = loopwerk_plugins::library::Library::default();
+    let spec = if ["clap:", "test:"].iter().any(|p| name.starts_with(p)) {
+        name.to_string()
+    } else {
+        let found = library.catalog().find(name).ok_or_else(|| {
+            format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
+        })?;
+        eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
+        found.spec()
+    };
+
+    let audio = loopwerk_media::decode_file(std::path::Path::new(input))?;
+    let channels = usize::from(audio.channels.max(1));
+    let stereo: Vec<f32> = audio
+        .samples
+        .chunks(channels)
+        .flat_map(|frame| {
+            let left = frame.first().copied().unwrap_or(0.0);
+            [left, frame.get(1).copied().unwrap_or(left)]
+        })
+        .collect();
+    let tail_frames = (tail * f64::from(audio.sample_rate)) as usize;
+    let launch = loopwerk_plugins::Launch {
+        host: library.host().to_path_buf(),
+        plugin: spec,
+        channels: 2,
+        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        sample_rate: f64::from(audio.sample_rate),
+        timeout: std::time::Duration::from_secs(30),
+    };
+    let started = std::time::Instant::now();
+    let rendered = loopwerk_plugins::offline::render(launch, &stereo, tail_frames).map_err(|e| e.to_string())?;
+
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: audio.sample_rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(output, spec).map_err(|e| format!("{output}: {e}"))?;
+    for sample in &rendered.samples {
+        writer.write_sample(*sample).map_err(|e| format!("{output}: {e}"))?;
+    }
+    writer.finalize().map_err(|e| format!("{output}: {e}"))?;
+    eprintln!(
+        "wrote {output}: {:.1} s at {} Hz, plug-in latency {} frames (compensated), in {:.1} s",
+        rendered.samples.len() as f64 / 2.0 / f64::from(audio.sample_rate),
+        audio.sample_rate,
+        rendered.latency,
+        started.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
 /// `plugins …`: runs the matching `plugins.*` command and prints its result.
 fn plugins(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();

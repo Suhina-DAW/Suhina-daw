@@ -161,3 +161,22 @@ fn a_real_clap_file_when_one_is_given() {
     }
     assert!(plugin.ping());
 }
+
+#[test]
+fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
+    use loopwerk_plugins::offline::render;
+    // 1500 frames of a ramp, through the test CLAP gain (0.5, reports 16 frames of latency).
+    let input: Vec<f32> = (0..1_500).flat_map(|n| [n as f32, -(n as f32)]).collect();
+    let rendered = render(launch("test:clap"), &input, 100).unwrap();
+    assert_eq!(rendered.latency, 16);
+    assert_eq!(rendered.samples.len(), (1_500 + 100) * 2);
+    // The test plug-in does not really delay, so taking its reported latency out moves the
+    // output 16 frames early: frame n holds input frame n + 16.
+    assert_eq!(rendered.samples[0], 16.0 * 0.5);
+    assert_eq!(rendered.samples[1], -16.0 * 0.5);
+    assert_eq!(rendered.samples[2 * 1_000], 1_016.0 * 0.5);
+    assert!(rendered.samples[2 * 1_484..].iter().all(|&s| s == 0.0));
+
+    let crashing = render(launch("test:crash-after:2"), &input, 0);
+    assert!(matches!(crashing, Err(PluginError::Timeout(_))), "{crashing:?}");
+}

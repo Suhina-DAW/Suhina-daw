@@ -7,6 +7,7 @@
 //! blocks in a row the host has not answered.
 
 pub mod library;
+pub mod offline;
 pub mod protocol;
 pub mod scan;
 
