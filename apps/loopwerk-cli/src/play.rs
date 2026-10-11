@@ -6,14 +6,15 @@
 //! through the renderer's lock-free command queue.
 
 use std::io::BufRead;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
+use loopwerk_automation::AudioOutput;
 use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_engine::{AudioPool, Renderer};
+use loopwerk_engine::{AudioPool, Controller, Renderer};
 use loopwerk_session::{Player, Session};
 use serde_json::{Value, json};
 
@@ -122,12 +123,7 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let output = Output::open()?;
-    let mut renderer = Renderer::stopped(&project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
-    let controller = renderer.controller();
-    let progress = Arc::new(Progress::default());
-    let stream = output.start(renderer, &progress)?;
-
+    let (controller, output, progress, stream) = start_stopped(&project, audio)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -159,6 +155,48 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     std::thread::sleep(TAIL);
     drop(stream);
     Ok(())
+}
+
+/// Opens the default output and plays `project` on it with the transport stopped.
+fn start_stopped(
+    project: &Project,
+    audio: &AudioPool,
+) -> Result<(Controller, Output, Arc<Progress>, cpal::Stream), String> {
+    let output = Output::open()?;
+    let mut renderer = Renderer::stopped(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
+    let controller = renderer.controller();
+    let progress = Arc::new(Progress::default());
+    let stream = output.start(renderer, &progress)?;
+    Ok((controller, output, progress, stream))
+}
+
+/// Plays projects opened over MCP on the default output device. Each one gets a thread that
+/// owns the audio stream and closes it when the session drops the player.
+pub struct DeviceOutput;
+
+impl AudioOutput for DeviceOutput {
+    fn open(&self, project: &Project, audio: &AudioPool) -> Result<(Player, String), String> {
+        let (project, audio) = (project.clone(), audio.clone());
+        let (ready, opened) = mpsc::channel();
+        let (close, closed) = mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("loopwerk-audio".into())
+            .spawn(move || match start_stopped(&project, &audio) {
+                Ok((controller, output, _progress, stream)) => {
+                    if ready.send(Ok((controller, output.describe()))).is_ok() {
+                        // Returns once the player, which holds `close`, is dropped.
+                        let _closed = closed.recv();
+                    }
+                    drop(stream);
+                }
+                Err(e) => {
+                    let _unheard = ready.send(Err(e));
+                }
+            })
+            .map_err(|e| format!("could not start the audio thread: {e}"))?;
+        let (controller, description) = opened.recv().map_err(|_| "the audio thread stopped".to_string())??;
+        Ok((Player::new(controller, Some(Box::new(close))), description))
+    }
 }
 
 #[derive(Debug, PartialEq)]

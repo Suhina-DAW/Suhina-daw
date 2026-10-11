@@ -13,14 +13,15 @@ use loopwerk_session::Session;
 const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
        loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
-       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>]
+       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
   play      play a project once on the default audio output, or with --launcher launch its
             clips and scenes by typing commands
   mcp       serve the Model Context Protocol on stdin/stdout for agents; files can be read only
-            below --read-root and written only below --write-root (no root, no access)
+            below --read-root and written only below --write-root (no root, no access); with
+            --audio, opened projects play on the default output so agents can launch clips
 
 options:
   <project.als>      a Live Set to import
@@ -184,16 +185,21 @@ fn render(args: &Args) -> Result<(), String> {
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut read_root = None;
     let mut write_root = None;
+    let mut audio = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--read-root" => read_root = Some(PathBuf::from(it.next().ok_or("--read-root needs a folder")?)),
             "--write-root" => write_root = Some(PathBuf::from(it.next().ok_or("--write-root needs a folder")?)),
+            "--audio" => audio = true,
             other => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    let mut server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    if audio {
+        server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
