@@ -3,6 +3,8 @@
 - **Status:** accepted
 - **Date:** 2026-10-11
 - **Task:** LOOP-3
+- **Amended:** 2026-10-11 (LOOP-31: transients on the grid; LOOP-27: arrangement clips stretched
+  ahead on a worker thread, decision 6)
 
 ## Context
 
@@ -36,9 +38,9 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
    stretch voice when the renderer is built: a timestretch engine plus a playlist that says
    which part of the file plays when and how fast (warp marker segments and loop jumps, at the
-   project tempo). In `process` the voice copies source frames into the stretcher's ring,
-   schedules rate changes at exact frames and runs the stretcher; it never allocates (AGENTS.md
-   rule 3). Offline rendering runs the same voices (rule 4), and the output does not depend on
+   project tempo). The voice copies source frames into the stretcher's ring, schedules rate
+   changes at exact frames and runs the stretcher; it never allocates (AGENTS.md rule 3). Where
+   it runs: decision 6. Offline rendering runs the same voices (rule 4), and the output does not depend on
    the block size. A tempo change only means a new playlist, not new audio.
    - The stretcher runs at the **file's** sample rate, so the pitch is kept against the file's
      own pitch; its output is read at the project rate with linear interpolation.
@@ -74,6 +76,15 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    and a safe interface for the rest of the code, as PhotoCraft does for its tablet crate. That
    exception is recorded in AGENTS.md when it is made. Owner decisions 2026-10-11: timestretch
    first, Rubber Band afterwards; real-time stretching now rather than pre-rendering.
+6. **Arrangement clips are stretched ahead of the audio thread.** Their stretch voices live on a
+   worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
+   per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
+   position in the clip. A worker that falls behind costs silence, counted as underruns, never
+   timing: late frames are dropped. When the transport stops, a lock-free handshake (request,
+   worker paused, rings emptied) lets the worker rewind the voices and fill the rings again
+   before the next start. Without a worker thread (offline rendering) the renderer fills the
+   rings itself just before reading them, through the same voices and rings (rule 4); tests
+   check that both give the same samples. Launched clips' voices still run on the audio thread.
 
 ## Measurements (2026-10-11, the warped-vocal project: 80 s, 58 warped clips, 25 files)
 
@@ -94,18 +105,8 @@ from where the warp markers put each click):
 | Full range 0.7× / 1.5× | 19 ms early / 4 ms late on average, up to 30 ms | 5 ms early / 1 ms early on average |
 
 On the same project the restarts cost about 3 % more CPU; the worst 512-frame block measured
-8.3–10.3 ms against 8.0–8.7 ms before (budget 10.7 ms). Rendering ahead on a worker thread is
-what gives the real margin:
-
-5. **Arrangement clips are stretched ahead of the audio thread.** Their stretch voices live on a
-   worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
-   per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
-   position in the clip. A worker that falls behind costs silence, counted as underruns, never
-   timing: late frames are dropped. When the transport stops, a lock-free handshake (request,
-   worker paused, rings emptied) lets the worker rewind the voices and fill the rings again
-   before the next start. Without a worker thread (offline rendering) the renderer fills the
-   rings itself just before reading them, through the same voices and rings (rule 4); tests
-   check that both give the same samples. Launched clips' voices still run on the audio thread.
+8.3–10.3 ms against 8.0–8.7 ms before (budget 10.7 ms). Rendering ahead on a worker thread (decision 6)
+is what gives the real margin:
 
 | Same project, 512-frame blocks, paced in real time | Stretching on the audio thread | Worker thread |
 |---|---|---|

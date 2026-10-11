@@ -91,6 +91,43 @@ the work starts):
 | Simpler, Sampler, Drum Rack | sampler, drum rack | own |
 | Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) |
 
+## Audio to MIDI
+
+Turning audio into something playable from MIDI, offline (not on the audio thread), each as a
+command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-midi.md).
+
+- **Slice to a new MIDI track.** Cut an audio clip into slices (at warp markers, transients,
+  bars or a note grid), put each slice on its own pad of a sampler or drum rack on a new MIDI
+  track, and write a MIDI clip that plays the slices back in their original rhythm, warped
+  timing kept if asked. Needs the sampler and drum rack devices; transients come from the
+  stretcher's analysis that `media` already computes. Slicing presets are our own.
+- **Convert to a new MIDI track:** four narrow detectors instead of one that tries to write
+  every note of a mix, since each narrow task is far more reliable.
+  - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
+    of a drum rack; more classes (toms, cymbals) later with a small model.
+  - *Bass:* one note at a time in the low register (about 30–300 Hz); pitch tracking limited to
+    that range, note starts taken from transients.
+  - *Melody:* one note at a time across the whole range; pitch tracking (own, pYIN-style) plus
+    note segmentation.
+  - *Chords:* chord names rather than every note: pitch classes (chroma) matched against chord
+    templates and smoothed over time, then written as a voicing; the bass detector gives the
+    inversion.
+  - Full polyphonic transcription (every note of a piano part) comes later, if at all. Candidate:
+    Spotify's Basic Pitch (Apache-2.0) run in pure Rust through `tract`, licence and model
+    weights checked first.
+- **Using what the project knows:** every detector snaps to the project's tempo and warp grid,
+  and chords and pitches can be held to the project's key, so results need less cleaning up.
+- **Stem separation first:** separating a full mix into drums, bass and the rest before
+  detecting is the largest single gain in quality. Candidate: Demucs (MIT), model weights
+  checked first. Also offered on its own, as separating stems to new audio tracks.
+- **Dropping audio onto a MIDI track** asks which conversion to run (drums, bass, melody,
+  chords), and writes the result where the audio was dropped.
+- **Order:** after the sampler and drum rack exist; slicing first (smallest, reuses the
+  stretcher's analysis), then drums, bass, melody and chords, then stem separation. An ADR comes
+  before the detectors.
+- **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
+  can be compared note by note.
+
 ## Before the repository goes public
 
 - Clean-room documentation matches how the design was actually made, and `CONTRIBUTING.md`
@@ -173,8 +210,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Audio clips play with clip gain, loops and fades; unwarped clips also with transpose.
 - Warped clips are **time-stretched in real time** along their warp markers and keep their
   pitch ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips
-  opens in 3.1 s and plays at about 20 % of one core.
+  opens in 3.1 s.
+- Stretched transients stay on the grid: a fresh stretcher takes over before every strong onset,
+  so stretched drum loops no longer flam against unstretched ones (within 2 ms, measured with
+  click tests).
 - Arrangement clips are stretched 0.5 s ahead on a worker thread; the audio thread only copies
   their frames (2 % of one core on the same set, worst block 1–8 ms of its 10.7 ms).
-- Still to do: transpose on warped clips; launched clips stretched ahead too; a disk cache for the stretcher's analysis; Rubber Band as
+- Still to do: transpose on warped clips; launched clips stretched ahead too; a disk cache for
+  the stretcher's analysis; Rubber Band as
   the `HighQuality` stretch mode.

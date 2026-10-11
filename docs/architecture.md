@@ -54,9 +54,11 @@ L0        model
    samples in memory, so playback never reads the disk.
 3. **Build the renderer.** `Renderer::with_audio` turns the project into flat, sorted lists the
    audio thread can walk without searching: note events, audio events, one stretch voice per
-   warped clip placement, the prepared launcher clips and the per-track gains (group and master
-   chain included). Every buffer the renderer will ever need is allocated here. The player takes
-   the stretch worker (`Renderer::take_stretch_worker`) and runs it on its own thread.
+   warped clip placement (two stretchers each, so a fresh one takes over before every strong
+   onset and transients stay on the grid; ADR 0003), the prepared launcher clips and the
+   per-track gains (group and master chain included). Every buffer the renderer will ever need
+   is allocated here. The player takes the stretch worker (`Renderer::take_stretch_worker`) and
+   runs it on its own thread.
 4. **Play.** `Renderer::process` fills one block of interleaved stereo. It never allocates,
    locks, blocks or does I/O. Offline rendering (`render_offline*`, `render_launches`) calls the
    same `process` in a loop, so an offline render is the test oracle for playback, and the output
