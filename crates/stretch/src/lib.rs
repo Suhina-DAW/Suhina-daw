@@ -775,3 +775,50 @@ mod tests {
         assert!(short.iter().all(|s| *s == 0.0));
     }
 }
+
+#[cfg(test)]
+mod timing {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    /// Mono clicks every 0.5 s: 2 ms bursts.
+    fn clicks(seconds: f32) -> Vec<f32> {
+        let period = (0.5 * SR) as usize;
+        (0..(seconds * SR) as usize).map(|i| if i % period < 96 { 0.9 } else { 0.0 }).collect()
+    }
+
+    fn onsets(out: &[f32]) -> Vec<f32> {
+        let quiet_needed = (0.05 * SR) as usize;
+        let mut quiet = quiet_needed;
+        let mut found = Vec::new();
+        for (i, s) in out.iter().enumerate() {
+            if s.abs() > 0.2 {
+                if quiet >= quiet_needed {
+                    found.push(i as f32 / SR);
+                }
+                quiet = 0;
+            } else {
+                quiet += 1;
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn transients_stay_on_the_grid() {
+        // Clicks every 0.5 s land where the stretch puts them, without drifting over 30 s.
+        for (rate, worst) in [(0.95f32, 3.0f32), (1.05, 3.0), (0.7, 4.0), (1.5, 4.0), (0.5, 5.0), (2.0, 3.0)] {
+            let ratio = 1.0 / rate;
+            let input = clicks(30.0);
+            let mut output = vec![0.0; (input.len() as f32 * ratio) as usize];
+            let mut stretch = Stretch::new(1, SR);
+            assert!(stretch.exact(&input, &mut output));
+            let errors: Vec<f32> =
+                onsets(&output).iter().map(|t| (t - (t / ratio / 0.5).round() * 0.5 * ratio) * 1000.0).collect();
+            assert!(errors.len() >= 58, "x{rate}: {} clicks", errors.len());
+            let off = errors.iter().fold(0.0f32, |w, e| w.max(e.abs()));
+            assert!(off < worst, "x{rate}: {errors:?}");
+        }
+    }
+}
