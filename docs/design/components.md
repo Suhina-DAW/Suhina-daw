@@ -22,8 +22,10 @@ replaces them.
 
 - Radius 0 everywhere. No shadows, gradients or cards.
 - Regions are separated by 1 px gaps that show `line` beneath them.
-- Type: 11 px `IBM Plex Sans Condensed` for UI text; 10 px for small values and labels;
-  `IBM Plex Mono` for every number, time and position; 9 px only in rulers and key labels.
+- Type: 11 px `Encode Sans Semi Expanded` for UI text; 10 px for small values and labels;
+  a monospace for every number, time and position (egui's built-in one until `IBM Plex Mono`
+  is bundled); 9 px only in rulers and key labels. Fonts live in `crates/ui/fonts/` with their
+  licence and a row in `ATTRIBUTION.md`.
 - Text colours: `text.primary` for values and names, `text.secondary` for labels,
   `text.tertiary` for inactive and hints.
 

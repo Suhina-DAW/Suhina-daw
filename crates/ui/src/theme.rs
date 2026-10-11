@@ -66,8 +66,21 @@ pub fn hairline(color: Color32) -> Stroke {
     Stroke::new(1.0, color)
 }
 
-/// Sets egui's visuals and text styles to the tokens, for the few stock widgets the views use.
+/// The UI typeface: Encode Sans Semi Expanded (SIL Open Font License 1.1, `fonts/OFL.txt`).
+const UI_FONT: &[u8] = include_bytes!("../fonts/EncodeSansSemiExpanded-Regular.ttf");
+
+/// egui's fonts with Encode Sans first for UI text; numbers stay on egui's monospace font.
+fn fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("encode-sans".into(), std::sync::Arc::new(egui::FontData::from_static(UI_FONT)));
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "encode-sans".into());
+    fonts
+}
+
+/// Sets the fonts, and egui's visuals and text styles to the tokens, for the few stock widgets
+/// the views use.
 pub fn install(ctx: &egui::Context) {
+    ctx.set_fonts(fonts());
     ctx.set_theme(egui::Theme::Dark);
     ctx.all_styles_mut(|style| {
         style.visuals = egui::Visuals::dark();

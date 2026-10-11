@@ -248,4 +248,4 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every click is a command, the same the CLI and
   MCP run.
 - Still to do: the Arrangement view, browser, detail area (devices, clip editor), menu bar and
-  settings, project tabs, meters, solo and arm, the design's fonts, installers.
+  settings, project tabs, meters, solo and arm, the design's monospace font, installers.

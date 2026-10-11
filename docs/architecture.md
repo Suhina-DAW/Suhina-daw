@@ -175,5 +175,5 @@ queued clips.
   deadline; plug-in state and parameters go over messages. A crashing plug-in is reported and
   restarted without losing the project. An ADR comes first (M6).
 - **UI:** the Arrangement view, the browser, the detail area (device chain, clip editor), the
-  menu bar and settings, meters, and the commands they need (solo, arm, sends); the IBM Plex
-  fonts the design brief asks for (M8).
+  menu bar and settings, meters, and the commands they need (solo, arm, sends); the monospace
+  font the design brief asks for (M8).

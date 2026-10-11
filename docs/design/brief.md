@@ -60,7 +60,7 @@ From [research](#sources) and the first design rounds:
 | Base palette | Warm graphite surfaces in four lightness steps (see tokens) | Live's neutral mid-grey |
 | Accent | Iris `#A6A3FF`, used sparingly: transport play, solo, queued, device on, selected parameter | Orange as the active colour; cyan as the value colour |
 | Track colours | Our own muted palette (terracotta, ochre, steel blue, lavender, …) | Live's saturated pastel palette |
-| Type | IBM Plex Sans Condensed for UI, IBM Plex Mono for numbers and time | Live's typeface |
+| Type | Encode Sans Semi Expanded for UI text; a monospace for numbers and time (egui's built-in one for now, IBM Plex Mono planned) | Live's typeface |
 | Knobs | Small circle with a pointer line, value below | Live's open arc knobs |
 | Value fields | Neutral grey fill; volume fills full height with a level tick at the edges only; pan is a thin bottom bar growing from a centre tick | Live's cyan-filled boxes |
 | Toggles | Track on = light grey number button; solo = accent; arm = red ring, filled when armed | The orange numbered track button |
