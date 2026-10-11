@@ -18,12 +18,14 @@ are changing (*Code and its documents*).
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
 | [0004: Built-in devices](decisions/0004-built-in-devices.md) | decision | current | device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance | The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate |
 | [0005: Edits while playing](decisions/0005-edits-while-playing.md) | decision | current | edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26 | How edits reach an engine that is already playing — a new graph built off the audio thread and swapped in at an exact frame |
+| [0007: Several open projects](decisions/0007-several-open-projects.md) | decision | current | tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId | Several projects open at once like tabs, one active; where commands go, which project plays, and what is left for later |
+| [0008: Patch devices](decisions/0008-patch-devices.md) | decision | draft | Pure Data, Pd, plugdata, libpd, patch, patch device, community devices, Max for Live, Max device, amxd, scripting devices, collect and save | Proposed way for the community to build devices as Pure Data patches (plugdata, libpd) with access to commands, and how imported Max devices are kept |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
@@ -58,6 +60,7 @@ Change this code, and check these documents.
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |

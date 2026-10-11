@@ -18,6 +18,9 @@ pub enum CommandKind {
     /// Controls playback in the attached audio engine (transport, clip launching); never
     /// changes the project or its undo history.
     Transport,
+    /// Opens, switches or closes whole projects (the open projects, like tabs); never changes a
+    /// project or its undo history. Runs on [`crate::Projects`], not on one session.
+    Projects,
 }
 
 impl CommandKind {
@@ -27,11 +30,13 @@ impl CommandKind {
             Self::Edit => "edit",
             Self::History => "history",
             Self::Transport => "transport",
+            Self::Projects => "projects",
         }
     }
 }
 
-type Run = fn(&mut Session, &Value) -> Result<Value, CommandError>;
+/// How a command runs: on one session, or (for [`CommandKind::Projects`]) on the open projects.
+pub type Run<T> = fn(&mut T, &Value) -> Result<Value, CommandError>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamType {
@@ -53,7 +58,7 @@ pub struct Param {
     pub doc: &'static str,
 }
 
-const fn param(name: &'static str, ty: ParamType, doc: &'static str) -> Param {
+pub(crate) const fn param(name: &'static str, ty: ParamType, doc: &'static str) -> Param {
     Param { name, ty, required: true, doc }
 }
 
@@ -64,17 +69,17 @@ const fn optional(name: &'static str, ty: ParamType, doc: &'static str) -> Param
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
-pub struct CommandSpec {
+pub struct CommandSpec<T: 'static = Session> {
     /// Stable id in `area.verb` form; part of the public interface for agents.
     pub id: &'static str,
     /// One line saying what the command does.
     pub label: &'static str,
     pub params: &'static [Param],
     pub kind: CommandKind,
-    pub run: Run,
+    pub run: Run<T>,
 }
 
-impl CommandSpec {
+impl<T> CommandSpec<T> {
     /// The parameters as a JSON Schema object, for MCP tool listings.
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
@@ -91,6 +96,11 @@ impl CommandSpec {
         }
         let required: Vec<&str> = self.params.iter().filter(|p| p.required).map(|p| p.name).collect();
         json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false })
+    }
+
+    /// The command as `commands.list` and the MCP server's `command_list` show it.
+    pub fn describe(&self) -> Value {
+        json!({ "id": self.id, "label": self.label, "kind": self.kind.name(), "params": self.input_schema() })
     }
 }
 
