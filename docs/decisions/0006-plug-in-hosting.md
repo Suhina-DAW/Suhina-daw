@@ -97,6 +97,12 @@ workspace forbids.
     floating on Wayland and macOS, which have no public way to embed another process's window.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple
     silicon, Windows plug-ins on Linux through Wine.
+12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which
+    load like any other. Windows-only plug-ins reach Linux through yabridge (GPL-3.0), which
+    wraps each one as a Linux CLAP or VST3 file; Loopwerk loads those like native plug-ins once
+    CLAP and VST3 hosting work, with nothing of its own to build. It costs a second process hop
+    (our host, then yabridge's Wine process). Windows plug-ins that exist only as VST2 do not
+    work this way (decision 8).
 
 ## Not decided yet
 
@@ -104,6 +110,10 @@ workspace forbids.
   (observed from plug-ins and hosts we may use, written in `docs/spec/`), an optional crate kept
   apart from the rest, no use of the VST trademark, and legal advice before release. Decided
   when we know which plug-ins people still use only as VST2.
+- **Our own Wine host** for Windows plug-ins on Linux (`loopwerk-plugin-host` built for Wine,
+  speaking the same protocol, so one hop instead of two and one place for crashes, scanning and
+  editors). Decided after native CLAP and VST3 work and the cost of the yabridge path has been
+  measured; yabridge's code (GPL-3.0) can be read for how it solves the same problems.
 - macOS block sync and audio workgroup details, after the prototype.
 - Audio Units on macOS, LV2 on Linux, ARA (LOOP-15).
 
