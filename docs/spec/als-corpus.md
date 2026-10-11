@@ -1,6 +1,6 @@
 ---
 description: How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces
-read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal
+read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
 type: howto
 status: current
 last_verified: 2026-10-11
@@ -345,6 +345,70 @@ P="corpus/devices/100-base Project"
 git diff --no-index "$P/110-utility-default.als.xml" "$P/111-utility-gain-minus12.als.xml"
 ```
 
+## Series 7: automation
+
+Teaches the importer how Live stores automation: arrangement envelopes on the mixer, on device
+parameters and on the tempo, their breakpoints and curves, the state when a control has been
+moved by hand over its automation, and envelopes inside session clips. The arrangement files
+also get a bounce, so Loopwerk's render of the same automation can be compared with Live's.
+
+Like series 1–4, **each file is the previous one plus one edit**: automation is built up step
+by step, and a diff between neighbours shows one change.
+
+### Setup
+
+1. Make the test signal if you have not (series 6, step 1).
+2. Open `corpus/devices/…/100-base.als` (one audio track with the test signal at bar 1, warp off,
+   tempo 120) and Save As `corpus/automation/300-base.als`. Live creates
+   `corpus/automation/300-base Project/`; save the whole series there.
+3. In Arrangement View, show the audio track's automation lane (the track's automation button,
+   or press `A`). Choose envelopes with the lane's two menus: device (`Mixer`, `Utility`, …) and
+   parameter (`Track Volume`, `Track Panning`, …).
+
+**Placing a breakpoint at an exact value:** double-click the line at the bar to add a point,
+then right-click the point › Edit Value and type the value. Positions are on bar lines, so
+snap to the grid is enough. Log what you did if Live behaves differently.
+
+Bounce the arrangement files (`301`–`314`) as in series 6 (Master, `1.1.1`, `4.0.0`, WAV 48 kHz
+24-bit, no normalise, no dither) into `corpus/automation/bounces/` under the set's name. For
+`311` (tempo) render 6 bars instead of 4, so the whole signal fits at the faster tempo.
+
+### Arrangement automation (300–314)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 300 | `300-base.als` | No edit: the series 6 base, saved here. |
+| 301 | `301-volume-two-points.als` | Mixer › Track Volume: a point at bar 1 at `0` dB and one at bar 3 at `-12` dB. |
+| 302 | `302-volume-third-point.als` | Add a point at bar 4 at `-inf` (drag it to the bottom). |
+| 303 | `303-volume-curve.als` | Curve the segment between bar 1 and bar 3: hold Alt and drag the line downwards. Log what the curve looks like. |
+| 304 | `304-pan.als` | Mixer › Track Panning: bar 1 `50L`, bar 3 `50R`. |
+| 305 | `305-track-activator.als` | Mixer › Track Activator (the mute): off from bar 2, on again from bar 3. |
+| 306 | `306-send.als` | Mixer › Send A (add one return track first if the base has none, and log it): bar 1 `-inf`, bar 2 `0` dB. |
+| 307 | `307-device-gain.als` | Add Utility to the track (the device itself). Utility › Gain: bar 1 `0` dB, bar 3 `-12` dB. |
+| 308 | `308-device-switch.als` | Utility › Mono: off at bar 1, on from bar 2. |
+| 309 | `309-device-choice.als` | Utility › Channel Mode (the input menu): Stereo at bar 1, Left from bar 3. |
+| 310 | `310-main-volume.als` | The Main track's Mixer › Track Volume: bar 1 `0` dB, bar 4 `-6` dB. |
+| 311 | `311-tempo.als` | The Main track's Mixer › Song Tempo: bar 1 `120`, bar 3 `140`. Bounce 6 bars. |
+| 312 | `312-overridden.als` | Remove the tempo envelope again (select it, Delete), then drag the audio track's volume fader by hand, so its automation is overridden (the Re-Enable Automation button lights up). |
+| 313 | `313-re-enabled.als` | Click Re-Enable Automation. |
+| 314 | `314-volume-cleared.als` | Right-click the volume lane › Clear Envelope (or select all its points and Delete). |
+
+### Clip envelopes (320–323)
+
+No bounces: Export renders the arrangement, not session clips.
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 320 | `320-session-clip.als` | In Session View, drag `test-signal.wav` into the audio track's first clip slot. Warp off. |
+| 321 | `321-clip-volume-envelope.als` | Clip View › Envelopes, Mixer › Track Volume: a ramp from `0` dB at the clip's start to `-12` dB at its end. |
+| 322 | `322-clip-device-envelope.als` | In the same clip, Utility › Gain: `0` dB at the start, `-12` dB halfway. |
+| 323 | `323-clip-envelope-unlinked.als` | Unlink the clip's envelope (the Link switch in the envelope panel) and give it a loop of 1 bar. Log how. |
+
+### Log
+
+`corpus/automation/README.md`, as in series 6, with a column for the values Live showed on each
+point.
+
 ## Tips from the first run
 
 - Live's default new set already has two MIDI tracks, two audio tracks, two returns and eight
@@ -388,7 +452,6 @@ Date:
 
 ## Later series
 
-Not yet; each gets its own section when the importer needs it: tempo and time-signature
-automation, track automation, groups, return tracks, follow actions, launch quantisation and
+Not yet; each gets its own section when the importer needs it: groups, return tracks, follow actions, launch quantisation and
 launch modes, MIDI CC and pitch-bend envelopes, comping and take lanes, Max for Live devices
 (as opaque placeholders), and sets saved by older Live versions.
