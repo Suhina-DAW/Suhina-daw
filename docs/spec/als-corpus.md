@@ -337,6 +337,12 @@ Date:
 | 111-utility-gain-minus12.als | | -12.0 dB | | |
 ```
 
+### Test
+
+`cargo test -p loopwerk-als --features corpus` also reads the device series and checks that
+each Utility file imports as the Loopwerk utility with the values the file holds. It finds the
+files in whichever project folder under `corpus/devices/` holds them.
+
 ### Extract and diff a device file
 
 ```sh

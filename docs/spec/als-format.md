@@ -6,6 +6,7 @@ status: current
 last_verified: 2026-10-11
 covers:
   - crates/als/src/lib.rs
+  - crates/als/src/devices.rs
   - crates/als/tests/synthetic.rs
 ---
 
@@ -196,7 +197,9 @@ from `true` to `false`) and `UserName@Value` (empty unless renamed).
 **Live's own devices** are elements named after the device type: `OriginalSimpler`, `Eq8`,
 `Reverb`, `Delay`. Their parameters are nested elements with the usual `Manual` values; band 3
 gain of EQ Eight is `Bands.2/ParameterA/Gain/Manual` (+3 dB stored as `3`). `LastPresetRef`
-points at the default preset the device was loaded from.
+points at the default preset the device was loaded from. The importer keeps them as
+placeholders, except the ones that have a Loopwerk counterpart: those become Loopwerk devices
+with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, below).
 
 **Plug-ins** are `PluginDevice` elements whose `PluginDesc` holds one of:
 

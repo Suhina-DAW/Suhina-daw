@@ -141,7 +141,25 @@ pub struct Device {
     pub enabled: bool,
     /// Plug-in state, handed back to the plug-in unchanged.
     pub state: Option<Vec<u8>>,
+    /// Parameter values of a built-in device (`DeviceKind::Builtin`); empty for plug-ins and
+    /// placeholders. Parameters that are not listed keep their defaults.
+    pub params: Vec<DeviceParam>,
     pub extensions: Extensions,
+}
+
+/// One parameter value of a built-in device, by the parameter's stable id (ADR 0004). The value
+/// is in the parameter's own unit (decibels, hertz, a fraction for a percentage, an option
+/// index for a choice); the device limits it to its range when it loads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceParam {
+    pub id: String,
+    pub value: f64,
+}
+
+impl DeviceParam {
+    pub fn new(id: impl Into<String>, value: f64) -> Self {
+        Self { id: id.into(), value }
+    }
 }
 
 /// Reusable musical content: the notes of a clip, a pattern shared by several tracks, an audio
