@@ -1,4 +1,4 @@
-# 0002: egui for the UI; familiar workflow, Loopwerk's own look
+# 0003: egui for the UI; familiar workflow, Loopwerk's own look
 
 - **Status:** accepted
 - **Date:** 2026-10-11

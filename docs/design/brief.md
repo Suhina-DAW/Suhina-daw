@@ -1,6 +1,6 @@
 # Design brief
 
-How Loopwerk looks. Read with [ADR 0002](../decisions/0002-ui-toolkit-and-look.md): the workflow
+How Loopwerk looks. Read with [ADR 0003](../decisions/0003-ui-toolkit-and-look.md): the workflow
 is familiar to Ableton Live users, the look is Loopwerk's own. This brief is what a designer (or a
 design tool) gets, together with the functional specs in `docs/spec/ui-*.md`. Never give a design
 tool screenshots of Live.
