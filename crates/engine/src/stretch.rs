@@ -223,6 +223,21 @@ impl StretchVoice {
         usize::from(self.data.channels)
     }
 
+    /// Rewinds the voice to the clip's first frame, for a transport restart or a relaunch.
+    /// Never allocates.
+    pub(crate) fn restart(&mut self) {
+        self.processor.reset();
+        self.controller.set_tempo_rate(self.pieces.first().map_or(1.0, |p| p.rate));
+        self.feed_piece = 0;
+        self.feed_frame = self.pieces.first().map_or(0, |p| p.src_start.max(0.0) as usize);
+        self.source.set_track_position(self.feed_frame as u64);
+        self.next_retarget = 0;
+        self.started = false;
+        self.fifo_len = 0;
+        self.fifo_read = 0;
+        self.fifo_position = 0.0;
+    }
+
     /// Pushes playlist audio into the stretcher's ring until it is full or the playlist ends.
     fn feed(&mut self) {
         let channels = self.channels();

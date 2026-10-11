@@ -5,6 +5,6 @@ pub mod render;
 pub mod server;
 pub mod workspace;
 
-pub use render::{RenderSummary, render_wav, scene_as_arrangement};
-pub use server::LoopwerkMcp;
+pub use render::{LaunchStep, RenderSummary, render_launch_script, render_wav, scene_as_arrangement};
+pub use server::{AudioOutput, LoopwerkMcp};
 pub use workspace::{Workspace, display_path};

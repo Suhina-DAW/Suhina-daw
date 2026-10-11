@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 timestretch = "0.15"  # MIT, pure Rust (ADR 0003)
 loopwerk-model.workspace = true
+rtrb.workspace = true
 
 [lints]
 workspace = true

@@ -17,6 +17,7 @@ loopwerk-automation.workspace = true
 loopwerk-media.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
 cpal.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

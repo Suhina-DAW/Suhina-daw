@@ -8,7 +8,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `loopwerk-cli play` | done (verified on Windows) |
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | next |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | in progress |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 after | |
 | M7 | **More formats:** DAWproject import and export | |
@@ -58,6 +58,24 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   only below granted roots ([`docs/mcp.md`](docs/mcp.md)).
 - Still to do: more commands (notes, clips, sends, tracks), a native project format so edits can
   be saved, MCP resources.
+
+### M4 Clip launching (in progress)
+- The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
+  too, or none), following the time signature; 1 bar by default
+  ([spec](docs/spec/clip-launching.md)).
+- One clip per track; a clip loops until it is stopped or replaced, a clip without a loop plays
+  once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
+  tempo changes the tempo at the launch.
+- A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- Warped launched clips are time-stretched like arrangement clips, and re-pitched after a tempo
+  change.
+- Transport commands (`clip.launch`, `scene.launch`, `track.stop`, `launcher.*`,
+  `transport.play`/`stop`) reach the audio thread through a lock-free queue:
+  `loopwerk-cli play --launcher` takes them as typed lines, `loopwerk-cli mcp --audio` from
+  agents, and `project_render` renders a script of them offline.
+- Still to do: follow actions, launch modes, per-clip quantisation, reading the global
+  quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
+  against Live.
 
 ### M5 Audio (in progress)
 - Audio files (WAV, AIFF, FLAC, MP3, Ogg Vorbis) are decoded in parallel when a set opens.
