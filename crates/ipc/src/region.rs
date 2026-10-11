@@ -1,0 +1,230 @@
+//! The shared-memory region: a header of atomics, then the input and the output buffer.
+//!
+//! The region is a file mapped by both processes (in `/dev/shm` on Linux, so it stays in
+//! memory; in the temporary directory elsewhere). The engine creates it and removes it when the
+//! link is dropped.
+
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use memmap2::MmapMut;
+
+use crate::{IpcError, MAX_CHANNELS, MAX_FRAMES};
+
+const MAGIC: u32 = 0x4C57_4950;
+const VERSION: u32 = 1;
+/// The header's size; the buffers start after it.
+const HEADER_BYTES: usize = 256;
+// Byte offsets of the header fields. The words the two sides write sit on cache lines of their
+// own.
+const AT_MAGIC: usize = 0;
+const AT_VERSION: usize = 4;
+const AT_CHANNELS: usize = 8;
+const AT_MAX_FRAMES: usize = 12;
+const AT_REQUEST: usize = 64;
+const AT_RESPONSE: usize = 128;
+const AT_FRAMES: usize = 192;
+
+/// Bytes a region for `channels` × `max_frames` needs: the header and two buffers.
+fn size(channels: u32, max_frames: u32) -> Option<usize> {
+    let samples = (channels as usize).checked_mul(max_frames as usize)?;
+    samples.checked_mul(2 * size_of::<f32>())?.checked_add(HEADER_BYTES)
+}
+
+/// Where new regions go.
+fn directory() -> PathBuf {
+    let shm = Path::new("/dev/shm");
+    if cfg!(target_os = "linux") && shm.is_dir() { shm.to_path_buf() } else { std::env::temp_dir() }
+}
+
+pub(crate) struct Region {
+    map: MmapMut,
+    path: PathBuf,
+    name: String,
+    channels: u32,
+    max_frames: u32,
+    /// Whether this side created the region and removes it.
+    owner: bool,
+}
+
+impl Region {
+    pub(crate) fn create(channels: u32, max_frames: u32) -> Result<Self, IpcError> {
+        let len = size(channels, max_frames).ok_or(IpcError::BadSize { channels, max_frames })?;
+        let name = unique_name();
+        let path = directory().join(&name);
+        let file = OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
+        file.set_len(len as u64)?;
+        let mut region = Self { map: map(&file)?, path, name, channels, max_frames, owner: true };
+        region.map.fill(0);
+        region.word(AT_MAGIC).store(MAGIC, Ordering::Relaxed);
+        region.word(AT_VERSION).store(VERSION, Ordering::Relaxed);
+        region.word(AT_CHANNELS).store(channels, Ordering::Relaxed);
+        region.word(AT_MAX_FRAMES).store(max_frames, Ordering::Release);
+        Ok(region)
+    }
+
+    pub(crate) fn open(path: &Path) -> Result<Self, IpcError> {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| n.starts_with("loopwerk-ipc-"))
+            .ok_or(IpcError::BadLink("not a Loopwerk link name"))?
+            .to_string();
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        if (file.metadata()?.len() as usize) < HEADER_BYTES {
+            return Err(IpcError::BadLink("too short"));
+        }
+        let map = map(&file)?;
+        let mut region = Self { map, path: path.to_path_buf(), name, channels: 0, max_frames: 0, owner: false };
+        if region.word(AT_MAGIC).load(Ordering::Acquire) != MAGIC {
+            return Err(IpcError::BadLink("wrong magic number"));
+        }
+        if region.word(AT_VERSION).load(Ordering::Acquire) != VERSION {
+            return Err(IpcError::BadLink("made by another version"));
+        }
+        let channels = region.word(AT_CHANNELS).load(Ordering::Acquire);
+        let max_frames = region.word(AT_MAX_FRAMES).load(Ordering::Acquire);
+        if !(1..=MAX_CHANNELS).contains(&channels) || !(1..=MAX_FRAMES).contains(&max_frames) {
+            return Err(IpcError::BadSize { channels, max_frames });
+        }
+        if size(channels, max_frames).is_none_or(|needed| needed > region.map.len()) {
+            return Err(IpcError::BadLink("shorter than its sizes say"));
+        }
+        region.channels = channels;
+        region.max_frames = max_frames;
+        Ok(region)
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn channels(&self) -> u32 {
+        self.channels
+    }
+
+    pub(crate) fn max_frames(&self) -> u32 {
+        self.max_frames
+    }
+
+    /// Samples in each buffer.
+    pub(crate) fn samples(&self) -> usize {
+        self.channels as usize * self.max_frames as usize
+    }
+
+    /// The atomic word at byte `offset` of the header.
+    fn word(&self, offset: usize) -> &AtomicU32 {
+        let ptr = self.map.as_ptr().wrapping_add(offset).cast::<AtomicU32>();
+        // SAFETY: `offset` is one of the header constants, inside the mapping (which is at
+        // least `HEADER_BYTES` long, checked on create and open) and 4-byte aligned (the
+        // mapping is page-aligned). The other process only ever touches these bytes through
+        // atomics too, and `AtomicU32` allows shared mutation through `&`.
+        unsafe { &*ptr }
+    }
+
+    pub(crate) fn request_word(&self) -> &AtomicU32 {
+        self.word(AT_REQUEST)
+    }
+
+    pub(crate) fn response_word(&self) -> &AtomicU32 {
+        self.word(AT_RESPONSE)
+    }
+
+    pub(crate) fn request(&self) -> u32 {
+        self.request_word().load(Ordering::Acquire)
+    }
+
+    pub(crate) fn response(&self) -> u32 {
+        self.response_word().load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_request(&self, value: u32) {
+        self.request_word().store(value, Ordering::Release);
+    }
+
+    pub(crate) fn set_response(&self, value: u32) {
+        self.response_word().store(value, Ordering::Release);
+    }
+
+    /// Frames in the current block; at most `max_frames`, whatever the other side wrote.
+    pub(crate) fn frames(&self) -> u32 {
+        self.word(AT_FRAMES).load(Ordering::Acquire).min(self.max_frames)
+    }
+
+    pub(crate) fn set_frames(&self, frames: u32) {
+        self.word(AT_FRAMES).store(frames, Ordering::Release);
+    }
+
+    /// Start of buffer `index` (0 input, 1 output).
+    fn buffer(&mut self, index: usize) -> *mut f32 {
+        let offset = HEADER_BYTES + index * self.samples() * size_of::<f32>();
+        self.map.as_mut_ptr().wrapping_add(offset).cast::<f32>()
+    }
+
+    /// Copies `samples` (at most `samples()` long) into the input buffer.
+    pub(crate) fn write_input(&mut self, samples: &[f32]) {
+        let len = samples.len().min(self.samples());
+        let to = self.buffer(0);
+        // SAFETY: the input buffer has room for `samples()` values, `len` is at most that, the
+        // source is a separate Rust slice so they do not overlap, and the buffer is 4-byte
+        // aligned (after a 256-byte header in a page-aligned mapping). The protocol gives the
+        // engine the buffer alone: the host does not read it until the request is published,
+        // which happens after this copy.
+        unsafe { std::ptr::copy_nonoverlapping(samples.as_ptr(), to, len) };
+    }
+
+    /// Copies the output buffer's first `out.len()` values (at most `samples()`) into `out`.
+    pub(crate) fn read_output(&mut self, out: &mut [f32]) {
+        let len = out.len().min(self.samples());
+        let from = self.buffer(1);
+        // SAFETY: as in `write_input`, the other way: the output buffer holds `samples()`
+        // values, `len` is at most that, and the host has finished with it (its response was
+        // read with Acquire ordering before this copy).
+        unsafe { std::ptr::copy_nonoverlapping(from, out.as_mut_ptr(), len) };
+    }
+
+    /// Runs `process` on the first `samples` values of both buffers, the output zeroed first.
+    pub(crate) fn with_block(&mut self, samples: usize, process: impl FnOnce(&[f32], &mut [f32])) {
+        let len = samples.min(self.samples());
+        let (input, output) = (self.buffer(0), self.buffer(1));
+        // SAFETY: both buffers hold `samples()` values and `len` is at most that; they do not
+        // overlap (the output starts where the input ends); they are 4-byte aligned. Every bit
+        // pattern is a valid f32. The protocol gives the host both buffers alone between the
+        // engine's request and the host's response, and the slices do not outlive this call.
+        let input = unsafe { std::slice::from_raw_parts(input, len) };
+        // SAFETY: as above; the output slice is the only reference to the output buffer.
+        let output = unsafe { std::slice::from_raw_parts_mut(output, len) };
+        output.fill(0.0);
+        process(input, output);
+    }
+}
+
+impl Drop for Region {
+    fn drop(&mut self) {
+        if self.owner {
+            // A host that still has it mapped keeps its view; on Windows the file stays until it
+            // closes. Nothing to do about a failure here.
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn map(file: &File) -> Result<MmapMut, IpcError> {
+    // SAFETY: mapping a file is unsafe because another process may change it underneath. That
+    // is the point here: the only other writer is the peer of this link, and every access
+    // goes through atomics or through the buffers the protocol hands to one side at a time.
+    Ok(unsafe { MmapMut::map_mut(file) }?)
+}
+
+/// A file name no other link uses: the process id, a counter and the time.
+fn unique_name() -> String {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+    format!("loopwerk-ipc-{}-{count}-{nanos}", std::process::id())
+}

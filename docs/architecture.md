@@ -58,6 +58,7 @@ The engine does not run them yet (see *Planned parts*).
 | `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
+| `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region, one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Not used by the engine yet. | nothing |
 | `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono (with listening to the low band alone), phase inversion, channel selection, DC filter, mute. | dsp, device-api |
 | `devices/auto-pan` | The auto-pan device: an LFO (six shapes, shaping, inversion) that pans or, with no stereo phase, does tremolo; free in hertz or synced to the song position. | dsp, device-api |
 | `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
@@ -165,8 +166,8 @@ queued clips.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
   (AGENTS.md rule 5), as [ADR 0006](decisions/0006-plug-in-hosting.md) decides: a
   `loopwerk-plugin-host` executable per plug-in binary, shared-memory audio and events with a
-  per-block deadline through the `ipc` crate, state and control over messages, crashed or hung
-  plug-ins restarted from their last state. `ipc` and `plugin-host` are the only crates allowed
-  `unsafe` (M6).
+  per-block deadline through the `ipc` crate (which exists: blocks, deadline, crash and hang
+  tests), state and control over messages, crashed or hung plug-ins restarted from their last
+  state. `ipc` and `plugin-host` are the only crates allowed `unsafe` (M6).
 - **UI:** Session and Arrangement views as a crate on top of `session`, using the same commands
   and reading engine state through monitors like `LauncherMonitor` (M8).

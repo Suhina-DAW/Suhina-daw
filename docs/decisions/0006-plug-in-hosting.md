@@ -4,6 +4,8 @@ read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC,
 type: decision
 status: current
 last_verified: 2026-10-11
+covers:
+  - crates/ipc/**
 ---
 
 # 0006: Plug-in hosting
@@ -123,6 +125,10 @@ workspace forbids.
   many plug-in products this is noticeable. Grouping by product and running chains in one round
   trip keep it bounded; *in process* is not offered.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
+- Measured with `ipc` on Windows (test `round_trips_with_another_process`, 128 frames, the peer
+  at normal priority): blocks back to back take 0.7 µs per round trip, because the peer is still
+  spinning; with 2.5 ms between blocks, as in playback, 19 µs on average and 0.8 ms at worst,
+  the worst case being why the host's audio thread needs real-time priority.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3 and VST2 migration; plug-ins in the
   engine's track chain together with built-in devices (LOOP-35); editors.
