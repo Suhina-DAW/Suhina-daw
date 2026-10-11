@@ -13,8 +13,25 @@ path = "src/main.rs"
 loopwerk-ipc.workspace = true
 loopwerk-plugins.workspace = true
 interprocess = "2.4"  # 0BSD OR Apache-2.0
+clack-host = { version = "0.2", features = ["clack-plugin"] }  # MIT OR Apache-2.0
+# The test plug-in built into the host (`test:clap`).
+clack-plugin = "0.2"  # MIT OR Apache-2.0
+clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "latency", "log", "state"] }  # MIT OR Apache-2.0
 
-# ADR 0006 allows this crate `unsafe` for loading plug-ins. Until plug-in formats land it needs
-# none, so it keeps the workspace lints (and `forbid`).
-[lints]
-workspace = true
+# The workspace lints, except that this crate may use `unsafe` to load plug-ins (ADR 0006). It
+# cannot inherit them with `workspace = true` and change one, so they are repeated here; keep
+# them in step.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"

@@ -155,6 +155,10 @@ impl Served {
         self.region.channels()
     }
 
+    pub fn max_frames(&self) -> u32 {
+        self.region.max_frames()
+    }
+
     /// Waits until `timeout` has passed for a block, runs `process(input, output)` on it
     /// (interleaved, the same length, the output zeroed) and answers. Returns whether a block
     /// was served.

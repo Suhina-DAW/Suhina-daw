@@ -66,7 +66,7 @@ crates/
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
   ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)
   plugins  L1 the engine's side of plug-in hosting: start a host process, control protocol, health, state, restart
-  plugin-host  the loopwerk-plugin-host executable plug-ins run in (ADR 0006; may use unsafe); test processors for now
+  plugin-host  the loopwerk-plugin-host executable plug-ins run in (ADR 0006; may use unsafe): CLAP through clack-host, test plug-ins
 devices/
   utility  gain, balance, width, mono, bass mono, phase, channels, DC filter; depends on dsp, device-api
   auto-pan LFO panning and tremolo, free in Hz or synced to the song position

@@ -88,7 +88,12 @@ workspace forbids.
    crate stays `forbid`. Both offer safe APIs, keep `unsafe` blocks small, explain each one in a
    `// SAFETY:` comment (`clippy::undocumented_unsafe_blocks` denied there) and test them. `ipc`
    runs inside the engine process, so it stays small.
-7. **Formats.** CLAP first, then VST3, on the same boundary.
+7. **Formats.** CLAP first, then VST3, on the same boundary. CLAP goes through `clack-host`:
+   the instance stays on the host's main thread (with the plug-in's main-thread callbacks), the
+   started audio processor on its audio thread. A plug-in is named `clap:<file>` or
+   `clap:<file>#<id>`; the only `unsafe` the host needs for it is opening the file. A CLAP gain
+   built into the host (`test:clap`, made with `clack-plugin`) lets the tests run the whole path
+   without a plug-in installed; `LOOPWERK_TEST_CLAP` runs them against a real file too.
 8. **VST2: through VST3, no VST2 host for now.** A project that names a VST2 plug-in is opened
    with the installed VST3 that declares it replaces it, and the saved VST2 state is handed to
    it. Without such a VST3 the device stays in the project as a *missing plug-in* with its state

@@ -77,6 +77,7 @@ pub struct Launch {
     pub plugin: String,
     pub channels: u32,
     pub max_frames: u32,
+    pub sample_rate: f64,
     /// How long to wait for the host to start, load the plug-in or answer a request.
     pub timeout: Duration,
 }
@@ -168,7 +169,11 @@ impl Plugin {
             Message::Hello { version } if version == VERSION => {}
             other => return Err(PluginError::Protocol(format!("host speaks another version: {other:?}"))),
         }
-        let load = Message::Load { plugin: plugin.launch.plugin.clone(), link: link.address() };
+        let load = Message::Load {
+            plugin: plugin.launch.plugin.clone(),
+            link: link.address(),
+            sample_rate: plugin.launch.sample_rate,
+        };
         plugin.send(&load)?;
         if let Message::Loaded { latency } = plugin.reply("load", |m| matches!(m, Message::Loaded { .. }))? {
             plugin.latency = latency;
