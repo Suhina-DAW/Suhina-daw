@@ -73,26 +73,28 @@ Example, the FM synth that Live's **Operator** imports into:
   real sound. Until the device exists, Operator comes in as a placeholder that keeps all its
   parameters.
 
-The other devices, planned the same way (sources are candidates; each licence is checked when
-the work starts):
+Every device, planned the same way (sources are candidates; each licence is checked when the
+work starts). **DSP done** means the device exists in `devices/` and passes its tests, but the
+engine does not run it yet; **import** is whether a Live Set's device comes in as it (otherwise a
+placeholder):
 
-| Imports from Live | Loopwerk device | DSP from |
-|---|---|---|
-| Utility, Auto Pan | utility, auto-pan | own |
-| EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) |
-| Vinyl Distortion | vinyl distortion | own |
-| Overdrive | overdrive | own, oversampled |
-| Glue Compressor, Compressor | bus compressor, compressor | own, Airwindows (MIT) for reference |
-| Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors |
-| Delay, Echo | delays | own delay lines |
-| Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution |
-| Saturator, Roar | multi-stage saturation | own, oversampled |
-| EQ Eight, Auto Filter | EQ, filter | own (`dsp` filters) |
-| Operator | FM synth | MSFA (Apache-2.0) via Dexed |
-| Wavetable | wavetable synth | Vital (GPL-3.0), under its own name |
-| Drift, Analog | subtractive synth | own, Surge XT (GPL-3.0) for reference |
-| Simpler, Sampler, Drum Rack | sampler, drum rack | own |
-| Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) |
+| Imports from Live | Loopwerk device | DSP from | Status |
+|---|---|---|---|
+| Utility, Auto Pan | utility, auto-pan | own | DSP done; import planned |
+| EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | DSP done; import planned |
+| Vinyl Distortion | vinyl distortion | own, oversampled | DSP done; import planned |
+| Overdrive | overdrive | own, oversampled | DSP done; import planned |
+| Glue Compressor, Compressor | bus compressor, compressor | own, Airwindows (MIT) for reference | planned |
+| Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors | planned |
+| Delay, Echo | delays | own delay lines | planned |
+| Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
+| Saturator, Roar | multi-stage saturation | own, oversampled | planned |
+| EQ Eight, Auto Filter | EQ, filter | own (`dsp` filters) | planned |
+| Operator | FM synth | MSFA (Apache-2.0) via Dexed | planned |
+| Wavetable | wavetable synth | Vital (GPL-3.0), under its own name | planned |
+| Drift, Analog | subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
+| Simpler, Sampler, Drum Rack | sampler, drum rack | own | planned |
+| Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) | planned |
 
 ## Audio to MIDI
 
