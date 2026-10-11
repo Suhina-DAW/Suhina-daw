@@ -7,7 +7,8 @@ tool screenshots of Live.
 
 Reference mockups (our own work, minimal v3):
 [Session](reference/session-minimal-v3.png) and [Arrangement](reference/arrangement-minimal-v3.png).
-They are the visual target; this file records the decisions behind them. Where the text and an
+They are the visual target; this file records the decisions behind them, and
+[`components.md`](components.md) the measurements and states of every component. Where the text and an
 image disagree, the text wins. These images may be given to design tools and agents; screenshots
 of Live may not.
 
