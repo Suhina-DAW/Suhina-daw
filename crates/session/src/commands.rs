@@ -199,6 +199,16 @@ static COMMANDS: &[CommandSpec] = &[
         run: stop,
     },
     CommandSpec {
+        id: "transport.setMetronome",
+        label: "Turn the metronome on or off: a click on every beat while playing, higher on the bar",
+        params: &[
+            param("on", ParamType::Bool, "true turns the click on"),
+            optional("db", ParamType::Decibels, "click level in dB, at most +6; -6 by default"),
+        ],
+        kind: CommandKind::Transport,
+        run: set_metronome,
+    },
+    CommandSpec {
         id: "clip.launch",
         label: "Launch the clip in a track's slot at the next quantisation boundary (an empty slot with a stop button stops the track)",
         params: &[TRACK, SCENE],
@@ -382,6 +392,17 @@ fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError
     Ok(json!({ "mute": mute }))
 }
 
+fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let on = params.get("on").and_then(Value::as_bool).ok_or("on must be true or false")?;
+    let db = if params.get("db").is_some() { number_or_neg_infinity(params, "db")? } else { -6.0 };
+    if db > 6.0 {
+        return Err(format!("db must be at most +6, got {db}").into());
+    }
+    let gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) };
+    send(session, LaunchCommand::SetMetronome { on, gain: gain as f32 })?;
+    Ok(json!({ "metronome": on, "db": to_db(gain) }))
+}
+
 fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let track = track_id(&session.project, params)?;
     let index = params.get("index").and_then(Value::as_u64).ok_or("index must be a whole number from project.clips")?;
@@ -444,6 +465,7 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
 fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     let monitor = session.player_mut()?.monitor();
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
+    let monitor_metronome = monitor.metronome();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
     let ts = p.transport.time_signature;
@@ -480,6 +502,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
     let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
     Ok(json!({
         "running": running,
+        "metronome": monitor_metronome,
         "tempo_bpm": tempo,
         "beat": (beat * 1000.0).round() / 1000.0,
         "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),

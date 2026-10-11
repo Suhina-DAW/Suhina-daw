@@ -72,6 +72,11 @@ pub enum LaunchCommand {
     SetQuantization(Quantization),
     /// Every track plays its arrangement clips again.
     BackToArrangement,
+    /// Turns the metronome on or off; `gain` is its level (linear, 0.5 is -6 dB).
+    SetMetronome {
+        on: bool,
+        gain: f32,
+    },
 }
 
 /// What a column is waiting to do, as reported by [`LauncherMonitor::column`].
@@ -107,6 +112,7 @@ pub struct LauncherMonitor {
     /// Arrangement frames per beat of the playing graph (f64 bits), so an update can find the
     /// playhead's beat.
     pub(crate) frames_per_beat: AtomicU64,
+    metronome: AtomicBool,
 }
 
 impl LauncherMonitor {
@@ -122,6 +128,7 @@ impl LauncherMonitor {
             arrangement: AtomicU64::new(0),
             stretch_underruns: AtomicU64::new(0),
             frames_per_beat: AtomicU64::new(0),
+            metronome: AtomicBool::new(false),
         }
     }
 
@@ -137,6 +144,11 @@ impl LauncherMonitor {
 
     pub fn tempo_bpm(&self) -> f64 {
         f64::from_bits(self.tempo.load(Ordering::Relaxed))
+    }
+
+    /// Whether the metronome clicks while the transport runs.
+    pub fn metronome(&self) -> bool {
+        self.metronome.load(Ordering::Relaxed)
     }
 
     pub fn columns(&self) -> usize {
@@ -366,6 +378,11 @@ impl Launcher {
         self.columns.get(column as usize).and_then(|c| c.overrides_since).is_some_and(|since| since <= position)
     }
 
+    /// The beat playing now and the beats in a bar, for the metronome.
+    pub(crate) fn beat_and_bar(&self) -> (f64, f64) {
+        (self.beat, self.bar_beats)
+    }
+
     /// The beat a launch issued now happens at.
     fn launch_beat(&self) -> f64 {
         let step = self.quantization.step(self.bar_beats);
@@ -561,6 +578,10 @@ impl Renderer {
                 }
             }
             LaunchCommand::Stop => self.stop_transport(),
+            LaunchCommand::SetMetronome { on, gain } => {
+                self.metronome.set(on, gain);
+                self.graph.launcher.monitor.metronome.store(self.metronome.on(), Ordering::Relaxed);
+            }
             LaunchCommand::LaunchClip { column, slot } => {
                 let Some(target) = self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else {
                     return;
@@ -625,6 +646,7 @@ impl Renderer {
         self.running = true;
         self.origin = self.position;
         self.time_at_origin = 0;
+        self.metronome.reset();
         self.next_event = 0;
         self.next_audio = 0;
         self.active_audio_count = 0;
@@ -640,6 +662,7 @@ impl Renderer {
 
     fn stop_transport(&mut self) {
         self.running = false;
+        self.metronome.reset();
         self.active_audio_count = 0;
         if !self.stretch_fresh {
             self.graph.ahead.rewind();

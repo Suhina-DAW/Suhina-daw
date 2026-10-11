@@ -110,7 +110,7 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
     for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport) {
-        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar" });
+        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true });
         let params: Value = params
             .as_object()
             .unwrap()
@@ -265,4 +265,18 @@ fn edits_and_undo_are_heard_while_playing() {
     run(&mut session, "edit.undo", json!({})).unwrap();
     let back = beat_peaks(&mut renderer, 2)[1];
     assert!((back / loud - 1.0).abs() < 0.01, "{loud} -> {back}");
+}
+
+#[test]
+fn the_metronome_is_a_transport_command() {
+    let (mut session, mut renderer) = playing();
+    let set = run(&mut session, "transport.setMetronome", json!({ "on": true, "db": -12 })).unwrap();
+    assert_eq!(set, json!({ "metronome": true, "db": -12.0 }));
+    run(&mut session, "transport.play", json!({})).unwrap();
+    let peaks = beat_peaks(&mut renderer, 2);
+    // A click at -12 dB on each beat, and no undo step.
+    assert!(peaks.iter().all(|p| (0.2..0.26).contains(p)), "{peaks:?}");
+    assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["metronome"], true);
+    assert!(!session.can_undo());
+    assert!(run(&mut session, "transport.setMetronome", json!({ "on": true, "db": 7 })).is_err());
 }

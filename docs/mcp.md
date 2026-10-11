@@ -27,6 +27,7 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Audio output.** With `--audio`, each opened project also plays on the default output device
   with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
+  `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
   `project_render` work either way. Edits and undo/redo are heard by the playing engine about
   0.15 s after the command returns, with launched clips playing on
