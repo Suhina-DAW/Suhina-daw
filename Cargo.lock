@@ -539,6 +539,7 @@ dependencies = [
  "loopwerk-engine",
  "loopwerk-media",
  "loopwerk-session",
+ "serde_json",
  "tokio",
 ]
 
