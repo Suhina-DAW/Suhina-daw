@@ -7,6 +7,7 @@ last_verified: 2026-10-11
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
+  - devices/*/Cargo.toml
   - crates/engine/src/lib.rs
   - crates/session/src/lib.rs
   - apps/loopwerk-cli/src/play.rs
@@ -37,9 +38,13 @@ L1  als           engine -------+
       Live Set     rendering, launcher, time-stretching
       reader       no file I/O
         \        /
-L0        model
-      the project as pure data
+L0        model                    dsp, device-api
+      the project as pure data       devices/* (built-in devices)
 ```
+
+The built-in devices sit apart: `dsp` and `device-api` depend on nothing in Loopwerk, and each
+device crate under `devices/` depends only on those two ([ADR 0004](decisions/0004-built-in-devices.md)).
+The engine does not run them yet (see *Planned parts*).
 
 | Crate | Owns | Depends on |
 |---|---|---|
@@ -50,6 +55,13 @@ L0        model
 | `session` | One open project, its undo history, the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over a session, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
 | `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
+| `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
+| `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
+| `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono (with listening to the low band alone), phase inversion, channel selection, DC filter, mute. | dsp, device-api |
+| `devices/auto-pan` | The auto-pan device: an LFO (six shapes, shaping, inversion) that pans or, with no stereo phase, does tremolo; free in hertz or synced to the song position. | dsp, device-api |
+| `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
+| `devices/vinyl-distortion` | Vinyl distortion: tracing (even harmonics in a band), pinch (odd harmonics, out of phase between the sides or mono) and crackle; shaped at twice the sample rate, 31 frames of latency. | dsp, device-api |
+| `devices/overdrive` | Pedal-style overdrive: a band into a biased, asymmetric soft curve at twice the sample rate, then tone, dynamics, dry/wet and output; 31 frames of latency. | dsp, device-api |
 
 ## From a file to the speakers
 
@@ -124,6 +136,7 @@ as rule 3 describes. **(planned)**
 | A new kind of file to decode or analyse | `media` | Input sizes are hostile; cap them |
 | Something agents need | `automation`, on top of commands | File roots; `isError` for failed commands |
 | A new front end (UI) | its own crate on top of `session` | Dispatches commands; never edits the model directly |
+| A built-in instrument or effect | a crate under `devices/`, blocks in `dsp` | ADR 0004; `conformance::check` in a test; import mapping in the format crate |
 
 ## Planned parts
 
@@ -132,9 +145,10 @@ as rule 3 describes. **(planned)**
   and handed to the audio thread through lock-free rings, so heavy sets cannot crackle
   (ADR 0003, consequences).
 - **Native project format:** so edits can be saved; written and read by its own crate.
-- **Built-in devices:** `dsp`, `device-api` and `devices/*`, running inside the engine under the
-  same real-time rules; every parameter a command ([`ROADMAP.md`](../ROADMAP.md) › Built-in
-  devices).
+- **Devices in the engine:** per-track buffers and device chains in the renderer, a registry
+  from `DeviceKind::Builtin` ids to the device crates, parameter values in the model, parameter
+  commands and automation ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
+  The devices themselves (`dsp`, `device-api`, `devices/*`) exist and are tested on their own.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
   (AGENTS.md rule 5). The engine talks to them over shared-memory audio buffers with a per-block
   deadline; plug-in state and parameters go over messages. A crashing plug-in is reported and
