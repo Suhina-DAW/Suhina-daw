@@ -69,7 +69,16 @@ scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py
 
 A crate may depend only on lower layers. Nothing below the UI layer may depend on a GUI toolkit.
 
-## 3. Before you finish a task
+## 3. Tasks
+
+Work is tracked in the GitHub project **Loopwerk**
+(<https://github.com/users/juhamikael/projects/12>), and nowhere else. New work, bugs found while
+testing and follow-ups a change leaves open go there as items, written in English, with a
+Status, a Priority (P0 to P2) and a Phase (the ROADMAP milestone). Work that a pull request will
+close gets an issue, so the pull request can say `Closes #N`. Items imported from the earlier
+board keep their old key in the title (`(LOOP-27)`); a pull request for one names that key.
+
+## 4. Before you finish a task
 
 ```sh
 cargo fmt --all
