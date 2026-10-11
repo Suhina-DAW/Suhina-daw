@@ -268,20 +268,16 @@ fn unwarped_audio_times_are_seconds() {
     assert!((clip.offset - bpm / 60.0).abs() < 1e-9);
 }
 
-/// The Utility of a file in corpus series 6 (`corpus/devices`, docs/spec/als-corpus.md).
+/// The Utility of a file in corpus series 6 (`corpus/devices`, docs/spec/als-corpus.md), in
+/// whichever Live project folder under `corpus/devices` holds it.
 fn utility(name: &str) -> loopwerk_model::Device {
-    let path: PathBuf = [
-        env!("CARGO_MANIFEST_DIR"),
-        "..",
-        "..",
-        "corpus",
-        "devices",
-        "utility-default Project",
-        &format!("{name}.als"),
-    ]
-    .iter()
-    .collect();
-    assert!(path.exists(), "{} is missing; author series 6 first (docs/spec/als-corpus.md)", path.display());
+    let root: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "corpus", "devices"].iter().collect();
+    let file = format!("{name}.als");
+    let path = std::fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("{}: {e}; author series 6 first (docs/spec/als-corpus.md)", root.display()))
+        .filter_map(|entry| entry.ok().map(|e| e.path().join(&file)))
+        .find(|p| p.exists())
+        .unwrap_or_else(|| panic!("{file} is missing under {}", root.display()));
     let project = read_file(&path).unwrap_or_else(|e| panic!("{name}: {e}")).project;
     let devices: Vec<_> = project.channels.into_iter().flat_map(|c| c.devices).collect();
     devices.into_iter().find(|d| d.kind == loopwerk_model::DeviceKind::Builtin("utility".into())).unwrap()

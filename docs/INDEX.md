@@ -39,6 +39,7 @@ Change this code, and check these documents.
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/loopwerk-cli/src/play.rs` | [Architecture](architecture.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
+| `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/tests/corpus.rs` | [Making the `.als` test corpus](spec/als-corpus.md) |
 | `crates/als/tests/synthetic.rs` | [Live Set (`.als`) format](spec/als-format.md) |
