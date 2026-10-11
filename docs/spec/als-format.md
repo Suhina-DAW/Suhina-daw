@@ -213,7 +213,7 @@ to the plug-in. **Never commit a corpus file that contains a commercial plug-in'
 
 ### Utility (`StereoGain`)
 
-Corpus: series 6, files `110`–`135`. Those files were saved as a chain, each from the previous
+Corpus: series 6, files `110`–`135`, and two extra files at 50M and 50S. Those files were saved as a chain, each from the previous
 one, not from the default, so a neighbour diff shows the step; `128` has both phase switches on.
 
 Live's Utility is the element `StereoGain`. Parameters that can be automated hold their value in
@@ -225,7 +225,7 @@ Live's Utility is the element `StereoGain`. Parameters that can be automated hol
 | `Balance` | -1 … 1 | the knob shows 50L … 50R; typing `50L` stored `-1`, typing `100R` stopped at `1` | `balance`, the same number |
 | `StereoWidth` | fraction | 0 % → `0`, 200 % → `1.99999988`, fully up → `4` (400 %) | `width`, the same number |
 | `MidSideBalanceOn` | `@Value` true/false | the Width knob's Mid/Side Mode (right-click menu, not on the panel). Turning it on reset `StereoWidth` to `1` | when true: `width` = 1 and `midSide` from `MidSideBalance` |
-| `MidSideBalance` | 0 … 2 | on switching the mode on, the knob shows `0` and stores `1`; fully Mid `0`, fully Side `2` | `midSide` = value − 1 (−1 only mid, +1 only side), only when `MidSideBalanceOn` is true |
+| `MidSideBalance` | 0 … 2, linear in what the knob shows | on switching the mode on, the knob shows `0` and stores `1`; 100M `0`, 50M `0.5`, 50S `1.5`, 100S `2` | `midSide` = value − 1 (−1 only mid, +1 only side), only when `MidSideBalanceOn` is true |
 | `Mono` | true/false | | `mono` |
 | `BassMono` | true/false | | `bassMono` |
 | `BassMonoFrequency` | Hz | 50 … 500, default 120 | `bassMonoFrequency` |
@@ -237,9 +237,10 @@ Live's Utility is the element `StereoGain`. Parameters that can be automated hol
 | `On` | true/false | the device switch, as on every device | the model's `Device::enabled` |
 | `LegacyGain`, `LegacyMode` | `0`, `false` | unchanged in every file | not mapped **(hypothesis: older sets stored gain here)** |
 
-Still open: how Mid/Side between the ends scales mid and side (Loopwerk keeps one at full and
-turns the other down linearly), and whether Width and Mid/Side sound like Loopwerk's at the same
-settings. Both need bounces of files `118` and `121`–`122` with a value between the ends.
+Still open: how Mid/Side between the ends scales mid and side in the sound (the stored value is
+linear in the display; Loopwerk keeps one at full and turns the other down linearly), and
+whether Width and Mid/Side sound like Loopwerk's at the same settings. Both need bounces of
+`118` and of the 50M and 50S files (`120-utility-midside-mid-50M.als`, `…-50S.als`).
 
 ## Noise: ignore when importing or diffing
 
