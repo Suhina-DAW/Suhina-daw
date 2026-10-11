@@ -19,7 +19,10 @@ that describe them (*Code and its documents*). Read only the documents that matc
 2. **Never crash.** Non-test code never panics: no `unwrap()`, `expect()`, `panic!`,
    `unreachable!`, `todo!` or `unimplemented!`. Return the crate's error type. Input-derived
    numbers are hostile: use `get()` and `checked_*`, cap allocations sized by input. No `unsafe`
-   (`unsafe_code = "forbid"` workspace-wide).
+   (`unsafe_code = "forbid"` workspace-wide), except in the two crates plug-in hosting needs,
+   `crates/ipc` and `crates/plugin-host` ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)):
+   there every `unsafe` block is small, tested and explained in a `// SAFETY:` comment, and the
+   crate offers a safe API.
 3. **Real-time safety.** Code reachable from the audio callback never allocates, frees, locks,
    blocks, logs or does I/O. Hand data to it through lock-free queues (`rtrb`) and swap whole
    graphs atomically.
@@ -31,7 +34,7 @@ that describe them (*Code and its documents*). Read only the documents that matc
    intact, and can restart it. Design the plug-in host boundary as IPC from the first line of
    plug-in code (shared-memory audio buffers, per-block sync with a deadline, plug-in state and
    parameters over messages); never add an in-process shortcut that the rest of the engine
-   comes to depend on.
+   comes to depend on. The design is [ADR 0006](docs/decisions/0006-plug-in-hosting.md).
 6. **Everything is a command.** User-visible behaviour is a command in the engine with an id,
    params and tests. The UI, CLI and MCP all dispatch the same commands.
 7. **Tests are the gate.** Every change comes with tests: round-trip and malformed-input tests for

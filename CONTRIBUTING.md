@@ -5,8 +5,9 @@
   licensed the same way. Dependencies and bundled libraries must be GPLv3-compatible (MIT,
   Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0); GPL-2.0-only and proprietary or
   non-commercial licences are not.
-- **Never crash:** non-test code must not panic and must not use `unsafe`. Errors go through
-  `Result` and `?`; input-derived indices and sizes are checked. See `AGENTS.md`.
+- **Never crash:** non-test code must not panic and must not use `unsafe` (the only exceptions
+  are the plug-in hosting crates `ipc` and `plugin-host`, ADR 0006). Errors go through `Result`
+  and `?`; input-derived indices and sizes are checked. See `AGENTS.md`.
 - **Real-time safety:** code that runs on the audio thread never allocates, locks, blocks or does
   I/O. Communicate with it through lock-free queues.
 - **Tests:** required for every change. Format code needs round-trip and malformed-input tests;

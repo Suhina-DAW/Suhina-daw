@@ -163,8 +163,10 @@ queued clips.
   commands and automation ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
   The devices themselves (`dsp`, `device-api`, `devices/*`) exist and are tested on their own.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
-  (AGENTS.md rule 5). The engine talks to them over shared-memory audio buffers with a per-block
-  deadline; plug-in state and parameters go over messages. A crashing plug-in is reported and
-  restarted without losing the project. An ADR comes first (M6).
+  (AGENTS.md rule 5), as [ADR 0006](decisions/0006-plug-in-hosting.md) decides: a
+  `loopwerk-plugin-host` executable per plug-in binary, shared-memory audio and events with a
+  per-block deadline through the `ipc` crate, state and control over messages, crashed or hung
+  plug-ins restarted from their last state. `ipc` and `plugin-host` are the only crates allowed
+  `unsafe` (M6).
 - **UI:** Session and Arrangement views as a crate on top of `session`, using the same commands
   and reading engine state through monitors like `LauncherMonitor` (M8).
