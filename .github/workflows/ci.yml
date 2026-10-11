@@ -82,7 +82,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS is not a required check, so a docs-only change does not wait for a macOS runner.
+        os: ${{ fromJSON(needs.changes.outputs.code == 'true' && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       CODE: ${{ needs.changes.outputs.code }}
