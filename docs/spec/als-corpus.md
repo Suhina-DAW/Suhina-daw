@@ -206,12 +206,14 @@ corpus/devices/
 | 112 | `112-utility-gain-plus6.als` | Gain: type `6`. |
 | 113 | `113-utility-gain-inf.als` | Gain: drag fully down, until it shows -inf. |
 | 114 | `114-utility-gain-max.als` | Gain: drag fully up. |
-| 115 | `115-utility-balance-50l.als` | Balance: type `50L`. |
-| 116 | `116-utility-balance-100r.als` | Balance: type `100R`. |
+| 115 | `115-utility-balance-25l.als` | Balance: type `25L`. |
+| 116 | `116-utility-balance-50r.als` | Balance: type `50R` (Balance shows 50L to 50R). |
 | 117 | `117-utility-width-0.als` | Width: type `0`. |
 | 118 | `118-utility-width-200.als` | Width: type `200`. |
 | 119 | `119-utility-width-max.als` | Width: drag fully up. |
-| 120–122 | `120-utility-midside-mid.als`, `121-utility-midside-centre.als`, `122-utility-midside-side.als` | **Only if** Width has a Mid/Side mode (look in its right-click menu): fully Mid, middle, fully Side. Live 12.4's panel shows none; if there is none, skip these and log it. |
+| 120 | `120-utility-midside-mode.als` | Switch Width to Mid/Side mode (it is not on the panel: right-click Width). Leave the knob where it lands; log what it shows. |
+| 121 | `121-utility-midside-mid.als` | Mid/Side mode, drag fully to Mid. |
+| 122 | `122-utility-midside-side.als` | Mid/Side mode, drag fully to Side. |
 | 123 | `123-utility-mono.als` | Mono on. |
 | 124 | `124-utility-bassmono-120.als` | Bass Mono on, frequency `120`. |
 | 125 | `125-utility-bassmono-min.als` | Bass Mono on, frequency dragged fully down. |
