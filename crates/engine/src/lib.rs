@@ -2,12 +2,15 @@
 //! [`Renderer::new`] does all allocation up front, and [`Renderer::process`] never allocates,
 //! so the same `process` call can later run on the audio thread.
 
+mod ahead;
 mod audio;
 mod launcher;
 mod stretch;
 
 use std::fmt;
 
+use ahead::AheadReader;
+pub use ahead::{StretchThread, StretchWorker};
 use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
 use launcher::Launcher;
@@ -64,11 +67,11 @@ impl fmt::Display for RenderError {
 
 impl std::error::Error for RenderError {}
 
-/// A warped clip placement and its stretcher. `start` and `end` are arrangement frames.
+/// A warped clip placement; its stretcher is the voice with the same index in the renderer's
+/// [`AheadReader`]. `start` and `end` are arrangement frames.
 struct StretchEvent {
     start: u64,
     end: u64,
-    voice: StretchVoice,
     gain_left: f32,
     gain_right: f32,
     /// The launcher column of the clip's track, or `NO_COLUMN`.
@@ -119,8 +122,11 @@ pub struct Renderer {
     /// Indices into `audio_events` that are playing; the first `active_audio_count` are valid.
     active_audio: [usize; MAX_AUDIO_VOICES],
     active_audio_count: usize,
-    /// Warped clips stretched as they play (ADR 0003), mixed block by block.
+    /// Warped clips stretched as they play (ADR 0003), rendered ahead and mixed block by block.
     stretch_events: Vec<StretchEvent>,
+    ahead: AheadReader,
+    /// The stretch voices are at their first frame and nothing has played them since.
+    stretch_fresh: bool,
     stretch_scratch: Vec<f32>,
     fade_frames: f64,
     /// Frames rendered since the renderer was built.
@@ -162,6 +168,7 @@ impl Renderer {
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
+        let mut stretch_voices = Vec::new();
         for lane in &project.arrangement.lanes {
             for clip in lane.clips.iter().filter(|c| c.enabled) {
                 let Some(content) = project.content(clip.content) else { continue };
@@ -189,10 +196,11 @@ impl Renderer {
                                 {
                                     let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
                                     let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                    let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
+                                    stretch_voices.push((voice, end.saturating_sub(start)));
                                     stretch_events.push(StretchEvent {
-                                        start: to_frame(clip.start),
-                                        end: to_frame(clip.start + clip.length),
-                                        voice,
+                                        start,
+                                        end,
                                         gain_left: gains.0 * gain,
                                         gain_right: gains.1 * gain,
                                         column,
@@ -237,6 +245,8 @@ impl Renderer {
             active_audio: [0; MAX_AUDIO_VOICES],
             active_audio_count: 0,
             stretch_events,
+            ahead: AheadReader::new(stretch_voices, sample_rate),
+            stretch_fresh: true,
             stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
             fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
             position: 0,
@@ -269,10 +279,26 @@ impl Renderer {
         self.running
     }
 
+    /// Takes the worker that renders stretched clips ahead, to run it on its own thread
+    /// ([`StretchWorker::spawn`]) so that the audio thread only copies their frames. Without
+    /// this the renderer stretches them itself as it goes, as offline rendering does. `None` once
+    /// taken.
+    pub fn take_stretch_worker(&mut self) -> Option<StretchWorker> {
+        self.ahead.take_worker()
+    }
+
+    /// Frames of stretched clips that were not ready in time and played as silence.
+    pub fn stretch_underruns(&self) -> u64 {
+        self.ahead.underruns()
+    }
+
     /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
     /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
         self.drain_commands();
+        // A rewind moves along even while the transport is stopped, so the stretched clips are
+        // ready again by the next start.
+        self.ahead.service();
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
@@ -336,7 +362,9 @@ impl Renderer {
         let fade_frames = self.fade_frames;
         let scratch = &mut self.stretch_scratch;
         let launcher = &self.launcher;
-        for event in &mut self.stretch_events {
+        let ahead = &mut self.ahead;
+        self.stretch_fresh = false;
+        for (index, event) in self.stretch_events.iter().enumerate() {
             if event.end <= time_start || event.start >= time_end {
                 continue;
             }
@@ -345,7 +373,7 @@ impl Renderer {
             while time < to {
                 let frames = ((to - time) as usize).min(STRETCH_BLOCK);
                 let Some(chunk) = scratch.get_mut(..frames * 2) else { return };
-                event.voice.render(chunk);
+                ahead.read(index, time - event.start, chunk);
                 for (k, [left, right]) in chunk.as_chunks::<2>().0.iter().enumerate() {
                     let frame = time + k as u64;
                     if launcher.overrides_at(event.column, frame - time_start + block_start) {
@@ -889,5 +917,85 @@ mod tests {
         let looping = project_with(untargeted(vec![note(0.0, 1.0, 60)]), vec![looped], 1);
         assert!(render_offline(&project, SR, 256).is_ok());
         assert!(render_offline(&looping, SR, 256).is_ok());
+    }
+
+    /// Renders `blocks` blocks of `frames` from `renderer`, calling `between` before each.
+    fn blocks(renderer: &mut Renderer, blocks: usize, frames: usize, mut between: impl FnMut(usize)) -> Vec<f32> {
+        let mut out = Vec::new();
+        let mut block = vec![0.0f32; frames * 2];
+        for i in 0..blocks {
+            between(i);
+            renderer.process(&mut block);
+            out.extend_from_slice(&block);
+        }
+        out
+    }
+
+    fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
+    }
+
+    #[test]
+    fn a_stretch_worker_renders_the_same_audio_as_offline() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        let mut offline = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let reference = blocks(&mut offline, 200, 441, |_| {});
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut worker = renderer.take_stretch_worker().unwrap();
+        assert!(renderer.take_stretch_worker().is_none());
+        let out = blocks(&mut renderer, 200, 441, |_| worker.fill());
+        assert!(reference.iter().any(|s| s.abs() > 0.1));
+        assert_eq!(max_diff(&reference, &out), 0.0);
+        assert_eq!(renderer.stretch_underruns(), 0);
+    }
+
+    #[test]
+    fn a_late_stretch_worker_costs_silence_but_not_timing() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        let mut offline = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let reference = blocks(&mut offline, 200, 441, |_| {});
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut worker = renderer.take_stretch_worker().unwrap();
+        // The worker stalls for 1 s (blocks 0-99), longer than it renders ahead.
+        let out = blocks(&mut renderer, 200, 441, |i| {
+            if i >= 100 {
+                worker.fill();
+            }
+        });
+        assert!(renderer.stretch_underruns() > 0);
+        let stalled = &out[2 * 441 * 70..2 * 441 * 100];
+        assert!(stalled.iter().all(|s| *s == 0.0), "a stalled worker plays silence");
+        // Once it catches up the clip plays where it should, not where it left off.
+        let tail = 2 * 441 * 110;
+        assert_eq!(max_diff(&reference[tail..], &out[tail..]), 0.0);
+    }
+
+    #[test]
+    fn a_stretch_worker_rewinds_with_the_transport() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut worker = renderer.take_stretch_worker().unwrap();
+        let first = blocks(&mut renderer, 50, 441, |_| worker.fill());
+        renderer.handle(LaunchCommand::Stop);
+        // The rewind handshake: the worker pauses, the audio side empties the rings, the worker
+        // rewinds and fills them again, all while the transport is stopped.
+        blocks(&mut renderer, 3, 441, |_| worker.fill());
+        renderer.handle(LaunchCommand::Play);
+        let again = blocks(&mut renderer, 50, 441, |_| worker.fill());
+        assert_eq!(max_diff(&first, &again), 0.0);
+        assert_eq!(renderer.stretch_underruns(), 0);
+    }
+
+    #[test]
+    fn a_stretch_worker_thread_keeps_up() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        let mut offline = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let reference = blocks(&mut offline, 100, 441, |_| {});
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let thread = renderer.take_stretch_worker().unwrap().spawn().unwrap();
+        // Paced like a device: one 10 ms block every 10 ms.
+        let out = blocks(&mut renderer, 100, 441, |_| std::thread::sleep(std::time::Duration::from_millis(10)));
+        assert_eq!(thread.underruns(), 0);
+        assert_eq!(max_diff(&reference, &out), 0.0);
     }
 }

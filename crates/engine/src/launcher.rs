@@ -538,8 +538,11 @@ impl Renderer {
         self.next_event = 0;
         self.next_audio = 0;
         self.active_audio_count = 0;
-        for event in &mut self.stretch_events {
-            event.voice.restart();
+        // The stretch voices are rewound when the transport stops, so the worker has them ready
+        // by the next start; only a start without a stop before it rewinds here.
+        if !self.stretch_fresh {
+            self.ahead.rewind();
+            self.stretch_fresh = true;
         }
         self.launcher.beat = 0.0;
         self.launcher.monitor.running.store(true, Ordering::Relaxed);
@@ -548,6 +551,10 @@ impl Renderer {
     fn stop_transport(&mut self) {
         self.running = false;
         self.active_audio_count = 0;
+        if !self.stretch_fresh {
+            self.ahead.rewind();
+            self.stretch_fresh = true;
+        }
         for voice in self.voices.iter_mut().filter(|v| v.active) {
             voice.end = voice.end.min(self.position);
         }

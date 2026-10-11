@@ -3,7 +3,8 @@
 //! The engine's [`Renderer`] is built here, on the main thread, and then moved into the audio
 //! callback. The callback only calls `Renderer::process`, converts samples and sets atomics: no
 //! allocation, locks or I/O on the audio thread (AGENTS.md rule 3). Launcher commands reach it
-//! through the renderer's lock-free command queue.
+//! through the renderer's lock-free command queue, and stretched clips are rendered ahead on a
+//! worker thread of their own (ADR 0003).
 
 use std::io::BufRead;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -14,7 +15,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 use loopwerk_automation::AudioOutput;
 use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_engine::{AudioPool, Controller, Renderer};
+use loopwerk_engine::{AudioPool, Controller, Renderer, StretchThread};
 use loopwerk_session::{Player, Session};
 use serde_json::{Value, json};
 
@@ -28,6 +29,19 @@ const TAIL: Duration = Duration::from_millis(300);
 struct Progress {
     frames: AtomicU64,
     stream_error: AtomicBool,
+}
+
+/// A started output. Dropping it closes the device, then stops the stretch worker.
+struct Running {
+    _stream: cpal::Stream,
+    stretch: Option<StretchThread>,
+}
+
+impl Running {
+    /// Frames of stretched clips the worker did not have ready in time.
+    fn stretch_underruns(&self) -> u64 {
+        self.stretch.as_ref().map_or(0, StretchThread::underruns)
+    }
 }
 
 /// The default output device and the format it asks for.
@@ -50,8 +64,14 @@ impl Output {
         Ok(Self { device, config, format })
     }
 
-    /// Starts playing `renderer` on the device.
-    fn start(&self, renderer: Renderer, progress: &Arc<Progress>) -> Result<cpal::Stream, String> {
+    /// Starts playing `renderer` on the device, with its stretched clips rendered ahead on a
+    /// worker thread.
+    fn start(&self, mut renderer: Renderer, progress: &Arc<Progress>) -> Result<Running, String> {
+        let stretch = renderer
+            .take_stretch_worker()
+            .map(|worker| worker.spawn())
+            .transpose()
+            .map_err(|e| format!("could not start the stretch worker: {e}"))?;
         let (device, config) = (&self.device, self.config);
         let stream = match self.format {
             cpal::SampleFormat::F32 => build::<f32>(device, config, renderer, progress),
@@ -63,7 +83,7 @@ impl Output {
             }
         }?;
         stream.play().map_err(|e| format!("could not start audio output {device}: {e}"))?;
-        Ok(stream)
+        Ok(Running { _stream: stream, stretch })
     }
 
     fn describe(&self) -> String {
@@ -81,7 +101,7 @@ pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
         return Ok(());
     }
     let progress = Arc::new(Progress::default());
-    let stream = output.start(renderer, &progress)?;
+    let running = output.start(renderer, &progress)?;
 
     let seconds = length as f64 / f64::from(output.config.sample_rate);
     println!("playing {seconds:.2} s on {}; Ctrl+C stops", output.describe());
@@ -98,7 +118,11 @@ pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(20));
     }
     std::thread::sleep(TAIL);
-    drop(stream);
+    let underruns = running.stretch_underruns();
+    drop(running);
+    if underruns > 0 {
+        eprintln!("warning: {underruns} frames of stretched audio were not ready in time and played as silence");
+    }
     println!("done");
     Ok(())
 }
@@ -123,7 +147,7 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let (controller, output, progress, stream) = start_stopped(&project, audio)?;
+    let (controller, output, progress, running) = start_stopped(&project, audio)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -153,21 +177,18 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
         eprintln!("warning: {e}");
     }
     std::thread::sleep(TAIL);
-    drop(stream);
+    drop(running);
     Ok(())
 }
 
 /// Opens the default output and plays `project` on it with the transport stopped.
-fn start_stopped(
-    project: &Project,
-    audio: &AudioPool,
-) -> Result<(Controller, Output, Arc<Progress>, cpal::Stream), String> {
+fn start_stopped(project: &Project, audio: &AudioPool) -> Result<(Controller, Output, Arc<Progress>, Running), String> {
     let output = Output::open()?;
     let mut renderer = Renderer::stopped(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
     let controller = renderer.controller();
     let progress = Arc::new(Progress::default());
-    let stream = output.start(renderer, &progress)?;
-    Ok((controller, output, progress, stream))
+    let running = output.start(renderer, &progress)?;
+    Ok((controller, output, progress, running))
 }
 
 /// Plays projects opened over MCP on the default output device. Each one gets a thread that
@@ -182,12 +203,12 @@ impl AudioOutput for DeviceOutput {
         std::thread::Builder::new()
             .name("loopwerk-audio".into())
             .spawn(move || match start_stopped(&project, &audio) {
-                Ok((controller, output, _progress, stream)) => {
+                Ok((controller, output, _progress, running)) => {
                     if ready.send(Ok((controller, output.describe()))).is_ok() {
                         // Returns once the player, which holds `close`, is dropped.
                         let _closed = closed.recv();
                     }
-                    drop(stream);
+                    drop(running);
                 }
                 Err(e) => {
                     let _unheard = ready.send(Err(e));

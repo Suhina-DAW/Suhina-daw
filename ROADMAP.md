@@ -174,6 +174,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Warped clips are **time-stretched in real time** along their warp markers and keep their
   pitch ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips
   opens in 3.1 s and plays at about 20 % of one core.
-- Still to do: transpose on warped clips; rendering stretched clips slightly ahead on a worker
-  thread so heavy sets cannot crackle; a disk cache for the stretcher's analysis; Rubber Band as
+- Arrangement clips are stretched 0.5 s ahead on a worker thread; the audio thread only copies
+  their frames (2 % of one core on the same set, worst block 1–8 ms of its 10.7 ms).
+- Still to do: transpose on warped clips; launched clips stretched ahead too; a disk cache for the stretcher's analysis; Rubber Band as
   the `HighQuality` stretch mode.

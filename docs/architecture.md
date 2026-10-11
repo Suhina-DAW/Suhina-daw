@@ -55,7 +55,8 @@ L0        model
 3. **Build the renderer.** `Renderer::with_audio` turns the project into flat, sorted lists the
    audio thread can walk without searching: note events, audio events, one stretch voice per
    warped clip placement, the prepared launcher clips and the per-track gains (group and master
-   chain included). Every buffer the renderer will ever need is allocated here.
+   chain included). Every buffer the renderer will ever need is allocated here. The player takes
+   the stretch worker (`Renderer::take_stretch_worker`) and runs it on its own thread.
 4. **Play.** `Renderer::process` fills one block of interleaved stereo. It never allocates,
    locks, blocks or does I/O. Offline rendering (`render_offline*`, `render_launches`) calls the
    same `process` in a loop, so an offline render is the test oracle for playback, and the output
@@ -67,6 +68,7 @@ L0        model
 |---|---|---|
 | Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session`, runs commands, imports and loads audio, builds the `Renderer`. | yes |
 | Audio | The device callback: `Renderer::process`, sample conversion, setting atomics. | **no** (AGENTS.md rule 3) |
+| Stretch worker | `StretchWorker`: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). | allocates nothing after the renderer is built; never locks |
 | Audio owner | Over MCP, one thread per open project holds the output stream and closes it when the session drops its `Player`. | yes, but does nothing while playing |
 | Decode workers | Scoped threads in `media` while a project loads. | yes |
 
@@ -112,9 +114,8 @@ as rule 3 describes. **(planned)**
 ## Planned parts
 
 - **Edits while playing:** see *Current limit* above.
-- **Render-ahead for stretch voices:** warped clips rendered slightly ahead on a worker thread
-  and handed to the audio thread through lock-free rings, so heavy sets cannot crackle
-  (ADR 0003, consequences).
+- **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;
+  launched clips' stretch voices still run on the audio thread.
 - **Native project format:** so edits can be saved; written and read by its own crate.
 - **Built-in devices:** `dsp`, `device-api` and `devices/*`, running inside the engine under the
   same real-time rules; every parameter a command ([`ROADMAP.md`](../ROADMAP.md) › Built-in

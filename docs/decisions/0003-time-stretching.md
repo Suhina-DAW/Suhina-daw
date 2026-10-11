@@ -95,17 +95,36 @@ from where the warp markers put each click):
 
 On the same project the restarts cost about 3 % more CPU; the worst 512-frame block measured
 8.3–10.3 ms against 8.0–8.7 ms before (budget 10.7 ms). Rendering ahead on a worker thread is
-what gives the real margin.
+what gives the real margin:
+
+5. **Arrangement clips are stretched ahead of the audio thread.** Their stretch voices live on a
+   worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
+   per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
+   position in the clip. A worker that falls behind costs silence, counted as underruns, never
+   timing: late frames are dropped. When the transport stops, a lock-free handshake (request,
+   worker paused, rings emptied) lets the worker rewind the voices and fill the rings again
+   before the next start. Without a worker thread (offline rendering) the renderer fills the
+   rings itself just before reading them, through the same voices and rings (rule 4); tests
+   check that both give the same samples. Launched clips' voices still run on the audio thread.
+
+| Same project, 512-frame blocks, paced in real time | Stretching on the audio thread | Worker thread |
+|---|---|---|
+| Average load on the audio thread | 20 % | 2 % |
+| Worst block (budget 10.7 ms) | 8.3–10.3 ms | 1.3–7.9 ms in quiet runs |
+| Underruns | – | none in quiet runs; 0.75 s once with a 0.2 s ring while the machine compiled, hence 0.5 s |
 
 ## Consequences
 
 - Warped clips keep their pitch while playing, and their timing still comes from the warp
   markers.
-- CPU use grows with the number of warped clips playing at once. The worst block is close to its
-  budget in a heavy project, so stretch voices should next render a little ahead on a worker
-  thread (lock-free rings to the audio thread) to absorb peaks.
-- Every clip placement owns a stretcher, so memory grows with the number of warped placements;
-  pooling voices across clips that do not overlap is a later optimisation.
+- CPU use grows with the number of warped clips playing at once, on the worker thread; the audio
+  thread's share stays small. The worker runs at normal priority, so a heavily loaded machine
+  can starve it: that is heard as dropouts of stretched clips, never as clips out of time.
+- Each arrangement voice holds a 0.5 s ring (about 190 KB at 48 kHz) from the start, whether or
+  not it is near the playhead.
+- Every clip placement owns a stretcher and a ring, so memory grows with the number of warped
+  placements; pooling voices and rings across clips that do not overlap is a later
+  optimisation.
 - Our own algorithm choice, not Live's: modes with the same name in another DAW will not sound
   identical. The modes describe intent, not a copy.
 - Comparing backends will be a mode switch on the same clip once Rubber Band is in.
