@@ -60,6 +60,7 @@ devices/
   auto-pan LFO panning and tremolo, free in Hz or synced to the song position
   dj-eq    three bands with kills, Linkwitz-Riley crossovers at 24 or 48 dB/octave
   vinyl-distortion  tracing (even), pinch (odd, out of phase) and crackle, oversampled
+  overdrive  pedal-style: band, drive, tone, dynamics, dry/wet; oversampled
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
 docs/

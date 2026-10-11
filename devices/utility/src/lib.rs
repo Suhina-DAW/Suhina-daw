@@ -3,7 +3,8 @@
 //!
 //! Signal path, in order: DC filter, then one 2×2 matrix that does channel selection, phase
 //! inversion, width, mid/side and mono at once, then bass mono, then gain and balance (mute
-//! included). Every control is smoothed over [`RAMP_SECONDS`], toggles too, so automating any
+//! included). Bass mono listen plays only the band below the bass mono frequency, as bass mono
+//! leaves it, so the crossover can be set by ear. Every control is smoothed over [`RAMP_SECONDS`], toggles too, so automating any
 //! of them does not click. With every parameter at its default the output equals the input
 //! exactly.
 
@@ -28,7 +29,8 @@ pub mod param {
     pub const CHANNEL: usize = 9;
     pub const DC_FILTER: usize = 10;
     pub const MUTE: usize = 11;
-    pub(crate) const COUNT: usize = 12;
+    pub const BASS_MONO_LISTEN: usize = 12;
+    pub(crate) const COUNT: usize = 13;
 }
 
 /// Options of the channel parameter.
@@ -60,6 +62,7 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::choice("channel", "Channel", &["Stereo", "Left", "Right", "Swap"], 0),
     ParamInfo::toggle("dcFilter", "DC Filter", false),
     ParamInfo::toggle("mute", "Mute", false),
+    ParamInfo::toggle("bassMonoListen", "Bass Mono Listen", false),
 ];
 
 pub const INFO: DeviceInfo = DeviceInfo { id: "utility", name: "Utility", params: &PARAMS };
@@ -75,6 +78,7 @@ pub struct Utility {
     gain_right: Smoother,
     dc_mix: Smoother,
     bass_mix: Smoother,
+    listen_mix: Smoother,
     dc: [DcBlocker; 2],
     crossover: [LinkwitzRiley; 2],
 }
@@ -99,6 +103,7 @@ impl Utility {
             gain_right: Smoother::new(1.0, ramp),
             dc_mix: Smoother::new(0.0, ramp),
             bass_mix: Smoother::new(0.0, ramp),
+            listen_mix: Smoother::new(0.0, ramp),
             dc: [DcBlocker::new(sr); 2],
             crossover: [LinkwitzRiley::new(sr, frequency); 2],
         };
@@ -116,7 +121,9 @@ impl Utility {
     }
 
     fn smoothers(&mut self) -> impl Iterator<Item = &mut Smoother> {
-        self.matrix.iter_mut().chain([&mut self.gain_left, &mut self.gain_right, &mut self.dc_mix, &mut self.bass_mix])
+        let rest =
+            [&mut self.gain_left, &mut self.gain_right, &mut self.dc_mix, &mut self.bass_mix, &mut self.listen_mix];
+        self.matrix.iter_mut().chain(rest)
     }
 
     /// Sets every smoother's target from the parameter values.
@@ -125,14 +132,16 @@ impl Utility {
         let (left, right) = self.target_gains();
         let dc = if self.on(param::DC_FILTER) { 1.0 } else { 0.0 };
         let bass = if self.on(param::BASS_MONO) { 1.0 } else { 0.0 };
+        let listen = if self.on(param::BASS_MONO_LISTEN) { 1.0 } else { 0.0 };
         // A filter that has been fully off starts again from silence, not from stale state.
         if dc > 0.0 && self.dc_mix.current() == 0.0 && self.dc_mix.is_settled() {
             self.dc.iter_mut().for_each(DcBlocker::reset);
         }
-        if bass > 0.0 && self.bass_mix.current() == 0.0 && self.bass_mix.is_settled() {
+        let idle = |s: &Smoother| s.current() == 0.0 && s.is_settled();
+        if bass + listen > 0.0 && idle(&self.bass_mix) && idle(&self.listen_mix) {
             self.crossover.iter_mut().for_each(LinkwitzRiley::reset);
         }
-        let targets = [ll, lr, rl, rr, left, right, dc, bass];
+        let targets = [ll, lr, rl, rr, left, right, dc, bass, listen];
         for (smoother, target) in self.smoothers().zip(targets) {
             smoother.set_target(target);
         }
@@ -222,13 +231,19 @@ impl Device for Utility {
             (l, r) = (ll * l + lr * r, rl * l + rr * r);
 
             let bass_mix = self.bass_mix.next_value();
-            if bass_mix > 0.0 {
+            let listen_mix = self.listen_mix.next_value();
+            if bass_mix > 0.0 || listen_mix > 0.0 {
                 let [left_bands, right_bands] = &mut self.crossover;
                 let (low_l, high_l) = left_bands.split(f64::from(l));
                 let (low_r, high_r) = right_bands.split(f64::from(r));
                 let low = (low_l + low_r) / 2.0;
                 l += ((high_l + low) as f32 - l) * bass_mix;
                 r += ((high_r + low) as f32 - r) * bass_mix;
+                // The low band alone, centred as far as bass mono is on.
+                let mix = f64::from(bass_mix);
+                let (only_l, only_r) = (low_l + (low - low_l) * mix, low_r + (low - low_r) * mix);
+                l += (only_l as f32 - l) * listen_mix;
+                r += (only_r as f32 - r) * listen_mix;
             }
 
             *left = l * self.gain_left.next_value();
