@@ -52,8 +52,8 @@ The engine does not run them yet (see *Planned parts*).
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
 | `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), group and master gain. Never touches files. | model |
 | `media` | Finding a project's audio files, decoding them (symphonia) on all cores and analysing the ones warped clips play, into an `AudioPool`. | engine |
-| `session` | One open project, its undo history, the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
-| `automation` | The MCP server over a session, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
+| `session` | An open project with its undo history (`Session`), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
+| `automation` | The MCP server over the open projects, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
 | `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
@@ -95,7 +95,7 @@ The engine does not run them yet (see *Planned parts*).
 
 | Thread | Runs | May allocate, lock, do I/O |
 |---|---|---|
-| Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session`, runs commands, imports and loads audio, builds the `Renderer`. | yes |
+| Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session` (the MCP server: all open `Projects`), runs commands, imports and loads audio, builds the `Renderer`. | yes |
 | Audio | The device callback: `Renderer::process`, sample conversion, setting atomics. | **no** (AGENTS.md rule 3) |
 | Stretch worker | `StretchWorker`: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). | allocates nothing after the renderer is built; never locks |
 | Audio owner | Over MCP, one thread per open project holds the output stream and closes it when the session drops its `Player`. | yes, but does nothing while playing |
@@ -113,7 +113,9 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
 
 Every user-visible action is a command in `session` with an id, typed parameters and a kind
 ([ADR 0002](decisions/0002-commands.md)). The CLI, the MCP server and later the UI all call
-`Session::execute(id, params)`; none of them changes a project directly.
+`Session::execute(id, params)`, or `Projects::execute` when several projects are open (it runs
+`projects.*` itself and passes everything else to the active project); none of them changes a
+project directly.
 
 | Kind | What it touches | Undo |
 |---|---|---|
@@ -121,6 +123,7 @@ Every user-visible action is a command in `session` with an id, typed parameters
 | Edit | Changes the session's `Project`. Validated afterwards; a failed or invalid edit restores the project. | one step, a snapshot |
 | History | Undo and redo. | moves between snapshots |
 | Transport | Sends a `LaunchCommand` to the attached `Player`; fails if no engine is playing. | none |
+| Projects | Lists, switches and closes open projects (`Projects`); only the active one keeps its `Player`. | none |
 
 **Current limit:** an edit changes the session's project, but a renderer that is already playing
 keeps the project it was built from. Edits are heard the next time a renderer is built (a new
@@ -142,6 +145,12 @@ as rule 3 describes. **(planned)**
 | A built-in instrument or effect | a crate under `devices/`, blocks in `dsp` | ADR 0004; `conformance::check` in a test; import mapping in the format crate |
 
 ## Planned parts
+
+- **Projects:** copying clips, tracks and devices between open projects, and switching without
+  reopening the audio output ([ADR 0007](decisions/0007-several-open-projects.md) › Not decided
+  yet).
+- **Patch devices:** community devices as Pure Data patches run in the plug-in host process,
+  with a command channel ([ADR 0008](decisions/0008-patch-devices.md), proposed).
 
 - **Edits while playing:** see *Current limit* above.
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;

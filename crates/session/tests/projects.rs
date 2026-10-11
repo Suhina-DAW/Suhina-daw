@@ -1,0 +1,147 @@
+//! Several open projects: which one is active, where commands go, and that only the active one
+//! keeps its player.
+#![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
+
+use loopwerk_engine::{AudioPool, Renderer};
+use loopwerk_model::Project;
+use loopwerk_session::{CommandKind, MAX_OPEN_PROJECTS, Player, ProjectId, Projects, Session, commands};
+use serde_json::{Value, json};
+
+fn untitled(projects: &mut Projects) -> ProjectId {
+    projects.add(Session::new(Project::default()), None).unwrap()
+}
+
+fn run(projects: &mut Projects, id: &str, params: Value) -> Result<Value, String> {
+    projects.execute(id, &params).map_err(|e| e.0)
+}
+
+fn tempo(projects: &mut Projects, project: ProjectId) -> f64 {
+    projects.get(project).unwrap().project().transport.tempo_bpm
+}
+
+#[test]
+fn an_added_project_becomes_active_with_a_fresh_id() {
+    let mut projects = Projects::new();
+    assert!(projects.is_empty());
+    let a = untitled(&mut projects);
+    let b = untitled(&mut projects);
+    assert_ne!(a, b);
+    assert_eq!(projects.active(), Some(b));
+    assert_eq!(projects.ids(), vec![a, b]);
+    let listed = run(&mut projects, "projects.list", json!({})).unwrap();
+    assert_eq!(listed["active"], json!(b.0));
+    assert_eq!(listed["projects"][0]["name"], json!(format!("Untitled {}", a.0)));
+    assert_eq!(listed["projects"][1]["active"], json!(true));
+}
+
+#[test]
+fn commands_go_to_the_active_project_or_the_one_named() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    let b = untitled(&mut projects);
+    run(&mut projects, "transport.setTempo", json!({ "bpm": 90 })).unwrap();
+    projects.execute_in(Some(a), "transport.setTempo", &json!({ "bpm": 140 })).unwrap();
+    assert_eq!(tempo(&mut projects, a), 140.0);
+    assert_eq!(tempo(&mut projects, b), 90.0);
+    assert_eq!(projects.active(), Some(b), "naming a project does not switch to it");
+
+    // Each project keeps its own undo history.
+    run(&mut projects, "projects.switch", json!({ "project": a.0 })).unwrap();
+    run(&mut projects, "edit.undo", json!({})).unwrap();
+    assert_eq!(tempo(&mut projects, a), Project::default().transport.tempo_bpm);
+    assert_eq!(tempo(&mut projects, b), 90.0);
+}
+
+#[test]
+fn next_and_previous_wrap_around() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    let b = untitled(&mut projects);
+    let c = untitled(&mut projects);
+    assert_eq!(run(&mut projects, "projects.next", json!({})).unwrap()["active"], json!(a.0));
+    assert_eq!(run(&mut projects, "projects.next", json!({})).unwrap()["active"], json!(b.0));
+    assert_eq!(run(&mut projects, "projects.previous", json!({})).unwrap()["active"], json!(a.0));
+    assert_eq!(run(&mut projects, "projects.previous", json!({})).unwrap()["active"], json!(c.0));
+    assert_eq!(projects.cycle(-4).unwrap(), b);
+}
+
+#[test]
+fn closing_the_active_project_activates_a_neighbour() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    let b = untitled(&mut projects);
+    let c = untitled(&mut projects);
+    projects.switch(b).unwrap();
+    run(&mut projects, "projects.close", json!({ "project": b.0 })).unwrap();
+    assert_eq!(projects.active(), Some(c), "the tab to the right");
+    projects.close(c).unwrap();
+    assert_eq!(projects.active(), Some(a), "the last tab falls back to the left");
+    projects.close(a).unwrap();
+    assert_eq!(projects.active(), None);
+    assert!(run(&mut projects, "project.info", json!({})).unwrap_err().contains("no project is open"));
+    assert!(run(&mut projects, "projects.next", json!({})).is_err());
+}
+
+#[test]
+fn ids_are_not_reused_after_a_close() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    projects.close(a).unwrap();
+    let b = untitled(&mut projects);
+    assert_ne!(a, b);
+    assert!(projects.execute_in(Some(a), "project.info", &json!({})).is_err());
+    assert!(run(&mut projects, "projects.switch", json!({ "project": a.0 })).unwrap_err().contains("no open project"));
+}
+
+#[test]
+fn opening_too_many_projects_is_refused() {
+    let mut projects = Projects::new();
+    for _ in 0..MAX_OPEN_PROJECTS {
+        untitled(&mut projects);
+    }
+    assert!(projects.add(Session::new(Project::default()), None).is_err());
+    assert_eq!(projects.len(), MAX_OPEN_PROJECTS);
+}
+
+#[test]
+fn only_the_active_project_keeps_its_player() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    let project = Project::default();
+    let mut renderer = Renderer::stopped(&project, &AudioPool::new(), 48_000).unwrap();
+    projects.get_mut(a).unwrap().attach_player(Player::new(renderer.controller(), None));
+    assert!(run(&mut projects, "launcher.state", json!({})).is_ok());
+
+    let b = untitled(&mut projects);
+    assert!(projects.get(a).unwrap().player().is_none(), "switching away stops the old project");
+    assert_eq!(projects.active(), Some(b));
+    let listed = run(&mut projects, "projects.list", json!({})).unwrap();
+    assert_eq!(listed["projects"][0]["playing"], json!(false));
+}
+
+#[test]
+fn commands_list_shows_project_and_session_commands_once() {
+    let mut projects = Projects::new();
+    let listed = run(&mut projects, "commands.list", json!({})).unwrap();
+    let ids: Vec<&str> = listed.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+    for id in ["projects.list", "projects.switch", "projects.next", "projects.previous", "projects.close"] {
+        assert!(ids.contains(&id), "{id} is listed");
+    }
+    assert!(commands().iter().all(|c| ids.contains(&c.id)));
+    assert!(commands().iter().all(|c| c.kind != CommandKind::Projects), "session commands never manage projects");
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), ids.len());
+}
+
+#[test]
+fn project_commands_check_their_parameters() {
+    let mut projects = Projects::new();
+    let a = untitled(&mut projects);
+    assert!(run(&mut projects, "projects.list", json!({ "x": 1 })).unwrap_err().contains("unknown parameter"));
+    assert!(run(&mut projects, "projects.switch", json!({})).is_err());
+    assert!(run(&mut projects, "projects.switch", json!({ "project": "one" })).is_err());
+    assert!(run(&mut projects, "projects.switch", json!([1])).is_err());
+    assert!(projects.execute_in(Some(a), "projects.list", &json!({})).is_err(), "no target for project commands");
+}

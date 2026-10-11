@@ -415,6 +415,41 @@ No bounces: Export renders the arrangement, not session clips.
 `corpus/automation/README.md`, as in series 6, with a column for the values Live showed on each
 point.
 
+## Series 8: Max devices
+
+Teaches the importer how a Live Set refers to a Max for Live device: the file reference, the
+stored parameter values, and what Collect All and Save does with the device file. Loopwerk will
+never run these devices; it keeps them so a project loses nothing
+([ADR 0008](../decisions/0008-patch-devices.md)). Needs Live Suite (or Max for Live).
+
+Build the devices yourself, as below: no devices from Packs or the Core Library beyond the
+empty templates.
+
+### Setup
+
+1. Open `corpus/devices/…/100-base.als` (one audio track with the test signal) and Save As
+   `corpus/max/400-base.als`. Save the whole series in the project folder Live creates.
+2. Make a folder outside the project, `corpus/max/devices/`, for the device files you save from
+   Max.
+
+### Files (400–407)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 400 | `400-base.als` | No edit. |
+| 401 | `401-max-audio-effect.als` | Browser › Max for Live › Max Audio Effect (the empty template) onto the audio track. Do not open the editor. |
+| 402 | `402-edited-device.als` | Click the device's Edit button. In Max, put a `*~ 0.5` between `plugin~` and `plugout~` (both channels), save the device as `corpus/max/devices/loopwerk-half.amxd`, close Max. Log what Live asked. |
+| 403 | `403-device-parameter.als` | Edit again: add a `live.dial` named `Amount` (range 0–1) feeding the `*~` right inlets, save the device, close Max. On the device in Live, type `0.25` into Amount. |
+| 404 | `404-collect-all.als` | File › Collect All and Save (include everything Live offers), then Save As this name. Log which files Live copied, and where. |
+| 405 | `405-moved-original.als` | Close Live. Rename `corpus/max/devices/` to `devices-moved/`. Open `404-collect-all.als`, check the device still loads (log it), Save As this name. Rename the folder back. |
+| 406 | `406-max-midi-effect.als` | Add a MIDI track, put Browser › Max for Live › Max MIDI Effect (empty template) on it. |
+| 407 | `407-device-off.als` | Turn the `loopwerk-half` device off with its activator. |
+
+### Log
+
+`corpus/max/README.md`, as in series 6, plus the Max version (Max › About Max) and, for 404 and
+405, the paths Live used.
+
 ## Tips from the first run
 
 - Live's default new set already has two MIDI tracks, two audio tracks, two returns and eight
@@ -459,5 +494,5 @@ Date:
 ## Later series
 
 Not yet; each gets its own section when the importer needs it: groups, return tracks, follow actions, launch quantisation and
-launch modes, MIDI CC and pitch-bend envelopes, comping and take lanes, Max for Live devices
-(as opaque placeholders), and sets saved by older Live versions.
+launch modes, MIDI CC and pitch-bend envelopes, comping and take lanes, and sets saved by older
+Live versions.

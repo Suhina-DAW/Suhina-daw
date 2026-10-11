@@ -8,7 +8,6 @@ use std::process::ExitCode;
 use loopwerk_automation::{LoopwerkMcp, Workspace, render_wav, scene_as_arrangement};
 use loopwerk_engine::AudioPool;
 use loopwerk_engine::model::*;
-use loopwerk_session::Session;
 
 const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
@@ -205,7 +204,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let mut server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    let mut server = LoopwerkMcp::new(workspace);
     if audio {
         server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
     }
