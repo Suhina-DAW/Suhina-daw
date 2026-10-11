@@ -461,10 +461,13 @@ impl StretchVoice {
         let channels = self.channels();
         // Make room by dropping frames that have been read.
         if self.fifo_read > 0 {
-            let read = self.fifo_read * channels;
-            let len = self.fifo_len * channels;
-            self.fifo.copy_within(read..len, 0);
-            self.fifo_len -= self.fifo_read;
+            // Reading may have run past what was produced (a stall plays silence); drop that too.
+            let read = self.fifo_read.min(self.fifo_len);
+            if let Some(unread) = self.fifo.get(read * channels..self.fifo_len * channels) {
+                let unread = unread.len();
+                self.fifo.copy_within(read * channels..read * channels + unread, 0);
+            }
+            self.fifo_len -= read;
             self.fifo_read = 0;
         }
         let free = self.fifo.len() / channels - self.fifo_len;
@@ -542,9 +545,11 @@ impl StretchVoice {
         for frame in out.as_chunks_mut::<2>().0 {
             // Linear interpolation needs this frame and the next.
             while self.fifo_len < self.fifo_read + 2 {
-                let before = self.fifo_len;
+                // Progress is counted in frames produced: compacting the FIFO can leave its length
+                // unchanged even when a chunk was added.
+                let before = self.produced;
                 self.run_chunk();
-                if self.fifo_len == before {
+                if self.produced == before {
                     break;
                 }
             }
@@ -709,6 +714,25 @@ mod tests {
 
     fn worst(errors: &[f64]) -> f64 {
         errors.iter().fold(0.0f64, |w, x| w.max(x.abs()))
+    }
+
+    #[test]
+    fn plays_through_at_any_device_rate_and_block_size() {
+        // A 48 kHz file on 44.1 kHz and 96 kHz devices, with restarts, in odd block sizes.
+        let data = clicks(0.25, 40.0, 48_000);
+        let analysis = analyze_audio(&data);
+        for markers in [vec![(0.0, 0.0), (64.0, 30.4)], vec![(0.0, 0.0), (64.0, 45.0)]] {
+            let r = region(&markers, StretchMode::Smooth);
+            for (device_rate, block) in [(44_100, 441), (44_100, 448), (96_000, 37), (22_050, 1000)] {
+                let mut voice =
+                    StretchVoice::new(&clip(60.0, 0.0, None), &r, data.clone(), Some(&analysis), 120.0, device_rate)
+                        .unwrap();
+                let mut out = vec![0.0; block * 2];
+                for _ in 0..(30 * device_rate as usize / block) {
+                    voice.render(&mut out);
+                }
+            }
+        }
     }
 
     #[test]
