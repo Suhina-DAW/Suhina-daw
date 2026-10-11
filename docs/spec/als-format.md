@@ -1,6 +1,6 @@
 ---
 description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices
-read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state
+read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
 type: spec
 status: current
 last_verified: 2026-10-11
@@ -16,7 +16,7 @@ What we have learned about the Live Set format, from Live Sets we authored ourse
 
 - **Observed with:** Live 12.4.6 (`Creator="Ableton Live 12.4.6"`, `MinorVersion="12.0_12402"`,
   `MajorVersion="5"`), Windows.
-- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`36` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio).
+- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`36` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio); series 6, files `110`–`135` (Utility).
 - Every statement marked **(hypothesis)** still needs a corpus file that proves it.
 
 ## Container
@@ -210,6 +210,36 @@ points at the default preset the device was loaded from.
 
 Plug-in state is the plug-in vendor's own format. Loopwerk keeps it verbatim and hands it back
 to the plug-in. **Never commit a corpus file that contains a commercial plug-in's state.**
+
+### Utility (`StereoGain`)
+
+Corpus: series 6, files `110`–`135`. Those files were saved as a chain, each from the previous
+one, not from the default, so a neighbour diff shows the step; `128` has both phase switches on.
+
+Live's Utility is the element `StereoGain`. Parameters that can be automated hold their value in
+`<Name>/Manual@Value` next to an `AutomationTarget`; the two plain elements hold it in `@Value`.
+
+| Element | Stored | Observed | Loopwerk `utility` |
+|---|---|---|---|
+| `Gain` | linear gain | -12 dB → `0.2511886358`, +6 dB → `1.99526238`, -inf → `0`, fully up → `56.2341309` (+35 dB) | `gain` = 20·log10 of it, dB; `0` → the minimum (silence) |
+| `Balance` | -1 … 1 | the knob shows 50L … 50R; typing `50L` stored `-1`, typing `100R` stopped at `1` | `balance`, the same number |
+| `StereoWidth` | fraction | 0 % → `0`, 200 % → `1.99999988`, fully up → `4` (400 %) | `width`, the same number |
+| `MidSideBalanceOn` | `@Value` true/false | the Width knob's Mid/Side Mode (right-click menu, not on the panel). Turning it on reset `StereoWidth` to `1` | when true: `width` = 1 and `midSide` from `MidSideBalance` |
+| `MidSideBalance` | 0 … 2 | on switching the mode on, the knob shows `0` and stores `1`; fully Mid `0`, fully Side `2` | `midSide` = value − 1 (−1 only mid, +1 only side), only when `MidSideBalanceOn` is true |
+| `Mono` | true/false | | `mono` |
+| `BassMono` | true/false | | `bassMono` |
+| `BassMonoFrequency` | Hz | 50 … 500, default 120 | `bassMonoFrequency` |
+| `BassMonoAudition` | `@Value` true/false | the headphones button by the frequency; not automatable | `bassMonoListen` |
+| `PhaseInvertL`, `PhaseInvertR` | true/false | `Ø L`, `Ø R`, independent | `invertLeft`, `invertRight` |
+| `ChannelMode` | 0 … 3 | `0` Left, `1` Stereo (default), `2` Right, `3` Swap | `channel`: Stereo 0, Left 1, Right 2, Swap 3 (a different order) |
+| `DcFilter` | true/false | | `dcFilter` |
+| `Mute` | true/false | | `mute` |
+| `On` | true/false | the device switch, as on every device | the model's `Device::enabled` |
+| `LegacyGain`, `LegacyMode` | `0`, `false` | unchanged in every file | not mapped **(hypothesis: older sets stored gain here)** |
+
+Still open: how Mid/Side between the ends scales mid and side (Loopwerk keeps one at full and
+turns the other down linearly), and whether Width and Mid/Side sound like Loopwerk's at the same
+settings. Both need bounces of files `118` and `121`–`122` with a value between the ends.
 
 ## Noise: ignore when importing or diffing
 
