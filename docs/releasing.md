@@ -1,3 +1,13 @@
+---
+description: How versions are numbered and release builds for Linux, Windows and macOS are made
+read_when: release, version, release candidate, tag, binaries, release workflow
+type: howto
+status: current
+last_verified: 2026-10-11
+covers:
+  - .github/workflows/release.yml
+---
+
 # Releasing
 
 Releases are built by [`.github/workflows/release.yml`](../.github/workflows/release.yml).

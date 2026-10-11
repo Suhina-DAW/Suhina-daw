@@ -6,6 +6,10 @@ machine names stay lowercase (`loopwerk-*` crates, binaries, file names). Read t
 then [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture.md`](docs/architecture.md)
 (layers, data flow, threads, and where new code goes).
 
+**Find documentation through [`docs/INDEX.md`](docs/INDEX.md)** before reading code: it lists
+every document with the words it is read for (*Read when*), and maps code paths to the documents
+that describe them (*Code and its documents*). Read only the documents that match your task.
+
 ## 1. Golden rules
 
 1. **Clean-room (outranks everything).** Follow [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
@@ -59,7 +63,8 @@ docs/
   architecture.md  how the crates, threads and commands fit together
   decisions/  architecture decision records; read 0001 before changing the model
   spec/       clean-room specs written from observation (formats, behaviour)
-scripts/   research helpers (e.g. extracting and diffing .als files)
+  INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
+scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```
 
 A crate may depend only on lower layers. Nothing below the UI layer may depend on a GUI toolkit.
@@ -88,3 +93,15 @@ that no longer exists:
 | A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
 
 A limit or a planned part that a change resolves is removed from the docs in the same change.
+
+```sh
+python scripts/docs.py impact   # documents that cover code you changed but you have not updated
+python scripts/docs.py index    # after adding a document or changing its front matter
+python scripts/docs.py check    # what CI runs: front matter, covered paths, INDEX.md current
+```
+
+Every file under `docs/` starts with front matter (format in `scripts/docs.py`): `description`,
+`read_when`, `type` (system, decision, spec, howto, plan), `status`, `last_verified` and
+`covers`, the code paths it describes. Set `last_verified` to the day you checked the text
+against the code; CI warns when it is over 90 days old. A new document lists in `covers` the code
+it describes, so `impact` can point the next change to it.
