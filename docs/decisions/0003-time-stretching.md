@@ -44,6 +44,18 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      own pitch; its output is read at the project rate with linear interpolation.
    - Audio that already plays at its own speed everywhere (within 0.01 %) skips the stretcher
      and is read directly.
+   - **Transients stay on the grid.** A stretcher places transients exactly only right after it
+     starts; later they drift by up to half its grain (keylock: up to ~9 ms early when slowing
+     down), so a stretched drum loop flams against unstretched ones and against the vocals. Each
+     voice therefore has two stretchers: shortly before every strong onset of the file (from the
+     pre-analysis) the idle one is restarted at exactly the right source frame and the voice
+     crossfades into it (`ANCHOR_LEAD`, `ANCHOR_FADE`). The restart's start-up is spread over the
+     frames before it, so voices whose onsets fall on the same beat do not all pay for it in one
+     audio block, and the first start-up happens when the renderer is built.
+   - The full-range profile reports no pipeline delay, but its phase vocoder slews its rate from
+     1× after a reset and its window delay is missing from its source-position map: measured,
+     output lands about `31 ms × (1 − 1/rate)` late. A restart feeds a preroll, runs until the
+     stretcher reports the start point playing and corrects by that measured amount.
 3. **Loading a project decodes and analyses.** `loopwerk-media` decodes every file on all cores
    and computes the stretcher's pre-analysis (onsets, beat grid) once per file that a warped clip
    plays. A disk cache for the analysis, as Live has, comes later.
@@ -71,6 +83,19 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
 | Average load on one core while playing | – | 52 % | 20 % |
 | Worst 512-frame block (budget 10.7 ms) | – | 42 ms | 8.6 ms |
 | Tempo change | stretch everything again | new playlists only | new playlists only |
+
+Transient timing, measured with clicks every 0.5 s (`crates/engine/src/stretch.rs` tests; error
+from where the warp markers put each click):
+
+| | Before restarts | With restarts |
+|---|---|---|
+| Keylock 0.95× | up to 9.4 ms early | within 1.7 ms |
+| Keylock with changing segment rates | up to 9.6 ms | within 2.4 ms |
+| Full range 0.7× / 1.5× | 19 ms early / 4 ms late on average, up to 30 ms | 5 ms early / 1 ms early on average |
+
+On the same project the restarts cost about 3 % more CPU; the worst 512-frame block measured
+8.3–10.3 ms against 8.0–8.7 ms before (budget 10.7 ms). Rendering ahead on a worker thread is
+what gives the real margin.
 
 ## Consequences
 
