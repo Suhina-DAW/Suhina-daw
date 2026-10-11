@@ -67,6 +67,19 @@ impl Coefficients {
         Self::normalised(b, -(1.0 + cos), b, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
     }
 
+    /// Band-pass around `frequency` with 0 dB at its peak.
+    pub fn bandpass(sample_rate: f64, frequency: f64, q: f64) -> Self {
+        let Terms { cos, alpha } = Terms::new(sample_rate, frequency, q);
+        Self::normalised(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+    }
+
+    /// Q of a band-pass or bell `octaves` wide (between its -3 dB points).
+    pub fn q_for_octaves(octaves: f64) -> f64 {
+        let octaves = if octaves.is_finite() { octaves.clamp(0.01, 10.0) } else { 1.0 };
+        let ratio = 2.0f64.powf(octaves);
+        ratio.sqrt() / (ratio - 1.0)
+    }
+
     /// Bell boosting or cutting `gain_db` around `frequency`.
     pub fn peak(sample_rate: f64, frequency: f64, q: f64, gain_db: f64) -> Self {
         let Terms { cos, alpha } = Terms::new(sample_rate, frequency, q);
@@ -213,6 +226,18 @@ pub(crate) mod tests {
         let high = Coefficients::high_shelf(SR, 5_000.0, BUTTERWORTH_Q, 9.0);
         assert!((db(high.magnitude(SR, 22_000.0)) - 9.0).abs() < 0.2);
         assert!(db(high.magnitude(SR, 50.0)).abs() < 0.05);
+    }
+
+    #[test]
+    fn bandpass_peaks_at_its_frequency() {
+        let q = Coefficients::q_for_octaves(1.0);
+        assert!((q - 1.414).abs() < 0.001, "{q}");
+        let bp = Coefficients::bandpass(SR, 1_000.0, q);
+        assert!((bp.magnitude(SR, 1_000.0) - 1.0).abs() < 1e-6);
+        // One octave wide: the -3 dB points are half an octave either side.
+        let edge = bp.magnitude(SR, 1_000.0 * 2.0f64.sqrt());
+        assert!((db(edge) + 3.01).abs() < 0.2, "{}", db(edge));
+        assert!(bp.magnitude(SR, 0.0) < 1e-9);
     }
 
     #[test]
