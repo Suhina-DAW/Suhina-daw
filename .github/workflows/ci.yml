@@ -1,9 +1,16 @@
 name: CI
 
+# Changes that touch only documentation do not run the checks; no code reads these files.
 on:
   push:
     branches: [main]
+    paths-ignore: &docs
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+      - "NOTICE"
   pull_request:
+    paths-ignore: *docs
 
 permissions:
   contents: read
