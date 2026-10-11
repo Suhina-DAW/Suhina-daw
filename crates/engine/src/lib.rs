@@ -110,6 +110,9 @@ struct Voice {
 struct ArrangedAudio {
     event: AudioEvent,
     column: u32,
+    /// Which clip of the project this is (arrangement lane, clip, content lane), so a graph swap
+    /// can find the same clip in the old graph (ADR 0005).
+    key: (usize, usize, usize),
 }
 
 /// Plays a project: its arrangement from the start, and launcher clips as they are launched
@@ -450,10 +453,10 @@ impl Graph {
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
         let mut stretch_voices = Vec::new();
-        for lane in &project.arrangement.lanes {
-            for clip in lane.clips.iter().filter(|c| c.enabled) {
+        for (lane_index, lane) in project.arrangement.lanes.iter().enumerate() {
+            for (clip_index, clip) in lane.clips.iter().enumerate().filter(|(_, c)| c.enabled) {
                 let Some(content) = project.content(clip.content) else { continue };
-                for content_lane in &content.lanes {
+                for (content_index, content_lane) in content.lanes.iter().enumerate() {
                     let Some(track) = content_lane.target.or(lane.track) else { continue };
                     let Some((gain_left, gain_right)) = track_gains(project, track) else { continue };
                     let column = column_of(track);
@@ -490,10 +493,9 @@ impl Graph {
                                 }
                             }
                             let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
-                            audio_events.extend(
-                                AudioEvent::new(clip, region, data.clone(), timing, gains)
-                                    .map(|event| ArrangedAudio { event, column }),
-                            );
+                            audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
+                                |event| ArrangedAudio { event, column, key: (lane_index, clip_index, content_index) },
+                            ));
                         }
                     }
                 }
@@ -1187,5 +1189,30 @@ mod tests {
         assert_eq!(renderer.stretch_underruns(), 0);
         let at = swap_frame(50);
         assert!(rms(&out, at, at + 4_800) > 0.9 * rms(&out, at - 4_800, at));
+    }
+
+    #[test]
+    fn an_unwarped_clip_carries_on_through_a_tempo_edit() {
+        // Unwarped audio plays at its own speed: a tempo edit must not move it in its file.
+        let (mut project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Smooth);
+        for content in &mut project.contents {
+            for lane in &mut content.lanes {
+                if let LaneData::Audio(region) = &mut lane.data {
+                    region.warped = false;
+                }
+            }
+        }
+        let mut slower = project.clone();
+        slower.transport.tempo_bpm = 90.0;
+        let mut original = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let original = blocks(&mut original, 150, 480, |_| {});
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut controller = renderer.controller();
+        let mut out = blocks(&mut renderer, 50, 480, |_| {});
+        controller.update(&slower).unwrap();
+        out.extend(blocks(&mut renderer, 100, 480, |_| {}));
+        assert!(rms(&out, 40_000, 70_000) > 0.1);
+        // The same file positions as without the edit (to rounding).
+        assert!(max_diff(&out, &original) < 1e-6);
     }
 }

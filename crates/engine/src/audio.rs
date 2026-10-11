@@ -112,6 +112,11 @@ pub(crate) struct AudioEvent {
     gain_left: f32,
     gain_right: f32,
     fade_frames: f64,
+    /// Whether the clip follows the beat (warped); an unwarped clip plays at its own speed.
+    warped: bool,
+    /// Seconds added to the file position: an unwarped clip that was playing when the tempo
+    /// changed carries on from where it was (ADR 0005).
+    shift: f64,
 }
 
 impl AudioEvent {
@@ -159,7 +164,26 @@ impl AudioEvent {
             gain_left: gains.0 * gain,
             gain_right: gains.1 * gain,
             fade_frames: 0.002 * f64::from(sample_rate),
+            warped: region.warped,
+            shift: 0.0,
         })
+    }
+
+    pub(crate) fn warped(&self) -> bool {
+        self.warped
+    }
+
+    /// The file position, in seconds, played at frame `position` (inside `start..end`).
+    pub(crate) fn file_seconds(&self, position: u64) -> f64 {
+        let since_start = position.saturating_sub(self.start) as f64;
+        self.map.seconds(self.clip_beat(since_start / self.frames_per_beat)) + self.shift
+    }
+
+    /// Makes the clip play file position `seconds` at frame `position`, and on from there.
+    pub(crate) fn continue_from(&mut self, position: u64, seconds: f64) {
+        self.shift = 0.0;
+        let shift = seconds - self.file_seconds(position);
+        self.shift = if shift.is_finite() { shift } else { 0.0 };
     }
 
     /// The clip beat played `elapsed` project beats after the clip starts: from the offset, then
@@ -177,7 +201,7 @@ impl AudioEvent {
         let since_start = (position - self.start) as f64;
         let until_end = (self.end - position) as f64;
         let fade = (since_start / self.fade_frames).min(until_end / self.fade_frames).min(1.0) as f32;
-        let seconds = self.map.seconds(self.clip_beat(since_start / self.frames_per_beat));
+        let seconds = self.map.seconds(self.clip_beat(since_start / self.frames_per_beat)) + self.shift;
         let (left, right) = self.data.stereo_at(seconds);
         (left * self.gain_left * fade, right * self.gain_right * fade)
     }

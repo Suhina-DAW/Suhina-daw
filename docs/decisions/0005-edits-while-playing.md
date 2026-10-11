@@ -44,7 +44,9 @@ clip; devices (ADR 0004) will add many more parameters.
 4. **State carries over at the swap, without allocation.** The playhead stays in beats: if the
    tempo changed, the transport's origin is moved so the same beat plays on. Cursors into the
    new event lists are found by binary search; playing audio clips are found again by their
-   time. Sounding note voices ring on. The launcher's runtime is copied column by column (a
+   time; an unwarped audio clip plays at its own speed, not the beat's, so it carries on from
+   the file position it was at (after a tempo edit its beat position moves, as in other DAWs).
+   Sounding note voices ring on. The launcher's runtime is copied column by column (a
    column or slot that no longer exists is dropped). A playing launched clip whose prepared
    audio is unchanged keeps its stretch voice (moved from the old graph to the new); otherwise
    the new voice is moved to the clip's position.

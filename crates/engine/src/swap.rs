@@ -100,6 +100,7 @@ impl Renderer {
     pub(crate) fn apply_swap(&mut self) {
         let Some(swap) = self.swap.pending.take() else { return };
         let old_beat_frames = self.graph.frames_per_beat;
+        let old_time = self.time();
         let mut old = std::mem::replace(&mut self.graph, swap.graph);
         // The playhead stays on the same beat when the tempo changed.
         if self.running && old_beat_frames != self.graph.frames_per_beat {
@@ -113,12 +114,22 @@ impl Renderer {
         self.next_audio = self.graph.audio_events.partition_point(|a| a.event.start < time);
         self.active_audio_count = 0;
         if self.running {
-            for (index, arranged) in self.graph.audio_events.iter().enumerate().take(self.next_audio) {
+            for (index, arranged) in self.graph.audio_events.iter_mut().enumerate().take(self.next_audio) {
                 if arranged.event.end > time && self.active_audio_count < MAX_AUDIO_VOICES {
                     if let Some(slot) = self.active_audio.get_mut(self.active_audio_count) {
                         *slot = index;
                     }
                     self.active_audio_count += 1;
+                    // An unwarped clip plays at its own speed, not the beat's: it carries on from
+                    // the file position it was at, whatever the tempo now.
+                    if !arranged.event.warped()
+                        && let Some(before) = old
+                            .audio_events
+                            .iter()
+                            .find(|a| a.key == arranged.key && a.event.start <= old_time && old_time < a.event.end)
+                    {
+                        arranged.event.continue_from(time, before.event.file_seconds(old_time));
+                    }
                 }
             }
         }
