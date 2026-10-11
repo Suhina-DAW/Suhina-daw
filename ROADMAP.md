@@ -101,17 +101,30 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
   track, and write a MIDI clip that plays the slices back in their original rhythm, warped
   timing kept if asked. Needs the sampler and drum rack devices; transients come from the
   stretcher's analysis that `media` already computes. Slicing presets are our own.
-- **Convert to a new MIDI track:** three kinds of material, each with its own detector.
-  - *Melody:* one note at a time; pitch tracking (own, e.g. pYIN-style) plus note segmentation.
-  - *Harmony:* chords and polyphony; the hardest part. Candidate: a small open transcription
-    model run in pure Rust (Spotify's Basic Pitch, Apache-2.0, through `tract`), licence and
-    model weights checked first.
+- **Convert to a new MIDI track:** four narrow detectors instead of one that tries to write
+  every note of a mix, since each narrow task is far more reliable.
   - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
-    of a drum rack.
-- **Dropping audio onto a MIDI track** asks which of the three conversions to run, and writes
-  the result where the audio was dropped.
+    of a drum rack; more classes (toms, cymbals) later with a small model.
+  - *Bass:* one note at a time in the low register (about 30–300 Hz); pitch tracking limited to
+    that range, note starts taken from transients.
+  - *Melody:* one note at a time across the whole range; pitch tracking (own, pYIN-style) plus
+    note segmentation.
+  - *Chords:* chord names rather than every note: pitch classes (chroma) matched against chord
+    templates and smoothed over time, then written as a voicing; the bass detector gives the
+    inversion.
+  - Full polyphonic transcription (every note of a piano part) comes later, if at all. Candidate:
+    Spotify's Basic Pitch (Apache-2.0) run in pure Rust through `tract`, licence and model
+    weights checked first.
+- **Using what the project knows:** every detector snaps to the project's tempo and warp grid,
+  and chords and pitches can be held to the project's key, so results need less cleaning up.
+- **Stem separation first:** separating a full mix into drums, bass and the rest before
+  detecting is the largest single gain in quality. Candidate: Demucs (MIT), model weights
+  checked first. Also offered on its own, as separating stems to new audio tracks.
+- **Dropping audio onto a MIDI track** asks which conversion to run (drums, bass, melody,
+  chords), and writes the result where the audio was dropped.
 - **Order:** after the sampler and drum rack exist; slicing first (smallest, reuses the
-  stretcher's analysis), then drums, melody and harmony. An ADR comes before the detectors.
+  stretcher's analysis), then drums, bass, melody and chords, then stem separation. An ADR comes
+  before the detectors.
 - **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
   can be compared note by note.
 

@@ -72,19 +72,32 @@ slice with no audible content is still created, so note numbers stay predictable
 
 ### Behaviour
 
-1. **Melody:** one note at a time. Each note gets the pitch heard, its start and its length;
-   pitch glides become separate notes. **(hypothesis)**
-2. **Harmony:** several notes at once (chords, polyphonic parts). Each note gets its pitch, start
-   and length.
-3. **Drums:** each hit becomes a note on a fixed key per drum class: kick, snare, hi-hat.
-   **(hypothesis** for the classes and keys; the manual lists them.**)**
-4. **Velocity** follows the loudness of each note or hit. **(hypothesis)**
-5. **Dropping onto a MIDI track:** after a choice, the MIDI clip is written on the track it was
-   dropped on, at the drop position, and the audio clip is not placed there. *Cancel* drops
-   nothing. **(hypothesis)**
+**Loopwerk:** four kinds of material instead of three. A detector that writes every note of a
+mix ("harmony") mixes parts up; narrow detectors are far more reliable, so Loopwerk offers:
 
-**Loopwerk:** every conversion is a command (`clip.sliceToMidi`, `clip.convertToMidi` with
-`material: melody | harmony | drums`), runs off the audio thread, and is one undo step.
+1. **Drums:** each hit becomes a note on a fixed key per drum class: kick, snare, hi-hat to
+   start with.
+2. **Bass:** one note at a time in the low register (about 30–300 Hz). Each note gets its pitch,
+   start and length; starts come from transients, since low pitches need long analysis windows.
+3. **Melody:** one note at a time across the whole range. Each note gets the pitch heard, its
+   start and its length; pitch glides become separate notes.
+4. **Chords:** one chord at a time, recognised by its pitch classes and written as a voicing in
+   a middle register, with the bass note from the bass detector as the inversion. Chords change
+   at most once per beat.
+
+For all four:
+
+- **Velocity** follows the loudness of each note or hit.
+- **Grid and key:** note starts snap to the project's tempo and warp grid within a tolerance,
+  and pitches and chords can be held to the project's key.
+- **Dropping onto a MIDI track** offers these four choices and *Cancel*. After a choice, the
+  MIDI clip is written on the track it was dropped on, at the drop position, and the audio clip
+  is not placed there. *Cancel* drops nothing. **(hypothesis** for Live; Loopwerk does this.**)**
+- Every conversion is a command (`clip.sliceToMidi`, `clip.convertToMidi` with
+  `material: drums | bass | melody | chords`), runs off the audio thread, and is one undo step.
+
+For comparison, Live offers three: *Harmony* (several notes at once), *Melody* and *Drums*;
+which keys its drum classes land on is in its manual. **(hypothesis)**
 
 ## To observe
 
@@ -102,5 +115,7 @@ Checks in Live 12.4 (screen recording or notes; no audio from Live is committed)
 
 ## Not yet
 
-- Stem separation (*Separate Stems to New Audio Tracks*).
+- Stem separation (*Separate Stems to New Audio Tracks*), planned as a step before detection
+  and as a command of its own; it gets its own spec.
+- Full polyphonic transcription (every note of a mix or a piano part).
 - Converting in real time or while recording.
