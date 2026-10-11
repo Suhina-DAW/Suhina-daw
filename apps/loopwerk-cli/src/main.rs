@@ -1,23 +1,36 @@
 //! Headless Loopwerk CLI.
 
+mod play;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use loopwerk_automation::{LoopwerkMcp, Workspace, render_wav, scene_as_arrangement};
+use loopwerk_engine::AudioPool;
 use loopwerk_engine::model::*;
-use loopwerk_engine::render_offline;
+use loopwerk_session::Session;
 
 const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
+       loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
+       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
+  play      play a project once on the default audio output, or with --launcher launch its
+            clips and scenes by typing commands
+  mcp       serve the Model Context Protocol on stdin/stdout for agents; files can be read only
+            below --read-root and written only below --write-root (no root, no access); with
+            --audio, opened projects play on the default output so agents can launch clips
 
 options:
   <project.als>      a Live Set to import
-  --demo             render the built-in demo project instead
-  -o, --output       output WAV path
-  --scene <n>        render scene n (1-based) of the clip launcher instead of the arrangement
-  --sample-rate      sample rate in Hz (default 48000)";
+  --demo             use the built-in demo project instead
+  -o, --output       output WAV path (render only)
+  --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
+  --launcher         play only: start stopped and read launcher commands (scene 2, clip Bass 1,
+                     stop Bass, quit, help) from standard input
+  --sample-rate      sample rate in Hz (render only; default 48000)";
 
 #[derive(Debug)]
 enum Source {
@@ -26,17 +39,41 @@ enum Source {
 }
 
 #[derive(Debug)]
-struct RenderArgs {
+struct Args {
     source: Source,
-    output: PathBuf,
+    output: Option<PathBuf>,
     scene: Option<usize>,
+    launcher: bool,
     sample_rate: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Command {
+    Render,
+    Play,
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("render") => match parse_render(args.get(1..).unwrap_or_default()).and_then(|a| render(&a)) {
+        Some(name @ ("render" | "play")) => {
+            let command = if name == "render" { Command::Render } else { Command::Play };
+            let result = parse_args(args.get(1..).unwrap_or_default(), command).and_then(|a| match command {
+                Command::Render => render(&a),
+                Command::Play => {
+                    let (project, audio) = load_project(&a)?;
+                    if a.launcher { play::launcher(project, &audio) } else { play::play(&project, &audio) }
+                }
+            });
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("mcp") => match mcp(args.get(1..).unwrap_or_default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("error: {message}");
@@ -58,10 +95,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn parse_render(args: &[String]) -> Result<RenderArgs, String> {
+fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
     let mut output = None;
     let mut sample_rate = 48_000;
     let mut scene = None;
+    let mut launcher = false;
     let mut source = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -82,6 +120,10 @@ fn parse_render(args: &[String]) -> Result<RenderArgs, String> {
                 scene = Some(n.checked_sub(1).ok_or("scenes are numbered from 1")?);
                 None
             }
+            "--launcher" => {
+                launcher = true;
+                None
+            }
             other if other.starts_with('-') => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
             path => Some(Source::Als(PathBuf::from(path))),
         };
@@ -92,68 +134,81 @@ fn parse_render(args: &[String]) -> Result<RenderArgs, String> {
             source = Some(next);
         }
     }
-    Ok(RenderArgs {
+    match (command, &output) {
+        (Command::Render, None) => return Err(format!("missing --output\n\n{USAGE}")),
+        (Command::Play, Some(_)) => return Err(format!("play does not write a file; use render\n\n{USAGE}")),
+        _ => {}
+    }
+    if launcher && (command != Command::Play || scene.is_some()) {
+        return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
+    }
+    Ok(Args {
         source: source.ok_or(format!("missing project: give a .als file or --demo\n\n{USAGE}"))?,
-        output: output.ok_or(format!("missing --output\n\n{USAGE}"))?,
+        output,
         scene,
+        launcher,
         sample_rate,
     })
 }
 
-fn render(args: &RenderArgs) -> Result<(), String> {
-    let mut project = match &args.source {
-        Source::Demo => demo_project(),
+/// Opens the project named by the arguments and the audio files it uses, printing warnings, and
+/// applies `--scene`.
+fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
+    let (project, audio) = match &args.source {
+        Source::Demo => (demo_project(), AudioPool::new()),
         Source::Als(path) => {
             let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
-            for warning in &import.warnings {
+            let folder = path.parent().unwrap_or(std::path::Path::new("."));
+            let started = std::time::Instant::now();
+            let (audio, audio_warnings) = loopwerk_media::load_project_audio(&import.project, folder);
+            for warning in import.warnings.iter().chain(&audio_warnings) {
                 eprintln!("warning: {warning}");
             }
-            import.project
+            if !audio.files.is_empty() {
+                eprintln!("audio: {} files decoded in {:.1} s", audio.files.len(), started.elapsed().as_secs_f64());
+            }
+            (import.project, audio)
         }
     };
-    if let Some(scene) = args.scene {
-        project = scene_as_arrangement(&project, scene)?;
-    }
-    let samples = render_offline(&project, args.sample_rate, 512).map_err(|e| e.to_string())?;
-
-    let spec = hound::WavSpec {
-        channels: 2,
-        sample_rate: args.sample_rate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
+    let project = match args.scene {
+        Some(scene) => scene_as_arrangement(&project, scene)?,
+        None => project,
     };
-    let path = &args.output;
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("{}: {e}", path.display()))?;
-    for sample in &samples {
-        writer.write_sample(*sample).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    writer.finalize().map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok((project, audio))
+}
 
-    let seconds = samples.len() as f64 / 2.0 / f64::from(args.sample_rate);
-    println!("wrote {} ({seconds:.2} s, {} Hz)", path.display(), args.sample_rate);
+fn render(args: &Args) -> Result<(), String> {
+    let path = args.output.as_ref().ok_or("missing --output")?;
+    let (project, audio) = load_project(args)?;
+    let summary = render_wav(&project, &audio, path, args.sample_rate)?;
+    println!("wrote {} ({:.2} s, {} Hz)", path.display(), summary.seconds, summary.sample_rate);
     Ok(())
 }
 
-/// Replaces the arrangement with the clips of one launcher scene, each played once from the start,
-/// as if the scene were launched at time zero.
-fn scene_as_arrangement(project: &Project, scene: usize) -> Result<Project, String> {
-    let count = project.launcher.scenes.len();
-    if scene >= count {
-        return Err(format!("scene {} does not exist; the project has {count} scenes", scene.saturating_add(1)));
+/// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
+fn mcp(args: &[String]) -> Result<(), String> {
+    let mut read_root = None;
+    let mut write_root = None;
+    let mut audio = false;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--read-root" => read_root = Some(PathBuf::from(it.next().ok_or("--read-root needs a folder")?)),
+            "--write-root" => write_root = Some(PathBuf::from(it.next().ok_or("--write-root needs a folder")?)),
+            "--audio" => audio = true,
+            other => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
+        }
     }
-    let lanes = project
-        .launcher
-        .columns
-        .iter()
-        .map(|column| ArrangementLane {
-            name: String::new(),
-            track: Some(column.track),
-            clips: column.slots.get(scene).and_then(|s| s.clip.clone()).into_iter().collect(),
-        })
-        .collect();
-    let mut project = project.clone();
-    project.arrangement = Arrangement { lanes };
-    Ok(project)
+    let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
+    let mut server = LoopwerkMcp::new(Session::new(Project::default()), workspace);
+    if audio {
+        server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("could not start the async runtime: {e}"))?;
+    runtime.block_on(server.serve_stdio())
 }
 
 /// Two bars at 120 bpm: a bass line and a chord pattern on separate tracks, each placed twice.
@@ -238,7 +293,7 @@ mod tests {
     fn demo_project_is_valid_and_renders_two_bars() {
         let project = demo_project();
         assert_eq!(project.validate(), Ok(()));
-        let samples = render_offline(&project, 48_000, 512).unwrap();
+        let samples = loopwerk_engine::render_offline(&project, 48_000, 512).unwrap();
         let seconds = samples.len() as f64 / 2.0 / 48_000.0;
         assert!((4.0..4.2).contains(&seconds), "{seconds} s");
         let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
@@ -248,6 +303,7 @@ mod tests {
     #[test]
     fn render_args_need_one_project_and_an_output() {
         let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let parse_render = |a: &[String]| parse_args(a, Command::Render);
         assert!(parse_render(&args(&["-o", "x.wav"])).is_err());
         assert!(parse_render(&args(&["--demo"])).is_err());
         assert!(parse_render(&args(&["--demo", "-o"])).is_err());
@@ -259,6 +315,18 @@ mod tests {
         assert_eq!(ok.sample_rate, 44_100);
         assert_eq!(ok.scene, Some(1));
         assert!(matches!(ok.source, Source::Als(_)));
+    }
+
+    #[test]
+    fn play_args_take_a_project_but_no_output() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(parse_args(&args(&["--demo"]), Command::Play).is_ok());
+        assert!(parse_args(&args(&["a.als", "--scene", "3"]), Command::Play).is_ok());
+        assert!(parse_args(&args(&["--demo", "-o", "x.wav"]), Command::Play).is_err());
+        assert!(parse_args(&args(&[]), Command::Play).is_err());
+        assert!(parse_args(&args(&["a.als", "--launcher"]), Command::Play).unwrap().launcher);
+        assert!(parse_args(&args(&["a.als", "--launcher", "--scene", "1"]), Command::Play).is_err());
+        assert!(parse_args(&args(&["a.als", "--launcher", "-o", "x.wav"]), Command::Render).is_err());
     }
 
     #[test]

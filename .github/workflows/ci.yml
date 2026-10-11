@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Changes that touch only documentation skip the build jobs entirely; no code reads these
+  # files. main requires only the `ci` job at the end, which passes when the others passed or
+  # were skipped.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # A pull request is checked out as a merge commit, so its first parent is the current base.
+      - id: diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: |
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(git diff --name-only "$BASE" HEAD \
+            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$' || true)
+          if [ -n "$code" ]; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
+
+  # Runs on every change, documentation included.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request is checked out as a merge commit; its first parent is the base.
+          fetch-depth: 2
+      - name: Front matter, covered paths and docs/INDEX.md
+        run: python3 scripts/docs.py check
+      # Warnings only: documents that describe code this pull request changes, left unchanged.
+      - name: Documents that describe the changed code
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/docs.py impact HEAD^1
+      - name: No hidden or bidirectional Unicode characters
+        run: |
+          if git grep -nIP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' -- . ':!*.lock'; then
+            echo "::error::Hidden or bidirectional Unicode characters found (listed above)."
+            exit 1
+          fi
+      - name: No Live project or library files
+        run: |
+          if git ls-files | grep -Ei '\.(als|alc|adg|adv|agr|ams|amxd|asd|alp)$'; then
+            echo "::error::Live files are not committed; test sets stay in corpus/ (see CONTRIBUTING.md)."
+            exit 1
+          fi
+      - name: Links between repository files resolve
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress "**/*.md"
+          fail: true
+
+  fmt:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  check:
+    name: clippy and tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
+      # stays off here.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # Not part of `ci`: a macOS failure is reported but does not block merging.
+  check-macos:
+    name: clippy and tests (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
+      # stays off here.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # The one check main requires. Fails if any job it depends on failed or was cancelled.
+  ci:
+    if: always()
+    needs: [changes, docs, fmt, check]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::A required job failed or was cancelled."
+          exit 1
+      - run: echo "All required jobs passed or were skipped."

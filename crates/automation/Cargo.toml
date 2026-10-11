@@ -1,0 +1,21 @@
+[package]
+name = "loopwerk-automation"
+description = "MCP server over a Loopwerk session, plus offline rendering to WAV"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+loopwerk-media.workspace = true
+hound.workspace = true
+serde_json.workspace = true
+serde = { version = "1", features = ["derive"] }  # MIT OR Apache-2.0
+schemars = "1"  # MIT
+rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io"] }  # Apache-2.0
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }  # MIT
+
+[lints]
+workspace = true

@@ -197,3 +197,119 @@ fn plugins_keep_id_and_state() {
     assert_eq!(vst2.kind, DeviceKind::Vst2 { id: 1_128_746_035 });
     assert!(vst2.state.as_ref().is_some_and(|s| s.len() == 3348));
 }
+
+#[test]
+fn time_signatures_come_from_the_automation_default() {
+    let ts = |name: &str| {
+        let t = open(name).project.transport.time_signature;
+        (t.numerator, t.denominator)
+    };
+    assert_eq!(ts("50-time-signature-3-4"), (3, 4));
+    assert_eq!(ts("51-time-signature-6-8"), (6, 8));
+    assert_eq!(ts("52-time-signature-7-8"), (7, 8));
+    assert_eq!(ts("53-time-signature-4-4"), (4, 4));
+}
+
+/// The session clip in 1-MIDI slot 1 through the marker edits of series 4.
+#[test]
+fn clip_start_loop_and_end_markers() {
+    let clip = |name: &str| open(name).project.launcher.columns[0].slots[0].clip.clone().unwrap();
+    let range = |c: &loopwerk_model::Clip| c.loop_range.map(|r| (r.start, r.end));
+
+    // Start 1.2.1 inside a 2-bar loop from 1.1.1.
+    let c = clip("54-clip-start-marker");
+    assert_eq!((c.offset, range(&c)), (1.0, Some((0.0, 8.0))));
+    // Loop moved to 1.3.1; Live moved the start to 3.2.1 (beat 9).
+    let c = clip("55-clip-loop-position");
+    assert_eq!((c.offset, range(&c)), (9.0, Some((2.0, 10.0))));
+    // Loop off: plays from the start marker (3.2.1) to the end marker (3.3.1).
+    let c = clip("56-clip-loop-off");
+    assert_eq!((c.offset, c.length, range(&c)), (9.0, 1.0, None));
+    // End marker moved to 3.4.1.
+    let c = clip("57-clip-end-marker");
+    assert_eq!((c.offset, c.length), (9.0, 2.0));
+    assert!(c.enabled);
+    assert!(!clip("58-clip-deactivated").enabled);
+}
+
+#[test]
+fn deactivated_notes_are_skipped() {
+    let p = open("59-note-deactivated").project;
+    let clip = p.launcher.columns[0].slots[1].clip.as_ref().unwrap();
+    let LaneData::Notes(notes) = &p.content(clip.content).unwrap().lanes[0].data else { panic!() };
+    assert!(notes.is_empty());
+}
+
+#[test]
+fn group_track_routes_its_members() {
+    let p = open("60-group-track").project;
+    let group = p.tracks.iter().find(|t| t.name == "3-Group").unwrap();
+    for name in ["4-Audio", "5-loopwerk-demo"] {
+        let track = p.tracks.iter().find(|t| t.name == name).unwrap();
+        assert_eq!(track.parent, Some(group.id));
+        let channel = p.channels.iter().find(|c| Some(c.id) == track.channel).unwrap();
+        assert_eq!(channel.output, group.channel);
+    }
+}
+
+#[test]
+fn unwarped_audio_times_are_seconds() {
+    let audio_column = |name: &str| {
+        let p = open(name).project;
+        let track = p.tracks.iter().find(|t| t.name == "5-loopwerk-demo").unwrap().id;
+        let clip = p.launcher.columns.iter().find(|c| c.track == track).unwrap().slots[0].clip.clone().unwrap();
+        (p.transport.tempo_bpm, clip)
+    };
+    // Warp off: Live stored the end as 3.9376 s (beat 8 through the moved warp marker).
+    let (bpm, clip) = audio_column("61-audio-warp-off");
+    assert!((clip.length - 3.937_645_8 * bpm / 60.0).abs() < 1e-6);
+    // Start moved to 1 s.
+    let (bpm, clip) = audio_column("62-audio-unwarped-start");
+    assert!((clip.offset - bpm / 60.0).abs() < 1e-9);
+}
+
+/// The Utility of a file in corpus series 6 (`corpus/devices`, docs/spec/als-corpus.md), in
+/// whichever Live project folder under `corpus/devices` holds it.
+fn utility(name: &str) -> loopwerk_model::Device {
+    let root: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "corpus", "devices"].iter().collect();
+    let file = format!("{name}.als");
+    let path = std::fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("{}: {e}; author series 6 first (docs/spec/als-corpus.md)", root.display()))
+        .filter_map(|entry| entry.ok().map(|e| e.path().join(&file)))
+        .find(|p| p.exists())
+        .unwrap_or_else(|| panic!("{file} is missing under {}", root.display()));
+    let project = read_file(&path).unwrap_or_else(|e| panic!("{name}: {e}")).project;
+    let devices: Vec<_> = project.channels.into_iter().flat_map(|c| c.devices).collect();
+    devices.into_iter().find(|d| d.kind == loopwerk_model::DeviceKind::Builtin("utility".into())).unwrap()
+}
+
+fn param(device: &loopwerk_model::Device, id: &str) -> f64 {
+    device.params.iter().find(|p| p.id == id).unwrap().value
+}
+
+#[test]
+fn utility_series_maps_onto_the_loopwerk_utility() {
+    let default = utility("110-utility-default.als");
+    assert_eq!(default.name, "Utility");
+    assert!(default.enabled);
+    assert_eq!(param(&default, "gain"), 0.0);
+    assert_eq!(param(&default, "channel"), 0.0);
+    assert!((param(&utility("111-utility-gain-minus12"), "gain") + 12.0).abs() < 1e-6);
+    assert_eq!(param(&utility("113-utility-gain-inf"), "gain"), -70.0);
+    assert!((param(&utility("114-utility-gain-max"), "gain") - 35.0).abs() < 1e-4);
+    assert_eq!(param(&utility("116-utility-balance-100r"), "balance"), 1.0);
+    assert_eq!(param(&utility("119-utility-width-max"), "width"), 4.0);
+    // The files were made as a chain: Mid/Side mode stays on from 120 to the end.
+    let mid = utility("121-utility-midside-centre");
+    assert_eq!((param(&mid, "width"), param(&mid, "midSide")), (1.0, -1.0));
+    assert_eq!(param(&utility("120-utility-midside-mid-50S"), "midSide"), 0.5);
+    assert_eq!(param(&utility("123-utility-mono"), "mono"), 1.0);
+    assert_eq!(param(&utility("126-utility-bassmono-max"), "bassMonoFrequency"), 500.0);
+    let both = utility("128-utility-phase-right");
+    assert_eq!((param(&both, "invertLeft"), param(&both, "invertRight")), (1.0, 1.0));
+    assert_eq!(param(&utility("130-utility-channel-left"), "channel"), 1.0);
+    assert_eq!(param(&utility("132-utility-channel-swap"), "channel"), 3.0);
+    assert_eq!(param(&utility("133-utility-dc"), "dcFilter"), 1.0);
+    assert_eq!(param(&utility("134-utility-mute"), "mute"), 1.0);
+    assert_eq!(param(&utility("135-utility-bassmono-listen"), "bassMonoListen"), 1.0);
+}

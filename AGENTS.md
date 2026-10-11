@@ -3,7 +3,12 @@
 Loopwerk is an open-source, native, clip-launching DAW written in **Rust only**, comparable in
 workflow to Ableton Live. The product name is always written **Loopwerk** in user-facing text;
 machine names stay lowercase (`loopwerk-*` crates, binaries, file names). Read this file first,
-then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+then [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture.md`](docs/architecture.md)
+(layers, data flow, threads, and where new code goes).
+
+**Find documentation through [`docs/INDEX.md`](docs/INDEX.md)** before reading code: it lists
+every document with the words it is read for (*Read when*), and maps code paths to the documents
+that describe them (*Code and its documents*). Read only the documents that match your task.
 
 ## 1. Golden rules
 
@@ -46,19 +51,43 @@ then [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ```text
 crates/
   model    L0 DAW-neutral project as pure data (tracks, channels, clip contents, clips, launcher)
-  engine   L1 audio graph and offline/real-time rendering
+  stretch  L0 time-stretching and pitch-shifting DSP: a pure-Rust port of Signalsmith Stretch (MIT)
+  engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
+           and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
+  media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool
+  session  L2 open project, undo history, the command registry (ADR 0002) and the attached player
+  automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
+  dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
+  device-api L0 the Device trait, parameter descriptions, contract tests every device runs
+devices/
+  utility  gain, balance, width, mono, bass mono, phase, channels, DC filter; depends on dsp, device-api
+  auto-pan LFO panning and tremolo, free in Hz or synced to the song position
+  dj-eq    three bands with kills, Linkwitz-Riley crossovers at 24 or 48 dB/octave
+  vinyl-distortion  tracing (even), pinch (odd, out of phase) and crackle, oversampled
+  overdrive  pedal-style: band, drive, tone, dynamics, dry/wet; oversampled
 apps/
-  loopwerk-cli   headless CLI (render, later mcp)
+  loopwerk-cli   headless CLI: render, play, mcp
 docs/
-  decisions/  architecture decision records; read 0001 before changing the model
+  architecture.md  how the crates, threads and commands fit together
+  decisions/  architecture decision records; read 0001 before changing the model, 0004 before a device
   spec/       clean-room specs written from observation (formats, behaviour)
-scripts/   research helpers (e.g. extracting and diffing .als files)
+  INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
+scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```
 
 A crate may depend only on lower layers. Nothing below the UI layer may depend on a GUI toolkit.
 
-## 3. Before you finish a task
+## 3. Tasks
+
+Work is tracked in the GitHub project **Loopwerk**
+(<https://github.com/users/juhamikael/projects/12>), and nowhere else. New work, bugs found while
+testing and follow-ups a change leaves open go there as items, written in English, with a
+Status, a Priority (P0 to P2) and a Phase (the ROADMAP milestone). Work that a pull request will
+close gets an issue, so the pull request can say `Closes #N`. Items imported from the earlier
+board keep their old key in the title (`(LOOP-27)`); a pull request for one names that key.
+
+## 4. Before you finish a task
 
 ```sh
 cargo fmt --all
@@ -67,3 +96,30 @@ cargo test --workspace
 ```
 
 Keep the tree building at every step.
+
+**Documentation is part of the change.** A pull request that changes how something works updates,
+in the same pull request, every document that describes it, so the docs never describe code
+that no longer exists:
+
+| If you change | Update |
+|---|---|
+| A crate's role, a dependency between crates, threads, how commands or data flow | [`docs/architecture.md`](docs/architecture.md), and the crate map above |
+| A decision recorded in an ADR | that ADR (status, consequences), or a new ADR that supersedes it |
+| What is read from a format, or behaviour described in a spec | the spec in `docs/spec/` |
+| Commands or MCP tools | [`docs/mcp.md`](docs/mcp.md) and the command list in [`ROADMAP.md`](ROADMAP.md) |
+| What works for users | [`ROADMAP.md`](ROADMAP.md) › What works now, and [`README.md`](README.md) if it shows it |
+| A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
+
+A limit or a planned part that a change resolves is removed from the docs in the same change.
+
+```sh
+python scripts/docs.py impact   # documents that cover code you changed but you have not updated
+python scripts/docs.py index    # after adding a document or changing its front matter
+python scripts/docs.py check    # what CI runs: front matter, covered paths, INDEX.md current
+```
+
+Every file under `docs/` starts with front matter (format in `scripts/docs.py`): `description`,
+`read_when`, `type` (system, decision, spec, howto, plan), `status`, `last_verified` and
+`covers`, the code paths it describes. Set `last_verified` to the day you checked the text
+against the code; CI warns when it is over 90 days old. A new document lists in `covers` the code
+it describes, so `impact` can point the next change to it.

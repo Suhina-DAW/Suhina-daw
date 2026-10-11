@@ -1,0 +1,17 @@
+[package]
+name = "loopwerk-media"
+description = "Finds and decodes the audio files a Loopwerk project uses"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loopwerk-engine.workspace = true
+symphonia = { version = "0.6", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis"] }  # MPL-2.0
+
+[dev-dependencies]
+hound.workspace = true
+
+[lints]
+workspace = true

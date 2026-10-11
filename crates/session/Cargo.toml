@@ -1,0 +1,16 @@
+[package]
+name = "loopwerk-session"
+description = "An open Loopwerk project, its undo history and the command registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loopwerk-model.workspace = true
+loopwerk-engine.workspace = true
+loopwerk-als.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
