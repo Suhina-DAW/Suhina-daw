@@ -33,7 +33,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
 
 | Library | Licence | Built from | Notes |
 |---|---|---|---|
-| timestretch (robmorgan/timestretch-rs) | MIT | pure Rust | Real-time engine: no allocation on the audio path, `forbid(unsafe_code)`, tempo changes at exact output frames, gapless loop re-anchoring. Quality gated in CI against Rubber Band. DJ-oriented: keylock profile within ±20 %, full-range profile 0.25×–2×. |
+| timestretch (robmorgan/timestretch-rs) | MIT | pure Rust | Real-time engine: no allocation on the audio path, `forbid(unsafe_code)`, tempo changes at exact output frames, gapless loop re-anchoring. Quality gated in CI against Rubber Band. DJ-oriented: keylock profile within ±20 %, full-range profile 0.25×–2× as documented (we measured it holding time only from 0.5×). |
 | Rubber Band | GPL-2.0-or-later | C++ | The reference for quality at any ratio (R3 engine). Needs a C++ compiler and FFI. |
 | Signalsmith Stretch | MIT | C++ | High quality; the Rust wrapper needs bindgen and libclang. |
 | Bungee | MPL-2.0 | C++ | Small, little-used Rust bindings. |
@@ -60,13 +60,28 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      down), so a stretched drum loop flams against unstretched ones and against the vocals. Each
      voice therefore has two stretchers: shortly before every strong onset of the file (from the
      pre-analysis) the idle one is restarted at exactly the right source frame and the voice
-     crossfades into it (`ANCHOR_LEAD`, `ANCHOR_FADE`). The restart's start-up is spread over the
+     crossfades into it (`ANCHOR_LEAD`, `ANCHOR_FADE`). For the keylock the crossfade ends 12 ms
+     before the onset, more than the old stretcher can have drifted; the phase vocoder smears an
+     onset some 20 ms ahead of itself, so its restart comes closer to the onset and the crossfade
+     hides part of the smear. The restart's start-up is spread over the
      frames before it, so voices whose onsets fall on the same beat do not all pay for it in one
      audio block, and the first start-up happens when the renderer is built.
    - The full-range profile reports no pipeline delay, but its phase vocoder slews its rate from
      1× after a reset and its window delay is missing from its source-position map: measured,
      output lands about `31 ms × (1 − 1/rate)` late. A restart feeds a preroll, runs until the
-     stretcher reports the start point playing and corrects by that measured amount.
+     stretcher reports the start point playing and corrects by that measured amount. The keylock
+     has a smaller delay of the same form, about `32 ms × (1 − 1/rate)`, corrected the same way.
+   - The phase vocoder clamps its ratio to 0.5–2, so the full-range profile covers 0.5×–2×
+     (rates below 0.5× drifted by 130–320 ms); slower clips are re-pitched.
+   - At the end of the playlist the file carries on into the stretcher, so a stretcher that
+     looks ahead (the phase vocoder, 2048 frames) can finish the clip's last frames instead of
+     going silent ~50 ms early.
+   - **Transpose** (`AudioRegion::transpose`) happens inside the same voice: the stretcher runs
+     at `rate / p` (p = 2^(semitones/12)), making the audio p times longer at its own pitch, and
+     its output is read p times faster, which raises the pitch by p and restores the length. In
+     the stretcher's own time every playlist piece is p times longer and slower, so rate changes,
+     restarts and lane starts work unchanged. A transpose that takes a segment outside 0.5×–2×
+     re-pitches the clip and ignores the transpose.
 3. **Loading a project decodes and analyses.** `loopwerk-media` decodes every file on all cores
    and computes the stretcher's pre-analysis (onsets, beat grid) once per file that a warped clip
    plays. A disk cache for the analysis, as Live has, comes later.
@@ -75,7 +90,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    | Mode | Backend |
    |---|---|
    | `Repitch` | none (read the file faster or slower) |
-   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | timestretch: keylock profile while every segment stays within ±20 % of the file's speed (it keeps the pitch there, bass included beyond about ±2 %, at a low and even cost), the full-range profile beyond that (0.25×–2×); outside that range the clip is re-pitched |
+   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | timestretch: keylock profile while every segment stays within ±20 % of the file's speed (it keeps the pitch there, bass included beyond about ±2 %, at a low and even cost), the full-range profile beyond that (0.5×–2×); outside that range the clip is re-pitched |
 
    The modes all map to the same backend for now; they are kept in the model so projects keep
    the user's intent and later backends can tell them apart.

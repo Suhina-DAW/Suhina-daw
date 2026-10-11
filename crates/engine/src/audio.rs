@@ -2,8 +2,10 @@
 //! `process` only reads decoded samples that are already in memory.
 //!
 //! Warped clips follow their warp markers: a beat in the clip maps to a time in the file, piece
-//! by piece. There is no time-stretching yet, so a clip that plays faster or slower than its file
-//! also sounds higher or lower ("re-pitch"); transpose applies to unwarped clips only.
+//! by piece. This is the re-pitch path: a clip that plays faster or slower than its file also
+//! sounds higher or lower. Warped clips the stretcher can handle are played by
+//! [`crate::stretch::StretchVoice`] instead, which keeps the pitch and applies transpose; here
+//! transpose applies to unwarped clips only.
 
 use std::collections::HashMap;
 use std::sync::Arc;

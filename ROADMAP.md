@@ -207,13 +207,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 
 ### M5 Audio (in progress)
 - Audio files (WAV, AIFF, FLAC, MP3, Ogg Vorbis) are decoded in parallel when a set opens.
-- Audio clips play with clip gain, loops and fades; unwarped clips also with transpose.
+- Audio clips play with clip gain, transpose, loops and fades; on warped clips transpose changes
+  the pitch only (the stretcher runs slower and its output is read faster).
 - Warped clips are **time-stretched in real time** along their warp markers and keep their
   pitch ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips
   opens in 3.1 s and plays at about 20 % of one core.
 - Stretched transients stay on the grid: a fresh stretcher takes over before every strong onset,
   so stretched drum loops no longer flam against unstretched ones (within 2 ms, measured with
   click tests).
-- Still to do: transpose on warped clips; rendering stretched clips slightly ahead on a worker
+- Still to do: rendering stretched clips slightly ahead on a worker
   thread so heavy sets cannot crackle; a disk cache for the stretcher's analysis; Rubber Band as
   the `HighQuality` stretch mode.
