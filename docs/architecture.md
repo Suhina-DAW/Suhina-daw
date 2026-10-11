@@ -7,6 +7,7 @@ last_verified: 2026-10-11
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
+  - devices/*/Cargo.toml
   - crates/engine/src/lib.rs
   - crates/session/src/lib.rs
   - apps/loopwerk-cli/src/play.rs

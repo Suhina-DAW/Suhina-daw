@@ -1,3 +1,15 @@
+---
+description: The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate
+read_when: device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
+type: decision
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/dsp/**
+  - crates/device-api/**
+  - devices/**
+---
+
 # 0004: Built-in devices
 
 - **Status:** accepted
