@@ -1,0 +1,145 @@
+//! Small drawing helpers and the controls the views share: text that fits a cell, the value
+//! field drag, the knob.
+
+use std::sync::Arc;
+
+use egui::text::{LayoutJob, TextWrapping};
+use egui::{
+    Align2, Color32, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, WidgetInfo, WidgetType,
+};
+use serde_json::Value;
+
+use crate::theme;
+
+/// A command for the session to run, made by a view: the same ids the CLI and MCP use.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Action {
+    pub id: &'static str,
+    pub params: Value,
+}
+
+impl Action {
+    pub fn new(id: &'static str, params: Value) -> Self {
+        Self { id, params }
+    }
+}
+
+/// One line of text cut to `max_width` with an ellipsis.
+pub fn fitted(painter: &Painter, text: &str, font: FontId, color: Color32, max_width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = TextWrapping::truncate_at_width(max_width.max(0.0));
+    painter.layout_job(job)
+}
+
+/// Draws one line of text in `rect`, cut to its width, aligned horizontally by `align` and
+/// centred vertically.
+pub fn text_in(painter: &Painter, rect: Rect, align: Align2, text: &str, font: FontId, color: Color32) {
+    let galley = fitted(painter, text, font, color, rect.width());
+    let pos = align.align_size_within_rect(galley.size(), rect).min;
+    painter.galley(pos, galley, color);
+}
+
+/// Makes `rect` clickable, with a label for screen readers and tests.
+pub fn button_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString) -> Response {
+    let response = ui.interact(rect, id, Sense::click());
+    let label = label.to_string();
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+    response
+}
+
+/// What a value control did this frame.
+pub enum Drag {
+    None,
+    /// Being dragged: the value to show.
+    Moving(f64),
+    /// Released, or reset by a double-click: the value to commit.
+    Done(f64),
+}
+
+/// A number changed by dragging vertically (up raises it) and reset by a double-click.
+/// `per_point` is the change per point of drag; Shift makes it ten times finer.
+pub fn drag_value(
+    ui: &Ui,
+    response: &Response,
+    preview: &mut Option<f64>,
+    value: f64,
+    per_point: f64,
+    range: (f64, f64),
+    default: f64,
+) -> Drag {
+    if response.double_clicked() {
+        *preview = None;
+        return Drag::Done(default);
+    }
+    if response.drag_started() {
+        *preview = Some(if value.is_finite() { value } else { range.0 });
+    }
+    if response.dragged() {
+        let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+        let start = preview.unwrap_or(value);
+        let next = (start - f64::from(response.drag_delta().y) * per_point * fine).clamp(range.0, range.1);
+        *preview = Some(next);
+        return Drag::Moving(next);
+    }
+    if response.drag_stopped() {
+        return match preview.take() {
+            Some(done) => Drag::Done(done),
+            None => Drag::None,
+        };
+    }
+    Drag::None
+}
+
+/// Makes `rect` a draggable value with a label for screen readers and tests.
+pub fn value_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString, value: impl ToString) -> Response {
+    let response = ui.interact(rect, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeVertical);
+    let (label, value) = (label.to_string(), value.to_string());
+    response.widget_info(|| {
+        let mut info = WidgetInfo::labeled(WidgetType::DragValue, true, &label);
+        info.current_text_value = Some(value.clone());
+        info
+    });
+    response
+}
+
+/// The knob: a small circle with a pointer from the centre, −135° … +135° of travel for
+/// `position` 0 … 1 (components › Mixer strip).
+pub fn knob(painter: &Painter, center: Pos2, size: f32, position: f32, pointer: Color32) {
+    let radius = size * 9.0 / 22.0;
+    painter.circle_filled(center, radius, theme::SURFACE_2);
+    painter.circle_stroke(center, radius, theme::hairline(theme::TEXT_TERTIARY));
+    let angle = (-135.0 + 270.0 * position.clamp(0.0, 1.0)).to_radians();
+    let tip = center + Vec2::new(angle.sin(), -angle.cos()) * (radius - 1.0);
+    painter.line_segment([center, tip], Stroke::new(1.5, pointer));
+}
+
+/// A volume in dB as the mixer shows it.
+pub fn format_db(db: f64) -> String {
+    if db.is_finite() && db > -70.0 { format!("{db:.1}") } else { "-inf".into() }
+}
+
+/// A pan position as the mixer shows it: 50L … C … 50R.
+pub fn format_pan(pan: f64) -> String {
+    let amount = (pan * 50.0).round() as i64;
+    match amount {
+        0 => "C".into(),
+        a if a < 0 => format!("{}L", -a),
+        a => format!("{a}R"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn values_read_like_the_mixer() {
+        assert_eq!(format_db(0.0), "0.0");
+        assert_eq!(format_db(-6.02), "-6.0");
+        assert_eq!(format_db(f64::NEG_INFINITY), "-inf");
+        assert_eq!(format_db(-80.0), "-inf");
+        assert_eq!(format_pan(0.0), "C");
+        assert_eq!(format_pan(-0.3), "15L");
+        assert_eq!(format_pan(1.0), "50R");
+    }
+}

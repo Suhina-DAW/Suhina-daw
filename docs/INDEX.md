@@ -47,6 +47,7 @@ Change this code, and check these documents.
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/loopwerk-cli/src/play.rs` | [Architecture](architecture.md) |
+| `apps/loopwerk/src/main.rs` | [Architecture](architecture.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -63,11 +64,18 @@ Change this code, and check these documents.
 | `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) |
+| `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
+| `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/widgets.rs` | [Components](design/components.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `scripts/test-signal.py` | [Making the `.als` test corpus](spec/als-corpus.md) |

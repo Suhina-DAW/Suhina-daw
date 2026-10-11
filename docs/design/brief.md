@@ -4,6 +4,8 @@ read_when: UI design, colours, tokens, typography, theme, accent, track colours,
 type: spec
 status: draft
 last_verified: 2026-10-12
+covers:
+  - crates/ui/src/theme.rs
 ---
 
 # Design brief

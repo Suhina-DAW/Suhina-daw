@@ -1,88 +1,24 @@
-//! Real-time playback on the default audio output.
-//!
-//! The engine's [`Renderer`] is built here, on the main thread, and then moved into the audio
-//! callback. The callback only calls `Renderer::process`, converts samples and sets atomics: no
-//! allocation, locks or I/O on the audio thread (AGENTS.md rule 3). Launcher commands reach it
-//! through the renderer's lock-free command queue, and stretched clips are rendered ahead on a
-//! worker thread of their own (ADR 0003).
+//! Real-time playback on the default audio output: the arrangement once, or the clip launcher
+//! driven by typed commands. The device itself is `loopwerk-output`.
 
 use std::io::BufRead;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SizedSample};
 use loopwerk_automation::AudioOutput;
 use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_engine::{AudioPool, Controller, Renderer};
+use loopwerk_engine::{AudioPool, Renderer};
+use loopwerk_output::{Output, Progress, Stopped};
 use loopwerk_session::{Player, Session};
 use serde_json::{Value, json};
 
-/// Frames rendered per engine call; output buffers larger than this are filled in several calls.
-const SCRATCH_FRAMES: usize = 4096;
 /// Extra time to wait after the last frame, so the device can drain its buffer.
 const TAIL: Duration = Duration::from_millis(300);
-
-/// State the audio callback shares with the main thread.
-#[derive(Default)]
-struct Progress {
-    frames: AtomicU64,
-    stream_error: AtomicBool,
-}
-
-/// The default output device and the format it asks for.
-struct Output {
-    device: cpal::Device,
-    config: cpal::StreamConfig,
-    format: cpal::SampleFormat,
-}
-
-impl Output {
-    fn open() -> Result<Self, String> {
-        let host = cpal::default_host();
-        let device = host.default_output_device().ok_or("no audio output device found")?;
-        let supported = device.default_output_config().map_err(|e| format!("audio output {device}: {e}"))?;
-        let format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
-        if config.channels == 0 {
-            return Err(format!("audio output {device} reports no channels"));
-        }
-        Ok(Self { device, config, format })
-    }
-
-    /// Starts playing `renderer` on the device, with its stretched clips rendered ahead on a
-    /// worker thread that `controller` keeps (and stops when it is dropped).
-    fn start(
-        &self,
-        mut renderer: Renderer,
-        controller: &mut Controller,
-        progress: &Arc<Progress>,
-    ) -> Result<cpal::Stream, String> {
-        controller.run_stretch_worker(&mut renderer).map_err(|e| format!("could not start the stretch worker: {e}"))?;
-        let (device, config) = (&self.device, self.config);
-        let stream = match self.format {
-            cpal::SampleFormat::F32 => build::<f32>(device, config, renderer, progress),
-            cpal::SampleFormat::I16 => build::<i16>(device, config, renderer, progress),
-            cpal::SampleFormat::I32 => build::<i32>(device, config, renderer, progress),
-            cpal::SampleFormat::U16 => build::<u16>(device, config, renderer, progress),
-            other => {
-                return Err(format!("audio output {device} uses sample format {other}, which is not supported yet"));
-            }
-        }?;
-        stream.play().map_err(|e| format!("could not start audio output {device}: {e}"))?;
-        Ok(stream)
-    }
-
-    fn describe(&self) -> String {
-        format!("{} ({} Hz, {} channels, {})", self.device, self.config.sample_rate, self.config.channels, self.format)
-    }
-}
 
 /// Plays the project's arrangement once on the default output device and returns when it ends.
 pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
     let output = Output::open()?;
-    let mut renderer = Renderer::with_audio(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
+    let mut renderer = Renderer::with_audio(project, audio, output.sample_rate()).map_err(|e| e.to_string())?;
     let length = renderer.length();
     if length == 0 {
         println!("{}", nothing_to_play(project));
@@ -92,17 +28,17 @@ pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
     let mut controller = renderer.controller();
     let stream = output.start(renderer, &mut controller, &progress)?;
 
-    let seconds = length as f64 / f64::from(output.config.sample_rate);
+    let seconds = length as f64 / f64::from(output.sample_rate());
     println!("playing {seconds:.2} s on {}; Ctrl+C stops", output.describe());
 
     // Wait for the callback to reach the end, with a wall-clock limit in case the device stalls.
     let deadline = Instant::now() + Duration::from_secs_f64(seconds) + Duration::from_secs(5);
-    while progress.frames.load(Ordering::Relaxed) < length {
-        if progress.stream_error.load(Ordering::Relaxed) {
-            return Err(format!("audio output {} reported an error during playback", output.device));
+    while progress.frames() < length {
+        if progress.failed() {
+            return Err(format!("audio output {} reported an error during playback", output.describe()));
         }
         if Instant::now() > deadline {
-            return Err(format!("audio output {} stopped advancing", output.device));
+            return Err(format!("audio output {} stopped advancing", output.describe()));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -143,7 +79,7 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let (controller, output, progress, stream) = start_stopped(&project, audio)?;
+    let Stopped { controller, output, progress, stream } = loopwerk_output::start_stopped(&project, audio)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -152,8 +88,8 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| format!("reading commands: {e}"))?;
-        if progress.stream_error.load(Ordering::Relaxed) {
-            return Err(format!("audio output {} reported an error during playback", output.device));
+        if progress.failed() {
+            return Err(format!("audio output {} reported an error during playback", output.describe()));
         }
         match parse_line(&line) {
             Ok(Line::Empty) => {}
@@ -177,45 +113,12 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens the default output and plays `project` on it with the transport stopped.
-fn start_stopped(
-    project: &Project,
-    audio: &AudioPool,
-) -> Result<(Controller, Output, Arc<Progress>, cpal::Stream), String> {
-    let output = Output::open()?;
-    let mut renderer = Renderer::stopped(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
-    let mut controller = renderer.controller();
-    let progress = Arc::new(Progress::default());
-    let stream = output.start(renderer, &mut controller, &progress)?;
-    Ok((controller, output, progress, stream))
-}
-
-/// Plays projects opened over MCP on the default output device. Each one gets a thread that
-/// owns the audio stream and closes it when the session drops the player.
+/// Plays projects opened over MCP on the default output device (see `loopwerk_output::open_player`).
 pub struct DeviceOutput;
 
 impl AudioOutput for DeviceOutput {
     fn open(&self, project: &Project, audio: &AudioPool) -> Result<(Player, String), String> {
-        let (project, audio) = (project.clone(), audio.clone());
-        let (ready, opened) = mpsc::channel();
-        let (close, closed) = mpsc::channel::<()>();
-        std::thread::Builder::new()
-            .name("loopwerk-audio".into())
-            .spawn(move || match start_stopped(&project, &audio) {
-                Ok((controller, output, _progress, stream)) => {
-                    if ready.send(Ok((controller, output.describe()))).is_ok() {
-                        // Returns once the player, which holds `close`, is dropped.
-                        let _closed = closed.recv();
-                    }
-                    drop(stream);
-                }
-                Err(e) => {
-                    let _unheard = ready.send(Err(e));
-                }
-            })
-            .map_err(|e| format!("could not start the audio thread: {e}"))?;
-        let (controller, description) = opened.recv().map_err(|_| "the audio thread stopped".to_string())??;
-        Ok((Player::new(controller, Some(Box::new(close))), description))
+        loopwerk_output::open_player(project, audio)
     }
 }
 
@@ -371,85 +274,9 @@ fn nothing_to_play(project: &Project) -> String {
     }
 }
 
-fn build<T>(
-    device: &cpal::Device,
-    config: cpal::StreamConfig,
-    mut renderer: Renderer,
-    progress: &Arc<Progress>,
-) -> Result<cpal::Stream, String>
-where
-    T: SizedSample + FromSample<f32>,
-{
-    let channels = usize::from(config.channels);
-    let mut scratch = vec![0.0f32; SCRATCH_FRAMES * 2];
-    let on_data = Arc::clone(progress);
-    let on_error = Arc::clone(progress);
-
-    device
-        .build_output_stream(
-            config,
-            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                for block in data.chunks_mut(SCRATCH_FRAMES * channels) {
-                    let frames = block.len() / channels;
-                    let Some(stereo) = scratch.get_mut(..frames * 2) else { return };
-                    renderer.process(stereo);
-                    write_frames(block, channels, stereo);
-                    on_data.frames.fetch_add(frames as u64, Ordering::Relaxed);
-                }
-            },
-            move |_err| on_error.stream_error.store(true, Ordering::Relaxed),
-            None,
-        )
-        .map_err(|e| format!("could not open audio output {device}: {e}"))
-}
-
-/// Writes interleaved stereo into a device buffer with any channel count: mono gets the average,
-/// channels beyond the first two get silence.
-fn write_frames<T: SizedSample + FromSample<f32>>(out: &mut [T], channels: usize, stereo: &[f32]) {
-    for (frame, [left, right]) in out.chunks_mut(channels).zip(stereo.as_chunks::<2>().0) {
-        let mut samples = frame.iter_mut();
-        if channels == 1 {
-            if let Some(mono) = samples.next() {
-                *mono = T::from_sample((left + right) * 0.5);
-            }
-            continue;
-        }
-        if let Some(l) = samples.next() {
-            *l = T::from_sample(*left);
-        }
-        if let Some(r) = samples.next() {
-            *r = T::from_sample(*right);
-        }
-        for rest in samples {
-            *rest = T::from_sample(0.0f32);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stereo_maps_onto_any_channel_count() {
-        let stereo = [0.5f32, -0.5, 1.0, 0.0];
-
-        let mut mono = [0.0f32; 2];
-        write_frames(&mut mono, 1, &stereo);
-        assert_eq!(mono, [0.0, 0.5]);
-
-        let mut two = [0.0f32; 4];
-        write_frames(&mut two, 2, &stereo);
-        assert_eq!(two, stereo);
-
-        let mut four = [9.0f32; 8];
-        write_frames(&mut four, 4, &stereo);
-        assert_eq!(four, [0.5, -0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
-
-        let mut ints = [0i16; 4];
-        write_frames(&mut ints, 2, &stereo);
-        assert_eq!(ints[2], i16::MAX);
-    }
 
     #[test]
     fn launcher_lines_become_commands() {

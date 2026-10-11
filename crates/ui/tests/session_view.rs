@@ -1,0 +1,142 @@
+//! The Session view and the window, driven like a user would: clicks become the commands the
+//! CLI and MCP run, and edits change the project through the session.
+
+use egui::{Key, Modifiers};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use loopwerk_session::Session;
+use loopwerk_ui::demo::demo_project;
+use loopwerk_ui::grid::Grid;
+use loopwerk_ui::session_view::{self, SessionViewState};
+use loopwerk_ui::widgets::Action;
+use loopwerk_ui::{App, Status, theme};
+use serde_json::json;
+
+const SIZE: (f32, f32) = (1280.0, 800.0);
+
+struct View {
+    grid: Grid,
+    state: SessionViewState,
+    actions: Vec<Action>,
+}
+
+fn view() -> Harness<'static, View> {
+    let view =
+        View { grid: Grid::build(&demo_project(), None), state: SessionViewState::default(), actions: Vec::new() };
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .build_ui_state(|ui, v: &mut View| session_view::show(ui, &v.grid, &[], &mut v.state, &mut v.actions), view);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness
+}
+
+fn clicked(harness: &mut Harness<'static, View>, label: &str) -> Vec<Action> {
+    harness.state_mut().actions.clear();
+    harness.get_by_label(label).click();
+    harness.run();
+    harness.state().actions.clone()
+}
+
+#[test]
+fn clicking_a_clip_launches_it() {
+    let mut harness = view();
+    assert_eq!(
+        clicked(&mut harness, "Launch Walk on Bass (scene 2)"),
+        [Action::new("clip.launch", json!({ "track": 2, "scene": 2 }))]
+    );
+}
+
+#[test]
+fn clicking_an_empty_slot_with_a_stop_button_stops_the_track() {
+    let mut harness = view();
+    assert_eq!(
+        clicked(&mut harness, "Stop Keys (scene 1)"),
+        [Action::new("clip.launch", json!({ "track": 3, "scene": 1 }))]
+    );
+}
+
+#[test]
+fn scenes_and_stop_buttons_send_their_commands() {
+    let mut harness = view();
+    assert_eq!(clicked(&mut harness, "Launch scene 3 Build"), [Action::new("scene.launch", json!({ "scene": 3 }))]);
+    assert_eq!(clicked(&mut harness, "Stop Drums"), [Action::new("track.stop", json!({ "track": 1 }))]);
+    assert_eq!(clicked(&mut harness, "Stop all clips"), [Action::new("launcher.stopAll", json!({}))]);
+    assert_eq!(
+        clicked(&mut harness, "Turn Vox off"),
+        [Action::new("track.setMute", json!({ "track": 4, "mute": true }))]
+    );
+}
+
+#[test]
+fn return_tracks_have_a_mixer_but_no_slots() {
+    let harness = view();
+    assert!(harness.query_by_label("Turn A Reverb off").is_some());
+    assert!(harness.query_by_label_contains("on A Reverb").is_none());
+}
+
+fn window(app: App) -> Harness<'static, App> {
+    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness
+}
+
+fn demo_app() -> App {
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    app
+}
+
+#[test]
+fn turning_a_track_off_is_an_edit_that_undoes() {
+    let mut harness = window(demo_app());
+    let muted = |h: &Harness<'static, App>| h.state().session().map(|s| s.project().channels[1].mute);
+    assert_eq!(muted(&harness), Some(false));
+
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    assert_eq!(muted(&harness), Some(true));
+    assert!(harness.query_by_label("Turn Bass on").is_some());
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(muted(&harness), Some(false));
+}
+
+#[test]
+fn launching_without_an_audio_engine_says_why() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Beat A on Drums (scene 1)").click();
+    harness.run();
+    match harness.state().status() {
+        Status::Error(message) => assert!(message.contains("no audio engine"), "{message}"),
+        other => panic!("expected an error, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_empty_window_asks_for_a_project() {
+    let harness = window(App::new());
+    assert!(harness.state().session().is_none());
+    assert!(matches!(harness.state().status(), Status::Hint(_)));
+}
+
+/// Renders the window with the demo project to `target/ui-snapshots/session.png`, to compare
+/// with `docs/design/reference/session-minimal-v3.png`. Needs a GPU adapter, so it runs only
+/// when asked: `cargo test -p loopwerk-ui -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_session_window() {
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(2.0)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), demo_app());
+    theme::install(&harness.ctx);
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    image.save(folder.join("session.png")).unwrap_or_else(|e| panic!("{e}"));
+}

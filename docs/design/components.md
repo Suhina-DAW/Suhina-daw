@@ -4,6 +4,10 @@ read_when: widget sizes, clip slot states, value field, slider, knob, toggle, me
 type: spec
 status: draft
 last_verified: 2026-10-12
+covers:
+  - crates/ui/src/theme.rs
+  - crates/ui/src/session_view.rs
+  - crates/ui/src/widgets.rs
 ---
 
 # Components

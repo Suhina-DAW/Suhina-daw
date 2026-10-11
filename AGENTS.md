@@ -59,6 +59,8 @@ crates/
   session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002) and the
            attached player
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
+  output   L3 the audio device (cpal): plays an engine, opens a Player for a session
+  ui       L3 the main window and views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
 devices/
@@ -69,6 +71,7 @@ devices/
   overdrive  pedal-style: band, drive, tone, dynamics, dry/wet; oversampled
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
+  loopwerk       the desktop app (eframe): opens a project and shows it in the ui
 docs/
   architecture.md  how the crates, threads and commands fit together
   decisions/  architecture decision records; read 0001 before changing the model, 0004 before a device

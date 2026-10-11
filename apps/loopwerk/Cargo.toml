@@ -1,0 +1,22 @@
+[package]
+name = "loopwerk"
+description = "Loopwerk, the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loopwerk"
+path = "src/main.rs"
+
+[dependencies]
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+loopwerk-media.workspace = true
+loopwerk-output.workspace = true
+loopwerk-ui.workspace = true
+eframe = "0.36"  # MIT OR Apache-2.0
+
+[lints]
+workspace = true

@@ -4,6 +4,10 @@ read_when: Session view, main window layout, clip slot behaviour, scene launch, 
 type: spec
 status: draft
 last_verified: 2026-10-12
+covers:
+  - crates/ui/src/session_view.rs
+  - crates/ui/src/grid.rs
+  - crates/ui/src/app.rs
 ---
 
 # UI: main window and Session view

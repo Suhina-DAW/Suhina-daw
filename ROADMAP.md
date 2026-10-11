@@ -12,7 +12,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 after | |
 | M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
 ## Built-in devices
 
@@ -237,3 +237,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   their frames (3 % of one core on the same set, 99 % of blocks within 1.3 ms of their 10.7 ms).
 - Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
   vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
+
+### M8 UI (started)
+- `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
+  stopped on the default output and shows the **Session view**: tracks as columns, return tracks
+  beside the scene column, clip slots with their state (stopped, queued, playing with progress),
+  scene launch, stop buttons, and a mixer strip with pan, volume and track on/off
+  ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md), [spec](docs/spec/ui-session-view.md)).
+- The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
+  stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every click is a command, the same the CLI and
+  MCP run.
+- Still to do: the Arrangement view, browser, detail area (devices, clip editor), menu bar and
+  settings, project tabs, meters, solo and arm, the design's fonts, installers.

@@ -24,6 +24,8 @@ loopwerk-device-dj-eq = { path = "devices/dj-eq" }
 loopwerk-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
 loopwerk-device-overdrive = { path = "devices/overdrive" }
 loopwerk-stretch = { path = "crates/stretch" }
+loopwerk-output = { path = "crates/output" }
+loopwerk-ui = { path = "crates/ui" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0

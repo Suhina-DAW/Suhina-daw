@@ -3,8 +3,8 @@
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
 > **Status:** pre-alpha. Loopwerk opens Live Sets, plays and renders them (MIDI as sine tones for
-> now, audio clips with real-time time-stretching), and lets agents edit them over MCP. There is
-> no UI yet. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
+> now, audio clips with real-time time-stretching), and lets agents edit them over MCP. The
+> desktop app shows the Session view so far. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
 
 Loopwerk is an independent clean-room project. It is not affiliated with, sponsored by or
 endorsed by Ableton AG. Ableton and Live are trademarks of Ableton AG, named here only to describe
@@ -30,6 +30,9 @@ How a release is made: [`docs/releasing.md`](docs/releasing.md).
 ## Try it
 
 ```sh
+# Open a Live Set in the desktop app and launch its clips and scenes with the mouse
+cargo run --release -p loopwerk -- path/to/set.als
+
 # Play a Live Set on the default audio device (release builds play heavy sets smoothly)
 cargo run --release -p loopwerk-cli -- play path/to/set.als
 
