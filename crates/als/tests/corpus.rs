@@ -267,3 +267,53 @@ fn unwarped_audio_times_are_seconds() {
     let (bpm, clip) = audio_column("62-audio-unwarped-start");
     assert!((clip.offset - bpm / 60.0).abs() < 1e-9);
 }
+
+/// The Utility of a file in corpus series 6 (`corpus/devices`, docs/spec/als-corpus.md).
+fn utility(name: &str) -> loopwerk_model::Device {
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "corpus",
+        "devices",
+        "utility-default Project",
+        &format!("{name}.als"),
+    ]
+    .iter()
+    .collect();
+    assert!(path.exists(), "{} is missing; author series 6 first (docs/spec/als-corpus.md)", path.display());
+    let project = read_file(&path).unwrap_or_else(|e| panic!("{name}: {e}")).project;
+    let devices: Vec<_> = project.channels.into_iter().flat_map(|c| c.devices).collect();
+    devices.into_iter().find(|d| d.kind == loopwerk_model::DeviceKind::Builtin("utility".into())).unwrap()
+}
+
+fn param(device: &loopwerk_model::Device, id: &str) -> f64 {
+    device.params.iter().find(|p| p.id == id).unwrap().value
+}
+
+#[test]
+fn utility_series_maps_onto_the_loopwerk_utility() {
+    let default = utility("110-utility-default.als");
+    assert_eq!(default.name, "Utility");
+    assert!(default.enabled);
+    assert_eq!(param(&default, "gain"), 0.0);
+    assert_eq!(param(&default, "channel"), 0.0);
+    assert!((param(&utility("111-utility-gain-minus12"), "gain") + 12.0).abs() < 1e-6);
+    assert_eq!(param(&utility("113-utility-gain-inf"), "gain"), -70.0);
+    assert!((param(&utility("114-utility-gain-max"), "gain") - 35.0).abs() < 1e-4);
+    assert_eq!(param(&utility("116-utility-balance-100r"), "balance"), 1.0);
+    assert_eq!(param(&utility("119-utility-width-max"), "width"), 4.0);
+    // The files were made as a chain: Mid/Side mode stays on from 120 to the end.
+    let mid = utility("121-utility-midside-centre");
+    assert_eq!((param(&mid, "width"), param(&mid, "midSide")), (1.0, -1.0));
+    assert_eq!(param(&utility("120-utility-midside-mid-50S"), "midSide"), 0.5);
+    assert_eq!(param(&utility("123-utility-mono"), "mono"), 1.0);
+    assert_eq!(param(&utility("126-utility-bassmono-max"), "bassMonoFrequency"), 500.0);
+    let both = utility("128-utility-phase-right");
+    assert_eq!((param(&both, "invertLeft"), param(&both, "invertRight")), (1.0, 1.0));
+    assert_eq!(param(&utility("130-utility-channel-left"), "channel"), 1.0);
+    assert_eq!(param(&utility("132-utility-channel-swap"), "channel"), 3.0);
+    assert_eq!(param(&utility("133-utility-dc"), "dcFilter"), 1.0);
+    assert_eq!(param(&utility("134-utility-mute"), "mute"), 1.0);
+    assert_eq!(param(&utility("135-utility-bassmono-listen"), "bassMonoListen"), 1.0);
+}

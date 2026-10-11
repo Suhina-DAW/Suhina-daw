@@ -2,8 +2,11 @@
 //!
 //! The format is described in `docs/spec/als-format.md`, which was written from Live Sets we
 //! authored ourselves. This reader covers what that spec covers: tempo, tracks, mixer, sends,
-//! scenes and MIDI clips. Anything else (audio clips, devices, automation) is skipped and
-//! reported in [`Import::warnings`], so a project still opens with everything else intact.
+//! scenes, MIDI and audio clips, plug-ins, and Live's devices that have a Loopwerk counterpart
+//! (see `devices.rs`). Anything else is skipped or kept as a placeholder and reported in
+//! [`Import::warnings`], so a project still opens with everything else intact.
+
+mod devices;
 
 use std::fmt;
 use std::io::Read;
@@ -314,6 +317,17 @@ impl Reader {
         let user_name = value(node, &["UserName"]).filter(|n| !n.is_empty());
         let mut extensions = Extensions::default();
 
+        if let Some((id, name, params)) = devices::builtin(node, &mut |w| self.warn(format!("track {track_name}: {w}")))
+        {
+            return Some(Device {
+                name: user_name.unwrap_or(name).to_string(),
+                kind: DeviceKind::Builtin(id.into()),
+                enabled,
+                state: None,
+                params,
+                extensions,
+            });
+        }
         if !node.has_tag_name("PluginDevice") {
             self.warn(format!("track {track_name}: Live device {tag} is imported as a placeholder"));
             return Some(Device {
@@ -321,6 +335,7 @@ impl Reader {
                 kind: DeviceKind::Foreign { format: "als".into(), id: tag.into() },
                 enabled,
                 state: None,
+                params: Vec::new(),
                 extensions,
             });
         }
@@ -375,6 +390,7 @@ impl Reader {
             kind,
             enabled,
             state,
+            params: Vec::new(),
             extensions,
         })
     }
@@ -681,20 +697,20 @@ fn child<'a, 'input>(node: Node<'a, 'input>, name: &str) -> Option<Node<'a, 'inp
     node.children().find(|n| n.has_tag_name(name))
 }
 
-fn path<'a, 'input>(node: Node<'a, 'input>, names: &[&str]) -> Option<Node<'a, 'input>> {
+pub(crate) fn path<'a, 'input>(node: Node<'a, 'input>, names: &[&str]) -> Option<Node<'a, 'input>> {
     names.iter().try_fold(node, |n, name| child(n, name))
 }
 
 /// The `Value` attribute of the element at `names` below `node`.
-fn value<'a>(node: Node<'a, '_>, names: &[&str]) -> Option<&'a str> {
+pub(crate) fn value<'a>(node: Node<'a, '_>, names: &[&str]) -> Option<&'a str> {
     path(node, names)?.attribute("Value")
 }
 
-fn number(node: Node, names: &[&str]) -> Option<f64> {
+pub(crate) fn number(node: Node, names: &[&str]) -> Option<f64> {
     value(node, names).and_then(parse_number)
 }
 
-fn boolean(node: Node, names: &[&str]) -> Option<bool> {
+pub(crate) fn boolean(node: Node, names: &[&str]) -> Option<bool> {
     match value(node, names)? {
         "true" => Some(true),
         "false" => Some(false),
