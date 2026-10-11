@@ -178,3 +178,23 @@ fn ramps_follow_the_sample_rate() {
     let left: Vec<f32> = s.as_chunks::<2>().0.iter().map(|[l, _]| *l).collect();
     assert!(left[1_900] > 0.0 && left[1_920] == 0.0);
 }
+
+#[test]
+fn bass_mono_listen_plays_only_the_lows() {
+    let listen = [(param::BASS_MONO_LISTEN, 1.0), (param::BASS_MONO_FREQUENCY, 200.0)];
+    // 3 kHz is above the band: silent.
+    let mut s = sines(3_000.0, 3_000.0, 48_000);
+    run(&mut utility(&listen), &mut s);
+    let (l, r) = peaks(&s);
+    assert!(l < 0.001 && r < 0.001, "{l} {r}");
+    // 40 Hz on the left only stays on the left without bass mono...
+    let mut s = sines(40.0, 0.0, 48_000);
+    run(&mut utility(&listen), &mut s);
+    let (l, r) = peaks(&s);
+    assert!((l - 1.0).abs() < 0.01 && r < 0.001, "{l} {r}");
+    // ...and is centred with it.
+    let mut s = sines(40.0, 0.0, 48_000);
+    run(&mut utility(&[listen.as_slice(), &[(param::BASS_MONO, 1.0)]].concat()), &mut s);
+    let (l, r) = peaks(&s);
+    assert!((l - 0.5).abs() < 0.01 && (r - 0.5).abs() < 0.01, "{l} {r}");
+}
