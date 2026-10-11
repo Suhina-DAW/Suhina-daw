@@ -63,6 +63,7 @@ Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu)
 |---|---|
 | [`ROADMAP.md`](ROADMAP.md) | Milestones, what works now, what is next |
 | [`AGENTS.md`](AGENTS.md) | Rules for contributors and agents, and the crate map |
+| [`docs/architecture.md`](docs/architecture.md) | How the parts fit: layers, data flow, threads, commands, where new code goes |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Clean-room rules, licences, AI-assisted contributions |
 | [`docs/decisions/`](docs/decisions/) | Architecture decisions: the DAW-neutral model, commands, time-stretching |
 | [`docs/spec/`](docs/spec/) | The Live Set format as observed, and how to author test sets |

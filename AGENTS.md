@@ -3,7 +3,8 @@
 Loopwerk is an open-source, native, clip-launching DAW written in **Rust only**, comparable in
 workflow to Ableton Live. The product name is always written **Loopwerk** in user-facing text;
 machine names stay lowercase (`loopwerk-*` crates, binaries, file names). Read this file first,
-then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+then [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture.md`](docs/architecture.md)
+(layers, data flow, threads, and where new code goes).
 
 ## 1. Golden rules
 
@@ -55,6 +56,7 @@ crates/
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
 docs/
+  architecture.md  how the crates, threads and commands fit together
   decisions/  architecture decision records; read 0001 before changing the model
   spec/       clean-room specs written from observation (formats, behaviour)
 scripts/   research helpers (e.g. extracting and diffing .als files)
