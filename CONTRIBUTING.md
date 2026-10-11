@@ -11,6 +11,9 @@
   I/O. Communicate with it through lock-free queues.
 - **Tests:** required for every change. Format code needs round-trip and malformed-input tests;
   DSP and engine code is tested by rendering offline and comparing against golden files.
+- **Documentation:** a change that alters how something works updates the documents that
+  describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
+  *Before you finish a task* lists which document covers what.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
 - **Commits:** small, focused, with a clear subject line.
 

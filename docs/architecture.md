@@ -3,7 +3,8 @@
 How Loopwerk's parts fit together: the layers, how a project gets from a file to the speakers,
 which threads exist and what each may do, and where new code goes. The rules behind it are in
 [`AGENTS.md`](../AGENTS.md); the larger decisions in [`decisions/`](decisions/). This page
-describes the code as it is; planned parts are marked **(planned)**.
+describes the code as it is; planned parts are marked **(planned)**. A change that makes this
+page wrong updates it in the same pull request (AGENTS.md › Before you finish a task).
 
 ## Layers
 
