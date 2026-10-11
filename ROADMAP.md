@@ -32,7 +32,8 @@ the first device.
   most used ones. After import, the user sees which devices came in exactly, approximately or as
   placeholders. No content from Live's library (presets, wavetables, samples, impulse responses).
 - **Order:** utility (gain, width, mono, phase) and auto-pan first, to prove the device system;
-  then bus compressor, multiband dynamics with upward and downward compression, delays,
+  then three small devices users have asked for: a three-band DJ EQ with kills, vinyl distortion
+  (tracing, pinch, crackle) and a pedal-style overdrive; then bus compressor, multiband dynamics with upward and downward compression, delays,
   algorithmic and convolution reverb, multi-stage saturation; then an FM synth (DSP core ported
   from Dexed/MSFA) and a wavetable synth (from Vital, under its own name).
 
@@ -75,6 +76,9 @@ the work starts):
 | Imports from Live | Loopwerk device | DSP from |
 |---|---|---|
 | Utility, Auto Pan | utility, auto-pan | own |
+| EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) |
+| Vinyl Distortion | vinyl distortion | own |
+| Overdrive | overdrive | own, oversampled |
 | Glue Compressor, Compressor | bus compressor, compressor | own, Airwindows (MIT) for reference |
 | Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors |
 | Delay, Echo | delays | own delay lines |
