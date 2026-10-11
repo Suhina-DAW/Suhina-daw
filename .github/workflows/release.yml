@@ -1,7 +1,8 @@
 name: Release
 
-# Builds the release binaries. A `v*` tag (for example `v0.0.2`) builds them and attaches them to a
-# draft GitHub Release; running the workflow by hand only builds them, as workflow artifacts.
+# Builds the release binaries. A `v*` tag builds them and attaches them to a draft GitHub Release:
+# `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Running the workflow by hand only
+# builds them, as workflow artifacts. See docs/releasing.md.
 # The binaries are not signed yet (ROADMAP, M8): macOS Gatekeeper and Windows SmartScreen warn
 # about them.
 
@@ -27,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -40,11 +42,19 @@ jobs:
             echo "::error::could not read the loopwerk-cli version"
             exit 1
           fi
+          # MAJOR.MINOR.PATCH, optionally with a release-candidate suffix: 0.1.0 or 0.1.0-rc.1.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]; then
+            echo "::error::version $version is not MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.N"
+            exit 1
+          fi
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
             exit 1
           fi
+          # Release candidates and everything before 1.0 are pre-releases.
+          if [[ "$version" == *-rc.* || "$version" == 0.* ]]; then prerelease=true; else prerelease=false; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.name }})
@@ -179,11 +189,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           ls -l dist
+          flags=()
+          # A pre-release never becomes the "latest" release on the repository page.
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease --latest=false); fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --draft \
-            --prerelease \
+            "${flags[@]}" \
             --title "Loopwerk $VERSION" \
             --notes "Pre-alpha build of the headless command-line tool (\`$BIN\`). The binaries are not signed."
