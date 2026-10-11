@@ -10,6 +10,7 @@ pub mod library;
 pub mod offline;
 pub mod protocol;
 pub mod scan;
+pub mod scan_pool;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;

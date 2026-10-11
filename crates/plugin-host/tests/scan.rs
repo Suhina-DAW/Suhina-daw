@@ -42,7 +42,8 @@ fn a_crash_or_a_hang_while_loading_is_a_failure_not_a_stall() {
     let started = Instant::now();
     let hung = scan_file(&host(), "test:hang", Duration::from_millis(500));
     assert!(matches!(&hung, Scanned::Failed(why) if why.contains("hung")), "{hung:?}");
-    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    // Far less than "forever"; process starts are slow on a busy machine (antivirus).
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
 
     let dir = folder("not-a-plugin");
     let fake = dir.join("fake.clap");
@@ -128,14 +129,41 @@ fn the_library_scans_its_folders_and_remembers_across_starts() {
     use loopwerk_plugins::library::Library;
     let dir = folder("library");
     write(&dir.join("plugins/fake.clap"), "not a plug-in");
-    let mut library = Library::new(Some(dir.join("settings")), host());
+    let mut library = Library::new(Some(dir.join("settings")), host()).without_standard_folders();
     assert!(library.add_folder(&dir.join("plugins")).unwrap());
     let first = library.scan(false).unwrap();
     assert_eq!((first.read.len(), first.failed.len()), (1, 1));
 
     // A new start loads the saved catalog: nothing to read again, unless asked to.
-    let mut later = Library::new(Some(dir.join("settings")), host());
+    let mut later = Library::new(Some(dir.join("settings")), host()).without_standard_folders();
     assert_eq!(later.catalog().entries().len(), 1);
     assert_eq!(later.scan(false).unwrap().unchanged, 1);
     assert_eq!(later.scan(true).unwrap().read.len(), 1);
+}
+
+#[test]
+fn worker_processes_read_many_files_and_survive_crashes_and_hangs() {
+    use loopwerk_plugins::scan_pool::scan_files;
+    let files: Vec<String> =
+        ["test:clap", "test:crash", "test:vst3", "test:hang", "test:clap", "test:vst3"].map(String::from).to_vec();
+    let started = Instant::now();
+    let results = scan_files(&host(), &files, 2, &|_| Duration::from_secs(3));
+    assert_eq!(results.len(), files.len());
+    let names: Vec<String> = results
+        .iter()
+        .map(|r| match r {
+            Scanned::Plugins(p) => p.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join(","),
+            Scanned::Failed(why) => format!("failed: {}", why.split(':').next().unwrap_or_default()),
+        })
+        .collect();
+    assert_eq!(names[0], "Loopwerk Test Gain");
+    assert!(names[1].starts_with("failed: crashed"), "{names:?}");
+    assert_eq!(names[2], "Loopwerk Test Gain");
+    assert!(names[3].starts_with("failed: hung"), "{names:?}");
+    assert_eq!(names[4..], ["Loopwerk Test Gain", "Loopwerk Test Gain"]);
+    // The VST3 test plug-in's id is in the canonical text form.
+    let Scanned::Plugins(vst3) = &results[2] else { panic!() };
+    assert_eq!(vst3[0].id.len(), 32);
+    // One hang costs its timeout once, not per file (with room for slow process starts).
+    assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
 }

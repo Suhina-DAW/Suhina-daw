@@ -8,7 +8,7 @@
 //! what changed; files that failed stay listed with the reason and are not tried again until
 //! they change.
 //!
-//! CLAP only for now; VST3 joins when the host can run it.
+//! CLAP and VST3.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -41,10 +41,23 @@ pub struct PluginInfo {
 }
 
 impl PluginInfo {
-    /// How the host is asked to load it (`clap:<file>#<id>`).
-    pub fn spec(&self) -> String {
-        format!("clap:{}#{}", self.path.display(), self.id)
+    /// Its format, from the file's extension: `vst3` or `clap`.
+    pub fn format(&self) -> &'static str {
+        if is_vst3(&self.path) { "vst3" } else { "clap" }
     }
+
+    /// How the host is asked to load it (`clap:<file>#<id>` or `vst3:<file>#<id>`).
+    pub fn spec(&self) -> String {
+        format!("{}:{}#{}", self.format(), self.path.display(), self.id)
+    }
+}
+
+fn has_extension(path: &Path, extension: &str) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case(extension))
+}
+
+fn is_vst3(path: &Path) -> bool {
+    has_extension(path, "vst3")
 }
 
 /// What reading one file gave.
@@ -84,20 +97,28 @@ pub struct Catalog {
     entries: Vec<Entry>,
 }
 
-/// Where this system keeps CLAP plug-ins (those that exist), then the folders in `CLAP_PATH`.
+/// Where this system keeps CLAP and VST3 plug-ins (those that exist), then the folders in
+/// `CLAP_PATH`.
 pub fn standard_folders() -> Vec<PathBuf> {
     let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
     let mut folders: Vec<PathBuf> = Vec::new();
     if cfg!(windows) {
-        folders.extend(env("COMMONPROGRAMFILES").map(|p| p.join("CLAP")));
-        folders.extend(env("LOCALAPPDATA").map(|p| p.join("Programs").join("Common").join("CLAP")));
+        for format in ["CLAP", "VST3"] {
+            folders.extend(env("COMMONPROGRAMFILES").map(|p| p.join(format)));
+            folders.extend(env("LOCALAPPDATA").map(|p| p.join("Programs").join("Common").join(format)));
+        }
     } else if cfg!(target_os = "macos") {
-        folders.extend(env("HOME").map(|p| p.join("Library/Audio/Plug-Ins/CLAP")));
-        folders.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
+        for format in ["CLAP", "VST3"] {
+            folders.extend(env("HOME").map(|p| p.join("Library/Audio/Plug-Ins").join(format)));
+            folders.push(PathBuf::from("/Library/Audio/Plug-Ins").join(format));
+        }
     } else {
         folders.extend(env("HOME").map(|p| p.join(".clap")));
         folders.push(PathBuf::from("/usr/lib/clap"));
         folders.push(PathBuf::from("/usr/local/lib/clap"));
+        folders.extend(env("HOME").map(|p| p.join(".vst3")));
+        folders.push(PathBuf::from("/usr/lib/vst3"));
+        folders.push(PathBuf::from("/usr/local/lib/vst3"));
     }
     if let Some(paths) = std::env::var_os("CLAP_PATH") {
         folders.extend(std::env::split_paths(&paths));
@@ -107,8 +128,9 @@ pub fn standard_folders() -> Vec<PathBuf> {
     folders
 }
 
-/// The plug-in files under `folders`: files (or, on macOS, bundle folders) named `*.clap`,
-/// at most [`MAX_DEPTH`] levels down and [`MAX_FILES`] in all, sorted.
+/// The plug-in files under `folders`: files or bundle folders named `*.clap` or `*.vst3` (a
+/// bundle is not looked into), at most [`MAX_DEPTH`] levels down and [`MAX_FILES`] in all,
+/// sorted.
 pub fn find_files(folders: &[PathBuf]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending: Vec<(PathBuf, usize)> = folders.iter().map(|f| (f.clone(), 0)).collect();
@@ -116,8 +138,7 @@ pub fn find_files(folders: &[PathBuf]) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(&folder) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
-            let is_clap = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("clap"));
-            if is_clap {
+            if has_extension(&path, "clap") || is_vst3(&path) {
                 found.push(path);
                 if found.len() >= MAX_FILES {
                     found.sort();
@@ -194,6 +215,15 @@ pub fn scan_json(plugins: &[PluginInfo]) -> String {
     json!({ "plugins": list }).to_string()
 }
 
+/// What a scan worker prints for `file`: its plug-ins, or why it has none.
+pub fn scan_answer(file: &str, result: Result<&[PluginInfo], &str>) -> String {
+    let value = match result {
+        Ok(plugins) => json!({ "file": file, "plugins": plugins.iter().map(plugin_json).collect::<Vec<_>>() }),
+        Err(message) => json!({ "file": file, "error": message }),
+    };
+    value.to_string()
+}
+
 /// What the host prints for a scan that failed.
 pub fn scan_error_json(message: &str) -> String {
     json!({ "error": message }).to_string()
@@ -203,7 +233,7 @@ fn plugin_json(p: &PluginInfo) -> Value {
     json!({ "id": p.id, "name": p.name, "vendor": p.vendor, "version": p.version, "features": p.features })
 }
 
-fn parse_scan(value: &Value, file: &str) -> Scanned {
+pub(crate) fn parse_scan(value: &Value, file: &str) -> Scanned {
     if let Some(error) = value.get("error").and_then(Value::as_str) {
         return Scanned::Failed(error.to_string());
     }
@@ -257,9 +287,12 @@ impl Catalog {
             .or_else(|| self.plugins().find(|p| p.name.eq_ignore_ascii_case(id_or_name)))
     }
 
-    /// Looks through `folders`, reads new and changed files with `host` (each within
-    /// `timeout`), and drops files that are gone.
+    /// Looks through `folders`, reads new and changed files, and drops files that are gone.
+    /// VST3 bundles with a `moduleinfo.json` are read from it; the rest are loaded by
+    /// [`scan_pool::default_workers`](crate::scan_pool::default_workers) worker processes, each
+    /// file within `timeout` (shells within [`SHELL_TIMEOUT`](crate::scan_pool::SHELL_TIMEOUT)).
     pub fn scan(&mut self, host: &Path, folders: &[PathBuf], timeout: Duration) -> Report {
+        use crate::scan_pool::{default_workers, module_info, scan_files, timeout_for};
         let files = find_files(folders);
         let mut report = Report::default();
         self.entries.retain(|e| {
@@ -269,30 +302,39 @@ impl Catalog {
             }
             keep
         });
+        let mut fresh: Vec<Entry> = Vec::new();
+        let mut to_load: Vec<(PathBuf, u64, u64)> = Vec::new();
         for file in files {
             let Some((modified, size)) = stamp(&file) else { continue };
-            let known = self.entries.iter().position(|e| e.path == file);
-            if let Some(index) = known
-                && self.entries.get(index).is_some_and(|e| e.modified == modified && e.size == size)
-            {
+            if self.entries.iter().any(|e| e.path == file && e.modified == modified && e.size == size) {
                 report.unchanged += 1;
                 continue;
             }
-            let mut scanned = scan_file(host, &file.display().to_string(), timeout);
+            match module_info(&file) {
+                Some(plugins) => fresh.push(Entry { path: file, modified, size, scanned: Scanned::Plugins(plugins) }),
+                None => to_load.push((file, modified, size)),
+            }
+        }
+        let names: Vec<String> = to_load.iter().map(|(f, _, _)| f.display().to_string()).collect();
+        let loaded = scan_files(host, &names, default_workers(), &|f| timeout_for(f, timeout));
+        for ((file, modified, size), mut scanned) in to_load.into_iter().zip(loaded) {
             if let Scanned::Plugins(plugins) = &mut scanned {
                 plugins.iter_mut().for_each(|p| p.path = file.clone());
             }
-            if let Scanned::Failed(why) = &scanned {
-                report.failed.push((file.clone(), why.clone()));
+            fresh.push(Entry { path: file, modified, size, scanned });
+        }
+        for entry in fresh {
+            if let Scanned::Failed(why) = &entry.scanned {
+                report.failed.push((entry.path.clone(), why.clone()));
             }
-            report.read.push(file.clone());
-            let entry = Entry { path: file, modified, size, scanned };
-            match known.and_then(|i| self.entries.get_mut(i)) {
+            report.read.push(entry.path.clone());
+            match self.entries.iter_mut().find(|e| e.path == entry.path) {
                 Some(slot) => *slot = entry,
                 None => self.entries.push(entry),
             }
         }
         self.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        report.read.sort();
         report
     }
 

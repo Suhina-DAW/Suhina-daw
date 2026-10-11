@@ -180,3 +180,26 @@ fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     let crashing = render(launch("test:crash-after:2"), &input, 0);
     assert!(matches!(crashing, Err(PluginError::Timeout(_))), "{crashing:?}");
 }
+
+#[test]
+fn a_vst3_plugin_processes_reports_latency_and_keeps_state() {
+    let (mut plugin, mut audio) = start("test:vst3");
+    assert_eq!(plugin.latency(), 32);
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
+    assert_eq!(plugin.save_state().unwrap(), 0.5f32.to_le_bytes());
+    plugin.load_state(0.25f32.to_le_bytes().to_vec()).unwrap();
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
+    assert!(matches!(plugin.load_state(vec![1, 2]), Err(PluginError::Host(_))));
+
+    let mut audio = plugin.restart().unwrap();
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
+}
+
+#[test]
+fn vst3_files_that_are_missing_or_not_plugins_are_errors() {
+    let missing = std::env::temp_dir().join("loopwerk-no-such-plugin.vst3");
+    let error = Plugin::start(launch(&format!("vst3:{}", missing.display()))).err();
+    assert!(matches!(&error, Some(PluginError::Host(_))), "{error:?}");
+    let error = Plugin::start(launch("vst3:x.vst3#nothex")).err();
+    assert!(matches!(&error, Some(PluginError::Host(m)) if m.contains("class id")), "{error:?}");
+}

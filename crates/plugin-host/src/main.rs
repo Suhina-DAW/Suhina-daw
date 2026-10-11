@@ -12,6 +12,8 @@
 mod clap;
 mod processors;
 mod test_clap;
+mod test_vst3;
+mod vst3;
 
 use std::io::Write;
 use std::sync::Arc;
@@ -36,8 +38,9 @@ fn main() {
     let address = match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("--control"), Some(address)) => address,
         (Some("--scan"), Some(file)) => scan(file),
+        (Some("--scan-worker"), None) => scan_worker(),
         _ => {
-            eprintln!("usage: loopwerk-plugin-host --control <address> | --scan <file>");
+            eprintln!("usage: loopwerk-plugin-host --control <address> | --scan <file> | --scan-worker");
             std::process::exit(2);
         }
     };
@@ -55,14 +58,7 @@ fn main() {
 /// answer and `test:hang` never answers.
 fn scan(file: &str) -> ! {
     use loopwerk_plugins::scan::{SCAN_MARKER, scan_error_json, scan_json};
-    let result = match file {
-        "test:crash" => std::process::exit(3),
-        "test:hang" => loop {
-            thread::sleep(Duration::from_secs(60));
-        },
-        "test:clap" => clap::describe(file),
-        _ => clap::describe(&format!("clap:{file}")),
-    };
+    let result = describe(file);
     let (line, code) = match result {
         Ok(plugins) => (scan_json(&plugins), 0),
         Err(message) => (scan_error_json(&message), 1),
@@ -72,9 +68,45 @@ fn scan(file: &str) -> ! {
     std::process::exit(code);
 }
 
+/// The plug-ins `file` holds (see [`scan`] for the `test:` names).
+fn describe(file: &str) -> Result<Vec<loopwerk_plugins::scan::PluginInfo>, String> {
+    match file {
+        "test:crash" => std::process::exit(3),
+        "test:hang" => loop {
+            thread::sleep(Duration::from_secs(60));
+        },
+        "test:clap" => clap::describe(file),
+        "test:vst3" => vst3::describe(file),
+        _ if file.to_ascii_lowercase().ends_with(".vst3") => vst3::describe(&format!("vst3:{file}")),
+        _ => clap::describe(&format!("clap:{file}")),
+    }
+}
+
+/// `--scan-worker`: reads one file name per line from standard input and prints each answer on
+/// a line after [`loopwerk_plugins::scan::SCAN_MARKER`], until the input ends. The engine's
+/// scanner keeps a few of these running so a scan does not start a process per file; one that
+/// crashes or hangs on a file is ended and replaced.
+fn scan_worker() -> ! {
+    use loopwerk_plugins::scan::{SCAN_MARKER, scan_answer};
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let Ok(file) = line else { break };
+        let file = file.trim_end();
+        let answer = match describe(file) {
+            Ok(plugins) => scan_answer(file, Ok(&plugins)),
+            Err(message) => scan_answer(file, Err(&message)),
+        };
+        println!("{SCAN_MARKER}{answer}");
+        let _ = std::io::stdout().flush();
+    }
+    std::process::exit(0);
+}
+
 /// What is loaded.
 enum Loaded {
     Clap(clap::ClapPlugin),
+    Vst3(vst3::Vst3Plugin),
     Test { processor: Arc<dyn Processor>, stop: Arc<AtomicBool>, audio: thread::JoinHandle<()> },
 }
 
@@ -82,6 +114,7 @@ impl Loaded {
     fn latency(&self) -> u32 {
         match self {
             Self::Clap(plugin) => plugin.latency(),
+            Self::Vst3(plugin) => plugin.latency(),
             Self::Test { processor, .. } => processor.latency(),
         }
     }
@@ -89,6 +122,7 @@ impl Loaded {
     fn state(&mut self) -> Result<Vec<u8>, String> {
         match self {
             Self::Clap(plugin) => plugin.state(),
+            Self::Vst3(plugin) => plugin.state(),
             Self::Test { processor, .. } => Ok(processor.state()),
         }
     }
@@ -96,6 +130,7 @@ impl Loaded {
     fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
         match self {
             Self::Clap(plugin) => plugin.set_state(data),
+            Self::Vst3(plugin) => plugin.set_state(data),
             Self::Test { processor, .. } => processor.set_state(data),
         }
     }
@@ -110,6 +145,7 @@ impl Loaded {
     fn unload(self) {
         match self {
             Self::Clap(plugin) => drop(plugin),
+            Self::Vst3(plugin) => drop(plugin),
             Self::Test { stop, audio, .. } => {
                 stop.store(true, Ordering::Release);
                 if audio.is_finished() {
@@ -124,6 +160,9 @@ fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let served = Served::open(link).map_err(|e| e.to_string())?;
     if plugin.starts_with("clap:") || plugin == "test:clap" {
         return clap::ClapPlugin::load(plugin, served, sample_rate).map(Loaded::Clap);
+    }
+    if plugin.starts_with("vst3:") || plugin == "test:vst3" {
+        return vst3::Vst3Plugin::load(plugin, served, sample_rate).map(Loaded::Vst3);
     }
     let processor = processors::create(plugin)?;
     let stop = Arc::new(AtomicBool::new(false));

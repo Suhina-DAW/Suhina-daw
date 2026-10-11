@@ -94,6 +94,15 @@ workspace forbids.
    `clap:<file>#<id>`; the only `unsafe` the host needs for it is opening the file. A CLAP gain
    built into the host (`test:clap`, made with `clack-plugin`) lets the tests run the whole path
    without a plug-in installed; `LOOPWERK_TEST_CLAP` runs them against a real file too.
+   VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
+   thread (connected through their connection points, the controller given the component's
+   state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
+   silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
+   the state handed to the engine is the component's. `test:vst3`, a gain with a separate
+   controller built into the host, plays the part of `test:clap`. **Class ids** are written as
+   the SDK writes them (`moduleinfo.json`, the model): on Windows the first three fields of the
+   COM GUID layout are turned back into numbers, so the text matches across scanning, the
+   module's own description and imported projects.
 8. **VST2: through VST3, no VST2 host for now.** A project that names a VST2 plug-in is opened
    with the installed VST3 that declares it replaces it, and the saved VST2 state is handed to
    it. Without such a VST3 the device stays in the project as a *missing plug-in* with its state
@@ -103,9 +112,19 @@ workspace forbids.
    path, modification time and size, and a block list of plug-ins that crashed or hung. CLAP's
    factory and VST3's `moduleinfo.json` are read without instantiating plug-ins where possible.
    It looks in the system's standard folders (and, for CLAP, the folders in `CLAP_PATH`) plus
-   folders the user adds, so no setting is needed to find installed plug-ins. Implemented for
-   CLAP in `loopwerk_plugins::scan`, one `loopwerk-plugin-host --scan <file>` process per new or
-   changed file; a file that failed keeps its reason and is not tried again until it changes.
+   folders the user adds, so no setting is needed to find installed plug-ins. Implemented in
+   `loopwerk_plugins::scan` and `scan_pool` for CLAP and VST3:
+   - A VST3 bundle with a `moduleinfo.json` (JSON5) is read from it without loading anything.
+   - Everything else goes to a few long-lived `loopwerk-plugin-host --scan-worker` processes
+     (half the processor's threads, at most 4), each reading file after file. A worker that
+     crashes or hangs on a file is ended, the file is marked failed with the reason, and a new
+     worker takes the rest. Shells (files with many plug-ins, such as Waves' WaveShell) go first
+     and get 180 s, other files 30 s.
+   - Measured on a Windows machine with 443 plug-in files: a process per file took 11.5 min and
+     timed the shells out; this takes 86 s and finds every plug-in (733). Starting a process
+     cost about a second there (antivirus checks each start), more than most plug-ins take to
+     load.
+   - A file that failed keeps its reason and is not tried again until it changes.
    The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
    folders and the catalog are kept as JSON in Loopwerk's settings folder.
 10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,

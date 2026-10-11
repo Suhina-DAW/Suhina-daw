@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 
 use crate::scan::{Catalog, Report, standard_folders};
 
-/// How long reading one plug-in file may take before it counts as hung.
-pub const SCAN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long loading one plug-in file may take before it counts as hung (shells get longer).
+pub const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
 /// Folders a user may add.
 const MAX_FOLDERS: usize = 256;
 const FOLDERS_FILE: &str = "plugin-folders.json";
@@ -56,6 +56,8 @@ pub struct Library {
     loaded: bool,
     custom: Vec<PathBuf>,
     catalog: Catalog,
+    /// Whether scans look in the system's standard folders as well as the added ones.
+    standard: bool,
 }
 
 impl Default for Library {
@@ -68,7 +70,14 @@ impl Default for Library {
 impl Library {
     /// A library kept in `folder` (nothing is saved when it is `None`), scanned with `host`.
     pub fn new(folder: Option<PathBuf>, host: PathBuf) -> Self {
-        Self { folder, host, loaded: false, custom: Vec::new(), catalog: Catalog::new() }
+        Self { folder, host, loaded: false, custom: Vec::new(), catalog: Catalog::new(), standard: true }
+    }
+
+    /// Scans only the folders the user added, not the system's standard ones (tests, portable
+    /// setups).
+    pub fn without_standard_folders(mut self) -> Self {
+        self.standard = false;
+        self
     }
 
     pub fn host(&self) -> &Path {
@@ -106,7 +115,7 @@ impl Library {
 
     /// Every folder a scan looks in: the system's standard ones, then the user's.
     pub fn folders(&mut self) -> Vec<PathBuf> {
-        let mut folders = standard_folders();
+        let mut folders = if self.standard { standard_folders() } else { Vec::new() };
         for folder in self.custom_folders() {
             if !folders.contains(folder) {
                 folders.push(folder.clone());

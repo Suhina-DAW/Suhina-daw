@@ -74,7 +74,7 @@ fn list(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
         .plugins()
         .map(|p| {
             json!({
-                "format": "clap",
+                "format": p.format(),
                 "id": p.id,
                 "name": p.name,
                 "vendor": p.vendor,

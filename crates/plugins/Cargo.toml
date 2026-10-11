@@ -9,6 +9,7 @@ rust-version.workspace = true
 loopwerk-ipc.workspace = true
 interprocess = "2.4"  # 0BSD OR Apache-2.0
 serde_json.workspace = true
+json5 = "1.3"  # MIT
 
 [lints]
 workspace = true

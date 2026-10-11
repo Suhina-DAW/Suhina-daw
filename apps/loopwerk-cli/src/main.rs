@@ -233,7 +233,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
     }
 
     let mut library = loopwerk_plugins::library::Library::default();
-    let spec = if ["clap:", "test:"].iter().any(|p| name.starts_with(p)) {
+    let spec = if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
         name.to_string()
     } else {
         let found = library.catalog().find(name).ok_or_else(|| {
