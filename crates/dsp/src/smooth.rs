@@ -72,6 +72,34 @@ impl Smoother {
     }
 }
 
+/// A one-pole low-pass for control signals: follows its input with time constant `seconds`
+/// (63 % of a step after that long). Softens edges in a modulation signal, such as a square
+/// LFO, that would otherwise click.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OnePole {
+    coefficient: f64,
+    state: f64,
+}
+
+impl OnePole {
+    pub fn new(seconds: f64, sample_rate: f64) -> Self {
+        let frames = seconds * crate::usable_sample_rate(sample_rate);
+        let coefficient = if frames.is_finite() && frames > 0.0 { (-1.0 / frames).exp() } else { 0.0 };
+        Self { coefficient, state: 0.0 }
+    }
+
+    #[inline]
+    pub fn process(&mut self, x: f64) -> f64 {
+        self.state = crate::flush(x + (self.state - x) * self.coefficient);
+        self.state
+    }
+
+    /// Jumps to `value`, as if it had been the input forever.
+    pub fn reset(&mut self, value: f64) {
+        self.state = if value.is_finite() { value } else { 0.0 };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +135,19 @@ mod tests {
         assert_eq!(Smoother::ramp_frames(f64::NAN, 48_000.0), 1);
         assert_eq!(Smoother::ramp_frames(0.02, 48_000.0), 960);
         assert_eq!(Smoother::ramp_frames(1e300, 48_000.0), u32::MAX);
+    }
+
+    #[test]
+    fn one_pole_follows_with_its_time_constant() {
+        let mut p = OnePole::new(0.001, 48_000.0);
+        let mut y = 0.0;
+        for _ in 0..48 {
+            y = p.process(1.0);
+        }
+        assert!((y - (1.0 - (-1.0f64).exp())).abs() < 1e-9, "{y}");
+        p.reset(f64::NAN);
+        assert_eq!(p.process(0.0), 0.0);
+        let mut instant = OnePole::new(0.0, 48_000.0);
+        assert_eq!(instant.process(0.7), 0.7);
     }
 }

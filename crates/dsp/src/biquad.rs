@@ -67,6 +67,19 @@ impl Coefficients {
         Self::normalised(b, -(1.0 + cos), b, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
     }
 
+    /// Band-pass around `frequency` with 0 dB at its peak.
+    pub fn bandpass(sample_rate: f64, frequency: f64, q: f64) -> Self {
+        let Terms { cos, alpha } = Terms::new(sample_rate, frequency, q);
+        Self::normalised(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+    }
+
+    /// Q of a band-pass or bell `octaves` wide (between its -3 dB points).
+    pub fn q_for_octaves(octaves: f64) -> f64 {
+        let octaves = if octaves.is_finite() { octaves.clamp(0.01, 10.0) } else { 1.0 };
+        let ratio = 2.0f64.powf(octaves);
+        ratio.sqrt() / (ratio - 1.0)
+    }
+
     /// Bell boosting or cutting `gain_db` around `frequency`.
     pub fn peak(sample_rate: f64, frequency: f64, q: f64, gain_db: f64) -> Self {
         let Terms { cos, alpha } = Terms::new(sample_rate, frequency, q);
@@ -216,6 +229,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn bandpass_peaks_at_its_frequency() {
+        let q = Coefficients::q_for_octaves(1.0);
+        assert!((q - 1.414).abs() < 0.001, "{q}");
+        let bp = Coefficients::bandpass(SR, 1_000.0, q);
+        assert!((bp.magnitude(SR, 1_000.0) - 1.0).abs() < 1e-6);
+        // One octave wide: the -3 dB points are half an octave either side.
+        let edge = bp.magnitude(SR, 1_000.0 * 2.0f64.sqrt());
+        assert!((db(edge) + 3.01).abs() < 0.2, "{}", db(edge));
+        assert!(bp.magnitude(SR, 0.0) < 1e-9);
+    }
+
+    #[test]
     fn hostile_parameters_give_a_stable_filter() {
         for (f, q, sr) in [(f64::NAN, 1.0, SR), (1e9, 1.0, SR), (-5.0, 0.0, SR), (1_000.0, f64::NAN, 0.0)] {
             let mut filter = Biquad::new(Coefficients::lowpass(sr, f, q));
@@ -228,6 +253,19 @@ pub(crate) mod tests {
         }
         let c = Coefficients::peak(SR, 1_000.0, 1.0, f64::INFINITY);
         assert!(c.magnitude(SR, 1_000.0).is_finite());
+    }
+
+    #[test]
+    fn broken_input_does_not_stick() {
+        let mut filter = Biquad::new(Coefficients::lowpass(SR, 250.0, 1.3));
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e30, -1e300] {
+            filter.process(x);
+        }
+        let mut out = 0.0;
+        for n in 0..100 {
+            out = filter.process((n as f64 * 0.05).sin());
+        }
+        assert!(out.is_finite() && out.abs() < 2.0, "{out}");
     }
 
     #[test]

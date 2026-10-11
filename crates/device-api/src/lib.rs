@@ -25,6 +25,8 @@ pub enum Unit {
     Percent,
     /// -1.0 is fully left, 0.0 centre, 1.0 fully right.
     Balance,
+    /// A bandwidth in octaves.
+    Octaves,
 }
 
 /// How a continuous parameter maps onto a knob's travel.
