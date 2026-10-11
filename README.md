@@ -36,6 +36,9 @@ cargo run --release -p loopwerk-cli -- play path/to/set.als
 # Play one launcher scene instead of the arrangement
 cargo run --release -p loopwerk-cli -- play path/to/set.als --scene 2
 
+# Launch clips and scenes by typing commands (see below)
+cargo run --release -p loopwerk-cli -- play path/to/set.als --launcher
+
 # Render to a 32-bit float WAV
 cargo run --release -p loopwerk-cli -- render path/to/set.als -o out.wav
 
@@ -44,6 +47,20 @@ cargo run --release -p loopwerk-cli -- mcp --read-root path/to/projects --write-
 ```
 
 `--demo` instead of a file uses a small built-in project.
+
+With `--launcher` the set starts stopped and Loopwerk reads one command per line:
+
+| Type | Does |
+|---|---|
+| `scene 2` | launch scene 2 |
+| `clip Bass 1` | launch the clip of track *Bass* in scene 1 |
+| `stop Bass`, `stopall` | stop one track, or every track |
+| `play`, `stop` | start or stop the transport |
+| `quant 1/4` | launch quantisation: `none`, `8 bars` … `1 bar`, or a note value from `1/2` to `1/32`, `T` for triplets (`1/8T`) |
+| `back` | return every track to the arrangement |
+| `state`, `grid` | what is playing and queued; the scenes and clips |
+| `track.setMute {"track": 1, "mute": true}` | any command by id, with JSON parameters |
+| `help`, `quit` | |
 
 ## Building
 
