@@ -6,6 +6,8 @@ status: current
 last_verified: 2026-10-11
 covers:
   - crates/ipc/**
+  - crates/plugins/**
+  - crates/plugin-host/**
 ---
 
 # 0006: Plug-in hosting

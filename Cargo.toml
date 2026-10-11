@@ -18,6 +18,8 @@ loopwerk-automation = { path = "crates/automation" }
 loopwerk-media = { path = "crates/media" }
 loopwerk-dsp = { path = "crates/dsp" }
 loopwerk-device-api = { path = "crates/device-api" }
+loopwerk-ipc = { path = "crates/ipc" }
+loopwerk-plugins = { path = "crates/plugins" }
 loopwerk-device-utility = { path = "devices/utility" }
 loopwerk-device-auto-pan = { path = "devices/auto-pan" }
 loopwerk-device-dj-eq = { path = "devices/dj-eq" }

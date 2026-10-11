@@ -59,6 +59,8 @@ The engine does not run them yet (see *Planned parts*).
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
 | `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region, one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Not used by the engine yet. | nothing |
+| `plugins` | The engine's side of plug-in hosting: `Plugin::start` launches a `loopwerk-plugin-host` process and returns a control half (health, ping, state, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. Not used by the engine yet. | ipc |
+| `plugin-host` | The `loopwerk-plugin-host` executable: answers control messages on its main thread and serves audio blocks on a thread of its own. Knows only test processors so far (`test:gain`, `test:crash-after:<n>`, `test:hang-after:<n>`); plug-in formats come next. | ipc, plugins |
 | `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono (with listening to the low band alone), phase inversion, channel selection, DC filter, mute. | dsp, device-api |
 | `devices/auto-pan` | The auto-pan device: an LFO (six shapes, shaping, inversion) that pans or, with no stereo phase, does tremolo; free in hertz or synced to the song position. | dsp, device-api |
 | `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
@@ -101,6 +103,7 @@ The engine does not run them yet (see *Planned parts*).
 | Stretch worker | One thread, owned by the `Controller`, running a `StretchWorker` per graph: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). A new graph's worker joins it, an old one leaves once its graph is freed. | only when a graph's worker joins; never locks |
 | Audio owner | Over MCP, one thread per open project holds the output stream and closes it when the session drops its `Player`. | yes, but does nothing while playing |
 | Decode workers | Scoped threads in `media` while a project loads. | yes |
+| Plug-in host processes | Not threads of Loopwerk's process: one `loopwerk-plugin-host` process per plug-in (ADR 0006), with a control thread and an audio thread of its own. Started by `plugins`; not used by the engine yet. | the host's own business; a crash or hang there costs Loopwerk missed blocks only |
 
 The main thread and the audio thread share nothing mutable. They talk in two directions:
 

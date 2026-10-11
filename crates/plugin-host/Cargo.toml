@@ -1,0 +1,20 @@
+[package]
+name = "loopwerk-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loopwerk-plugin-host"
+path = "src/main.rs"
+
+[dependencies]
+loopwerk-ipc.workspace = true
+loopwerk-plugins.workspace = true
+interprocess = "2.4"  # 0BSD OR Apache-2.0
+
+# ADR 0006 allows this crate `unsafe` for loading plug-ins. Until plug-in formats land it needs
+# none, so it keeps the workspace lints (and `forbid`).
+[lints]
+workspace = true
