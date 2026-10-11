@@ -12,7 +12,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M5 | **Audio playback:** play imported audio clips with gain, transpose, warping and time-stretching | in progress: clips play from WAV/AIFF/FLAC/MP3/Ogg with gain, loops and warp markers; warped clips still change pitch with speed (no time-stretch yet) and transpose applies to unwarped clips only |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 next, using the state already imported from Live Sets | |
 | M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look | |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
 
 Later, not ordered: FL Studio projects (`.flp`), built-in instruments and effects, automation,
 sends and returns in the mix (groups and the master already apply volume and mute), MIDI controllers and Push (from Ableton's published Push interface docs),

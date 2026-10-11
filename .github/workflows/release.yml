@@ -1,0 +1,189 @@
+name: Release
+
+# Builds the release binaries. A `v*` tag (for example `v0.0.2`) builds them and attaches them to a
+# draft GitHub Release; running the workflow by hand only builds them, as workflow artifacts.
+# The binaries are not signed yet (ROADMAP, M8): macOS Gatekeeper and Windows SmartScreen warn
+# about them.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: loopwerk-cli
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Read the version and check the tag
+        id: version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "loopwerk-cli") | .version')
+          if [ -z "$version" ]; then
+            echo "::error::could not read the loopwerk-cli version"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu runner, so the binary runs on older glibc versions too.
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            targets: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            targets: x86_64-pc-windows-msvc
+          # Both architectures, joined into one universal binary with lipo.
+          - name: macos-universal
+            os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PACKAGE: loopwerk-${{ needs.version.outputs.version }}-${{ matrix.name }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.name }}
+
+      - name: Build
+        shell: bash
+        env:
+          # Link the C runtime statically, so the Windows binary does not need the Visual C++
+          # redistributable.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          for target in ${TARGETS//,/ }; do
+            cargo build --release --locked -p loopwerk-cli --target "$target"
+          done
+      - name: Collect the package
+        shell: bash
+        run: |
+          mkdir -p "dist/$PACKAGE"
+          case "$RUNNER_OS" in
+            Windows)
+              cp "target/x86_64-pc-windows-msvc/release/$BIN.exe" "dist/$PACKAGE/" ;;
+            macOS)
+              lipo -create -output "dist/$PACKAGE/$BIN" \
+                "target/aarch64-apple-darwin/release/$BIN" \
+                "target/x86_64-apple-darwin/release/$BIN"
+              lipo -info "dist/$PACKAGE/$BIN" ;;
+            *)
+              cp "target/x86_64-unknown-linux-gnu/release/$BIN" "dist/$PACKAGE/" ;;
+          esac
+          cp LICENSE NOTICE README.md ATTRIBUTION.md "dist/$PACKAGE/"
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          exe="dist/$PACKAGE/$BIN"
+          [ "$RUNNER_OS" = "Windows" ] && exe="$exe.exe"
+          output=$("$exe" --version)
+          echo "$output"
+          if [ "$output" != "$BIN $VERSION" ]; then
+            echo "::error::expected '$BIN $VERSION', got '$output'"
+            exit 1
+          fi
+          case "$RUNNER_OS" in
+            Linux)
+              # Only system libraries: libasound is the one a user may have to install.
+              ldd "$exe"
+              if ldd "$exe" | grep -q "not found"; then exit 1; fi ;;
+            macOS)
+              otool -L "$exe"
+              lipo "$exe" -verify_arch arm64 x86_64 ;;
+            Windows)
+              # No dependency on the Visual C++ runtime: its DLL names would be in the import table.
+              if grep -qaiE "vcruntime140|msvcp140" "$exe"; then
+                echo "::error::the binary needs the Visual C++ runtime"
+                exit 1
+              fi ;;
+          esac
+
+      - name: Archive
+        shell: bash
+        run: |
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "$PACKAGE.zip" "$PACKAGE" > /dev/null
+            archive="$PACKAGE.zip"
+          else
+            tar -czf "$PACKAGE.tar.gz" "$PACKAGE"
+            archive="$PACKAGE.tar.gz"
+          fi
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          cat "$archive.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: [version, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --prerelease \
+            --title "Loopwerk $VERSION" \
+            --notes "Pre-alpha build of the headless command-line tool (\`$BIN\`). The binaries are not signed."
