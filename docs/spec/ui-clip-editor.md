@@ -1,3 +1,11 @@
+---
+description: Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing
+read_when: piano roll, clip editor, velocity lane, zoom, detail area height, note editing
+type: spec
+status: draft
+last_verified: 2026-10-12
+---
+
 # UI: clip editor (MIDI)
 
 Functional spec of the editor that opens in the detail area for a MIDI clip, written from using

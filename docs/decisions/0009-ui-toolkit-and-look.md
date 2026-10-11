@@ -1,4 +1,12 @@
-# 0003: egui for the UI; familiar workflow, Loopwerk's own look
+---
+description: Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Loopwerk's own look
+read_when: UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton
+type: decision
+status: current
+last_verified: 2026-10-12
+---
+
+# 0009: egui for the UI; familiar workflow, Loopwerk's own look
 
 - **Status:** accepted
 - **Date:** 2026-10-11

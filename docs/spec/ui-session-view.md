@@ -1,3 +1,11 @@
+---
+description: Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser
+read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
+type: spec
+status: draft
+last_verified: 2026-10-12
+---
+
 # UI: main window and Session view
 
 Functional spec, written from using Live 12.4.6 (Suite, Windows) with a self-authored set. Only

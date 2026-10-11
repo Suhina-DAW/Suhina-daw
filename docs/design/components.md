@@ -1,3 +1,11 @@
+---
+description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
+read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
+type: spec
+status: draft
+last_verified: 2026-10-12
+---
+
 # Components
 
 Measurements, states and tokens of every UI component, taken from the minimal v3 mockups

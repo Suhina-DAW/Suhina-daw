@@ -71,7 +71,8 @@ apps/
 docs/
   architecture.md  how the crates, threads and commands fit together
   decisions/  architecture decision records; read 0001 before changing the model, 0004 before a device
-  spec/       clean-room specs written from observation (formats, behaviour)
+  spec/       clean-room specs written from observation (formats, behaviour, UI views)
+  design/     UI design brief, component measurements and reference mockups (ADR 0009)
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
 scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```

@@ -1,6 +1,14 @@
+---
+description: Loopwerk's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens
+read_when: UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups
+type: spec
+status: draft
+last_verified: 2026-10-12
+---
+
 # Design brief
 
-How Loopwerk looks. Read with [ADR 0003](../decisions/0003-ui-toolkit-and-look.md): the workflow
+How Loopwerk looks. Read with [ADR 0009](../decisions/0009-ui-toolkit-and-look.md): the workflow
 is familiar to Ableton Live users, the look is Loopwerk's own. This brief is what a designer (or a
 design tool) gets, together with the functional specs in `docs/spec/ui-*.md`. Never give a design
 tool screenshots of Live.
