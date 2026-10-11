@@ -155,7 +155,8 @@ Linux is the primary platform; Windows and macOS are supported.
 ## What works now
 
 ### M0 Foundation
-- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux and Windows.
+- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
+  Windows and macOS when started by hand and in every release build.
 - Clean-room rules for people and agents ([`CONTRIBUTING.md`](CONTRIBUTING.md)) and the agent
   guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe`, real-time safety, sandboxed plug-ins.
 - DAW-neutral project model: tracks and mixer channels apart, a pool of clip contents placed by

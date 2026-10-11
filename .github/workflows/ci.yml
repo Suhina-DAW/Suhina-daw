@@ -1,9 +1,19 @@
 name: CI
 
+# Pull requests and main run on Linux only, to keep Actions minutes down while the repository is
+# private (Windows minutes count double, macOS ten times). Windows and macOS run when started by
+# hand (Actions > CI > Run workflow, "all platforms"), and the release workflow builds and checks
+# all three for every tag.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      all_platforms:
+        description: Also run clippy and the tests on Windows and macOS
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -91,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON(inputs.all_platforms && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -107,11 +117,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  # Not part of `ci`: a macOS failure is reported but does not block merging.
+  # Not part of `ci`: a macOS failure is reported but does not block merging. Only when started by
+  # hand with "all platforms".
   check-macos:
     name: clippy and tests (macos-latest)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && inputs.all_platforms
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
