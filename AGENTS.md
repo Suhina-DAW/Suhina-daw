@@ -46,9 +46,9 @@ then [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ```text
 crates/
   model    L0 DAW-neutral project as pure data (tracks, channels, clip contents, clips, launcher)
-  engine   L1 offline/real-time rendering of notes and audio clips; no file I/O
+  engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003); no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
-  media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool
+  media    L2 finds, decodes and analyses a project's audio files (symphonia) into the engine's AudioPool
   session  L2 open project, undo history and the command registry (ADR 0002)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
 apps/

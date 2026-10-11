@@ -145,9 +145,18 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
         Source::Als(path) => {
             let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let folder = path.parent().unwrap_or(std::path::Path::new("."));
+            let started = std::time::Instant::now();
             let (audio, audio_warnings) = loopwerk_media::load_project_audio(&import.project, folder);
             for warning in import.warnings.iter().chain(&audio_warnings) {
                 eprintln!("warning: {warning}");
+            }
+            if !audio.files.is_empty() {
+                eprintln!(
+                    "audio: {} files decoded, {} analysed for stretching, in {:.1} s",
+                    audio.files.len(),
+                    audio.analysis.len(),
+                    started.elapsed().as_secs_f64()
+                );
             }
             (import.project, audio)
         }

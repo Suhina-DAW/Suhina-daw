@@ -148,7 +148,7 @@ clips are under `DeviceChain/MainSequencer/Sample/ArrangerAutomation/Events`**, 
 | Length | `SampleRef/DefaultDuration@Value` | In sample frames (`192000`). |
 | Sample rate | `SampleRef/DefaultSampleRate@Value` | `48000` |
 | Warp on/off | `IsWarped@Value` | |
-| Warp mode | `WarpMode@Value` | `4` for this file by default; meaning of the codes unknown **(needs corpus)**. |
+| Warp mode | `WarpMode@Value` | `4` for this file by default, shown by Live as **Complex** (files `30`, `61`). Other codes **(needs corpus)**. |
 | Warp markers | `WarpMarkers/WarpMarker@SecTime`, `@BeatTime` | Pairs of (seconds in the file, beats in the clip). |
 | Clip gain | `SampleVolume@Value` | Linear, `1` = 0 dB; −6 dB is `0.5011872053` (file `36`). |
 | Transpose | `PitchCoarse@Value`, `PitchFine@Value` | Semitones, and cents **(fine: hypothesis)**. |
