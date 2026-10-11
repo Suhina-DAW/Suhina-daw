@@ -56,10 +56,13 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   marker of a clip without a loop) is shortened to end there.
 - **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
   launched audio clip fades in over 2 ms, to avoid clicks.
+- **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
+  0003): each one's stretcher is prepared for the project tempo when the project opens and
+  rewound at every launch.
 - **Tempo changes** from a scene affect the launcher clock. Warped audio clips follow the new
-  tempo (by reading faster or slower); unwarped audio clips keep playing at the speed of their
-  file. The arrangement keeps its frame positions for now; a tempo map for the arrangement comes
-  later.
+  tempo by reading faster or slower (re-pitch), since their stretchers are prepared for the
+  project tempo; unwarped audio clips keep playing at the speed of their file. The arrangement
+  keeps its frame positions for now; a tempo map for the arrangement comes later.
 - **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `launcher.state`), sent to the audio thread through a
