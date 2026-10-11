@@ -7,6 +7,7 @@
 //! blocks in a row the host has not answered.
 
 pub mod protocol;
+pub mod scan;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;

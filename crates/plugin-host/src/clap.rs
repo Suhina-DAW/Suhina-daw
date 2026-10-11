@@ -106,6 +106,24 @@ fn entry(spec: &str) -> Result<(PluginEntry, Option<String>), String> {
     Ok((entry, id))
 }
 
+/// The plug-ins the file `spec` names holds, without instantiating any (for scanning).
+pub(crate) fn describe(spec: &str) -> Result<Vec<loopwerk_plugins::scan::PluginInfo>, String> {
+    let (entry, _) = entry(spec)?;
+    let factory = entry.get_plugin_factory().ok_or("the file has no plug-in factory")?;
+    let text = |c: Option<&std::ffi::CStr>| c.map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
+    Ok(factory
+        .plugin_descriptors()
+        .map(|d| loopwerk_plugins::scan::PluginInfo {
+            path: std::path::PathBuf::new(),
+            id: text(d.id()),
+            name: text(d.name()),
+            vendor: text(d.vendor()),
+            version: text(d.version()),
+            features: d.features().map(|f| f.to_string_lossy().into_owned()).collect(),
+        })
+        .collect())
+}
+
 impl ClapPlugin {
     /// Loads the plug-in `spec` names, activates it for the link's block size at `sample_rate`
     /// and starts serving blocks from `served` on an audio thread.

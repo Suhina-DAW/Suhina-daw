@@ -102,6 +102,10 @@ workspace forbids.
 9. **Scanning** runs in its own short-lived process with a timeout per plug-in, a cache keyed by
    path, modification time and size, and a block list of plug-ins that crashed or hung. CLAP's
    factory and VST3's `moduleinfo.json` are read without instantiating plug-ins where possible.
+   It looks in the system's standard folders (and, for CLAP, the folders in `CLAP_PATH`) plus
+   folders the user adds, so no setting is needed to find installed plug-ins. Implemented for
+   CLAP in `loopwerk_plugins::scan`, one `loopwerk-plugin-host --scan <file>` process per new or
+   changed file; a file that failed keeps its reason and is not tried again until it changes.
 10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,
     floating on Wayland and macOS, which have no public way to embed another process's window.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple

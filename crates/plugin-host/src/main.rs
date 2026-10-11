@@ -35,8 +35,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let address = match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("--control"), Some(address)) => address,
+        (Some("--scan"), Some(file)) => scan(file),
         _ => {
-            eprintln!("usage: loopwerk-plugin-host --control <address>");
+            eprintln!("usage: loopwerk-plugin-host --control <address> | --scan <file>");
             std::process::exit(2);
         }
     };
@@ -44,6 +45,31 @@ fn main() {
         eprintln!("loopwerk-plugin-host: {e}");
         std::process::exit(1);
     }
+}
+
+/// `--scan <file>`: prints the plug-ins the file holds on one line after
+/// [`loopwerk_plugins::scan::SCAN_MARKER`] and exits. A plug-in that crashes or hangs while
+/// loading takes this process with it, and the scanner in the engine notices.
+///
+/// For tests, `test:clap` describes the built-in test plug-in, `test:crash` exits without an
+/// answer and `test:hang` never answers.
+fn scan(file: &str) -> ! {
+    use loopwerk_plugins::scan::{SCAN_MARKER, scan_error_json, scan_json};
+    let result = match file {
+        "test:crash" => std::process::exit(3),
+        "test:hang" => loop {
+            thread::sleep(Duration::from_secs(60));
+        },
+        "test:clap" => clap::describe(file),
+        _ => clap::describe(&format!("clap:{file}")),
+    };
+    let (line, code) = match result {
+        Ok(plugins) => (scan_json(&plugins), 0),
+        Err(message) => (scan_error_json(&message), 1),
+    };
+    // A plug-in may have printed to stdout while loading; the marker sets this line apart.
+    println!("{SCAN_MARKER}{line}");
+    std::process::exit(code);
 }
 
 /// What is loaded.
