@@ -1,0 +1,67 @@
+# Clip launching
+
+- **Sources:** the public Ableton Live 12 manual (chapters *Session View* and *Launching Clips*),
+  observation of Live 12 Suite 12.4.6, and the Live Set fields in [`als-format.md`](als-format.md)
+  (scenes, clip slots, stop buttons, scene tempo, clip markers).
+- **Status:** first version, implemented in `crates/engine/src/launcher.rs` (ROADMAP M4).
+  Follow actions, per-clip launch quantisation and launch modes (trigger, gate, toggle, repeat)
+  are not specified yet; they need a corpus series of their own.
+
+This document describes the behaviour Loopwerk implements, in Loopwerk's terms. Where Loopwerk
+decides something the sources do not settle, the text says so (**Loopwerk:**).
+
+## Terms
+
+- **Launcher:** a grid of **columns** (one per track) and **scenes** (rows). Each cell is a
+  **slot**: empty, or holding one clip. An empty slot may have a **stop button**.
+- **Transport:** the clock that clips are launched against, counted in beats (quarter notes)
+  from the moment it starts. A bar is `numerator × 4 / denominator` beats.
+- **Launch quantisation:** the grid that launches wait for. Choices: none, 8, 4, 2 or 1 bars,
+  or a note value (1/2, 1/4, 1/8, 1/16, 1/32, and the triplets 1/2T, 1/4T, 1/8T, 1/16T).
+  Default: 1 bar.
+
+## Behaviour
+
+1. **One clip per column.** A column plays at most one clip. Launching a clip in a column replaces
+   the clip that column was playing, at the launch moment.
+2. **Quantised launch.** A launch (clip, scene or stop) waits for the next quantisation boundary
+   of the transport. A launch on a boundary happens at once. With quantisation off it happens at
+   once. Until then the column shows the launch as queued; a later launch in the same column
+   replaces the queued one.
+3. **Launching starts the transport.** If the transport is stopped, launching a clip or scene
+   starts it at beat 0 and the launch happens immediately.
+4. **Playing a clip.** A launched clip plays from its start marker. With its loop on, it plays to
+   the loop end, then repeats the loop region until it is stopped or replaced. With its loop off,
+   it plays from the start marker to the end marker once and the column stops.
+5. **Scenes.** Launching a scene launches, in every column, the slot in that scene's row:
+   a clip is launched; an empty slot with a stop button stops the column; an empty slot without
+   one leaves the column as it is. If the scene has a tempo, the project tempo changes to it at
+   the launch moment.
+6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
+   quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
+   transport stops everything at once, and clears queued launches.
+7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored.
+8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
+   arrangement clips, even after that column stops, until "back to arrangement" returns every
+   track to the arrangement.
+
+## Loopwerk decisions
+
+- **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
+  marker of a clip without a loop) is shortened to end there.
+- **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
+  launched audio clip fades in over 2 ms, to avoid clicks.
+- **Tempo changes** from a scene affect the launcher clock. Warped audio clips follow the new
+  tempo (by reading faster or slower); unwarped audio clips keep playing at the speed of their
+  file. The arrangement keeps its frame positions for now; a tempo map for the arrangement comes
+  later.
+- **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
+  `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
+  `transport.play`, `transport.stop`, `launcher.state`), sent to the audio thread through a
+  lock-free queue and applied at the start of the next audio block.
+
+## Not yet
+
+- Follow actions, launch modes, per-clip launch quantisation, legato.
+- Reading the global launch quantisation from a Live Set (needs a corpus series).
+- Recording into slots.

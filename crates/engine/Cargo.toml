@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 loopwerk-model.workspace = true
+rtrb.workspace = true
 
 [lints]
 workspace = true

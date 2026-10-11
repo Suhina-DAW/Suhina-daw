@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use loopwerk_session::{CommandKind, Session, commands};
+use loopwerk_session::{Session, commands};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
@@ -168,14 +168,7 @@ impl LoopwerkMcp {
         let list: Vec<Value> = commands()
             .iter()
             .filter(|c| c.id.contains(filter.as_str()))
-            .map(|c| {
-                let kind = match c.kind {
-                    CommandKind::Read => "read",
-                    CommandKind::Edit => "edit",
-                    CommandKind::History => "history",
-                };
-                json!({ "id": c.id, "description": c.label, "kind": kind, "params": c.input_schema() })
-            })
+            .map(|c| json!({ "id": c.id, "description": c.label, "kind": c.kind.name(), "params": c.input_schema() }))
             .collect();
         Ok(ok_json(&Value::Array(list)))
     }

@@ -7,10 +7,11 @@ mod commands;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use loopwerk_engine::{Controller, LauncherMonitor};
 use loopwerk_model::Project;
 use serde_json::Value;
 
-pub use commands::{CommandKind, CommandSpec, Param, ParamType, commands};
+pub use commands::{CommandKind, CommandSpec, Param, ParamType, commands, parse_quantization};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -39,16 +40,62 @@ impl From<&str> for CommandError {
     }
 }
 
+/// A running audio engine that plays the session's project: transport and launcher commands
+/// go to it. Whatever keeps the audio output open (a stream, a thread) is held in `keep_alive`
+/// and closed when the player is dropped.
+pub struct Player {
+    controller: Controller,
+    _keep_alive: Option<Box<dyn std::any::Any + Send>>,
+}
+
+impl Player {
+    pub fn new(controller: Controller, keep_alive: Option<Box<dyn std::any::Any + Send>>) -> Self {
+        Self { controller, _keep_alive: keep_alive }
+    }
+
+    pub fn send(&mut self, command: loopwerk_engine::LaunchCommand) -> Result<(), CommandError> {
+        self.controller.send(command).map_err(CommandError)
+    }
+
+    pub fn monitor(&self) -> &LauncherMonitor {
+        self.controller.monitor()
+    }
+}
+
 pub struct Session {
     project: Project,
     source: Option<PathBuf>,
     undo: Vec<Project>,
     redo: Vec<Project>,
+    player: Option<Player>,
 }
 
 impl Session {
     pub fn new(project: Project) -> Self {
-        Self { project, source: None, undo: Vec::new(), redo: Vec::new() }
+        Self { project, source: None, undo: Vec::new(), redo: Vec::new(), player: None }
+    }
+
+    /// Connects an audio engine playing this session's project; transport and launcher commands
+    /// go to it from now on. Replaces (and so closes) any previous player.
+    pub fn attach_player(&mut self, player: Player) {
+        self.player = Some(player);
+    }
+
+    pub fn detach_player(&mut self) -> Option<Player> {
+        self.player.take()
+    }
+
+    pub fn player(&self) -> Option<&Player> {
+        self.player.as_ref()
+    }
+
+    fn player_mut(&mut self) -> Result<&mut Player, CommandError> {
+        self.player.as_mut().ok_or_else(|| {
+            CommandError(
+                "no audio engine is playing this project: start one with `loopwerk-cli play --launcher`, or the MCP                  server with --audio"
+                    .into(),
+            )
+        })
     }
 
     /// Opens a Live Set. Returns the session and the importer's warnings.
@@ -90,7 +137,7 @@ impl Session {
             return Err(format!("{id}: unknown parameter {unknown:?}; expected {known:?}").into());
         }
         match spec.kind {
-            CommandKind::Read | CommandKind::History => (spec.run)(self, params),
+            CommandKind::Read | CommandKind::History | CommandKind::Transport => (spec.run)(self, params),
             CommandKind::Edit => {
                 let before = self.project.clone();
                 let result = (spec.run)(self, params).and_then(|value| match self.project.validate() {

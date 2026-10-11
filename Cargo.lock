@@ -547,6 +547,7 @@ name = "loopwerk-engine"
 version = "0.0.1"
 dependencies = [
  "loopwerk-model",
+ "rtrb",
 ]
 
 [[package]]
@@ -567,6 +568,7 @@ name = "loopwerk-session"
 version = "0.0.1"
 dependencies = [
  "loopwerk-als",
+ "loopwerk-engine",
  "loopwerk-model",
  "serde_json",
 ]
@@ -889,6 +891,12 @@ checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
 
 [[package]]
 name = "rustc_version"

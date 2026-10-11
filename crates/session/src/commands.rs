@@ -1,6 +1,7 @@
 //! The command registry. Each command is a [`CommandSpec`]; new commands are added to
 //! [`COMMANDS`] with tests below.
 
+use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
 use loopwerk_model::{Channel, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
@@ -14,6 +15,20 @@ pub enum CommandKind {
     Edit,
     /// Moves through the undo history.
     History,
+    /// Controls playback in the attached audio engine (transport, clip launching); never
+    /// changes the project or its undo history.
+    Transport,
+}
+
+impl CommandKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Edit => "edit",
+            Self::History => "history",
+            Self::Transport => "transport",
+        }
+    }
 }
 
 type Run = fn(&mut Session, &Value) -> Result<Value, CommandError>;
@@ -27,6 +42,7 @@ pub enum ParamType {
     Track,
     /// A number, or the string "-inf".
     Decibels,
+    Text,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,6 +62,7 @@ const fn optional(name: &'static str, ty: ParamType, doc: &'static str) -> Param
 }
 
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
+const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
 pub struct CommandSpec {
     /// Stable id in `area.verb` form; part of the public interface for agents.
@@ -68,6 +85,7 @@ impl CommandSpec {
                 ParamType::Bool => json!("boolean"),
                 ParamType::Track => json!(["integer", "string"]),
                 ParamType::Decibels => json!(["number", "string"]),
+                ParamType::Text => json!("string"),
             };
             properties.insert(p.name.to_string(), json!({ "type": ty, "description": p.doc }));
         }
@@ -152,6 +170,80 @@ static COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Edit,
         run: move_clip,
     },
+    CommandSpec {
+        id: "project.launcher",
+        label: "List the clip launcher: scenes (name, tempo) and each track's slots (clip name, stop button)",
+        params: &[],
+        kind: CommandKind::Read,
+        run: launcher_grid,
+    },
+    CommandSpec {
+        id: "launcher.state",
+        label: "What the audio engine is playing: transport, tempo, position, and each track's playing and queued clip",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: launcher_state,
+    },
+    CommandSpec {
+        id: "transport.play",
+        label: "Start the transport from the beginning: the arrangement plays, launches follow the beat",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: play,
+    },
+    CommandSpec {
+        id: "transport.stop",
+        label: "Stop the transport, the arrangement and every launched clip at once",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: stop,
+    },
+    CommandSpec {
+        id: "clip.launch",
+        label: "Launch the clip in a track's slot at the next quantisation boundary (an empty slot with a stop button stops the track)",
+        params: &[TRACK, SCENE],
+        kind: CommandKind::Transport,
+        run: launch_clip,
+    },
+    CommandSpec {
+        id: "scene.launch",
+        label: "Launch a scene: every track launches its slot in that row at the next quantisation boundary",
+        params: &[SCENE],
+        kind: CommandKind::Transport,
+        run: launch_scene,
+    },
+    CommandSpec {
+        id: "track.stop",
+        label: "Stop the clip a track is playing, at the next quantisation boundary",
+        params: &[TRACK],
+        kind: CommandKind::Transport,
+        run: stop_track,
+    },
+    CommandSpec {
+        id: "launcher.stopAll",
+        label: "Stop every launched clip at the next quantisation boundary",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: stop_all,
+    },
+    CommandSpec {
+        id: "launcher.setQuantization",
+        label: "Set the grid launches wait for (default 1 bar)",
+        params: &[param(
+            "value",
+            ParamType::Text,
+            "none, 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T or 1/32",
+        )],
+        kind: CommandKind::Transport,
+        run: set_quantization,
+    },
+    CommandSpec {
+        id: "launcher.backToArrangement",
+        label: "Return every track that launched a clip to playing its arrangement clips",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: back_to_arrangement,
+    },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
         id: "edit.redo",
@@ -167,12 +259,7 @@ fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
         COMMANDS
             .iter()
             .map(|c| {
-                let kind = match c.kind {
-                    CommandKind::Read => "read",
-                    CommandKind::Edit => "edit",
-                    CommandKind::History => "history",
-                };
-                json!({ "id": c.id, "label": c.label, "params": c.input_schema()["properties"], "kind": kind })
+                json!({ "id": c.id, "label": c.label, "params": c.input_schema()["properties"], "kind": c.kind.name() })
             })
             .collect(),
     ))
@@ -317,6 +404,201 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     clip.start = start;
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
     Ok(json!({ "start": start }))
+}
+
+fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    let p = session.project();
+    let scenes: Vec<Value> = p
+        .launcher
+        .scenes
+        .iter()
+        .zip(1..)
+        .map(|(scene, number): (_, u32)| json!({ "scene": number, "name": scene.name, "tempo_bpm": scene.tempo_bpm }))
+        .collect();
+    let tracks: Vec<Value> = p
+        .launcher
+        .columns
+        .iter()
+        .map(|column| {
+            let slots: Vec<Value> = column
+                .slots
+                .iter()
+                .zip(1..)
+                .map(|(slot, number): (_, u32)| match &slot.clip {
+                    Some(clip) => json!({
+                        "scene": number,
+                        "clip": p.content(clip.content).map(|c| c.name.as_str()),
+                        "length": clip.length,
+                        "loop": clip.loop_range.is_some(),
+                        "enabled": clip.enabled,
+                    }),
+                    None => json!({ "scene": number, "clip": null, "stop_button": slot.has_stop }),
+                })
+                .collect();
+            json!({ "track": column.track.0, "track_name": track_name(p, column.track), "slots": slots })
+        })
+        .collect();
+    Ok(json!({ "scenes": scenes, "tracks": tracks }))
+}
+
+fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    let monitor = session.player_mut()?.monitor();
+    let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
+    let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
+    let p = session.project();
+    let ts = p.transport.time_signature;
+    let bar_beats =
+        if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
+    let tracks: Vec<Value> = p
+        .launcher
+        .columns
+        .iter()
+        .zip(statuses)
+        .map(|(column, status)| {
+            let status = status.unwrap_or(ColumnStatus { playing: None, queued: None, overrides_arrangement: false });
+            let clip_name = |slot: usize| {
+                column
+                    .slots
+                    .get(slot)
+                    .and_then(|s| s.clip.as_ref())
+                    .and_then(|c| p.content(c.content))
+                    .map(|c| c.name.clone())
+            };
+            json!({
+                "track": column.track.0,
+                "track_name": track_name(p, column.track),
+                "playing": status.playing.map(|slot| json!({ "scene": slot + 1, "clip": clip_name(slot) })),
+                "queued": match status.queued {
+                    None => Value::Null,
+                    Some(Queued::Stop) => json!("stop"),
+                    Some(Queued::Launch(slot)) => json!({ "scene": slot + 1, "clip": clip_name(slot) }),
+                },
+                "plays_arrangement": !status.overrides_arrangement,
+            })
+        })
+        .collect();
+    let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+    Ok(json!({
+        "running": running,
+        "tempo_bpm": tempo,
+        "beat": (beat * 1000.0).round() / 1000.0,
+        "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),
+        "tracks": tracks,
+    }))
+}
+
+fn send(session: &mut Session, command: LaunchCommand) -> Result<(), CommandError> {
+    session.player_mut()?.send(command)
+}
+
+fn play(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::Play)?;
+    Ok(json!({ "transport": "playing" }))
+}
+
+fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::Stop)?;
+    Ok(json!({ "transport": "stopped" }))
+}
+
+fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let column = column_index(session.project(), params)?;
+    let scene = scene_index(session.project(), params)?;
+    let slot = session.project().launcher.columns.get(column).and_then(|c| c.slots.get(scene));
+    let queued = match slot {
+        Some(slot) if slot.clip.as_ref().is_some_and(|c| c.enabled) => "launch",
+        Some(slot) if slot.clip.is_some() => return Err("the clip in that slot is deactivated".into()),
+        Some(slot) if slot.has_stop => "stop",
+        _ => return Err("that slot is empty and has no stop button".into()),
+    };
+    send(session, LaunchCommand::LaunchClip { column, slot: scene })?;
+    Ok(json!({ "scene": scene + 1, "queued": queued }))
+}
+
+fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(session.project(), params)?;
+    send(session, LaunchCommand::LaunchScene { scene })?;
+    Ok(json!({ "scene": scene + 1, "queued": "launch" }))
+}
+
+fn stop_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let column = column_index(session.project(), params)?;
+    send(session, LaunchCommand::StopColumn { column })?;
+    Ok(json!({ "queued": "stop" }))
+}
+
+fn stop_all(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::StopAll)?;
+    Ok(json!({ "queued": "stop" }))
+}
+
+fn set_quantization(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let text = params.get("value").and_then(Value::as_str).ok_or("value must be a string such as \"1 bar\"")?;
+    let quantization = parse_quantization(text)?;
+    send(session, LaunchCommand::SetQuantization(quantization))?;
+    Ok(json!({ "quantization": text.trim() }))
+}
+
+fn back_to_arrangement(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::BackToArrangement)?;
+    Ok(json!({ "arrangement": true }))
+}
+
+/// Parses a launch quantisation: "none", "1 bar", "2 bars", "1/4", "1/8T" and so on.
+pub fn parse_quantization(text: &str) -> Result<Quantization, CommandError> {
+    let normal = text.trim().to_ascii_lowercase();
+    match normal.as_str() {
+        "none" | "off" => return Ok(Quantization::None),
+        "8 bars" => return Ok(Quantization::Bars(8)),
+        "4 bars" => return Ok(Quantization::Bars(4)),
+        "2 bars" => return Ok(Quantization::Bars(2)),
+        "1 bar" => return Ok(Quantization::Bars(1)),
+        _ => {}
+    }
+    let (value, triplet) = match normal.strip_suffix('t') {
+        Some(value) => (value, true),
+        None => (normal.as_str(), false),
+    };
+    let beats = match (value, triplet) {
+        ("1/2", _) => 2.0,
+        ("1/4", _) => 1.0,
+        ("1/8", _) => 0.5,
+        ("1/16", _) => 0.25,
+        ("1/32", false) => 0.125,
+        _ => {
+            return Err(format!(
+                "unknown quantisation {text:?}; use none, 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/2T, 1/4, 1/4T, 1/8, \
+                 1/8T, 1/16, 1/16T or 1/32"
+            )
+            .into());
+        }
+    };
+    Ok(Quantization::Beats(if triplet { beats * 2.0 / 3.0 } else { beats }))
+}
+
+/// The launcher column of `params.track`.
+fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+    let track = track_id(p, params)?;
+    p.launcher
+        .columns
+        .iter()
+        .position(|c| c.track == track)
+        .ok_or_else(|| format!("track {} has no clip slots", track_name(p, track)).into())
+}
+
+/// The 0-based scene index of the 1-based `params.scene`.
+fn scene_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+    let count = p.launcher.scenes.len();
+    let number = params.get("scene").and_then(Value::as_u64).ok_or("scene must be a whole number from 1")?;
+    usize::try_from(number)
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .filter(|i| *i < count)
+        .ok_or_else(|| format!("scene {number} does not exist; the project has {count} scenes").into())
+}
+
+fn track_name(p: &Project, track: TrackId) -> String {
+    p.tracks.iter().find(|t| t.id == track).map_or_else(|| track.0.to_string(), |t| t.name.clone())
 }
 
 fn undo(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
