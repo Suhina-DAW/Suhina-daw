@@ -51,6 +51,7 @@ that describe them (*Code and its documents*). Read only the documents that matc
 ```text
 crates/
   model    L0 DAW-neutral project as pure data (tracks, channels, clip contents, clips, launcher)
+  stretch  L0 time-stretching and pitch-shifting DSP: a pure-Rust port of Signalsmith Stretch (MIT)
   engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
            and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)

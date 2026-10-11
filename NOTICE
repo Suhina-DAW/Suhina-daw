@@ -14,5 +14,8 @@ named only to describe file compatibility and comparable workflows.
 
 Third-party material
 
-This product bundles no third-party material yet. When it does, each item is listed here and,
-per file (author, source, license), in ATTRIBUTION.md.
+- crates/stretch is a Rust port of Signalsmith Stretch and of the STFT in Signalsmith Linear,
+  Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd. and (c) 2025 Signalsmith Audio,
+  MIT License; the full notice is in crates/stretch/LICENSE-signalsmith.txt.
+
+Other bundled material is listed per file (author, source, license) in ATTRIBUTION.md.

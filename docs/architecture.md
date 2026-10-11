@@ -49,6 +49,7 @@ The engine does not run them yet (see *Planned parts*).
 | Crate | Owns | Depends on |
 |---|---|---|
 | `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation. No behaviour beyond that. | nothing |
+| `stretch` | Time-stretching and pitch-shifting DSP for interleaved audio: a pure-Rust port of Signalsmith Stretch (MIT). Not used by the engine yet; it is the candidate to replace timestretch for the `Smooth` and `HighQuality` modes (ADR 0003). | nothing (rustfft) |
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
 | `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), group and master gain. Never touches files. | model |
 | `media` | Finding a project's audio files, decoding them (symphonia) on all cores and analysing the ones warped clips play, into an `AudioPool`. | engine |
