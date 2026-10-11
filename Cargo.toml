@@ -21,6 +21,7 @@ loopwerk-device-api = { path = "crates/device-api" }
 loopwerk-device-utility = { path = "devices/utility" }
 loopwerk-device-auto-pan = { path = "devices/auto-pan" }
 loopwerk-device-dj-eq = { path = "devices/dj-eq" }
+loopwerk-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0
