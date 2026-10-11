@@ -55,6 +55,14 @@ the project and record no undo step. Without an attached engine they return an e
 how to start one. `launcher.state` reads the engine's state the same way. See
 `docs/spec/clip-launching.md`.
 
+## Amendment: project commands (2026-10-11)
+
+With several projects open ([ADR 0007](0007-several-open-projects.md)), a fifth kind,
+**projects**, lists, switches and closes the open projects (`projects.*`). These run on
+`Projects`, not on one session, never change a project and record no undo step. `CommandSpec`
+is generic over what a command runs on, so both kinds share one shape, one parameter schema and
+one `commands.list`.
+
 ## Consequences
 
 - New behaviour starts as a command with tests, then gets a UI. The UI never edits the model

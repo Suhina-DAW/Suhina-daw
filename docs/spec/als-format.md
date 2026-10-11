@@ -263,5 +263,7 @@ These change without any musical edit:
 - Warp modes (`WarpMode` codes), audio fades.
 - Return tracks added or removed; sends routed pre-fader; track output to another track.
 - Tempo and time-signature changes over time (automation with more than the default event).
-- CLAP plug-ins, Audio Units, racks, Max for Live devices.
+- CLAP plug-ins, Audio Units, racks.
+- Max for Live devices: how the set refers to the `.amxd` file, what Collect All and Save does
+  with it, where parameter values are stored ([corpus series 8](als-corpus.md#series-8-max-devices)).
 - Sets saved by older Live versions.

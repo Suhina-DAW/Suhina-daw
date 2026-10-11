@@ -145,7 +145,12 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
 
 FL Studio projects (`.flp`), automation, sends and returns in the mix (groups and the master
 already apply volume and mute), MIDI controllers and Push (from Ableton's published Push interface
-docs), Max for Live devices as placeholders, bridging Windows plug-ins.
+docs), Max for Live devices kept as placeholders and copied along with the project, bridging Windows
+plug-ins.
+
+**Patch devices:** devices built by the community as Pure Data patches, with access to
+commands; plugdata works as an ordinary plug-in once hosting lands
+([ADR 0008](docs/decisions/0008-patch-devices.md), proposed).
 
 **ARA** after VST3 hosting works in the sandbox: Arrangement first, since looping, quantised
 Session clips do not fit ARA's linear timeline; Session view later. ADR before implementation.
@@ -155,7 +160,8 @@ Linux is the primary platform; Windows and macOS are supported.
 ## What works now
 
 ### M0 Foundation
-- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux and Windows.
+- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
+  Windows and macOS when started by hand and in every release build.
 - Clean-room rules for people and agents ([`CONTRIBUTING.md`](CONTRIBUTING.md)) and the agent
   guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe`, real-time safety, sandboxed plug-ins.
 - DAW-neutral project model: tracks and mixer channels apart, a pool of clip contents placed by
@@ -185,7 +191,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `clip.move`,
-  `edit.undo`, `edit.redo`.
+  `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
+  `projects.next`, `projects.previous`, `projects.close`.
+- Several projects open at once, like tabs, one of them active and playing; commands go to the
+  active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
   only below granted roots ([`docs/mcp.md`](docs/mcp.md)).
 - Edits and undo/redo are heard by a playing engine about 0.15 s later, without a gap: a new

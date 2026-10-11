@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 mod commands;
+mod projects;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,8 @@ use loopwerk_engine::{Controller, LauncherMonitor};
 use loopwerk_model::Project;
 use serde_json::Value;
 
-pub use commands::{CommandKind, CommandSpec, Param, ParamType, commands, parse_quantization};
+pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
+pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -142,7 +144,7 @@ impl Session {
             return Err(format!("{id}: unknown parameter {unknown:?}; expected {known:?}").into());
         }
         match spec.kind {
-            CommandKind::Read | CommandKind::Transport => (spec.run)(self, params),
+            CommandKind::Read | CommandKind::Transport | CommandKind::Projects => (spec.run)(self, params),
             CommandKind::History => {
                 let value = (spec.run)(self, params)?;
                 self.update_player()?;
