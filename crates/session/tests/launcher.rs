@@ -235,3 +235,34 @@ fn quantisation_none_launches_at_once() {
     let state = run(&mut session, "launcher.state", json!({})).unwrap();
     assert_eq!(state["tracks"][1]["playing"]["scene"], 2);
 }
+
+/// Renders `frames` and returns the loudest sample of each beat.
+fn beat_peaks(renderer: &mut Renderer, beats: usize) -> Vec<f32> {
+    let mut buffer = vec![0.0f32; 2 * BEAT];
+    (0..beats)
+        .map(|_| {
+            renderer.process(&mut buffer);
+            buffer.iter().fold(0.0f32, |m, s| m.max(s.abs()))
+        })
+        .collect()
+}
+
+#[test]
+fn edits_and_undo_are_heard_while_playing() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "clip.launch", json!({ "track": "Drums", "scene": 1 })).unwrap();
+    let loud = beat_peaks(&mut renderer, 2)[1];
+    assert!(loud > 0.05);
+
+    // -12 dB is a quarter of the level, from the next note on.
+    run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": -12 })).unwrap();
+    let quieter = beat_peaks(&mut renderer, 2)[1];
+    assert!((quieter / loud - 0.25).abs() < 0.01, "{loud} -> {quieter}");
+    // The clip kept playing: the launcher still reports it.
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["running"], true);
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let back = beat_peaks(&mut renderer, 2)[1];
+    assert!((back / loud - 1.0).abs() < 0.01, "{loud} -> {back}");
+}

@@ -62,6 +62,11 @@ impl Player {
     pub fn monitor(&self) -> &LauncherMonitor {
         self.controller.monitor()
     }
+
+    /// Makes the engine play `project` from now on, keeping what is playing (ADR 0005).
+    pub fn update(&mut self, project: &Project) -> Result<(), CommandError> {
+        self.controller.update(project).map_err(CommandError)
+    }
 }
 
 pub struct Session {
@@ -139,8 +144,11 @@ impl Session {
             return Err(format!("{id}: unknown parameter {unknown:?}; expected {known:?}").into());
         }
         match spec.kind {
-            CommandKind::Read | CommandKind::History | CommandKind::Transport | CommandKind::Projects => {
-                (spec.run)(self, params)
+            CommandKind::Read | CommandKind::Transport | CommandKind::Projects => (spec.run)(self, params),
+            CommandKind::History => {
+                let value = (spec.run)(self, params)?;
+                self.update_player()?;
+                Ok(value)
             }
             CommandKind::Edit => {
                 let before = self.project.clone();
@@ -152,6 +160,7 @@ impl Session {
                     Ok(value) => {
                         if self.project != before {
                             self.push_undo(before);
+                            self.update_player()?;
                         }
                         Ok(value)
                     }
@@ -162,6 +171,14 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// Lets a playing engine hear the project as it is now. The edit stays made if this fails.
+    fn update_player(&mut self) -> Result<(), CommandError> {
+        let Some(player) = self.player.as_mut() else { return Ok(()) };
+        player.update(&self.project).map_err(|e| {
+            CommandError(format!("the edit was made, but the playing engine could not follow it: {}", e.0))
+        })
     }
 
     fn push_undo(&mut self, before: Project) {

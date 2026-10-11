@@ -31,8 +31,9 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
-  `project_render` work either way. The engine plays the project as it was opened: edits made
-  afterwards are heard after the next `project_open`. Only the active project plays: switching
+  `project_render` work either way. Edits and undo/redo are heard by the playing engine about
+  0.15 s after the command returns, with launched clips playing on
+  ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 

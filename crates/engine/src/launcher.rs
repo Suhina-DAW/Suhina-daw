@@ -94,12 +94,19 @@ pub struct ColumnStatus {
 /// The launcher's state, written by the audio thread and readable from any thread.
 #[derive(Debug)]
 pub struct LauncherMonitor {
-    running: AtomicBool,
+    pub(crate) running: AtomicBool,
     beat: AtomicU64,
     tempo: AtomicU64,
     playing: Vec<AtomicU32>,
     queued: Vec<AtomicU32>,
     overrides: Vec<AtomicBool>,
+    /// Renderer frames played so far, and the arrangement frame playing (ADR 0005).
+    pub(crate) position: AtomicU64,
+    pub(crate) arrangement: AtomicU64,
+    pub(crate) stretch_underruns: AtomicU64,
+    /// Arrangement frames per beat of the playing graph (f64 bits), so an update can find the
+    /// playhead's beat.
+    pub(crate) frames_per_beat: AtomicU64,
 }
 
 impl LauncherMonitor {
@@ -111,6 +118,10 @@ impl LauncherMonitor {
             playing: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
             queued: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
             overrides: (0..columns).map(|_| AtomicBool::new(false)).collect(),
+            position: AtomicU64::new(0),
+            arrangement: AtomicU64::new(0),
+            stretch_underruns: AtomicU64::new(0),
+            frames_per_beat: AtomicU64::new(0),
         }
     }
 
@@ -148,7 +159,8 @@ impl LauncherMonitor {
 /// Sends commands to a renderer that may be running on the audio thread.
 pub struct Controller {
     producer: rtrb::Producer<LaunchCommand>,
-    monitor: Arc<LauncherMonitor>,
+    pub(crate) monitor: Arc<LauncherMonitor>,
+    pub(crate) updater: crate::swap::Updater,
 }
 
 impl Controller {
@@ -184,6 +196,9 @@ struct PlanAudio {
     /// Beats the stretch voice covers; after that the clip is re-pitched.
     stretch_beats: f64,
     stretch_gains: (f32, f32),
+    /// Identifies what the stretch voice plays (region, placement, tempo, sample rate), so a
+    /// graph swap can keep a playing voice whose audio has not changed (ADR 0005).
+    fingerprint: u64,
 }
 
 /// A slot's clip, ready to play.
@@ -263,7 +278,7 @@ pub(crate) struct Launcher {
     pending_tempo: Option<(f64, f64)>,
     frames_per_beat_at_build: f64,
     stop_fade_frames: f64,
-    monitor: Arc<LauncherMonitor>,
+    pub(crate) monitor: Arc<LauncherMonitor>,
     control: Option<rtrb::Consumer<LaunchCommand>>,
 }
 
@@ -312,6 +327,32 @@ impl Launcher {
             frames_per_beat_at_build: frames_per_beat,
             stop_fade_frames: (STOP_FADE_SECONDS * f64::from(sample_rate)).max(1.0),
             control: None,
+        }
+    }
+
+    /// Takes over `old`'s runtime state at a graph swap (ADR 0005): what each column plays, fades
+    /// and has queued, the beat, tempo and quantisation, and the control queue and monitor (the
+    /// new graph's own go back with the old graph). A playing clip whose stretched audio has not
+    /// changed keeps its stretch voice; any other playing stretch voice is moved to where its clip
+    /// is. A column or slot that no longer exists is dropped. Never allocates.
+    pub(crate) fn adopt(&mut self, old: &mut Launcher) {
+        std::mem::swap(&mut self.monitor, &mut old.monitor);
+        std::mem::swap(&mut self.control, &mut old.control);
+        self.quantization = old.quantization;
+        self.beat = old.beat;
+        self.pending_tempo = old.pending_tempo;
+        // An edited project tempo replaces the running one; otherwise a scene's tempo stays.
+        self.tempo_bpm =
+            if self.project_tempo_bpm == old.project_tempo_bpm { old.tempo_bpm } else { self.project_tempo_bpm };
+        let frames_per_beat = self.frames_per_beat_at_build;
+        for (new, old) in self.columns.iter_mut().zip(old.columns.iter_mut()) {
+            new.overrides_since = old.overrides_since;
+            new.pending = old.pending.filter(|p| match p.action {
+                Queued::Launch(slot) => new.slots.get(slot).is_some_and(|s| s.clip.is_some()),
+                Queued::Stop => true,
+            });
+            new.playing = carry(&mut new.slots, &mut old.slots, old.playing, frames_per_beat);
+            new.fading = carry(&mut new.slots, &mut old.slots, old.fading, frames_per_beat);
         }
     }
 
@@ -365,6 +406,45 @@ impl Launcher {
             }
         }
     }
+}
+
+/// A playing or fading clip carried from `old_slots` to the same slot in `new_slots`, or `None`
+/// if that slot has no clip now.
+fn carry(
+    new_slots: &mut [SlotPlan],
+    old_slots: &mut [SlotPlan],
+    state: Option<Playing>,
+    frames_per_beat: f64,
+) -> Option<Playing> {
+    let mut playing = state?;
+    let new_plan = new_slots.get_mut(playing.slot)?.clip.as_mut()?;
+    let old_plan = old_slots.get_mut(playing.slot).and_then(|s| s.clip.as_mut());
+    // Notes: the same place in the new list. Notes at exactly the last beat may have played.
+    let last = playing.last_clip_beat;
+    let played_at_last =
+        old_plan.as_ref().map_or(0, |plan| playing.next_note.saturating_sub(plan.first_note_from(last)));
+    let at_last = new_plan.notes.partition_point(|n| n.time <= last) - new_plan.first_note_from(last);
+    playing.next_note = new_plan.first_note_from(last) + played_at_last.min(at_last);
+    // Stretch voices: unchanged audio keeps its voice; changed audio starts where the clip is.
+    let unchanged = old_plan.as_ref().is_some_and(|plan| {
+        plan.audio.len() == new_plan.audio.len()
+            && plan.audio.iter().zip(&new_plan.audio).all(|(a, b)| a.fingerprint == b.fingerprint)
+    });
+    match old_plan {
+        Some(old_plan) if unchanged => {
+            for (new, old) in new_plan.audio.iter_mut().zip(old_plan.audio.iter_mut()) {
+                std::mem::swap(&mut new.stretch, &mut old.stretch);
+            }
+        }
+        _ if playing.stretched => {
+            let frames = (playing.elapsed_beats * frames_per_beat).round().max(0.0) as u64;
+            for voice in new_plan.audio.iter_mut().filter_map(|a| a.stretch.as_mut()) {
+                voice.seek(frames);
+            }
+        }
+        _ => {}
+    }
+    Some(playing)
 }
 
 /// Beats in one bar: a 4/4 bar has 4, a 6/8 bar 3.
@@ -437,12 +517,19 @@ fn plan_clip(
                     })
                     .flatten();
                 let region_gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
+                let fingerprint = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::hash::DefaultHasher::new();
+                    format!("{region:?}|{placed:?}|{stretch_beats}|{tempo}|{sample_rate}").hash(&mut hasher);
+                    hasher.finish()
+                };
                 audio_plans.push(PlanAudio {
                     event,
                     follows_tempo: region.warped,
                     stretch,
                     stretch_beats,
                     stretch_gains: (gains.0 * region_gain, gains.1 * region_gain),
+                    fingerprint,
                 });
             }
         }
@@ -456,13 +543,13 @@ impl Renderer {
     /// at the start of each [`Renderer::process`] call. Calling this again replaces the queue.
     pub fn controller(&mut self) -> Controller {
         let (producer, consumer) = rtrb::RingBuffer::new(QUEUE_CAPACITY);
-        self.launcher.control = Some(consumer);
-        Controller { producer, monitor: Arc::clone(&self.launcher.monitor) }
+        self.graph.launcher.control = Some(consumer);
+        Controller { producer, monitor: Arc::clone(&self.graph.launcher.monitor), updater: self.updater() }
     }
 
     /// The launcher state, as other threads see it.
     pub fn monitor(&self) -> Arc<LauncherMonitor> {
-        Arc::clone(&self.launcher.monitor)
+        Arc::clone(&self.graph.launcher.monitor)
     }
 
     /// Applies one launch command now. Never allocates.
@@ -475,7 +562,9 @@ impl Renderer {
             }
             LaunchCommand::Stop => self.stop_transport(),
             LaunchCommand::LaunchClip { column, slot } => {
-                let Some(target) = self.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else { return };
+                let Some(target) = self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else {
+                    return;
+                };
                 let action = match (&target.clip, target.has_stop) {
                     (Some(_), _) => Queued::Launch(slot),
                     (None, true) => Queued::Stop,
@@ -485,45 +574,45 @@ impl Renderer {
                     return;
                 }
                 self.ensure_running();
-                self.launcher.queue(column, action);
+                self.graph.launcher.queue(column, action);
             }
             LaunchCommand::LaunchScene { scene } => {
-                if scene >= self.launcher.scene_tempos.len() {
+                if scene >= self.graph.launcher.scene_tempos.len() {
                     return;
                 }
                 self.ensure_running();
-                for column in 0..self.launcher.columns.len() {
-                    let action = match self.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
+                for column in 0..self.graph.launcher.columns.len() {
+                    let action = match self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
                         Some(SlotPlan { clip: Some(_), .. }) => Queued::Launch(scene),
                         Some(SlotPlan { clip: None, has_stop: true }) => Queued::Stop,
                         _ => continue,
                     };
-                    self.launcher.queue(column, action);
+                    self.graph.launcher.queue(column, action);
                 }
-                if let Some(Some(bpm)) = self.launcher.scene_tempos.get(scene) {
-                    self.launcher.pending_tempo = Some((self.launcher.launch_beat(), *bpm));
+                if let Some(Some(bpm)) = self.graph.launcher.scene_tempos.get(scene) {
+                    self.graph.launcher.pending_tempo = Some((self.graph.launcher.launch_beat(), *bpm));
                 }
             }
             LaunchCommand::StopColumn { column } => {
                 if self.running {
-                    self.launcher.queue(column, Queued::Stop);
+                    self.graph.launcher.queue(column, Queued::Stop);
                 }
             }
             LaunchCommand::StopAll => {
                 if self.running {
-                    for column in 0..self.launcher.columns.len() {
-                        self.launcher.queue(column, Queued::Stop);
+                    for column in 0..self.graph.launcher.columns.len() {
+                        self.graph.launcher.queue(column, Queued::Stop);
                     }
                 }
             }
-            LaunchCommand::SetQuantization(q) => self.launcher.quantization = q,
+            LaunchCommand::SetQuantization(q) => self.graph.launcher.quantization = q,
             LaunchCommand::BackToArrangement => {
-                for column in &mut self.launcher.columns {
+                for column in &mut self.graph.launcher.columns {
                     column.overrides_since = None;
                 }
             }
         }
-        self.launcher.publish();
+        self.graph.launcher.publish();
     }
 
     fn ensure_running(&mut self) {
@@ -535,30 +624,31 @@ impl Renderer {
     fn start_transport(&mut self) {
         self.running = true;
         self.origin = self.position;
+        self.time_at_origin = 0;
         self.next_event = 0;
         self.next_audio = 0;
         self.active_audio_count = 0;
         // The stretch voices are rewound when the transport stops, so the worker has them ready
         // by the next start; only a start without a stop before it rewinds here.
         if !self.stretch_fresh {
-            self.ahead.rewind();
+            self.graph.ahead.rewind();
             self.stretch_fresh = true;
         }
-        self.launcher.beat = 0.0;
-        self.launcher.monitor.running.store(true, Ordering::Relaxed);
+        self.graph.launcher.beat = 0.0;
+        self.graph.launcher.monitor.running.store(true, Ordering::Relaxed);
     }
 
     fn stop_transport(&mut self) {
         self.running = false;
         self.active_audio_count = 0;
         if !self.stretch_fresh {
-            self.ahead.rewind();
+            self.graph.ahead.rewind();
             self.stretch_fresh = true;
         }
         for voice in self.voices.iter_mut().filter(|v| v.active) {
             voice.end = voice.end.min(self.position);
         }
-        let launcher = &mut self.launcher;
+        let launcher = &mut self.graph.launcher;
         for column in &mut launcher.columns {
             column.pending = None;
             if let Some(mut playing) = column.playing.take() {
@@ -575,13 +665,13 @@ impl Renderer {
     pub(crate) fn drain_commands(&mut self) {
         let mut handled = 0;
         while handled < QUEUE_CAPACITY {
-            let Some(command) = self.launcher.control.as_mut().and_then(|c| c.pop().ok()) else { break };
+            let Some(command) = self.graph.launcher.control.as_mut().and_then(|c| c.pop().ok()) else { break };
             self.handle(command);
             handled += 1;
         }
-        let monitor = &self.launcher.monitor;
-        monitor.beat.store(self.launcher.beat.to_bits(), Ordering::Relaxed);
-        monitor.tempo.store(self.launcher.tempo_bpm.to_bits(), Ordering::Relaxed);
+        let monitor = &self.graph.launcher.monitor;
+        monitor.beat.store(self.graph.launcher.beat.to_bits(), Ordering::Relaxed);
+        monitor.tempo.store(self.graph.launcher.tempo_bpm.to_bits(), Ordering::Relaxed);
     }
 
     /// Advances the launcher by one frame: applies launches that are due, starts notes, mixes
@@ -591,12 +681,12 @@ impl Renderer {
         if self.running {
             self.apply_due();
         }
-        let beats_per_frame = self.launcher.tempo_bpm / 60.0 / f64::from(self.sample_rate);
-        for index in 0..self.launcher.columns.len() {
+        let beats_per_frame = self.graph.launcher.tempo_bpm / 60.0 / f64::from(self.sample_rate);
+        for index in 0..self.graph.launcher.columns.len() {
             if self.running {
                 self.play_notes(index, beats_per_frame);
             }
-            let launcher = &mut self.launcher;
+            let launcher = &mut self.graph.launcher;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
             let fade_in = self.fade_frames;
@@ -647,32 +737,32 @@ impl Renderer {
                 && p.elapsed_beats >= plan.length
             {
                 column.playing = None;
-                self.launcher.publish();
+                self.graph.launcher.publish();
             }
         }
         if self.running {
-            self.launcher.beat += beats_per_frame;
+            self.graph.launcher.beat += beats_per_frame;
         }
         out
     }
 
     /// Applies queued launches, stops and tempo changes whose beat has come.
     fn apply_due(&mut self) {
-        let beat = self.launcher.beat;
-        if let Some((at, bpm)) = self.launcher.pending_tempo
+        let beat = self.graph.launcher.beat;
+        if let Some((at, bpm)) = self.graph.launcher.pending_tempo
             && at <= beat
         {
-            self.launcher.tempo_bpm = bpm;
-            self.launcher.pending_tempo = None;
+            self.graph.launcher.tempo_bpm = bpm;
+            self.graph.launcher.pending_tempo = None;
         }
         let mut changed = false;
-        for index in 0..self.launcher.columns.len() {
-            let Some(column) = self.launcher.columns.get_mut(index) else { continue };
+        for index in 0..self.graph.launcher.columns.len() {
+            let Some(column) = self.graph.launcher.columns.get_mut(index) else { continue };
             let Some(pending) = column.pending.filter(|p| p.at_beat <= beat) else { continue };
             column.pending = None;
             changed = true;
             if let Some(mut old) = column.playing.take() {
-                old.fade_left = self.launcher.stop_fade_frames;
+                old.fade_left = self.graph.launcher.stop_fade_frames;
                 column.fading = Some(old);
             }
             if let Queued::Launch(slot) = pending.action
@@ -695,14 +785,14 @@ impl Renderer {
                     last_clip_beat: plan.offset,
                     next_note: plan.first_note_from(plan.offset),
                     fade_left: 0.0,
-                    stretched: self.launcher.tempo_bpm == self.launcher.project_tempo_bpm,
+                    stretched: self.graph.launcher.tempo_bpm == self.graph.launcher.project_tempo_bpm,
                 });
                 column.overrides_since = Some(self.position);
             }
             self.release_column(index);
         }
         if changed {
-            self.launcher.publish();
+            self.graph.launcher.publish();
         }
     }
 
@@ -718,7 +808,8 @@ impl Renderer {
 
     /// Starts the notes of a column's playing clip that are due at this frame.
     fn play_notes(&mut self, index: usize, beats_per_frame: f64) {
-        let Self { launcher, voices, position, sample_rate, .. } = self;
+        let Self { graph, voices, position, sample_rate, .. } = self;
+        let launcher = &mut graph.launcher;
         let Ok(column_id) = u32::try_from(index) else { return };
         let Some(column) = launcher.columns.get_mut(index) else { return };
         let Some(p) = column.playing.as_mut() else { return };

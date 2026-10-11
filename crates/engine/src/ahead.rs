@@ -9,9 +9,10 @@
 //! worker has fallen behind, the missing frames play as silence and are counted, and frames that
 //! arrive late are dropped, so the clip carries on in time.
 //!
-//! Rewinding (the transport stopping) is a lock-free handshake: the audio side requests a new
-//! generation, the worker stops pushing and says so, the audio side empties the rings, and the
-//! worker rewinds its voices and fills them again.
+//! Moving the voices (the transport stopping rewinds them; a new graph can start them anywhere)
+//! is a lock-free handshake: the audio side requests a new generation with the arrangement frame
+//! to move to, the worker stops pushing and says so, the audio side empties the rings, and the
+//! worker moves its voices there and fills the rings again.
 //!
 //! Without a worker thread (offline rendering) the reader fills the rings itself just before it
 //! reads them, through the same voices and rings, so offline renders stay the test oracle for
@@ -41,6 +42,8 @@ struct Shared {
     requested: AtomicU64,
     paused: AtomicU64,
     drained: AtomicU64,
+    /// The arrangement frame the voices move to for the requested generation.
+    seek_to: AtomicU64,
     /// Frames the audio thread needed that were not ready.
     underruns: AtomicU64,
 }
@@ -49,6 +52,8 @@ struct Shared {
 struct Writer {
     voice: StretchVoice,
     producer: Producer<f32>,
+    /// The clip's first arrangement frame.
+    start: u64,
     /// Frames of the clip pushed so far, and the clip's length in frames.
     produced: u64,
     length: u64,
@@ -57,12 +62,14 @@ struct Writer {
 /// One voice on the audio side.
 struct Reader {
     consumer: Consumer<f32>,
+    start: u64,
+    length: u64,
     /// The clip frame at the head of the ring.
     next: u64,
 }
 
-/// Renders stretched clips ahead into the rings the [`AheadReader`] reads. Run it on its own
-/// thread with [`StretchWorker::spawn`].
+/// Renders stretched clips ahead into the rings the [`AheadReader`] reads. A
+/// [`crate::Controller`] runs it on its own thread (`Controller::run_stretch_worker`).
 pub struct StretchWorker {
     writers: Vec<Writer>,
     shared: Arc<Shared>,
@@ -81,7 +88,7 @@ impl StretchWorker {
             if self.shared.drained.load(Ordering::Acquire) != requested {
                 return false;
             }
-            self.rewind();
+            self.move_to(self.shared.seek_to.load(Ordering::Acquire));
             self.generation = requested;
             return true;
         }
@@ -112,40 +119,59 @@ impl StretchWorker {
         while self.work() {}
     }
 
-    /// Runs the worker on its own thread until the returned handle is dropped.
-    pub fn spawn(mut self) -> std::io::Result<StretchThread> {
-        let stop = Arc::new(AtomicBool::new(false));
-        let shared = Arc::clone(&self.shared);
-        let stop_flag = Arc::clone(&stop);
-        let handle = std::thread::Builder::new().name("loopwerk-stretch".into()).spawn(move || {
-            while !stop_flag.load(Ordering::Relaxed) {
-                if !self.work() {
-                    std::thread::sleep(IDLE);
-                }
-            }
-        })?;
-        Ok(StretchThread { stop, handle: Some(handle), shared })
-    }
-
-    fn rewind(&mut self) {
+    /// Moves every voice to arrangement frame `to`: the clips playing there to that point, the
+    /// later ones to their start.
+    fn move_to(&mut self, to: u64) {
         for writer in &mut self.writers {
-            writer.voice.restart();
-            writer.produced = 0;
+            let local = to.saturating_sub(writer.start).min(writer.length);
+            if local < writer.length {
+                writer.voice.seek(local);
+            }
+            writer.produced = local;
         }
     }
 }
 
-/// A running [`StretchWorker`]; dropping it stops the thread.
-pub struct StretchThread {
+/// Workers that can wait to join the thread.
+const INBOX: usize = 8;
+
+/// A thread running [`StretchWorker`]s, one per graph (ADR 0005): a worker joins through
+/// [`StretchThread::add`] and leaves once its graph has been dropped. Dropping the handle stops
+/// the thread.
+pub(crate) struct StretchThread {
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    shared: Arc<Shared>,
+    inbox: Producer<StretchWorker>,
 }
 
 impl StretchThread {
-    /// Frames the audio thread needed that the worker had not rendered yet (heard as silence).
-    pub fn underruns(&self) -> u64 {
-        self.shared.underruns.load(Ordering::Relaxed)
+    pub(crate) fn spawn() -> std::io::Result<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = Arc::clone(&stop);
+        let (inbox, mut incoming) = RingBuffer::<StretchWorker>::new(INBOX);
+        let handle = std::thread::Builder::new().name("loopwerk-stretch".into()).spawn(move || {
+            let mut workers: Vec<StretchWorker> = Vec::new();
+            while !stop_flag.load(Ordering::Relaxed) {
+                while let Ok(worker) = incoming.pop() {
+                    workers.push(worker);
+                }
+                // A worker whose reader (its graph) is gone has nobody to render for.
+                workers.retain(|w| Arc::strong_count(&w.shared) > 1);
+                let mut did = false;
+                for worker in &mut workers {
+                    did |= worker.work();
+                }
+                if !did {
+                    std::thread::sleep(IDLE);
+                }
+            }
+        })?;
+        Ok(Self { stop, handle: Some(handle), inbox })
+    }
+
+    /// Hands a graph's worker to the thread.
+    pub(crate) fn add(&mut self, worker: StretchWorker) -> Result<(), String> {
+        self.inbox.push(worker).map_err(|_| "the stretch worker thread is not taking new work".to_string())
     }
 }
 
@@ -168,17 +194,17 @@ pub(crate) struct AheadReader {
 }
 
 impl AheadReader {
-    /// Splits `voices` (each with its clip length in project frames) into a reader and its worker,
-    /// with a ring per voice holding [`AHEAD_SECONDS`] at `sample_rate`.
-    pub(crate) fn new(voices: Vec<(StretchVoice, u64)>, sample_rate: u32) -> Self {
+    /// Splits `voices` (each with its clip's start and length in arrangement frames) into a reader
+    /// and its worker, with a ring per voice holding [`AHEAD_SECONDS`] at `sample_rate`.
+    pub(crate) fn new(voices: Vec<(StretchVoice, u64, u64)>, sample_rate: u32) -> Self {
         let frames = ((AHEAD_SECONDS * f64::from(sample_rate)) as usize).max(2 * BLOCK_FRAMES);
         let shared = Arc::new(Shared::default());
         let mut readers = Vec::with_capacity(voices.len());
         let mut writers = Vec::with_capacity(voices.len());
-        for (voice, length) in voices {
+        for (voice, start, length) in voices {
             let (producer, consumer) = RingBuffer::new(frames * 2);
-            readers.push(Reader { consumer, next: 0 });
-            writers.push(Writer { voice, producer, produced: 0, length });
+            readers.push(Reader { consumer, start, length, next: 0 });
+            writers.push(Writer { voice, producer, start, produced: 0, length });
         }
         let worker =
             StretchWorker { writers, shared: Arc::clone(&shared), generation: 0, scratch: vec![0.0; BLOCK_FRAMES * 2] };
@@ -194,6 +220,13 @@ impl AheadReader {
 
     /// Asks for every voice to start again from its first frame.
     pub(crate) fn rewind(&mut self) {
+        self.move_to(0);
+    }
+
+    /// Asks for the voices to continue from arrangement frame `to`; until the worker has moved
+    /// them, reads are silence.
+    pub(crate) fn move_to(&mut self, to: u64) {
+        self.shared.seek_to.store(to, Ordering::Release);
         self.shared.requested.fetch_add(1, Ordering::AcqRel);
         self.service();
     }
@@ -211,12 +244,13 @@ impl AheadReader {
         if self.shared.paused.load(Ordering::Acquire) != requested {
             return;
         }
+        let to = self.shared.seek_to.load(Ordering::Acquire);
         for reader in &mut self.readers {
             let queued = reader.consumer.slots();
             if let Ok(chunk) = reader.consumer.read_chunk(queued) {
                 chunk.commit_all();
             }
-            reader.next = 0;
+            reader.next = to.saturating_sub(reader.start).min(reader.length);
         }
         self.shared.drained.store(requested, Ordering::Release);
         if let Some(worker) = self.inline.as_mut() {

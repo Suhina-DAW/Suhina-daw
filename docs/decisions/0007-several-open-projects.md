@@ -48,7 +48,7 @@ the layer that owns sessions.
   `--audio` a switch starts the new project playing.
 - A switch with audio reloads the new project's audio files and opens a new output stream, so
   it is not instant for large sets. Keeping one output open and swapping the engine graph
-  (the edits-while-playing work) makes it so; that is a follow-up.
+  ([ADR 0005](0005-edits-while-playing.md)) makes it so; that is a follow-up.
 - Background projects stay in memory with their undo history; decoded audio is held only by
   the active project's player.
 
