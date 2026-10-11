@@ -2,7 +2,9 @@
 
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
-> **Status:** pre-alpha. Nothing to use yet.
+> **Status:** pre-alpha. Loopwerk opens Live Sets, plays and renders them (MIDI as sine tones for
+> now, audio clips with real-time time-stretching), and lets agents edit them over MCP. There is
+> no UI yet. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
 
 Loopwerk is an independent clean-room project. It is not affiliated with, sponsored by or
 endorsed by Ableton AG. Ableton and Live are trademarks of Ableton AG, named here only to describe
@@ -15,7 +17,7 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 - Session-style clip launching with quantisation, plus a linear arrangement.
 - Reading `.als` projects you made yourself; later other formats such as DAWproject and `.flp`,
   so projects are not locked to one program.
-- CLAP plug-in hosting.
+- CLAP plug-in hosting, every plug-in sandboxed in its own process.
 - Every action available headlessly: CLI and MCP for automation and agents.
 
 ## Downloads
@@ -24,6 +26,24 @@ Tagged versions build the headless command-line tool `loopwerk-cli` for Linux (x
 (x64) and macOS (universal) and attach them to a GitHub Release. The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
+
+## Try it
+
+```sh
+# Play a Live Set on the default audio device (release builds play heavy sets smoothly)
+cargo run --release -p loopwerk-cli -- play path/to/set.als
+
+# Play one launcher scene instead of the arrangement
+cargo run --release -p loopwerk-cli -- play path/to/set.als --scene 2
+
+# Render to a 32-bit float WAV
+cargo run --release -p loopwerk-cli -- render path/to/set.als -o out.wav
+
+# Serve the Model Context Protocol for agents (see docs/mcp.md)
+cargo run --release -p loopwerk-cli -- mcp --read-root path/to/projects --write-root path/to/renders
+```
+
+`--demo` instead of a file uses a small built-in project.
 
 ## Building
 
@@ -34,6 +54,19 @@ On Linux, install the ALSA headers first (`libasound2-dev` on Debian and Ubuntu,
 cargo build --release
 cargo test --workspace
 ```
+
+Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu).
+
+## Documentation
+
+| | |
+|---|---|
+| [`ROADMAP.md`](ROADMAP.md) | Milestones, what works now, what is next |
+| [`AGENTS.md`](AGENTS.md) | Rules for contributors and agents, and the crate map |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Clean-room rules, licences, AI-assisted contributions |
+| [`docs/decisions/`](docs/decisions/) | Architecture decisions: the DAW-neutral model, commands, time-stretching |
+| [`docs/spec/`](docs/spec/) | The Live Set format as observed, and how to author test sets |
+| [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 
 ## License
 

@@ -1,11 +1,13 @@
-//! Audio files for a project: finds the files its audio clips refer to and decodes them into
-//! memory with symphonia (MPL-2.0), so the engine can play them without touching the disk.
+//! Audio files for a project: finds the files its audio clips refer to, decodes them into memory
+//! with symphonia (MPL-2.0) and analyses the files that warped clips play for the engine's
+//! real-time stretcher (ADR 0003), so the engine can play them without touching the disk.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use loopwerk_engine::model::{LaneData, Project};
-pub use loopwerk_engine::{AudioData, AudioPool};
+use loopwerk_engine::model::{LaneData, Project, StretchMode};
+pub use loopwerk_engine::{AudioAnalysis, AudioData, AudioPool, analyze_audio};
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
@@ -17,34 +19,76 @@ use symphonia::core::meta::MetadataOptions;
 /// stereo f32 at 48 kHz).
 const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
 
-/// Loads every audio file the project uses. `project_dir` is the folder the project file is in;
-/// a region's relative path is resolved from there first, then its absolute path is tried.
-/// Files that cannot be found or decoded are reported in the returned warnings and left out.
+/// Loads every audio file the project uses: decodes it and, for files that warped clips play,
+/// computes the stretcher's analysis. Same as [`decode_project_audio`].
 pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
-    let mut pool = AudioPool::new();
-    let mut warnings = Vec::new();
+    decode_project_audio(project, project_dir)
+}
+
+/// Decodes every audio file the project uses, on all cores. `project_dir` is the folder the
+/// project file is in; a region's relative path is resolved from there first, then its absolute
+/// path is tried. Files that cannot be found or decoded are reported in the returned warnings and
+/// left out.
+pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
+    // Each file once, with where to look for it and whether a warped clip stretches it.
+    let mut wanted: Vec<(String, Vec<PathBuf>, bool)> = Vec::new();
     for content in &project.contents {
         for lane in &content.lanes {
             let LaneData::Audio(region) = &lane.data else { continue };
-            if pool.contains_key(&region.file) {
+            let stretched = region.warped && region.stretch != StretchMode::Repitch;
+            if let Some(entry) = wanted.iter_mut().find(|(file, _, _)| *file == region.file) {
+                entry.2 |= stretched;
                 continue;
             }
             let mut candidates = vec![project_dir.join(&region.file)];
             if let Some(absolute) = &region.absolute_file {
                 candidates.push(PathBuf::from(absolute));
             }
-            let Some(path) = candidates.iter().find(|p| p.is_file()) else {
-                warnings.push(format!("audio file {} not found", region.file));
-                continue;
-            };
-            match decode_file(path) {
-                Ok(data) => {
-                    pool.insert(region.file.clone(), Arc::new(data));
-                }
-                Err(e) => warnings.push(format!("audio file {}: {e}", path.display())),
-            }
+            wanted.push((region.file.clone(), candidates, stretched));
         }
     }
+
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, usize::from).clamp(1, 16).min(wanted.len().max(1));
+    type Decoded = Result<(AudioData, Option<AudioAnalysis>), String>;
+    let decoded: Vec<(String, Decoded)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    while let Some((file, candidates, stretched)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let result = match candidates.iter().find(|p| p.is_file()) {
+                            None => Err(format!("audio file {file} not found")),
+                            Some(path) => decode_file(path)
+                                .map(|data| {
+                                    let analysis = stretched.then(|| analyze_audio(&data));
+                                    (data, analysis)
+                                })
+                                .map_err(|e| format!("audio file {}: {e}", path.display())),
+                        };
+                        done.push((file.clone(), result));
+                    }
+                    done
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    });
+
+    let mut pool = AudioPool::new();
+    let mut warnings = Vec::new();
+    for (file, result) in decoded {
+        match result {
+            Ok((data, analysis)) => {
+                if let Some(analysis) = analysis {
+                    pool.analysis.insert(file.clone(), analysis);
+                }
+                pool.files.insert(file, Arc::new(data));
+            }
+            Err(e) => warnings.push(e),
+        }
+    }
+    warnings.sort();
     (pool, warnings)
 }
 
@@ -142,6 +186,7 @@ mod tests {
                         channels: None,
                         duration_seconds: None,
                         warped: false,
+                        stretch: StretchMode::Smooth,
                         warp_markers: Vec::new(),
                         gain: 1.0,
                         transpose: 0.0,
@@ -171,14 +216,14 @@ mod tests {
         // Relative to the set's folder, the way Live writes "../file.wav".
         let (pool, warnings) = load_project_audio(&project_with_audio("../shared.wav", None), &dir.join("set"));
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert_eq!(pool["../shared.wav"].channels, 1);
+        assert_eq!(pool.files["../shared.wav"].channels, 1);
 
         // Relative path broken, absolute path still good.
         let absolute = dir.join("shared.wav").display().to_string();
         let (pool, warnings) =
             load_project_audio(&project_with_audio("moved/away.wav", Some(absolute)), &dir.join("set"));
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert!(pool.contains_key("moved/away.wav"));
+        assert!(pool.files.contains_key("moved/away.wav"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -187,9 +232,9 @@ mod tests {
         let dir = temp_dir("broken");
         std::fs::write(dir.join("set").join("noise.wav"), b"definitely not audio").unwrap();
         let (pool, warnings) = load_project_audio(&project_with_audio("gone.wav", None), &dir.join("set"));
-        assert!(pool.is_empty() && warnings[0].contains("not found"));
+        assert!(pool.files.is_empty() && warnings[0].contains("not found"));
         let (pool, warnings) = load_project_audio(&project_with_audio("noise.wav", None), &dir.join("set"));
-        assert!(pool.is_empty() && warnings.len() == 1, "{warnings:?}");
+        assert!(pool.files.is_empty() && warnings.len() == 1, "{warnings:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -202,12 +202,33 @@ pub struct AudioRegion {
     pub duration_seconds: Option<f64>,
     /// When false the audio plays at its original speed and `warp_markers` are kept but unused.
     pub warped: bool,
+    /// How a warped region keeps its pitch when it plays faster or slower (ADR 0003).
+    pub stretch: StretchMode,
     /// Empty when the audio plays at its original speed from the content start.
     pub warp_markers: Vec<WarpMarker>,
     /// Linear gain; 1.0 is unity.
     pub gain: f64,
     /// Pitch shift in semitones (fractions are cents / 100).
     pub transpose: f64,
+}
+
+/// The time-stretch algorithm for a warped audio region (ADR 0003). The names describe intent;
+/// which backend implements each one is decided where audio is prepared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StretchMode {
+    /// No stretching: speed and pitch change together.
+    Repitch,
+    /// Drums and other material where transients matter.
+    Rhythmic,
+    /// Monophonic, pitched material.
+    Tonal,
+    /// Pads and noisy material without clear pitch or rhythm.
+    Texture,
+    /// General-purpose, full-spectrum stretching.
+    #[default]
+    Smooth,
+    /// Best quality for full mixes and large tempo changes, at a higher cost.
+    HighQuality,
 }
 
 /// Pins a position in the audio file to a position in the content.
@@ -392,6 +413,13 @@ impl Project {
 
     pub fn content(&self, id: ContentId) -> Option<&ClipContent> {
         self.contents.iter().find(|c| c.id == id)
+    }
+
+    /// Every clip, on the arrangement or in a launcher slot, that plays the content `id`.
+    pub fn clips_of(&self, id: ContentId) -> impl Iterator<Item = &Clip> {
+        let arranged = self.arrangement.lanes.iter().flat_map(|l| &l.clips);
+        let launched = self.launcher.columns.iter().flat_map(|c| &c.slots).filter_map(|s| s.clip.as_ref());
+        arranged.chain(launched).filter(move |c| c.content == id)
     }
 }
 
