@@ -53,10 +53,11 @@ crates/
   media    L2 finds, decodes and analyses a project's audio files (symphonia) into the engine's AudioPool
   session  L2 open project, undo history, the command registry (ADR 0002) and the attached player
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
-  dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers (ADR 0004)
+  dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
 devices/
   utility  gain, balance, width, mono, bass mono, phase, channels, DC filter; depends on dsp, device-api
+  auto-pan LFO panning and tremolo, free in Hz or synced to the song position
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
 docs/

@@ -39,9 +39,10 @@ The engine does not run them yet (see *Planned parts*).
 | `session` | One open project, its undo history, the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over a session, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
 | `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
-| `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers. Real-time safe, panic-free on any input. | nothing |
+| `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers, LFO waveforms. Real-time safe, panic-free on any input. | nothing |
 | `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
 | `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono, phase inversion, channel selection, DC filter, mute. | dsp, device-api |
+| `devices/auto-pan` | The auto-pan device: an LFO (six shapes, shaping, inversion) that pans or, with no stereo phase, does tremolo; free in hertz or synced to the song position. | dsp, device-api |
 
 ## From a file to the speakers
 

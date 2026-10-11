@@ -584,6 +584,14 @@ name = "loopwerk-device-api"
 version = "0.0.1"
 
 [[package]]
+name = "loopwerk-device-auto-pan"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-dsp",
+]
+
+[[package]]
 name = "loopwerk-device-utility"
 version = "0.0.1"
 dependencies = [

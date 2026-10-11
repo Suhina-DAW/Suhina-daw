@@ -19,6 +19,7 @@ loopwerk-media = { path = "crates/media" }
 loopwerk-dsp = { path = "crates/dsp" }
 loopwerk-device-api = { path = "crates/device-api" }
 loopwerk-device-utility = { path = "devices/utility" }
+loopwerk-device-auto-pan = { path = "devices/auto-pan" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0

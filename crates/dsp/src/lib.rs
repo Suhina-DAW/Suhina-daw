@@ -1,5 +1,5 @@
 //! Signal-processing building blocks for Loopwerk's built-in devices (ADR 0004): gain
-//! conversions, parameter smoothing, filters and crossovers.
+//! conversions, parameter smoothing, filters, crossovers and LFO waveforms.
 //!
 //! Nothing here depends on the engine, the model or a device: every block is plain state plus a
 //! per-sample or per-block `process`, so it can be tested on its own and reused by any device.
@@ -11,12 +11,13 @@ pub mod biquad;
 pub mod crossover;
 pub mod dc;
 pub mod gain;
+pub mod lfo;
 pub mod smooth;
 
 pub use biquad::{Biquad, Coefficients};
 pub use crossover::LinkwitzRiley;
 pub use dc::DcBlocker;
-pub use smooth::Smoother;
+pub use smooth::{OnePole, Smoother};
 
 /// Highest filter frequency as a fraction of the sample rate; keeps coefficients stable just
 /// below Nyquist.
