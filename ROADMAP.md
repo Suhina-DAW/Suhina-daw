@@ -91,6 +91,30 @@ the work starts):
 | Simpler, Sampler, Drum Rack | sampler, drum rack | own |
 | Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) |
 
+## Audio to MIDI
+
+Turning audio into something playable from MIDI, offline (not on the audio thread), each as a
+command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-midi.md).
+
+- **Slice to a new MIDI track.** Cut an audio clip into slices (at warp markers, transients,
+  bars or a note grid), put each slice on its own pad of a sampler or drum rack on a new MIDI
+  track, and write a MIDI clip that plays the slices back in their original rhythm, warped
+  timing kept if asked. Needs the sampler and drum rack devices; transients come from the
+  stretcher's analysis that `media` already computes. Slicing presets are our own.
+- **Convert to a new MIDI track:** three kinds of material, each with its own detector.
+  - *Melody:* one note at a time; pitch tracking (own, e.g. pYIN-style) plus note segmentation.
+  - *Harmony:* chords and polyphony; the hardest part. Candidate: a small open transcription
+    model run in pure Rust (Spotify's Basic Pitch, Apache-2.0, through `tract`), licence and
+    model weights checked first.
+  - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
+    of a drum rack.
+- **Dropping audio onto a MIDI track** asks which of the three conversions to run, and writes
+  the result where the audio was dropped.
+- **Order:** after the sampler and drum rack exist; slicing first (smallest, reuses the
+  stretcher's analysis), then drums, melody and harmony. An ADR comes before the detectors.
+- **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
+  can be compared note by note.
+
 ## Before the repository goes public
 
 - Clean-room documentation matches how the design was actually made, and `CONTRIBUTING.md`
