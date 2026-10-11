@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/*"]
+members = ["crates/*", "devices/*", "apps/*"]
 
 [workspace.package]
 version = "0.0.1"
@@ -16,6 +16,9 @@ loopwerk-als = { path = "crates/als" }
 loopwerk-session = { path = "crates/session" }
 loopwerk-automation = { path = "crates/automation" }
 loopwerk-media = { path = "crates/media" }
+loopwerk-dsp = { path = "crates/dsp" }
+loopwerk-device-api = { path = "crates/device-api" }
+loopwerk-device-utility = { path = "devices/utility" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0
