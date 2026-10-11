@@ -102,9 +102,8 @@ impl Renderer {
         let old_beat_frames = self.graph.frames_per_beat;
         let mut old = std::mem::replace(&mut self.graph, swap.graph);
         // The playhead stays on the same beat when the tempo changed.
-        if self.running && old_beat_frames != self.graph.frames_per_beat && old_beat_frames > 0.0 {
-            let beats = self.time() as f64 / old_beat_frames;
-            self.time_at_origin = (beats * self.graph.frames_per_beat).round() as u64;
+        if self.running && old_beat_frames != self.graph.frames_per_beat {
+            self.time_at_origin = rescale(self.time(), old_beat_frames, self.graph.frames_per_beat);
             self.origin = self.position;
         }
         self.graph.launcher.adopt(&mut old.launcher);
@@ -146,7 +145,14 @@ impl Renderer {
         monitor.position.store(self.position, Ordering::Relaxed);
         monitor.arrangement.store(self.time(), Ordering::Relaxed);
         monitor.stretch_underruns.store(self.stretch_underruns(), Ordering::Relaxed);
+        monitor.frames_per_beat.store(self.graph.frames_per_beat.to_bits(), Ordering::Relaxed);
     }
+}
+
+/// Arrangement frame `time` at `from` frames per beat, moved to the same beat at `to` frames per
+/// beat. The controller and the audio thread both use this, so they agree to the frame.
+fn rescale(time: u64, from: f64, to: f64) -> u64 {
+    if from > 0.0 && to > 0.0 && from != to { (time as f64 / from * to).round() as u64 } else { time }
 }
 
 impl Controller {
@@ -162,7 +168,10 @@ impl Controller {
             let ahead = (SWAP_AHEAD_SECONDS * f64::from(updater.sample_rate)) as u64;
             let position = monitor.position.load(Ordering::Relaxed);
             let arrangement = monitor.arrangement.load(Ordering::Relaxed);
-            (position + ahead, Some(arrangement + ahead))
+            // Arrangement frames are in the playing graph's tempo; the swap keeps the beat, so
+            // the new graph's voices go to the same beat in its own tempo.
+            let playing = f64::from_bits(monitor.frames_per_beat.load(Ordering::Relaxed));
+            (position + ahead, Some(rescale(arrangement + ahead, playing, graph.frames_per_beat)))
         } else {
             (0, None)
         };

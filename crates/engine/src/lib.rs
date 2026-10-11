@@ -165,6 +165,11 @@ impl Renderer {
     pub fn with_audio(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
         let graph = Graph::build(project, audio, sample_rate)?;
         graph.launcher.monitor.running.store(true, std::sync::atomic::Ordering::Relaxed);
+        graph
+            .launcher
+            .monitor
+            .frames_per_beat
+            .store(graph.frames_per_beat.to_bits(), std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
             sample_rate,
             graph,
@@ -1163,5 +1168,24 @@ mod tests {
         let mut reference = Renderer::with_audio(&edited, &pool, SR).unwrap();
         let reference = blocks(&mut reference, 50, 480, |_| {});
         assert_eq!(max_diff(&out, &reference), 0.0);
+    }
+
+    #[test]
+    fn stretched_clips_carry_on_through_a_tempo_edit() {
+        let (project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Smooth);
+        let mut slower = project.clone();
+        slower.transport.tempo_bpm = 95.0;
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut controller = renderer.controller();
+        controller.run_stretch_worker(&mut renderer).unwrap();
+        // Paced like a device, with the worker on its own thread.
+        let pace = |_| std::thread::sleep(std::time::Duration::from_millis(10));
+        let mut out = blocks(&mut renderer, 50, 480, pace);
+        controller.update(&slower).unwrap();
+        out.extend(blocks(&mut renderer, 100, 480, pace));
+        // The new graph's stretch voices were ready where the playhead went: no gap.
+        assert_eq!(renderer.stretch_underruns(), 0);
+        let at = swap_frame(50);
+        assert!(rms(&out, at, at + 4_800) > 0.9 * rms(&out, at - 4_800, at));
     }
 }

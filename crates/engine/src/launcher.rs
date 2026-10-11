@@ -104,6 +104,9 @@ pub struct LauncherMonitor {
     pub(crate) position: AtomicU64,
     pub(crate) arrangement: AtomicU64,
     pub(crate) stretch_underruns: AtomicU64,
+    /// Arrangement frames per beat of the playing graph (f64 bits), so an update can find the
+    /// playhead's beat.
+    pub(crate) frames_per_beat: AtomicU64,
 }
 
 impl LauncherMonitor {
@@ -118,6 +121,7 @@ impl LauncherMonitor {
             position: AtomicU64::new(0),
             arrangement: AtomicU64::new(0),
             stretch_underruns: AtomicU64::new(0),
+            frames_per_beat: AtomicU64::new(0),
         }
     }
 
