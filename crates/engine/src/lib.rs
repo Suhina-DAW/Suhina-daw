@@ -197,7 +197,7 @@ impl Renderer {
                                     let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
                                     let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
                                     let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
-                                    stretch_voices.push((voice, end.saturating_sub(start)));
+                                    stretch_voices.push((voice, start, end.saturating_sub(start)));
                                     stretch_events.push(StretchEvent {
                                         start,
                                         end,

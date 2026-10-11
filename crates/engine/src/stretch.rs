@@ -386,15 +386,23 @@ impl StretchVoice {
     /// Never allocates; runs the first lane's start-up (its pipeline delay, or the phase
     /// vocoder's preroll) on the calling thread.
     pub(crate) fn restart(&mut self) {
+        self.seek(0);
+    }
+
+    /// Moves the voice so that its next frame is `frames` project frames after the clip's start.
+    /// Never allocates; runs a lane's start-up on the calling thread.
+    pub(crate) fn seek(&mut self, frames: u64) {
+        // Voice frames are the stretcher's own frames; `step` of them pass per project frame.
+        let at = (frames as f64 * self.step).round() as u64;
         self.active = 0;
-        self.next_restart = 0;
+        self.next_restart = self.restarts.partition_point(|r| *r <= at);
         self.fade_left = 0;
         self.priming = false;
-        self.produced = 0;
+        self.produced = at;
         self.fifo_len = 0;
         self.fifo_read = 0;
         self.fifo_position = 0.0;
-        self.begin_lane(0, 0);
+        self.begin_lane(0, at);
         self.prime(0, 0, 0);
     }
 
@@ -699,13 +707,22 @@ mod tests {
     /// Renders a warped click clip and returns how far each click lands from where the warp
     /// markers put it, in milliseconds.
     fn click_errors(markers: &[(f64, f64)], length_beats: f64) -> Vec<f64> {
+        seek_click_errors(markers, length_beats, 0.0)
+    }
+
+    /// Like [`click_errors`], playing from `seek` seconds into the clip.
+    fn seek_click_errors(markers: &[(f64, f64)], length_beats: f64, seek: f64) -> Vec<f64> {
         let sr = 48_000;
         let data = clicks(0.5, 40.0, sr);
         let r = region(markers, StretchMode::Smooth);
         let c = clip(length_beats, 0.0, None);
         let analysis = analyze_audio(&data);
         let mut voice = StretchVoice::new(&c, &r, data, Some(&analysis), 120.0, sr).unwrap();
-        let frames = (length_beats * 0.5 * f64::from(sr)) as usize;
+        let skipped = (seek * f64::from(sr)) as usize;
+        if skipped > 0 {
+            voice.seek(skipped as u64);
+        }
+        let frames = (length_beats * 0.5 * f64::from(sr)) as usize - skipped;
         let mut out = vec![0.0; frames * 2];
         for block in out.chunks_mut(512 * 2) {
             voice.render(block);
@@ -718,7 +735,8 @@ mod tests {
         };
         onsets(&out, sr)
             .iter()
-            .map(|&t| {
+            .map(|&t| t + seek)
+            .map(|t| {
                 // The nearest click in the file to this onset.
                 let expected = (0..80)
                     .map(|k| beat_of(k as f64 * 0.5) * 0.5)
@@ -726,6 +744,24 @@ mod tests {
                 (t - expected) * 1000.0
             })
             .collect()
+    }
+
+    #[test]
+    fn a_voice_can_start_anywhere_in_its_clip() {
+        // Seek into the middle of a beat, of a rate segment, and past a loop-free segment change.
+        for seek in [3.3, 9.87, 16.01] {
+            let errors = seek_click_errors(
+                &[(0.0, 0.0), (8.0, 3.9), (16.0, 8.1), (24.0, 11.9), (32.0, 16.2), (48.0, 23.8)],
+                46.0,
+                seek,
+            );
+            assert!(errors.len() >= 10, "seek {seek}: {} clicks found", errors.len());
+            assert!(worst(&errors) < 3.0, "seek {seek}: {errors:?}");
+        }
+        // The phase vocoder too.
+        let errors = seek_click_errors(&[(0.0, 0.0), (64.0, 48.0)], 30.0, 7.4);
+        let mean = errors.iter().sum::<f64>() / errors.len() as f64;
+        assert!(errors.len() >= 10 && mean.abs() < 7.0, "{errors:?}");
     }
 
     fn worst(errors: &[f64]) -> f64 {
