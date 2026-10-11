@@ -1,3 +1,14 @@
+---
+description: Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI
+read_when: adding a command, undo, redo, command registry, params, CommandSpec
+type: decision
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/session/src/commands.rs
+  - crates/session/src/lib.rs
+---
+
 # 0002: Every action is a command
 
 - **Status:** accepted

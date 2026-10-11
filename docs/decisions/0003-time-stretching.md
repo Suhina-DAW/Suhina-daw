@@ -1,3 +1,14 @@
+---
+description: Real-time time-stretching of warped audio, stretch modes and backends, with measurements
+read_when: warp, time-stretch, stretch mode, keylock, timestretch, Rubber Band, audio crackles, CPU load
+type: decision
+status: current
+last_verified: 2026-10-11
+covers:
+  - crates/engine/src/stretch.rs
+  - crates/media/src/lib.rs
+---
+
 # 0003: Time-stretching and stretch modes
 
 - **Status:** accepted

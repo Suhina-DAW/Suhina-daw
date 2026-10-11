@@ -46,6 +46,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request is checked out as a merge commit; its first parent is the base.
+          fetch-depth: 2
+      - name: Front matter, covered paths and docs/INDEX.md
+        run: python3 scripts/docs.py check
+      # Warnings only: documents that describe code this pull request changes, left unchanged.
+      - name: Documents that describe the changed code
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/docs.py impact HEAD^1
       - name: No hidden or bidirectional Unicode characters
         run: |
           if git grep -nIP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' -- . ':!*.lock'; then
