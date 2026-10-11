@@ -21,6 +21,9 @@ pub enum CommandKind {
     /// Opens, switches or closes whole projects (the open projects, like tabs); never changes a
     /// project or its undo history. Runs on [`crate::Projects`], not on one session.
     Projects,
+    /// Scans for plug-ins or changes where scans look (ADR 0006); belongs to Loopwerk, not to
+    /// one project. Runs on [`crate::Projects`].
+    Plugins,
 }
 
 impl CommandKind {
@@ -31,6 +34,7 @@ impl CommandKind {
             Self::History => "history",
             Self::Transport => "transport",
             Self::Projects => "projects",
+            Self::Plugins => "plugins",
         }
     }
 }
@@ -62,7 +66,7 @@ pub(crate) const fn param(name: &'static str, ty: ParamType, doc: &'static str) 
     Param { name, ty, required: true, doc }
 }
 
-const fn optional(name: &'static str, ty: ParamType, doc: &'static str) -> Param {
+pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static str) -> Param {
     Param { name, ty, required: false, doc }
 }
 

@@ -731,6 +731,7 @@ dependencies = [
  "loopwerk-als",
  "loopwerk-engine",
  "loopwerk-model",
+ "loopwerk-plugins",
  "serde_json",
 ]
 

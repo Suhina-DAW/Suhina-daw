@@ -6,6 +6,7 @@
 //! thread for everything else: health, ping, state, restart. They share only a counter of
 //! blocks in a row the host has not answered.
 
+pub mod library;
 pub mod protocol;
 pub mod scan;
 

@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id
+read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands
 type: system
 status: current
 last_verified: 2026-10-11
@@ -38,13 +38,19 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 
+- **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)
+  find and list installed plug-ins; a scan loads each new or changed plug-in file in a process
+  of its own ([ADR 0006](decisions/0006-plug-in-hosting.md)). `plugins.addFolder` and
+  `plugins.removeFolder` are refused for agents, since a folder decides whose code a scan runs;
+  the user adds folders with `loopwerk-cli plugins add-folder`.
+
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `project_open` | Open a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
 | `project_inspect` | Summary, tracks (volume, pan, mute, devices) and arrangement clips as JSON; optional `project`. |
-| `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`) and parameter schema; optional `filter`. |
+| `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`) and parameter schema; optional `filter`. |
 | `command_run` | Run one command: `{"id": "track.setPan", "params": {"track": "Bass", "pan": -1}}`; optional `project`. |
 | `command_batch` | Run `steps` in order; each editing command is its own undo step; `stop_on_error` (default true); optional `project` for every step. |
 | `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |

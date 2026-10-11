@@ -130,7 +130,7 @@ fn a_clap_plugin_processes_reports_latency_and_keeps_state() {
 fn clap_files_that_are_missing_or_not_plugins_are_errors() {
     let missing = std::env::temp_dir().join("loopwerk-no-such-plugin.clap");
     let error = Plugin::start(launch(&format!("clap:{}", missing.display()))).err();
-    assert!(matches!(&error, Some(PluginError::Host(m)) if m.contains("loading")), "{error:?}");
+    assert!(matches!(&error, Some(PluginError::Host(m)) if m.contains("could not load")), "{error:?}");
 
     // Any file that is not a plug-in: this test's own source.
     let not_a_plugin = PathBuf::from(file!()).canonicalize().unwrap_or_else(|_| PathBuf::from(file!()));

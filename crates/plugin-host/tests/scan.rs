@@ -48,7 +48,7 @@ fn a_crash_or_a_hang_while_loading_is_a_failure_not_a_stall() {
     let fake = dir.join("fake.clap");
     write(&fake, "not a plug-in");
     let failed = scan_file(&host(), &fake.display().to_string(), PATIENT);
-    assert!(matches!(&failed, Scanned::Failed(why) if why.contains("loading")), "{failed:?}");
+    assert!(matches!(&failed, Scanned::Failed(why) if why.contains("could not load")), "{failed:?}");
     let missing = scan_file(Path::new("no-such-host"), "test:clap", PATIENT);
     assert!(matches!(&missing, Scanned::Failed(why) if why.contains("start")), "{missing:?}");
 }
@@ -121,4 +121,21 @@ fn a_saved_catalog_finds_plugins_by_id_or_name() {
     for garbage in ["", "{", r#"{"version":2,"entries":[]}"#, r#"{"version":1}"#] {
         assert_eq!(Catalog::from_json(garbage), Catalog::new(), "{garbage}");
     }
+}
+
+#[test]
+fn the_library_scans_its_folders_and_remembers_across_starts() {
+    use loopwerk_plugins::library::Library;
+    let dir = folder("library");
+    write(&dir.join("plugins/fake.clap"), "not a plug-in");
+    let mut library = Library::new(Some(dir.join("settings")), host());
+    assert!(library.add_folder(&dir.join("plugins")).unwrap());
+    let first = library.scan(false).unwrap();
+    assert_eq!((first.read.len(), first.failed.len()), (1, 1));
+
+    // A new start loads the saved catalog: nothing to read again, unless asked to.
+    let mut later = Library::new(Some(dir.join("settings")), host());
+    assert_eq!(later.catalog().entries().len(), 1);
+    assert_eq!(later.scan(false).unwrap().unchanged, 1);
+    assert_eq!(later.scan(true).unwrap().read.len(), 1);
 }

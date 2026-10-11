@@ -13,6 +13,7 @@ const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
        loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
+       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>)
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -21,6 +22,9 @@ commands:
   mcp       serve the Model Context Protocol on stdin/stdout for agents; files can be read only
             below --read-root and written only below --write-root (no root, no access); with
             --audio, opened projects play on the default output so agents can launch clips
+  plugins   find installed plug-ins: scan looks in the standard folders and the added ones
+            (only new and changed files, or every file with --all), list shows what was found,
+            folders shows where scans look, add-folder and remove-folder change that
 
 options:
   <project.als>      a Live Set to import
@@ -72,6 +76,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("plugins") => match plugins(args.get(1..).unwrap_or_default()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Some("mcp") => match mcp(args.get(1..).unwrap_or_default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -185,6 +196,32 @@ fn render(args: &Args) -> Result<(), String> {
 }
 
 /// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
+/// `plugins …`: runs the matching `plugins.*` command and prints its result.
+fn plugins(args: &[String]) -> Result<(), String> {
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (id, params) = match words.as_slice() {
+        ["scan"] => ("plugins.scan", serde_json::json!({})),
+        ["scan", "--all"] => ("plugins.scan", serde_json::json!({ "all": true })),
+        ["list"] => ("plugins.list", serde_json::json!({})),
+        ["folders"] => ("plugins.folders", serde_json::json!({})),
+        ["add-folder", folder] => ("plugins.addFolder", serde_json::json!({ "folder": folder })),
+        ["remove-folder", folder] => ("plugins.removeFolder", serde_json::json!({ "folder": folder })),
+        _ => {
+            return Err(format!(
+                "unknown plugins command
+
+{USAGE}"
+            ));
+        }
+    };
+    if id == "plugins.scan" {
+        eprintln!("scanning for plug-ins; each new or changed file is loaded in a process of its own");
+    }
+    let result = loopwerk_session::Projects::new().execute(id, &params).map_err(|e| e.0)?;
+    println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut read_root = None;
     let mut write_root = None;

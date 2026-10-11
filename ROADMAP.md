@@ -192,7 +192,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `clip.move`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
-  `projects.next`, `projects.previous`, `projects.close`.
+  `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
+  `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
+  `loopwerk-cli plugins …`).
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access

@@ -131,6 +131,7 @@ project directly.
 | History | Undo and redo. | moves between snapshots |
 | Transport | Sends a `LaunchCommand` to the attached `Player`; fails if no engine is playing. | none |
 | Projects | Lists, switches and closes open projects (`Projects`); only the active one keeps its `Player`. | none |
+| Plugins | Scans for installed plug-ins, lists them, and chooses the folders scans look in (`plugins.*`, on the `Library` that `Projects` holds; ADR 0006). | none |
 
 **Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
 History command changes the project, the session calls `Player::update`. The controller builds a

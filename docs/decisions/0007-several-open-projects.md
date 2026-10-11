@@ -51,6 +51,9 @@ the layer that owns sessions.
   ([ADR 0005](0005-edits-while-playing.md)) makes it so; that is a follow-up.
 - Background projects stay in memory with their undo history; decoded audio is held only by
   the active project's player.
+- `Projects` is where Loopwerk-wide state lives too: it also holds the plug-in library that the
+  `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)), shared by every open
+  project.
 
 ## Not decided yet
 

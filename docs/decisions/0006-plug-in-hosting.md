@@ -106,6 +106,8 @@ workspace forbids.
    folders the user adds, so no setting is needed to find installed plug-ins. Implemented for
    CLAP in `loopwerk_plugins::scan`, one `loopwerk-plugin-host --scan <file>` process per new or
    changed file; a file that failed keeps its reason and is not tried again until it changes.
+   The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
+   folders and the catalog are kept as JSON in Loopwerk's settings folder.
 10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,
     floating on Wayland and macOS, which have no public way to embed another process's window.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple

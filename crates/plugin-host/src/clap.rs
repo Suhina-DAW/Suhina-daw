@@ -102,7 +102,7 @@ fn entry(spec: &str) -> Result<(PluginEntry, Option<String>), String> {
     // SAFETY: loading a CLAP file runs its initialisation code, which Rust cannot check. That is
     // the job of this process: it exists so that whatever the plug-in does, it does it here and
     // not in the engine (ADR 0006). The entry keeps the library loaded while any instance lives.
-    let entry = unsafe { PluginEntry::load(path) }.map_err(|e| format!("loading {path:?}: {e}"))?;
+    let entry = unsafe { PluginEntry::load(path) }.map_err(|e| format!("could not load the plug-in file: {e}"))?;
     Ok((entry, id))
 }
 
