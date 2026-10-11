@@ -15,7 +15,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 use loopwerk_automation::AudioOutput;
 use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_engine::{AudioPool, Controller, Renderer, StretchThread};
+use loopwerk_engine::{AudioPool, Controller, Renderer};
 use loopwerk_session::{Player, Session};
 use serde_json::{Value, json};
 
@@ -29,19 +29,6 @@ const TAIL: Duration = Duration::from_millis(300);
 struct Progress {
     frames: AtomicU64,
     stream_error: AtomicBool,
-}
-
-/// A started output. Dropping it closes the device, then stops the stretch worker.
-struct Running {
-    _stream: cpal::Stream,
-    stretch: Option<StretchThread>,
-}
-
-impl Running {
-    /// Frames of stretched clips the worker did not have ready in time.
-    fn stretch_underruns(&self) -> u64 {
-        self.stretch.as_ref().map_or(0, StretchThread::underruns)
-    }
 }
 
 /// The default output device and the format it asks for.
@@ -65,13 +52,14 @@ impl Output {
     }
 
     /// Starts playing `renderer` on the device, with its stretched clips rendered ahead on a
-    /// worker thread.
-    fn start(&self, mut renderer: Renderer, progress: &Arc<Progress>) -> Result<Running, String> {
-        let stretch = renderer
-            .take_stretch_worker()
-            .map(|worker| worker.spawn())
-            .transpose()
-            .map_err(|e| format!("could not start the stretch worker: {e}"))?;
+    /// worker thread that `controller` keeps (and stops when it is dropped).
+    fn start(
+        &self,
+        mut renderer: Renderer,
+        controller: &mut Controller,
+        progress: &Arc<Progress>,
+    ) -> Result<cpal::Stream, String> {
+        controller.run_stretch_worker(&mut renderer).map_err(|e| format!("could not start the stretch worker: {e}"))?;
         let (device, config) = (&self.device, self.config);
         let stream = match self.format {
             cpal::SampleFormat::F32 => build::<f32>(device, config, renderer, progress),
@@ -83,7 +71,7 @@ impl Output {
             }
         }?;
         stream.play().map_err(|e| format!("could not start audio output {device}: {e}"))?;
-        Ok(Running { _stream: stream, stretch })
+        Ok(stream)
     }
 
     fn describe(&self) -> String {
@@ -94,14 +82,15 @@ impl Output {
 /// Plays the project's arrangement once on the default output device and returns when it ends.
 pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
     let output = Output::open()?;
-    let renderer = Renderer::with_audio(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
+    let mut renderer = Renderer::with_audio(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
     let length = renderer.length();
     if length == 0 {
         println!("{}", nothing_to_play(project));
         return Ok(());
     }
     let progress = Arc::new(Progress::default());
-    let running = output.start(renderer, &progress)?;
+    let mut controller = renderer.controller();
+    let stream = output.start(renderer, &mut controller, &progress)?;
 
     let seconds = length as f64 / f64::from(output.config.sample_rate);
     println!("playing {seconds:.2} s on {}; Ctrl+C stops", output.describe());
@@ -118,8 +107,9 @@ pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(20));
     }
     std::thread::sleep(TAIL);
-    let underruns = running.stretch_underruns();
-    drop(running);
+    let underruns = controller.stretch_underruns();
+    drop(stream);
+    drop(controller);
     if underruns > 0 {
         eprintln!("warning: {underruns} frames of stretched audio were not ready in time and played as silence");
     }
@@ -138,6 +128,11 @@ commands (scenes count from 1; a track is its name or id):
   back                  tracks that launched clips play their arrangement again
   state                 what is playing and queued
   grid                  the scenes and each track's clips
+edits (heard while playing):
+  tempo <bpm>           set the project tempo
+  vol <track> <db>      set a track's volume, e.g. vol Bass -6
+  mute / unmute <track> mute or unmute a track
+  undo / redo           undo or redo the last edit
   <command.id> [json]   any command, e.g. track.setMute {\"track\": \"Bass\", \"mute\": true}
   help, quit";
 
@@ -147,7 +142,7 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let (controller, output, progress, running) = start_stopped(&project, audio)?;
+    let (controller, output, progress, stream) = start_stopped(&project, audio)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -177,18 +172,21 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
         eprintln!("warning: {e}");
     }
     std::thread::sleep(TAIL);
-    drop(running);
+    drop(stream);
     Ok(())
 }
 
 /// Opens the default output and plays `project` on it with the transport stopped.
-fn start_stopped(project: &Project, audio: &AudioPool) -> Result<(Controller, Output, Arc<Progress>, Running), String> {
+fn start_stopped(
+    project: &Project,
+    audio: &AudioPool,
+) -> Result<(Controller, Output, Arc<Progress>, cpal::Stream), String> {
     let output = Output::open()?;
     let mut renderer = Renderer::stopped(project, audio, output.config.sample_rate).map_err(|e| e.to_string())?;
-    let controller = renderer.controller();
+    let mut controller = renderer.controller();
     let progress = Arc::new(Progress::default());
-    let running = output.start(renderer, &progress)?;
-    Ok((controller, output, progress, running))
+    let stream = output.start(renderer, &mut controller, &progress)?;
+    Ok((controller, output, progress, stream))
 }
 
 /// Plays projects opened over MCP on the default output device. Each one gets a thread that
@@ -203,12 +201,12 @@ impl AudioOutput for DeviceOutput {
         std::thread::Builder::new()
             .name("loopwerk-audio".into())
             .spawn(move || match start_stopped(&project, &audio) {
-                Ok((controller, output, _progress, running)) => {
+                Ok((controller, output, _progress, stream)) => {
                     if ready.send(Ok((controller, output.describe()))).is_ok() {
                         // Returns once the player, which holds `close`, is dropped.
                         let _closed = closed.recv();
                     }
-                    drop(running);
+                    drop(stream);
                 }
                 Err(e) => {
                     let _unheard = ready.send(Err(e));
@@ -260,6 +258,22 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["quant", value @ ..] if !value.is_empty() => {
             command("launcher.setQuantization", json!({ "value": value.join(" ") }))
         }
+        ["tempo", bpm] => {
+            let bpm: f64 = bpm.parse().map_err(|_| format!("{bpm:?} is not a tempo"))?;
+            command("transport.setTempo", json!({ "bpm": bpm }))
+        }
+        ["vol", track @ .., db] if !track.is_empty() => {
+            let db: f64 = db.parse().map_err(|_| format!("{db:?} is not a level in dB"))?;
+            command("track.setVolume", json!({ "track": track_value(track), "db": db }))
+        }
+        ["mute", track @ ..] if !track.is_empty() => {
+            command("track.setMute", json!({ "track": track_value(track), "mute": true }))
+        }
+        ["unmute", track @ ..] if !track.is_empty() => {
+            command("track.setMute", json!({ "track": track_value(track), "mute": false }))
+        }
+        ["undo"] => command("edit.undo", json!({})),
+        ["redo"] => command("edit.redo", json!({})),
         [id, ..] if id.contains('.') => {
             let rest = line.trim_start().get(id.len()..).unwrap_or_default().trim();
             let params = if rest.is_empty() {
@@ -439,6 +453,12 @@ mod tests {
         assert_eq!(parse_line("stop"), cmd("transport.stop", json!({})));
         assert_eq!(parse_line("stop Drums"), cmd("track.stop", json!({ "track": "Drums" })));
         assert_eq!(parse_line("quant 2 bars"), cmd("launcher.setQuantization", json!({ "value": "2 bars" })));
+        assert_eq!(parse_line("tempo 100"), cmd("transport.setTempo", json!({ "bpm": 100.0 })));
+        assert_eq!(parse_line("vol Lead Vox -6"), cmd("track.setVolume", json!({ "track": "Lead Vox", "db": -6.0 })));
+        assert_eq!(parse_line("mute 2"), cmd("track.setMute", json!({ "track": 2, "mute": true })));
+        assert_eq!(parse_line("unmute Bass"), cmd("track.setMute", json!({ "track": "Bass", "mute": false })));
+        assert_eq!(parse_line("undo"), cmd("edit.undo", json!({})));
+        assert!(parse_line("tempo fast").is_err());
         assert_eq!(
             parse_line("track.setMute {\"track\": 1, \"mute\": true}"),
             cmd("track.setMute", json!({ "track": 1, "mute": true }))

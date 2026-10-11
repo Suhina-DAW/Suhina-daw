@@ -23,6 +23,7 @@ are changing (*Code and its documents*).
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, keylock, timestretch, Rubber Band, audio crackles, CPU load | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
 | [0004: Built-in devices](decisions/0004-built-in-devices.md) | decision | current | device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance | The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate |
+| [0005: Edits while playing](decisions/0005-edits-while-playing.md) | decision | current | edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26 | How edits reach an engine that is already playing — a new graph built off the audio thread and swapped in at an exact frame |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
@@ -48,13 +49,15 @@ Change this code, and check these documents.
 | `crates/automation/src/workspace.rs` | [MCP server](mcp.md) |
 | `crates/device-api/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/dsp/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/launcher.rs` | [Clip launching](spec/clip-launching.md) |
-| `crates/engine/src/lib.rs` | [Architecture](architecture.md) |
+| `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
+| `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
-| `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md) |
+| `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |

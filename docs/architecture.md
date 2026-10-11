@@ -95,9 +95,9 @@ The engine does not run them yet (see *Planned parts*).
 
 | Thread | Runs | May allocate, lock, do I/O |
 |---|---|---|
-| Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session`, runs commands, imports and loads audio, builds the `Renderer`. | yes |
+| Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session`, runs commands, imports and loads audio, builds the `Renderer` and, after each edit, a new graph for it (ADR 0005). | yes |
 | Audio | The device callback: `Renderer::process`, sample conversion, setting atomics. | **no** (AGENTS.md rule 3) |
-| Stretch worker | `StretchWorker`: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). | allocates nothing after the renderer is built; never locks |
+| Stretch worker | One thread, owned by the `Controller`, running a `StretchWorker` per graph: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). A new graph's worker joins it, an old one leaves once its graph is freed. | only when a graph's worker joins; never locks |
 | Audio owner | Over MCP, one thread per open project holds the output stream and closes it when the session drops its `Player`. | yes, but does nothing while playing |
 | Decode workers | Scoped threads in `media` while a project loads. | yes |
 
@@ -105,9 +105,12 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
 
 - **To the audio thread:** a `Controller` holds the producer end of a lock-free queue (`rtrb`)
   of `LaunchCommand`s (play, stop, launch clip or scene, stop column, quantisation, back to
-  arrangement). `process` drains the queue at the start of each block.
+  arrangement). `process` drains the queue at the start of each block. A second queue carries
+  new graphs after edits, and a third takes the old graphs back to be freed on the main thread
+  (ADR 0005).
 - **From the audio thread:** a `LauncherMonitor` of atomics (running, beat, tempo, what each
-  column plays and has queued), read by the `launcher.state` command.
+  column plays and has queued, the playhead, stretch underruns), read by the `launcher.state`
+  command and by `Controller::update` to pick the frame a new graph takes over at.
 
 ## Commands
 
@@ -122,11 +125,12 @@ Every user-visible action is a command in `session` with an id, typed parameters
 | History | Undo and redo. | moves between snapshots |
 | Transport | Sends a `LaunchCommand` to the attached `Player`; fails if no engine is playing. | none |
 
-**Current limit:** an edit changes the session's project, but a renderer that is already playing
-keeps the project it was built from. Edits are heard the next time a renderer is built (a new
-`play`, `project_render`). Making edits reach a playing engine is the next step for the engine:
-build a new renderer, or the changed part of it, off the audio thread and swap it in atomically,
-as rule 3 describes. **(planned)**
+**Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
+History command changes the project, the session calls `Player::update`. The controller builds a
+new `Graph` (everything the renderer derives from the project) on the main thread and the audio
+thread swaps it in at an exact frame about 0.15 s ahead, carrying over the playhead (on the same
+beat when the tempo changed), the transport, sounding notes and the launcher's playing and
+queued clips.
 
 ## Where new code goes
 
@@ -143,7 +147,6 @@ as rule 3 describes. **(planned)**
 
 ## Planned parts
 
-- **Edits while playing:** see *Current limit* above.
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;
   launched clips' stretch voices still run on the audio thread.
 - **Native project format:** so edits can be saved; written and read by its own crate.
