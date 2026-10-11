@@ -231,6 +231,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn broken_input_does_not_stick() {
+        let mut filter = Biquad::new(Coefficients::lowpass(SR, 250.0, 1.3));
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e30, -1e300] {
+            filter.process(x);
+        }
+        let mut out = 0.0;
+        for n in 0..100 {
+            out = filter.process((n as f64 * 0.05).sin());
+        }
+        assert!(out.is_finite() && out.abs() < 2.0, "{out}");
+    }
+
+    #[test]
     fn decaying_state_flushes_to_zero() {
         let mut filter = Biquad::new(Coefficients::lowpass(SR, 100.0, BUTTERWORTH_Q));
         filter.process(1.0);

@@ -58,6 +58,7 @@ crates/
 devices/
   utility  gain, balance, width, mono, bass mono, phase, channels, DC filter; depends on dsp, device-api
   auto-pan LFO panning and tremolo, free in Hz or synced to the song position
+  dj-eq    three bands with kills, Linkwitz-Riley crossovers at 24 or 48 dB/octave
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
 docs/

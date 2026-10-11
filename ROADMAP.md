@@ -28,7 +28,7 @@ the first device.
   command and can be automated, from the UI, CLI and MCP alike. Because devices do not depend on
   the engine, they can later be split into their own repository or built as CLAP plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
-- **Status:** `dsp`, `device-api`, the utility and the auto-pan exist and are tested on their own; the
+- **Status:** `dsp`, `device-api`, the utility, the auto-pan and the DJ EQ exist and are tested on their own; the
   engine does not run devices yet (per-track chains come after the renderer swap, LOOP-26).
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the

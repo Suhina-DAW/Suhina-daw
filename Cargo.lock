@@ -592,6 +592,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopwerk-device-dj-eq"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-dsp",
+]
+
+[[package]]
 name = "loopwerk-device-utility"
 version = "0.0.1"
 dependencies = [

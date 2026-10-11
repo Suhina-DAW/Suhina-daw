@@ -15,7 +15,7 @@ pub mod lfo;
 pub mod smooth;
 
 pub use biquad::{Biquad, Coefficients};
-pub use crossover::LinkwitzRiley;
+pub use crossover::{LinkwitzRiley, Slope};
 pub use dc::DcBlocker;
 pub use smooth::{OnePole, Smoother};
 
@@ -39,9 +39,12 @@ pub(crate) fn usable_sample_rate(sample_rate: f64) -> f64 {
 /// (which are slow on most CPUs).
 pub(crate) const DENORMAL_FLOOR: f64 = 1e-30;
 
-/// Filter state made safe to keep: tiny values become zero, and so does NaN, so one bad input
-/// sample cannot leave a filter producing NaN forever.
+/// Filter state above this (+400 dB) can only come from broken input; it is cleared.
+pub(crate) const STATE_CEILING: f64 = 1e20;
+
+/// Filter state made safe to keep: tiny values become zero, and so do NaN, infinities and
+/// absurdly large values, so bad input cannot leave a filter producing garbage forever.
 #[inline]
 pub(crate) fn flush(value: f64) -> f64 {
-    if value.abs() >= DENORMAL_FLOOR { value } else { 0.0 }
+    if (DENORMAL_FLOOR..STATE_CEILING).contains(&value.abs()) { value } else { 0.0 }
 }
