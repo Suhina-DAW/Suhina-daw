@@ -3,7 +3,8 @@
 Loopwerk is an open-source, native, clip-launching DAW written in **Rust only**, comparable in
 workflow to Ableton Live. The product name is always written **Loopwerk** in user-facing text;
 machine names stay lowercase (`loopwerk-*` crates, binaries, file names). Read this file first,
-then [`CONTRIBUTING.md`](CONTRIBUTING.md).
+then [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/architecture.md`](docs/architecture.md)
+(layers, data flow, threads, and where new code goes).
 
 ## 1. Golden rules
 
@@ -55,6 +56,7 @@ crates/
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
 docs/
+  architecture.md  how the crates, threads and commands fit together
   decisions/  architecture decision records; read 0001 before changing the model
   spec/       clean-room specs written from observation (formats, behaviour)
 scripts/   research helpers (e.g. extracting and diffing .als files)
@@ -71,3 +73,18 @@ cargo test --workspace
 ```
 
 Keep the tree building at every step.
+
+**Documentation is part of the change.** A pull request that changes how something works updates,
+in the same pull request, every document that describes it, so the docs never describe code
+that no longer exists:
+
+| If you change | Update |
+|---|---|
+| A crate's role, a dependency between crates, threads, how commands or data flow | [`docs/architecture.md`](docs/architecture.md), and the crate map above |
+| A decision recorded in an ADR | that ADR (status, consequences), or a new ADR that supersedes it |
+| What is read from a format, or behaviour described in a spec | the spec in `docs/spec/` |
+| Commands or MCP tools | [`docs/mcp.md`](docs/mcp.md) and the command list in [`ROADMAP.md`](ROADMAP.md) |
+| What works for users | [`ROADMAP.md`](ROADMAP.md) › What works now, and [`README.md`](README.md) if it shows it |
+| A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
+
+A limit or a planned part that a change resolves is removed from the docs in the same change.
