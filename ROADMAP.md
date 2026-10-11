@@ -7,9 +7,9 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M0 | **Foundation:** workspace, GPL-3.0-or-later, clean-room rules, DAW-neutral model | done |
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `loopwerk-cli play` | done (verified on Windows) |
-| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress |
-| M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | in progress |
+| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP and edits heard while playing work; more commands and a native project format to come |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
+| M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 after | |
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
@@ -224,7 +224,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.
 
-### M5 Audio (in progress)
+### M5 Audio (done)
 - Audio files (WAV, AIFF, FLAC, MP3, Ogg Vorbis) are decoded in parallel when a set opens.
 - Audio clips play with clip gain, transpose, loops and fades; on warped clips transpose changes
   the pitch only.
@@ -234,6 +234,6 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   in 0.4 s. Transients stay within 2 ms of the warp markers, so stretched drum loops do not flam
   against unstretched ones.
 - Arrangement clips are stretched 0.5 s ahead on a worker thread; the audio thread only copies
-  their frames (2 % of one core on the same set, worst block 1–8 ms of its 10.7 ms).
-- Still to do: launched clips stretched ahead too; formant shifting for transposed vocals;
-  Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
+  their frames (3 % of one core on the same set, 99 % of blocks within 1.3 ms of their 10.7 ms).
+- Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
+  vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
