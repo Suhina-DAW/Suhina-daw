@@ -16,10 +16,12 @@ use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComRef, ComWrapper};
 
 use crate::run_loop::Timers;
-use crate::window::{self, Size, Window};
+use crate::window::{self, Size, Window, WindowId};
 
 /// The frame the view asks to be resized through, and on Linux its run loop.
 struct Frame {
+    /// The window the view is in.
+    window: WindowId,
     handlers: RefCell<Vec<(ComPtr<IEventHandler>, i32)>>,
     timers: RefCell<Timers<ComPtr<ITimerHandler>>>,
 }
@@ -94,7 +96,7 @@ impl IPlugFrameTrait for Frame {
         let (Some(view), Some(rect)) = (unsafe { ComRef::from_raw(view) }, unsafe { size.as_mut() }) else {
             return kInvalidArgument;
         };
-        window::resize(size_of(rect));
+        window::resize(self.window, size_of(rect));
         // SAFETY: a live view, told its new size as the SDK asks after a resize.
         unsafe { view.onSize(rect) };
         kResultOk
@@ -136,7 +138,11 @@ impl Editor {
         // SAFETY: a live view.
         let resizable = unsafe { view.canResize() } == kResultTrue;
         let window = Window::open(title, size, resizable)?;
-        let frame = ComWrapper::new(Frame { handlers: RefCell::new(Vec::new()), timers: RefCell::new(Timers::new()) });
+        let frame = ComWrapper::new(Frame {
+            window: window.id(),
+            handlers: RefCell::new(Vec::new()),
+            timers: RefCell::new(Timers::new()),
+        });
         let frame_pointer = frame.to_com_ptr::<IPlugFrame>().ok_or("frame")?;
         // SAFETY: a live view and a frame that outlives it (it is dropped after `removed`).
         let _ = unsafe { view.setFrame(frame_pointer.as_ptr()) };
@@ -158,7 +164,7 @@ impl Editor {
     pub(crate) fn tick(&mut self) -> bool {
         self.frame.run();
         if self.resizable {
-            let now = window::client_size();
+            let now = window::client_size(self.window.id());
             if now != self.size && now.width > 0 && now.height > 0 {
                 let mut rect = ViewRect { left: 0, top: 0, right: now.width as i32, bottom: now.height as i32 };
                 // SAFETY: a live view, asked whether it takes the size and then given it.
@@ -168,7 +174,7 @@ impl Editor {
                 self.size = now;
             }
         }
-        window::take_close_request()
+        window::take_close_request(self.window.id())
     }
 
     /// Closes the editor: the view lets go of the window, then the window closes.

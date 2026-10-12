@@ -1,6 +1,7 @@
-//! The window a plug-in's editor lives in: a plain top-level window on the host's main thread,
-//! which the plug-in's own view is attached to. One editor is open per host process at most,
-//! so the window's state (asked to close, its size) is kept in statics.
+//! The windows plug-ins' editors live in: plain top-level windows on the host's main thread,
+//! which the plug-ins' own views are attached to. Several may be open at once, one per
+//! instance whose editor is open; what happened to each (asked to close, its size) is kept by
+//! its id in a list on the main thread.
 //!
 //! Windows (Win32) and Linux (X11, through `x11rb`); elsewhere opening one is an error for now
 //! (ADR 0006).
@@ -12,11 +13,16 @@ pub(crate) struct Size {
     pub height: u32,
 }
 
+/// Names one open window, for the code that has no hold of the [`Window`] itself (a plug-in's
+/// frame asking for a new size).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WindowId(usize);
+
 #[cfg(windows)]
 mod imp {
+    use std::cell::RefCell;
     use std::ffi::c_void;
     use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering};
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -27,16 +33,33 @@ mod imp {
         WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
     };
 
-    use super::Size;
+    use super::{Size, WindowId};
 
-    /// The user asked the window to close.
-    static CLOSE_REQUESTED: AtomicBool = AtomicBool::new(false);
-    /// The window's inside size as the system last reported it, width in the high half.
-    static CLIENT_SIZE: AtomicU64 = AtomicU64::new(0);
-    /// The open window's style, for turning an inside size into a window size.
-    static STYLE: AtomicU32 = AtomicU32::new(0);
-    /// The open window, as a number (0 for none).
-    static OPEN: AtomicIsize = AtomicIsize::new(0);
+    /// What happened to one open window.
+    struct State {
+        id: WindowId,
+        /// The user asked the window to close.
+        close_requested: bool,
+        /// The window's inside size as the system last reported it.
+        size: Size,
+        /// The window's style, for turning an inside size into a window size.
+        style: u32,
+    }
+
+    thread_local! {
+        // The editors' windows live on the host's main thread, like the plug-ins' views.
+        static OPEN: RefCell<Vec<State>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Runs `f` on the state of window `id`, if it is open. The window procedure may be called
+    /// from inside a system call made here; such a nested call finds the list busy and does
+    /// nothing rather than borrowing it twice.
+    fn with_state<R>(id: WindowId, f: impl FnOnce(&mut State) -> R) -> Option<R> {
+        OPEN.with(|open| {
+            let mut open = open.try_borrow_mut().ok()?;
+            open.iter_mut().find(|s| s.id == id).map(f)
+        })
+    }
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -45,15 +68,16 @@ mod imp {
     const CLASS: &str = "LoopwerkPluginEditor";
 
     unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        let id = WindowId(hwnd as usize);
         match message {
             WM_CLOSE => {
                 // The host closes it, after the plug-in has let go of it.
-                CLOSE_REQUESTED.store(true, Ordering::Release);
+                with_state(id, |s| s.close_requested = true);
                 0
             }
             WM_SIZE => {
-                let (width, height) = ((lparam & 0xFFFF) as u64, ((lparam >> 16) & 0xFFFF) as u64);
-                CLIENT_SIZE.store(width << 32 | height, Ordering::Release);
+                let (width, height) = ((lparam & 0xFFFF) as u32, ((lparam >> 16) & 0xFFFF) as u32);
+                with_state(id, |s| s.size = Size { width, height });
                 0
             }
             // SAFETY: the system's default handling of a message for this window.
@@ -104,9 +128,6 @@ mod imp {
         /// Opens a window `title` with an inside of `size`; the user may resize it when
         /// `resizable`.
         pub(crate) fn open(title: &str, size: Size, resizable: bool) -> Result<Self, String> {
-            if OPEN.load(Ordering::Acquire) != 0 {
-                return Err("an editor is already open".into());
-            }
             if !register() {
                 return Err("could not register the editor's window class".into());
             }
@@ -139,56 +160,75 @@ mod imp {
             if hwnd.is_null() {
                 return Err("could not open the editor's window".into());
             }
-            CLOSE_REQUESTED.store(false, Ordering::Release);
-            CLIENT_SIZE.store(u64::from(size.width) << 32 | u64::from(size.height), Ordering::Release);
-            STYLE.store(style, Ordering::Release);
-            OPEN.store(hwnd as isize, Ordering::Release);
+            let state = State { id: WindowId(hwnd as usize), close_requested: false, size, style };
+            let kept = OPEN.with(|open| open.try_borrow_mut().map(|mut open| open.push(state)).is_ok());
+            let window = Self { hwnd };
+            if !kept {
+                return Err("could not keep the editor's window".into());
+            }
             // SAFETY: the window just made.
             unsafe { ShowWindow(hwnd, SW_SHOW) };
-            Ok(Self { hwnd })
+            Ok(window)
         }
 
         /// The native handle, for the plug-in to attach its view to.
         pub(crate) fn handle(&self) -> *mut c_void {
             self.hwnd
         }
+
+        pub(crate) fn id(&self) -> WindowId {
+            WindowId(self.hwnd as usize)
+        }
     }
 
     impl Drop for Window {
         fn drop(&mut self) {
-            OPEN.store(0, Ordering::Release);
+            let id = self.id();
+            OPEN.with(|open| {
+                if let Ok(mut open) = open.try_borrow_mut() {
+                    open.retain(|s| s.id != id);
+                }
+            });
             // SAFETY: the window this made, destroyed once, on the thread that made it.
             unsafe { DestroyWindow(self.hwnd) };
         }
     }
 
-    /// Resizes the open window so its inside is `size` (a plug-in asked for it).
-    pub(crate) fn resize(size: Size) {
-        let hwnd = OPEN.load(Ordering::Acquire) as HWND;
-        if hwnd.is_null() {
+    /// Resizes window `id` so its inside is `size` (a plug-in asked for it).
+    pub(crate) fn resize(id: WindowId, size: Size) {
+        let Some(style) = with_state(id, |s| {
+            s.size = size;
+            s.style
+        }) else {
             return;
-        }
-        let (width, height) = outer(size, STYLE.load(Ordering::Acquire));
-        CLIENT_SIZE.store(u64::from(size.width) << 32 | u64::from(size.height), Ordering::Release);
-        // SAFETY: the open window; only its size changes.
+        };
+        let (width, height) = outer(size, style);
+        // SAFETY: an open window (it is in the list); only its size changes.
         unsafe {
-            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
+            SetWindowPos(
+                id.0 as HWND,
+                std::ptr::null_mut(),
+                0,
+                0,
+                width,
+                height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
         };
     }
 
-    /// Whether the user asked the window to close since the last call.
-    pub(crate) fn take_close_request() -> bool {
-        CLOSE_REQUESTED.swap(false, Ordering::AcqRel)
+    /// Whether the user asked window `id` to close since the last call.
+    pub(crate) fn take_close_request(id: WindowId) -> bool {
+        with_state(id, |s| std::mem::take(&mut s.close_requested)).unwrap_or(false)
     }
 
-    /// The window's inside size as the system last reported it.
-    pub(crate) fn client_size() -> Size {
-        let both = CLIENT_SIZE.load(Ordering::Acquire);
-        Size { width: (both >> 32) as u32, height: both as u32 }
+    /// Window `id`'s inside size as the system last reported it.
+    pub(crate) fn client_size(id: WindowId) -> Size {
+        with_state(id, |s| s.size).unwrap_or(Size { width: 0, height: 0 })
     }
 
-    /// Handles the window messages waiting for this thread's windows (the editor's and the
-    /// plug-in's own). Called from the host's main loop.
+    /// Handles the window messages waiting for this thread's windows (the editors' and the
+    /// plug-ins' own). Called from the host's main loop.
     pub(crate) fn pump() {
         // SAFETY: a zeroed message is a valid value to be filled.
         let mut message: MSG = unsafe { std::mem::zeroed() };
@@ -215,7 +255,7 @@ mod imp {
     use x11rb::rust_connection::RustConnection;
     use x11rb::wrapper::ConnectionExt as _;
 
-    use super::Size;
+    use super::{Size, WindowId};
 
     x11rb::atom_manager! {
         Atoms: AtomsCookie {
@@ -226,7 +266,7 @@ mod imp {
         }
     }
 
-    /// The open window: the connection to the X server, the window and what happened to it.
+    /// An open window: its own connection to the X server, the window and what happened to it.
     struct Open {
         connection: RustConnection,
         window: u32,
@@ -236,8 +276,16 @@ mod imp {
     }
 
     thread_local! {
-        // The editor's window lives on the host's main thread, like the plug-in's view.
-        static OPEN: RefCell<Option<Open>> = const { RefCell::new(None) };
+        // The editors' windows live on the host's main thread, like the plug-ins' views.
+        static OPEN: RefCell<Vec<Open>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Runs `f` on open window `id`, if it is open (and the list is not busy).
+    fn with_open<R>(id: WindowId, f: impl FnOnce(&mut Open) -> R) -> Option<R> {
+        OPEN.with(|open| {
+            let mut open = open.try_borrow_mut().ok()?;
+            open.iter_mut().find(|o| o.window as usize == id.0).map(f)
+        })
     }
 
     fn failed(what: &str) -> impl Fn(String) -> String + '_ {
@@ -253,9 +301,6 @@ mod imp {
         /// user may resize it when `resizable` (otherwise its smallest and largest size are
         /// that size).
         pub(crate) fn open(title: &str, size: Size, resizable: bool) -> Result<Self, String> {
-            if OPEN.with_borrow(Option::is_some) {
-                return Err("an editor is already open".into());
-            }
             let connect = failed("open");
             let (connection, screen) = x11rb::connect(None).map_err(|e| connect(e.to_string()))?;
             let root = connection.setup().roots.get(screen).ok_or("no X screen")?;
@@ -332,7 +377,19 @@ mod imp {
                 Ok(())
             };
             make()?;
-            OPEN.set(Some(Open { connection, window, atoms, close_requested: false, size }));
+            let fresh = Open { connection, window, atoms, close_requested: false, size };
+            let kept = OPEN.with(|open| match open.try_borrow_mut() {
+                Ok(mut open) => {
+                    open.push(fresh);
+                    None
+                }
+                Err(_) => Some(fresh),
+            });
+            if let Some(lost) = kept {
+                let _ = lost.connection.destroy_window(lost.window);
+                let _ = lost.connection.flush();
+                return Err("could not keep the editor's window".into());
+            }
             Ok(Self { window })
         }
 
@@ -340,21 +397,29 @@ mod imp {
         pub(crate) fn handle(&self) -> *mut c_void {
             self.window as usize as *mut c_void
         }
+
+        pub(crate) fn id(&self) -> WindowId {
+            WindowId(self.window as usize)
+        }
     }
 
     impl Drop for Window {
         fn drop(&mut self) {
-            if let Some(open) = OPEN.take() {
+            let closed = OPEN.with(|open| {
+                let mut open = open.try_borrow_mut().ok()?;
+                let at = open.iter().position(|o| o.window == self.window)?;
+                Some(open.swap_remove(at))
+            });
+            if let Some(open) = closed {
                 let _ = open.connection.destroy_window(open.window);
                 let _ = open.connection.flush();
             }
         }
     }
 
-    /// Resizes the open window so its inside is `size` (a plug-in asked for it).
-    pub(crate) fn resize(size: Size) {
-        OPEN.with_borrow_mut(|open| {
-            let Some(open) = open else { return };
+    /// Resizes window `id` so its inside is `size` (a plug-in asked for it).
+    pub(crate) fn resize(id: WindowId, size: Size) {
+        with_open(id, |open| {
             let aux = ConfigureWindowAux::new().width(size.width).height(size.height);
             let _ = open.connection.configure_window(open.window, &aux);
             let _ = open.connection.flush();
@@ -362,33 +427,36 @@ mod imp {
         });
     }
 
-    /// Whether the user asked the window to close since the last call.
-    pub(crate) fn take_close_request() -> bool {
-        OPEN.with_borrow_mut(|open| open.as_mut().is_some_and(|o| std::mem::take(&mut o.close_requested)))
+    /// Whether the user asked window `id` to close since the last call.
+    pub(crate) fn take_close_request(id: WindowId) -> bool {
+        with_open(id, |open| std::mem::take(&mut open.close_requested)).unwrap_or(false)
     }
 
-    /// The window's inside size as the X server last reported it.
-    pub(crate) fn client_size() -> Size {
-        OPEN.with_borrow(|open| open.as_ref().map_or(Size { width: 0, height: 0 }, |o| o.size))
+    /// Window `id`'s inside size as the X server last reported it.
+    pub(crate) fn client_size(id: WindowId) -> Size {
+        with_open(id, |open| open.size).unwrap_or(Size { width: 0, height: 0 })
     }
 
-    /// Takes in the events waiting for the window: a close request, a new size. (The plug-in's
-    /// own window is on its own connection and served through its run loop.)
+    /// Takes in the events waiting for every open window: a close request, a new size. (The
+    /// plug-ins' own windows are on their own connections and served through their run loops.)
     pub(crate) fn pump() {
-        OPEN.with_borrow_mut(|open| {
-            let Some(open) = open else { return };
-            while let Ok(Some(event)) = open.connection.poll_for_event() {
-                match event {
-                    Event::ClientMessage(message) => {
-                        let [first, ..] = message.data.as_data32();
-                        if message.window == open.window && first == open.atoms.WM_DELETE_WINDOW {
-                            open.close_requested = true;
+        OPEN.with(|open| {
+            let Ok(mut open) = open.try_borrow_mut() else { return };
+            for open in open.iter_mut() {
+                while let Ok(Some(event)) = open.connection.poll_for_event() {
+                    match event {
+                        Event::ClientMessage(message) => {
+                            let [first, ..] = message.data.as_data32();
+                            if message.window == open.window && first == open.atoms.WM_DELETE_WINDOW {
+                                open.close_requested = true;
+                            }
                         }
+                        Event::ConfigureNotify(configured) if configured.window == open.window => {
+                            open.size =
+                                Size { width: u32::from(configured.width), height: u32::from(configured.height) };
+                        }
+                        _ => {}
                     }
-                    Event::ConfigureNotify(configured) if configured.window == open.window => {
-                        open.size = Size { width: u32::from(configured.width), height: u32::from(configured.height) };
-                    }
-                    _ => {}
                 }
             }
         });
@@ -399,7 +467,7 @@ mod imp {
 mod imp {
     use std::ffi::c_void;
 
-    use super::Size;
+    use super::{Size, WindowId};
 
     pub(crate) struct Window;
 
@@ -411,6 +479,10 @@ mod imp {
         pub(crate) fn handle(&self) -> *mut c_void {
             std::ptr::null_mut()
         }
+
+        pub(crate) fn id(&self) -> WindowId {
+            WindowId(0)
+        }
     }
 
     impl Drop for Window {
@@ -418,13 +490,13 @@ mod imp {
         fn drop(&mut self) {}
     }
 
-    pub(crate) fn resize(_size: Size) {}
+    pub(crate) fn resize(_id: WindowId, _size: Size) {}
 
-    pub(crate) fn take_close_request() -> bool {
+    pub(crate) fn take_close_request(_id: WindowId) -> bool {
         false
     }
 
-    pub(crate) fn client_size() -> Size {
+    pub(crate) fn client_size(_id: WindowId) -> Size {
         Size { width: 0, height: 0 }
     }
 
