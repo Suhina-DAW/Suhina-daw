@@ -12,6 +12,11 @@ Apache-2.0, OFL, CC0, CC BY) and keep their license file next to them.
 |---|---|---|---|---|
 | `crates/ui/fonts/encode-sans/EncodeSansSemiExpanded-Regular.ttf` | Encode Sans Semi Expanded Regular (the UI typeface) | The Encode Project Authors (Pablo Impallari, Andres Torresi, Jacques Le Bailly) | [google/fonts](https://github.com/google/fonts/tree/main/ofl/encodesanssemiexpanded) | OFL-1.1 (`crates/ui/fonts/encode-sans/OFL.txt`) |
 | `crates/ui/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf` | IBM Plex Mono Regular (numbers, times, positions) | IBM Corp. | [google/fonts](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) | OFL-1.1 (`crates/ui/fonts/ibm-plex-mono/OFL.txt`) |
+| `crates/ui/themes/dracula.json` | Dracula colour palette, mapped onto Loopwerk's tokens | Dracula Theme | [dracula/dracula-theme](https://github.com/dracula/dracula-theme) | MIT (`crates/ui/themes/licenses/dracula.txt`) |
+| `crates/ui/themes/nord.json` | Nord colour palette, mapped onto Loopwerk's tokens | Sven Greb | [nordtheme/nord](https://github.com/nordtheme/nord) | MIT (`crates/ui/themes/licenses/nord.txt`) |
+| `crates/ui/themes/catppuccin-mocha.json`, `catppuccin-latte.json` | Catppuccin Mocha and Latte colour palettes, mapped onto Loopwerk's tokens | Catppuccin | [catppuccin/palette](https://github.com/catppuccin/palette) | MIT (`crates/ui/themes/licenses/catppuccin.txt`) |
+| `crates/ui/themes/solarized-dark.json` | Solarized colour palette (dark), mapped onto Loopwerk's tokens | Ethan Schoonover | [altercation/solarized](https://github.com/altercation/solarized) | MIT (`crates/ui/themes/licenses/solarized.txt`) |
+| `crates/ui/themes/editor-dark.json`, `loopwerk-light.json`, `high-contrast.json` | Loopwerk's own themes | Loopwerk contributors | Original work | GPL-3.0-or-later |
 
 ## Documentation
 

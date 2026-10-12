@@ -15,6 +15,7 @@ use loopwerk_session::{ProjectId, Session};
 use loopwerk_ui::keymap::Keymap;
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
+use loopwerk_ui::themes::FileAction;
 use loopwerk_ui::{App, OpenAs, Status};
 
 const USAGE: &str = "\
@@ -232,15 +233,33 @@ impl Window {
         }
     }
 
-    /// Writes the themes changed in Settings, reads them all again when asked, and reads a theme
-    /// file saved elsewhere. While a theme file is in use the folder is looked at every second.
+    /// Does what Settings asked of the theme files (write, rename, read again, back up, export
+    /// the template, bring in a dropped file, show the folder) and reads a theme file saved
+    /// elsewhere. While a theme file is in use the folder is looked at every second.
     fn sync_themes(&mut self, ctx: &eframe::egui::Context) {
-        for (id, theme) in self.app.take_changed_themes() {
-            if let Err(e) = self.themes.write(&id, &theme) {
-                self.app.set_status(Status::Error(e));
+        let mut reload = false;
+        for action in self.app.take_theme_actions() {
+            let done = match action {
+                FileAction::Save { id, theme } => self.themes.write(&id, &theme).map(|()| None),
+                FileAction::Rename { from, to } => self.themes.rename(&from, &to).map(|()| None),
+                FileAction::Reload => {
+                    reload = true;
+                    Ok(None)
+                }
+                FileAction::OpenFolder => self.themes.open_folder().map(|()| None),
+                FileAction::Backup => self.themes.backup().map(|path| Some(saved(&path, "Backed up the themes to"))),
+                FileAction::ExportTemplate => {
+                    self.themes.export_template().map(|path| Some(saved(&path, "Saved the theme template to")))
+                }
+                FileAction::Import(path) => self.import_themes(ctx, &path).map(Some),
+            };
+            match done {
+                Ok(Some(message)) => self.app.set_status(Status::Done(message)),
+                Ok(None) => {}
+                Err(e) => self.app.set_status(Status::Error(e)),
             }
         }
-        let (entries, warnings) = if self.app.take_theme_reload() {
+        let (entries, warnings) = if reload {
             let (entries, warnings) = self.themes.read_all();
             let count = entries.len();
             self.app.set_themes(ctx, entries, self.themes.folder_text());
@@ -257,15 +276,42 @@ impl Window {
         if let Some(warning) = warnings.first() {
             self.app.set_status(Status::Error(warning.clone()));
         }
-        if self.app.settings().theme != loopwerk_ui::theme::BUILT_IN {
+        if !loopwerk_ui::theme::is_built_in(&self.app.settings().theme) {
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
+    }
+
+    /// Brings in a dropped theme file or zip and lists the themes again; a single new theme is
+    /// put in use. Returns what to tell the user.
+    fn import_themes(&mut self, ctx: &eframe::egui::Context, path: &Path) -> Result<String, String> {
+        let (ids, warnings) = self.themes.import(path)?;
+        let (entries, _) = self.themes.read_all();
+        self.app.set_themes(ctx, entries, self.themes.folder_text());
+        if let [id] = ids.as_slice() {
+            self.app.use_theme(ctx, id);
+        }
+        let file = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let added = match ids.len() {
+            0 => format!("{file} has no themes that are not here already"),
+            1 => format!("Added the theme from {file}"),
+            n => format!("Added {n} themes from {file}"),
+        };
+        Ok(match warnings.first() {
+            Some(warning) => format!("{added}; {warning}"),
+            None => added,
+        })
     }
 
     /// Tells the Settings page what is in use.
     fn share_about(&mut self) {
         self.app.set_about(About { audio_output: self.audio_output.clone(), graphics_now: Some(self.graphics_now) });
     }
+}
+
+/// "<what> <file>", and the file shown in the file manager.
+fn saved(path: &Path, what: &str) -> String {
+    let _shown = theme_files::reveal(path, true);
+    format!("{what} {}", path.display())
 }
 
 /// Connects the default audio output to `session`; without one the project still opens.

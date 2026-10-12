@@ -1,0 +1,28 @@
+{
+  "name": "Catppuccin Mocha",
+  "description": "The Catppuccin Mocha palette (MIT, catppuccin.com), mapped onto Loopwerk's tokens.",
+  "colors": {
+    "window.background": "#11111B",
+    "panel.background": "#181825",
+    "panel.hoverBackground": "#1E1E2E",
+    "control.background": "#313244",
+    "control.hoverBackground": "#3B3D52",
+    "control.activeBackground": "#45475A",
+    "control.playingBackground": "#585B70",
+    "border": "#313244",
+    "border.strong": "#45475A",
+    "text.primary": "#CDD6F4",
+    "text.secondary": "#A6ADC8",
+    "text.hint": "#7F849C",
+    "text.value": "#BAC2DE",
+    "text.playing": "#FFFFFF",
+    "accent": "#CBA6F7",
+    "recording": "#F38BA8",
+    "meter.normal": "#A6E3A1",
+    "meter.hot": "#F9E2AF",
+    "slot.empty": "#45475A",
+    "track.mutedBackground": "#24243A",
+    "pan.background": "#181825",
+    "pan.centre": "#7F849C"
+  }
+}

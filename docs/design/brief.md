@@ -82,8 +82,8 @@ From [research](#sources) and the first design rounds:
 
 ## Layout decisions
 
-- **Grid lines:** Session columns are separated by `line.strong`, scene rows by `line`; the
-  separators run through the mixer section. Arrangement tracks are separated by `line.strong`.
+- **Grid lines:** Session columns are separated by `border.strong`, scene rows by `border`; the
+  separators run through the mixer section. Arrangement tracks are separated by `border.strong`.
 - **Track headers grow with track height** (Arrangement): compact = name and on/solo/arm; then
   volume and pan; then routing (output, and input, channel and monitor In/Auto/Off with
   recording); sends ("Send A", "Send B") go above routing once the engine plays them. Groups are
@@ -100,27 +100,30 @@ All colours, spacing, radii, stroke widths and type sizes are named tokens in on
 Widgets never contain literal colours. The colours below are the built-in theme, Loopwerk Dark;
 a theme file can change any of them (see Themes). Current values:
 
-| Token | Value | Use |
+| Token | Loopwerk Dark | Use |
 |---|---|---|
-| `surface.0` | `#1D1C1A` | Grid background, empty slots, lanes |
-| `surface.1` | `#252421` | Panels, headers, browser |
-| `surface.2` | `#2E2D2A` | Fields, stopped clips, buttons |
-| `surface.3` | `#45433F` | Selected, pressed |
-| `surface.3.bright` | `#4A4843` | Playing clip, playing scene, volume fill |
-| `hover.surface.1` / `hover.surface.2` | `#2A2926` / `#34332F` | Hover over `surface.1` / `surface.2` |
-| `line` | `#383733` | Separators between regions and rows |
-| `line.strong` | `#45433F` | Session columns, arrangement tracks |
-| `text.primary` | `#ECE8E1` | |
-| `text.secondary` | `#9A958C` | |
-| `text.tertiary` | `#66625B` | Labels, inactive |
-| `text.value` | `#C9C4BB` | Clip names, values on fields, the chosen option |
+| `window.background` | `#1D1C1A` | The window behind everything: grid, empty slots, lanes, Settings |
+| `panel.background` | `#252421` | Panels and headers: menu, control and status bars, track headers, beat lines |
+| `panel.hoverBackground` | `#2A2926` | A panel or list row under the pointer |
+| `control.background` | `#2E2D2A` | Fields, buttons and stopped clips |
+| `control.hoverBackground` | `#34332F` | A field, button or clip under the pointer |
+| `control.activeBackground` | `#45433F` | Selected or pressed: a selected clip or track, a dragged field |
+| `control.playingBackground` | `#4A4843` | A playing clip or scene, the fill of a volume field |
+| `border` | `#383733` | Hairlines between regions and rows |
+| `border.strong` | `#45433F` | Session columns and arrangement track lines |
+| `text.primary` | `#ECE8E1` | Names and values |
+| `text.secondary` | `#9A958C` | Labels and notes |
+| `text.hint` | `#66625B` | Inactive text, hints and section titles |
+| `text.value` | `#C9C4BB` | Clip names, values on fields, the chosen option of a switch |
 | `text.playing` | `#FFFFFF` | The name of a playing clip |
-| `accent` | `#A6A3FF` | |
-| `state.recording` | `#E5484D` | |
-| `meter.ok` / `meter.hot` | `#8BC48A` / `#E3C86A` | |
-| `slot.empty` | `#4A4743` | The mark of an empty slot |
-| `muted.fill` | `#34322F` | A muted track's fills |
-| `pan.background` / `pan.centre` | `#232220` / `#55524C` | A track header's pan field |
+| `accent` | `#A6A3FF` | The playhead, queued clips, a key being set |
+| `recording` | `#E5484D` | Recording and errors |
+| `meter.normal` | `#8BC48A` | A level meter below the top |
+| `meter.hot` | `#E3C86A` | A level meter near the top |
+| `slot.empty` | `#4A4743` | The mark in an empty clip slot |
+| `track.mutedBackground` | `#34322F` | The fills of a muted track |
+| `pan.background` | `#232220` | Behind a track header's pan field |
+| `pan.centre` | `#55524C` | The centre mark of a pan field |
 | `track.1`–`track.4` | `#D08F6E` `#C6AC5E` `#73AAC0` `#A497CC` | (palette to extend to 16) |
 | type | 11 px UI, 10 px values, 9 px rulers | |
 | row height | 20 px grid rows and fields, 15–16 px inline fields, 17 px browser rows | |
@@ -133,14 +136,28 @@ A theme is a JSON file in the `themes` folder of Loopwerk's app-data folder, bes
 `theme = <id>`. It names the theme and gives colour tokens as `#RRGGBB`:
 
 ```json
-{ "name": "Night", "colors": { "surface.0": "#14161A", "accent": "#7FD1B9" } }
+{ "name": "Night", "colors": { "window.background": "#14161A", "accent": "#7FD1B9" } }
 ```
 
-A token the file leaves out keeps the built-in colour, so a file needs only the colours it
-changes; an unknown token or a value that is not `#RRGGBB` is skipped with a warning. Settings ›
-Interface › Theme picks a theme, changes its colours (writing the file), duplicates it, and reads
-the files again; a theme file saved in another editor shows within a second. Only colours belong
-to a theme: sizes, spacing and type stay the design's. Track colours come from the project.
+A token the file leaves out keeps Loopwerk Dark's colour, so a file needs only the colours it
+changes; an unknown token or a value that is not `#RRGGBB` is skipped with a warning. Files with
+the first token names (`surface.0`, `line`, `text.tertiary` …) still read. Only colours belong to
+a theme: sizes, spacing and type stay the design's. Track colours come from the project.
+
+Themes that come with Loopwerk (`crates/ui/themes/`, read-only; editing one makes a copy):
+Loopwerk Dark (the default), Editor Dark (cool greys and blue, like a code editor), Loopwerk
+Light, High Contrast, and four popular open palettes mapped onto the tokens: Dracula, Nord,
+Catppuccin Mocha and Latte, Solarized Dark (all MIT, licences in `crates/ui/themes/licenses/`).
+
+Settings › Interface › Theme picks a theme and changes its colours (writing the file); the name
+of a theme file is changed there too, and its file is renamed to match. Duplicate copies the
+theme in use, Reload reads the files again, Open folder shows the themes folder, Back up writes
+every theme file into `exports/loopwerk-themes-<date>.zip`, and Export template writes
+`exports/loopwerk-theme-template.zip`: `template.json` (every token written out), `README.md`
+(the format and every token, written so an AI agent can make a theme from it alone) and the
+built-in themes in `examples/`. A theme file or a zip of them (a backup) dropped on the window is
+added; a theme already there is not doubled, and one whose id is taken gets `-2`. A theme file
+saved in another editor shows within a second.
 
 ## Squint test
 

@@ -42,6 +42,11 @@ pub fn fitted(painter: &Painter, text: &str, font: FontId, color: Color32, max_w
     painter.layout_job(job)
 }
 
+/// How wide `text` is in `font`.
+pub fn text_width(ui: &Ui, text: &str, font: FontId) -> f32 {
+    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, Color32::WHITE).size().x)
+}
+
 /// Draws one line of text in `rect`, cut to its width, aligned horizontally by `align` and
 /// centred vertically.
 pub fn text_in(painter: &Painter, rect: Rect, align: Align2, text: &str, font: FontId, color: Color32) {
@@ -67,10 +72,10 @@ pub fn hover(ui: &Ui, response: &Response) -> f32 {
 pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color32) {
     let hover = hover(ui, response);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), on, motion::VALUE);
-    let off_fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
-    let off_text = motion::mix(theme::text_tertiary(), theme::text_secondary(), hover);
+    let off_fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
+    let off_text = motion::mix(theme::text_hint(), theme::text_secondary(), hover);
     let on_fill = motion::mix(theme::text_value(), theme::text_primary(), hover);
-    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::surface_0(), lit))
+    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::window_background(), lit))
 }
 
 /// A track's solo button: draws it in `rect` and returns the command a click asks for. A click
@@ -87,9 +92,9 @@ pub fn solo_button(
     let label = if solo { format!("End solo on {name}") } else { format!("Solo {name}") };
     let response = button_area(ui, rect, id, label);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), solo, motion::VALUE);
-    let off = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover(ui, &response));
+    let off = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, &response));
     painter.rect_filled(rect, 0.0, motion::mix(off, theme::accent(), lit));
-    let text = motion::mix(theme::text_secondary(), theme::surface_0(), lit);
+    let text = motion::mix(theme::text_secondary(), theme::window_background(), lit);
     text_in(painter, rect, Align2::CENTER_CENTER, "S", theme::ui_font(theme::TEXT_SMALL), text);
     if !response.clicked() {
         return None;
@@ -104,13 +109,13 @@ pub fn solo_button(
 /// A dropdown field (components › Dropdown): the current choice and a chevron; the caller opens
 /// its menu from `response`.
 pub fn dropdown(ui: &Ui, painter: &Painter, rect: Rect, response: &Response, text: &str) {
-    let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover(ui, response));
+    let fill = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, response));
     painter.rect_filled(rect, 0.0, fill);
     let inner = rect.shrink2(Vec2::new(4.0, 0.0));
     let chevron = Rect::from_center_size(Pos2::new(inner.right() - 3.0, rect.center().y), Vec2::new(6.0, 4.0));
     painter.add(egui::Shape::convex_polygon(
         vec![chevron.left_top(), chevron.right_top(), chevron.center_bottom()],
-        theme::text_tertiary(),
+        theme::text_hint(),
         Stroke::NONE,
     ));
     let label = Rect::from_min_max(inner.min, Pos2::new(chevron.left() - 4.0, inner.bottom()));
@@ -176,8 +181,8 @@ pub fn value_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString, value
 /// `position` 0 … 1 (components › Mixer strip).
 pub fn knob(painter: &Painter, center: Pos2, size: f32, position: f32, pointer: Color32) {
     let radius = size * 9.0 / 22.0;
-    painter.circle_filled(center, radius, theme::surface_2());
-    painter.circle_stroke(center, radius, theme::hairline(theme::text_tertiary()));
+    painter.circle_filled(center, radius, theme::control_background());
+    painter.circle_stroke(center, radius, theme::hairline(theme::text_hint()));
     let angle = (-135.0 + 270.0 * position.clamp(0.0, 1.0)).to_radians();
     let tip = center + Vec2::new(angle.sin(), -angle.cos()) * (radius - 1.0);
     painter.line_segment([center, tip], Stroke::new(1.5, pointer));

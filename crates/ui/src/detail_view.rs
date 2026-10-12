@@ -237,7 +237,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::surface_0());
+    painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
         Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions),
@@ -275,7 +275,7 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::surface_0());
+    painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
         Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions),
@@ -334,9 +334,9 @@ fn plugin_button(
         format!("{label} {}", device.name),
     );
     let hover = widgets::hover(ui, &response);
-    let fill = crate::motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
+    let fill = crate::motion::mix(theme::control_background(), theme::control_hover(), hover);
     painter.rect_filled(button, 0.0, fill);
-    painter.rect_stroke(button, 0.0, theme::hairline(theme::line_strong()), egui::StrokeKind::Inside);
+    painter.rect_stroke(button, 0.0, theme::hairline(theme::border_strong()), egui::StrokeKind::Inside);
     widgets::text_in(
         painter,
         button,
@@ -358,14 +358,14 @@ fn name_for_readers(ui: &Ui, rect: Rect, device: &DeviceBox) {
 }
 
 fn hint(painter: &egui::Painter, area: Rect, text: &str) {
-    painter.text(area.center(), Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT), theme::text_tertiary());
+    painter.text(area.center(), Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT), theme::text_hint());
 }
 
 /// One device: a header with its on switch and name, then its parameters, one per row.
 fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
-    painter.rect_filled(rect, 0.0, theme::surface_1());
+    painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
-    painter.rect_filled(header, 0.0, theme::surface_2());
+    painter.rect_filled(header, 0.0, theme::control_background());
     let switch = Rect::from_min_size(
         Pos2::new(header.left() + PAD, header.center().y - ON_SWITCH / 2.0),
         Vec2::splat(ON_SWITCH),
@@ -373,9 +373,9 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
     if device.enabled {
         painter.rect_filled(switch, 0.0, theme::text_primary());
     } else {
-        painter.rect_stroke(switch, 0.0, theme::hairline(theme::text_tertiary()), egui::StrokeKind::Inside);
+        painter.rect_stroke(switch, 0.0, theme::hairline(theme::text_hint()), egui::StrokeKind::Inside);
     }
-    let name_color = if device.enabled { theme::text_primary() } else { theme::text_tertiary() };
+    let name_color = if device.enabled { theme::text_primary() } else { theme::text_hint() };
     let name = Rect::from_min_max(
         Pos2::new(switch.right() + PAD, header.top()),
         Pos2::new(header.right() - PAD, header.bottom()),
@@ -387,7 +387,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         Align2::RIGHT_CENTER,
         &device.kind,
         theme::ui_font(theme::TEXT_TINY),
-        theme::text_tertiary(),
+        theme::text_hint(),
     );
 
     let body = Rect::from_min_max(
@@ -398,7 +398,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         let color = match plugin.state {
             PluginState::Crashed => theme::recording(),
             PluginState::Running => theme::text_secondary(),
-            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::text_tertiary(),
+            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::text_hint(),
         };
         widgets::text_in(
             painter,
@@ -422,7 +422,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             Align2::LEFT_CENTER,
             text,
             theme::ui_font(theme::TEXT_SMALL),
-            theme::text_tertiary(),
+            theme::text_hint(),
         );
         return;
     }
@@ -478,7 +478,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
         Rect::from_min_max(area.min, Pos2::new(area.left() + CLIP_WIDTH, area.bottom()))
     }
     .intersect(area);
-    painter.rect_filled(column, 0.0, theme::surface_1());
+    painter.rect_filled(column, 0.0, theme::panel_background());
     let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
     widgets::text_in(
         painter,

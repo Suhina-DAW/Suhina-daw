@@ -1,0 +1,28 @@
+{
+  "name": "Catppuccin Latte",
+  "description": "The Catppuccin Latte palette (MIT, catppuccin.com), a light theme, mapped onto Loopwerk's tokens.",
+  "colors": {
+    "window.background": "#EFF1F5",
+    "panel.background": "#E6E9EF",
+    "panel.hoverBackground": "#DCE0E8",
+    "control.background": "#CCD0DA",
+    "control.hoverBackground": "#BCC0CC",
+    "control.activeBackground": "#ACB0BE",
+    "control.playingBackground": "#9CA0B0",
+    "border": "#DCE0E8",
+    "border.strong": "#BCC0CC",
+    "text.primary": "#4C4F69",
+    "text.secondary": "#5C5F77",
+    "text.hint": "#8C8FA1",
+    "text.value": "#4C4F69",
+    "text.playing": "#000000",
+    "accent": "#8839EF",
+    "recording": "#D20F39",
+    "meter.normal": "#40A02B",
+    "meter.hot": "#DF8E1D",
+    "slot.empty": "#ACB0BE",
+    "track.mutedBackground": "#DCE0E8",
+    "pan.background": "#E6E9EF",
+    "pan.centre": "#8C8FA1"
+  }
+}

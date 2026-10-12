@@ -9,12 +9,27 @@ use loopwerk_ui::arrangement_view::{self, ArrangementViewState};
 use loopwerk_ui::demo::demo_project;
 use loopwerk_ui::grid::Grid;
 use loopwerk_ui::session_view::{self, SessionViewState};
+use loopwerk_ui::themes::FileAction;
 use loopwerk_ui::timeline::Timeline;
 use loopwerk_ui::widgets::Action;
 use loopwerk_ui::{App, OpenAs, Status, View, theme};
 use serde_json::json;
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
+
+/// A file dropped on the window in a test.
+#[derive(Debug)]
+struct TestFile(std::path::PathBuf);
+
+impl egui::DroppedFile for TestFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Ok(Vec::new())
+    }
+}
 
 struct SessionHarness {
     grid: Grid,
@@ -374,15 +389,30 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
     // A copy to change becomes the theme in use, and is handed out to be written.
     harness.get_by_label("Duplicate theme").click();
     harness.run();
-    let saved = harness.state_mut().take_changed_themes();
-    assert_eq!(
-        saved.iter().map(|(id, t)| (id.as_str(), t.name.as_str())).collect::<Vec<_>>(),
-        [("night-copy", "Night copy")]
-    );
+    let saved: Vec<_> = harness
+        .state_mut()
+        .take_theme_actions()
+        .into_iter()
+        .map(|a| match a {
+            FileAction::Save { id, theme } => (id, theme.name),
+            other => (format!("{other:?}"), String::new()),
+        })
+        .collect();
+    assert_eq!(saved, [("night-copy".to_string(), "Night copy".to_string())]);
     assert_eq!(harness.state().settings().theme, "night-copy");
-    harness.get_by_label("Reload themes").click();
+    for button in ["Reload themes", "Open the themes folder", "Back up themes", "Export the theme template"] {
+        harness.get_by_label(button).click();
+        harness.run();
+    }
+    assert_eq!(
+        harness.state_mut().take_theme_actions(),
+        [FileAction::Reload, FileAction::OpenFolder, FileAction::Backup, FileAction::ExportTemplate]
+    );
+
+    // A theme file dropped on the window is handed out to be brought in.
+    harness.input_mut().dropped_files.push(std::sync::Arc::new(TestFile("dark blue.json".into())));
     harness.run();
-    assert!(harness.state_mut().take_theme_reload());
+    assert_eq!(harness.state_mut().take_theme_actions(), [FileAction::Import("dark blue.json".into())]);
 
     // A file saved elsewhere redraws the window.
     colors.accent = egui::Color32::from_rgb(1, 2, 3);
@@ -392,6 +422,24 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
     };
     harness.state_mut().put_theme(&ctx, edited);
     assert_eq!(theme::accent(), colors.accent);
+}
+
+#[test]
+fn tab_only_switches_the_view() {
+    let mut harness = window(demo_app());
+    harness.run();
+    for expected in [View::Arrangement, View::Session, View::Arrangement] {
+        harness.key_press(Key::Tab);
+        harness.run();
+        assert_eq!(harness.state().view(), expected);
+        // No widget took the keyboard, so the next Tab is a shortcut again.
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
+    for key in [Key::ArrowDown, Key::ArrowRight] {
+        harness.key_press(key);
+        harness.run();
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
 }
 
 #[test]
@@ -988,4 +1036,32 @@ fn render_the_session_window() {
     harness.run_steps(12);
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("drop.png")).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Renders the Session and Arrangement views in every theme that comes with Loopwerk, to
+/// `target/ui-snapshots/theme-<id>-session.png` and `-arrangement.png`, to look them over. Needs
+/// a GPU adapter: `cargo test -p loopwerk-ui -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_every_built_in_theme() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    for (id, _) in theme::built_in_themes() {
+        let mut harness =
+            Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), demo_app());
+        theme::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().use_theme(&ctx, id);
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        image.save(folder.join(format!("theme-{id}-session.png"))).unwrap_or_else(|e| panic!("{e}"));
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        image.save(folder.join(format!("theme-{id}-arrangement.png"))).unwrap_or_else(|e| panic!("{e}"));
+    }
 }
