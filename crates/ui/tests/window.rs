@@ -191,7 +191,9 @@ fn drag_clip(harness: &mut Harness<'static, App>, label: &str, by: egui::Vec2) {
 #[test]
 fn a_dropped_clip_replaces_what_it_covers_unless_midi_stacking_is_on() {
     let starts = |h: &Harness<'static, App>| {
-        h.state().session().map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
     };
     // Beat B (bars 17-28) moves two bars later, over Fill (bars 29-32), which is shortened.
     let mut harness = arrangement_app();
