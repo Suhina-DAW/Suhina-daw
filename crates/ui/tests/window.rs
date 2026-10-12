@@ -545,8 +545,8 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     let base = std::env::temp_dir().join(format!("loopwerk-ui-plugins-{}", std::process::id()));
     let folder = base.join("my plug-ins");
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
-    let library =
-        loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host")).without_standard_folders();
+    let library = loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host"))
+        .without_standard_folders();
     let mut app = App::with_library(library);
     app.set_session(Session::new(demo_project()), &[]);
     let mut harness = window(app);
