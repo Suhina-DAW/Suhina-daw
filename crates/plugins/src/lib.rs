@@ -32,6 +32,7 @@ use interprocess::local_socket::{
 pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS};
 use loopwerk_ipc::{IpcError, Link, Outcome};
 
+pub use protocol::ParamInfo;
 use protocol::{MAX_LINE, Message, VERSION};
 
 /// Blocks in a row without an answer after which a running host counts as hung.
@@ -155,6 +156,9 @@ pub struct Plugin {
     next_ping: u64,
     /// The state last read from the plug-in; loaded again after a restart.
     last_state: Option<SavedState>,
+    /// Parameters set since the state was last read or loaded, in order; set again after a
+    /// restart, on top of that state.
+    params_since: Vec<(u32, f64)>,
 }
 
 impl Plugin {
@@ -196,6 +200,7 @@ impl Plugin {
             latency: 0,
             next_ping: 0,
             last_state: None,
+            params_since: Vec::new(),
         };
         plugin.send(&Message::Hello { version: VERSION })?;
         match plugin.reply("hello", |m| matches!(m, Message::Hello { .. }))? {
@@ -244,6 +249,7 @@ impl Plugin {
         };
         let state = SavedState { data, controller };
         self.last_state = Some(state.clone());
+        self.params_since.clear();
         Ok(state)
     }
 
@@ -254,7 +260,32 @@ impl Plugin {
         self.send(&Message::SetState { data: state.data.clone(), controller: state.controller.clone() })?;
         self.reply("set_state", |m| matches!(m, Message::State { .. }))?;
         self.last_state = Some(state);
+        self.params_since.clear();
         Ok(())
+    }
+
+    /// The plug-in's parameters with their current values.
+    pub fn params(&mut self) -> Result<Vec<ParamInfo>, PluginError> {
+        self.send(&Message::GetParams)?;
+        match self.reply("params", |m| matches!(m, Message::Params { .. }))? {
+            Message::Params { params } => Ok(params),
+            _ => Err(PluginError::Protocol("expected parameters".into())),
+        }
+    }
+
+    /// Sets parameter `id` to `value`, in its own range (see [`ParamInfo`]); the plug-in's
+    /// audio follows from its next block. Returns the parameter as it is now. Kept for a
+    /// restart.
+    pub fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, PluginError> {
+        self.send(&Message::SetParam { id, value })?;
+        let Message::Param { param } = self.reply("set_param", |m| matches!(m, Message::Param { .. }))? else {
+            return Err(PluginError::Protocol("expected a parameter".into()));
+        };
+        self.params_since.retain(|(other, _)| *other != id);
+        if self.params_since.len() < protocol::MAX_PARAMS {
+            self.params_since.push((id, param.value));
+        }
+        Ok(param)
     }
 
     /// Ends the current host process, whatever its state, and starts a new one with the same
@@ -265,6 +296,9 @@ impl Plugin {
         let (mut fresh, audio) = Self::start(self.launch.clone())?;
         if let Some(state) = self.last_state.take() {
             fresh.load_state(state)?;
+        }
+        for (id, value) in std::mem::take(&mut self.params_since) {
+            fresh.set_param(id, value)?;
         }
         *self = fresh;
         Ok(audio)

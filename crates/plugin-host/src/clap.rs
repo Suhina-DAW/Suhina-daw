@@ -5,26 +5,29 @@
 //! audio thread, which serves blocks from the link. Audio is one output port with as many
 //! channels as the link carries, and one input port like it unless the plug-in has no audio
 //! input (an instrument). Notes go to note port 0 as note events; controllers and pitch bend as
-//! MIDI events.
+//! MIDI events. Parameters are read on the main thread; a value set goes to the audio thread
+//! and reaches the plug-in as a parameter event at the start of the next block.
 //!
 //! A plug-in is named `clap:<file>` (the first plug-in in the file) or `clap:<file>#<id>`, or
 //! `test:clap` for the gain plug-in built into the host for tests ([`crate::test_clap`]).
 
 use std::ffi::CString;
-use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use clack_extensions::audio_ports::PluginAudioPorts;
 use clack_extensions::latency::{HostLatency, HostLatencyImpl, PluginLatency};
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
+use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
 use clack_extensions::state::{HostState, HostStateImpl, PluginState};
 use clack_host::events::Match;
-use clack_host::events::event_types::{MidiEvent, NoteOffEvent, NoteOnEvent};
+use clack_host::events::event_types::{MidiEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
 use clack_host::prelude::*;
 use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Served};
+use loopwerk_plugins::ParamInfo;
 
 /// How long the audio thread waits for a block before checking whether it should stop.
 const POLL: Duration = Duration::from_millis(100);
@@ -38,13 +41,20 @@ pub(crate) struct Shared {
     state: OnceLock<Option<PluginState>>,
     latency: OnceLock<Option<PluginLatency>>,
     audio_ports: OnceLock<Option<PluginAudioPorts>>,
+    params: OnceLock<Option<PluginParams>>,
 }
+
+/// Parameter values waiting for the next block: id and plain value.
+type PendingParams = Arc<Mutex<Vec<(u32, f64)>>>;
+/// Most values one block carries; more wait for the next.
+const MAX_PARAM_CHANGES: usize = 1024;
 
 impl<'a> SharedHandler<'a> for Shared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
         let _ = self.state.set(instance.get_extension());
         let _ = self.latency.set(instance.get_extension());
         let _ = self.audio_ports.set(instance.get_extension());
+        let _ = self.params.set(instance.get_extension());
     }
 
     fn request_restart(&self) {}
@@ -90,6 +100,7 @@ pub(crate) struct ClapPlugin {
     audio: Option<thread::JoinHandle<StoppedPluginAudioProcessor<Host>>>,
     stop: Arc<AtomicBool>,
     latency: u32,
+    pending: PendingParams,
 }
 
 /// The entry `spec` names: a CLAP file, or the built-in test plug-in. Also returns the plug-in
@@ -152,6 +163,7 @@ impl ClapPlugin {
             state: OnceLock::new(),
             latency: OnceLock::new(),
             audio_ports: OnceLock::new(),
+            params: OnceLock::new(),
         };
         let mut instance =
             PluginInstance::<Host>::new(shared, |_| MainThread, &entry, &id, &info).map_err(|e| e.to_string())?;
@@ -172,11 +184,13 @@ impl ClapPlugin {
 
         let stop = Arc::new(AtomicBool::new(false));
         let audio_stop = stop.clone();
+        let pending = PendingParams::default();
+        let audio_pending = pending.clone();
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(stopped, served, has_input, &audio_stop))
+            .spawn(move || serve(stopped, served, has_input, audio_pending, &audio_stop))
             .map_err(|e| e.to_string())?;
-        Ok(Self { instance, audio: Some(audio), stop, latency })
+        Ok(Self { instance, audio: Some(audio), stop, latency, pending })
     }
 
     pub(crate) fn latency(&self) -> u32 {
@@ -200,6 +214,48 @@ impl ClapPlugin {
     pub(crate) fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
         let state = self.state_extension()?;
         state.load(&self.instance.plugin_handle(), &mut std::io::Cursor::new(data)).map_err(|e| e.to_string())
+    }
+
+    fn params_extension(&self) -> Option<PluginParams> {
+        self.instance.access_shared_handler(|s| s.params.get().copied().flatten())
+    }
+
+    /// The plug-in's parameters, values in their plain ranges.
+    pub(crate) fn params(&mut self) -> Vec<ParamInfo> {
+        let Some(params) = self.params_extension() else { return Vec::new() };
+        let handle = self.instance.plugin_handle();
+        let count = params.count(&handle).min(1 << 16);
+        (0..count)
+            .filter_map(|index| {
+                let mut buffer = ParamInfoBuffer::new();
+                let info = params.get_info(&handle, index, &mut buffer)?;
+                let value = params.get_value(&handle, info.id).unwrap_or(info.default_value);
+                Some(describe_param(&params, &handle, &info, value))
+            })
+            .collect()
+    }
+
+    /// Sets parameter `id` to `value` (kept within its range); the plug-in gets it at the start
+    /// of the next block.
+    pub(crate) fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, String> {
+        let params = self.params_extension().ok_or("the plug-in has no parameters")?;
+        let handle = self.instance.plugin_handle();
+        let count = params.count(&handle).min(1 << 16);
+        let mut buffer = ParamInfoBuffer::new();
+        let info = (0..count)
+            .find_map(|index| {
+                let mut probe = ParamInfoBuffer::new();
+                let found = params.get_info(&handle, index, &mut probe)?.id.get() == id;
+                found.then_some(index)
+            })
+            .and_then(|index| params.get_info(&handle, index, &mut buffer))
+            .ok_or_else(|| format!("no parameter {id}"))?;
+        let value = value.clamp(info.min_value.min(info.max_value), info.max_value.max(info.min_value));
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.retain(|(other, _)| *other != id);
+            pending.push((id, value));
+        }
+        Ok(describe_param(&params, &handle, &info, value))
     }
 
     fn state_extension(&self) -> Result<PluginState, String> {
@@ -226,6 +282,7 @@ fn serve(
     stopped: StoppedPluginAudioProcessor<Host>,
     mut served: Served,
     has_input: bool,
+    pending: PendingParams,
     stop: &AtomicBool,
 ) -> StoppedPluginAudioProcessor<Host> {
     let mut processor = match stopped.start_processing() {
@@ -265,6 +322,15 @@ fn serve(
             }]);
             out_events.clear();
             in_events.clear();
+            // Parameter values first, at the block's start; then the notes, in time order.
+            if let Ok(mut values) = pending.try_lock() {
+                let room = values.len().min(MAX_PARAM_CHANGES);
+                for (id, value) in values.drain(..room) {
+                    if let Some(id) = ClapId::from_raw(id) {
+                        in_events.push(&ParamValueEvent::new(0, id, Pckn::match_all(), value));
+                    }
+                }
+            }
             for event in events {
                 push_event(&mut in_events, event);
             }
@@ -290,6 +356,34 @@ fn serve(
         });
     }
     processor.stop_processing()
+}
+
+/// A parameter as the protocol describes it, at `value`.
+fn describe_param(
+    params: &PluginParams,
+    handle: &PluginMainThreadHandle,
+    info: &clack_extensions::params::ParamInfo,
+    value: f64,
+) -> ParamInfo {
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+    let mut shown = [0u8; 256];
+    let shown = params.value_to_text(handle, info.id, value, &mut shown).map(|t| text(t)).unwrap_or_default();
+    let stepped = info.flags.contains(ParamInfoFlags::IS_STEPPED);
+    let span = (info.max_value - info.min_value).abs();
+    ParamInfo {
+        id: info.id.get(),
+        name: text(info.name),
+        group: text(info.module),
+        min: info.min_value,
+        max: info.max_value,
+        default: info.default_value,
+        value,
+        text: shown,
+        steps: if stepped && span.is_finite() { span.round().min(f64::from(u32::MAX)) as u32 } else { 0 },
+        automatable: info.flags.contains(ParamInfoFlags::IS_AUTOMATABLE),
+        read_only: info.flags.contains(ParamInfoFlags::IS_READONLY),
+        hidden: info.flags.contains(ParamInfoFlags::IS_HIDDEN),
+    }
 }
 
 /// One event from the link as a CLAP event: notes as note events on note port 0, controllers

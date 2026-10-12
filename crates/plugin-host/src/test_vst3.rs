@@ -253,7 +253,14 @@ impl IPluginBaseTrait for Controller {
 }
 
 impl IEditControllerTrait for Controller {
-    unsafe fn setComponentState(&self, _state: *mut IBStream) -> tresult {
+    unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        // The component's own state is the gain; show it.
+        if let [a, b, c, d] = read_all(&stream)[..] {
+            let gain = f64::from(f32::from_le_bytes([a, b, c, d]));
+            self.gain.store(gain.to_bits(), Ordering::Relaxed);
+        }
         kResultOk
     }
 

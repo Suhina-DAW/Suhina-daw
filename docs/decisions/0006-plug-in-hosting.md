@@ -78,7 +78,13 @@ workspace forbids.
      CLAP host sends note events to note port 0 and controllers and bend as MIDI messages, and
      gives a plug-in without audio inputs (an instrument) no input port.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
-     state save and load, latency changes, editor open and close, ping.
+     state save and load, latency changes, editor open and close, ping. *Built:* parameters
+     (protocol version 3): `get_params` lists each with its id, name, group, range, default,
+     current value, the plug-in's own text for it, steps and flags; `set_param` sets one in its
+     own range (a VST3 plug-in's normalized, a CLAP plug-in's plain), on a VST3 controller at
+     once and on the processor (VST3 parameter changes, CLAP parameter events) at the start of
+     the next block. The engine side keeps values set since the state was last read and sets
+     them again after a restart.
 4. **Block sync and deadline.** The engine signals the host, the host processes and signals
    back. Primitives: a futex in the shared memory on Linux; duplicated auto-reset events on
    Windows; semaphores on macOS, prototyped first because they are the least certain. The host's

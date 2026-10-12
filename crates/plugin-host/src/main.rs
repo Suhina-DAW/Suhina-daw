@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use interprocess::TryClone;
 use loopwerk_ipc::Served;
+use loopwerk_plugins::ParamInfo;
 use loopwerk_plugins::protocol::{Message, VERSION};
 use processors::Processor;
 
@@ -121,6 +122,22 @@ impl Loaded {
         }
     }
 
+    fn params(&mut self) -> Result<Vec<ParamInfo>, String> {
+        match self {
+            Self::Clap(plugin) => Ok(plugin.params()),
+            Self::Vst3(plugin) => Ok(plugin.params()),
+            Self::Test { .. } => Ok(Vec::new()),
+        }
+    }
+
+    fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, String> {
+        match self {
+            Self::Clap(plugin) => plugin.set_param(id, value),
+            Self::Vst3(plugin) => plugin.set_param(id, value),
+            Self::Test { .. } => Err(format!("no parameter {id}")),
+        }
+    }
+
     /// The component's state and, for VST3, the controller's.
     fn state(&mut self) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
         match self {
@@ -211,6 +228,16 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
             }
             Message::Load { .. } => Message::Error { message: "a plug-in is already loaded".into() },
             Message::Ping { id } => Message::Pong { id },
+            Message::GetParams => match loaded.as_mut().map(Loaded::params) {
+                Some(Ok(params)) => Message::Params { params },
+                Some(Err(message)) => Message::Error { message },
+                None => Message::Error { message: "no plug-in loaded".into() },
+            },
+            Message::SetParam { id, value } => match loaded.as_mut().map(|p| p.set_param(id, value)) {
+                Some(Ok(param)) => Message::Param { param },
+                Some(Err(message)) => Message::Error { message },
+                None => Message::Error { message: "no plug-in loaded".into() },
+            },
             Message::GetState => match loaded.as_mut().map(Loaded::state) {
                 Some(Ok((data, controller))) => Message::State { data, controller },
                 Some(Err(message)) => Message::Error { message },

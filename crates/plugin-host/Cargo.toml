@@ -16,7 +16,7 @@ interprocess = "2.4"  # 0BSD OR Apache-2.0
 clack-host = { version = "0.2", features = ["clack-plugin"] }  # MIT OR Apache-2.0
 # The test plug-in built into the host (`test:clap`).
 clack-plugin = "0.2"  # MIT OR Apache-2.0
-clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "audio-ports", "latency", "log", "state"] }  # MIT OR Apache-2.0
+clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "audio-ports", "latency", "log", "params", "state"] }  # MIT OR Apache-2.0
 vst3 = "0.3"  # MIT OR Apache-2.0; bindings generated from the VST 3 SDK (MIT)
 libloading = "0.8"  # ISC
 

@@ -2,15 +2,22 @@
 //! as 4 bytes, little-endian `f32`) and a reported latency of [`LATENCY`] frames. Loading it
 //! through `clack-host` runs the host's whole CLAP path except opening a file, so the tests do
 //! not need a plug-in installed. For the event path it also answers notes and MIDI: a note-on
-//! adds its velocity to the first channel at its frame, and controller 7 sets the gain.
+//! adds its velocity to the first channel at its frame, and controller 7 sets the gain. The
+//! gain is also its one parameter (id 0, 0 to 1), set through parameter events.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use clack_extensions::latency::{PluginLatency, PluginLatencyImpl};
+use clack_extensions::params::{
+    ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter, PluginAudioProcessorParams, PluginMainThreadParams,
+    PluginParams,
+};
 use clack_extensions::state::{PluginState, PluginStateImpl};
+use clack_plugin::events::io::{InputEvents, OutputEvents};
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
 use clack_plugin::stream::{InputStream, OutputStream};
+use clack_plugin::utils::Cookie;
 
 /// Latency the test plug-in reports, in frames.
 pub(crate) const LATENCY: u32 = 16;
@@ -37,7 +44,7 @@ impl Plugin for TestGain {
     type MainThread<'a> = GainMainThread<'a>;
 
     fn declare_extensions(builder: &mut PluginExtensions<Self>, _shared: Option<&GainShared>) {
-        builder.register::<PluginState>().register::<PluginLatency>();
+        builder.register::<PluginState>().register::<PluginLatency>().register::<PluginParams>();
     }
 }
 
@@ -84,6 +91,52 @@ impl PluginLatencyImpl for GainMainThread<'_> {
     }
 }
 
+/// The id of its one parameter, the gain.
+const GAIN_PARAM: ClapId = ClapId::new(0);
+
+impl PluginMainThreadParams for GainMainThread<'_> {
+    fn count(&self) -> u32 {
+        1
+    }
+
+    fn get_info(&self, index: u32, info: &mut ParamInfoWriter) {
+        if index == 0 {
+            info.set(&ParamInfo {
+                id: GAIN_PARAM,
+                flags: ParamInfoFlags::IS_AUTOMATABLE,
+                cookie: Cookie::empty(),
+                name: b"Gain",
+                module: b"",
+                min_value: 0.0,
+                max_value: 1.0,
+                default_value: 0.5,
+            });
+        }
+    }
+
+    fn get_value(&self, id: ClapId) -> Option<f64> {
+        (id == GAIN_PARAM).then(|| f64::from(f32::from_bits(self.shared.gain.load(Ordering::Relaxed))))
+    }
+
+    fn value_to_text(&self, id: ClapId, value: f64, writer: &mut ParamDisplayWriter) -> std::fmt::Result {
+        if id != GAIN_PARAM {
+            return Err(std::fmt::Error);
+        }
+        use std::fmt::Write;
+        write!(writer, "{:.0} %", value * 100.0)
+    }
+
+    fn text_to_value(&self, _id: ClapId, _text: &std::ffi::CStr) -> Option<f64> {
+        None
+    }
+
+    fn flush(&self, _input: &InputEvents, _output: &mut OutputEvents) {}
+}
+
+impl PluginAudioProcessorParams for GainProcessor<'_> {
+    fn flush(&mut self, _input: &InputEvents, _output: &mut OutputEvents) {}
+}
+
 pub(crate) struct GainProcessor<'a> {
     shared: &'a GainShared,
 }
@@ -109,6 +162,11 @@ impl<'a> PluginAudioProcessor<'a, GainShared, GainMainThread<'a>> for GainProces
                         && status & 0xF0 == 0xB0
                     {
                         self.shared.gain.store((f32::from(value) / 127.0).to_bits(), Ordering::Relaxed);
+                    }
+                }
+                Some(CoreEventSpace::ParamValue(param)) => {
+                    if param.param_id() == Some(GAIN_PARAM) && param.value().is_finite() {
+                        self.shared.gain.store((param.value().clamp(0.0, 1.0) as f32).to_bits(), Ordering::Relaxed);
                     }
                 }
                 Some(CoreEventSpace::NoteOn(note)) => {

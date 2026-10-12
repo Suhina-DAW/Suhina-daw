@@ -309,3 +309,29 @@ fn an_offline_run_plays_notes_at_their_frames() {
     let total: f32 = rendered.samples.iter().sum();
     assert_eq!(total, 0.75);
 }
+
+#[test]
+fn parameters_are_listed_set_and_kept_over_a_restart() {
+    for spec in ["test:clap", "test:vst3"] {
+        let (mut plugin, mut audio) = start(spec);
+        let params = plugin.params().unwrap();
+        let [gain] = params.as_slice() else { panic!("{spec}: {params:?}") };
+        assert_eq!((gain.id, gain.name.as_str(), gain.value, gain.default), (0, "Gain", 0.5, 0.5), "{spec}");
+        assert_eq!((gain.min, gain.max, gain.automatable), (0.0, 1.0, true), "{spec}");
+
+        let set = plugin.set_param(0, 0.25).unwrap();
+        assert_eq!(set.value, 0.25, "{spec}");
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25), "{spec}");
+        // Values are kept within the range; unknown parameters are errors.
+        assert_eq!(plugin.set_param(0, 7.0).unwrap().value, 1.0, "{spec}");
+        assert!(matches!(plugin.set_param(99, 0.5), Err(PluginError::Host(_))), "{spec}");
+        plugin.set_param(0, 0.25).unwrap();
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25), "{spec}");
+
+        // A restart comes back with the value set, though no state was saved since.
+        let mut audio = plugin.restart().unwrap();
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25), "{spec}");
+    }
+    let (mut plain, _audio) = start("test:gain");
+    assert!(plain.params().unwrap().is_empty());
+}

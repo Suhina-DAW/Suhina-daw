@@ -18,6 +18,7 @@ use std::thread;
 use std::time::Duration;
 
 use loopwerk_ipc::Served;
+use loopwerk_plugins::ParamInfo;
 use loopwerk_plugins::scan::PluginInfo;
 
 use crate::vst3_events::{BlockEvents, MidiMapping};
@@ -61,6 +62,12 @@ fn cid_from_hex(hex: &str) -> Option<TUID> {
         *cid.get_mut(index)? = u8::from_str_radix(text, 16).ok()? as _;
     }
     Some(cid)
+}
+
+/// Text from a fixed-size UTF-16 field (`String128`), up to its first zero.
+fn utf16(field: &[TChar]) -> String {
+    let units: Vec<u16> = field.iter().take_while(|c| **c != 0).copied().collect();
+    String::from_utf16_lossy(&units)
 }
 
 /// Text from a fixed-size C string field.
@@ -672,6 +679,71 @@ impl Vst3Plugin {
             }
         }
         Ok(())
+    }
+
+    /// The controller's parameters, values normalized (0 to 1).
+    pub(crate) fn params(&self) -> Vec<ParamInfo> {
+        let Some(controller) = &self.controller else { return Vec::new() };
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        (0..count)
+            .filter_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                ok(unsafe { controller.getParameterInfo(index, &mut info) }).then(|| self.param(controller, &info))
+            })
+            .collect()
+    }
+
+    /// Parameter `info` with its current value and text.
+    fn param(&self, controller: &ComPtr<IEditController>, info: &ParameterInfo) -> ParamInfo {
+        use ParameterInfo_::ParameterFlags_ as Flags;
+        // SAFETY: a live controller, for a parameter it listed.
+        let value = unsafe { controller.getParamNormalized(info.id) };
+        let mut shown: String128 = [0; 128];
+        // SAFETY: as above, writing at most 128 UTF-16 units.
+        let text = if ok(unsafe { controller.getParamStringByValue(info.id, value, &mut shown) }) {
+            utf16(&shown)
+        } else {
+            String::new()
+        };
+        let flag = |f: ParameterInfo_::ParameterFlags| info.flags & f as int32 != 0;
+        ParamInfo {
+            id: info.id,
+            name: utf16(&info.title),
+            group: String::new(),
+            min: 0.0,
+            max: 1.0,
+            default: info.defaultNormalizedValue,
+            value,
+            text,
+            steps: u32::try_from(info.stepCount).unwrap_or(0),
+            automatable: flag(Flags::kCanAutomate),
+            read_only: flag(Flags::kIsReadOnly),
+            hidden: flag(Flags::kIsHidden),
+        }
+    }
+
+    /// Sets parameter `id` to `value` (normalized; kept within 0 to 1): on the controller now,
+    /// on the processor with its next block.
+    pub(crate) fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, String> {
+        let controller = self.controller.as_ref().ok_or("the plug-in has no parameters")?;
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        let info = (0..count)
+            .find_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                (ok(unsafe { controller.getParameterInfo(index, &mut info) }) && info.id == id).then_some(info)
+            })
+            .ok_or_else(|| format!("no parameter {id}"))?;
+        let value = value.clamp(0.0, 1.0);
+        // SAFETY: a live controller, for a parameter it listed.
+        let _ = unsafe { controller.setParamNormalized(id, value) };
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.push((id, value));
+        }
+        Ok(self.param(controller, &info))
     }
 
     /// Sets parameter `i` to `values[i]` (normalized), the numbering a VST3 version keeps from
