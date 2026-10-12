@@ -351,7 +351,7 @@ fn mixer_strip(
     let track = column.track;
 
     // Knob row: pan.
-    let pan_shown = match state.drag {
+    let label_pan = match state.drag {
         Some((t, Control::Pan, v)) if t == track => v,
         _ => column.pan,
     };
@@ -361,8 +361,9 @@ fn mixer_strip(
         knob_rect,
         id.with("pan"),
         format!("{} pan", column.name),
-        widgets::format_pan(pan_shown),
+        widgets::format_pan(label_pan),
     );
+    let mut committed_pan = None;
     let mut preview = match state.drag {
         Some((t, Control::Pan, v)) if t == track => Some(v),
         _ => None,
@@ -371,14 +372,20 @@ fn mixer_strip(
         Drag::Moving(v) => state.drag = Some((track, Control::Pan, v)),
         Drag::Done(v) => {
             state.drag = None;
+            committed_pan = Some(v);
             actions.push(Action::new("track.setPan", json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0 })));
         }
         Drag::None => {}
     }
+    // Shown after this frame's drag, so the knob never trails the pointer.
+    let pan_shown = match state.drag {
+        Some((t, Control::Pan, v)) if t == track => v,
+        _ => committed_pan.unwrap_or(column.pan),
+    };
     widgets::knob(painter, knob_rect.center(), theme::KNOB, ((pan_shown + 1.0) / 2.0) as f32, theme::TEXT_PRIMARY);
 
     // Values row: pan left, volume right (the volume is the draggable value).
-    let volume_shown = match state.drag {
+    let label_volume = match state.drag {
         Some((t, Control::Volume, v)) if t == track => v,
         _ => column.volume_db,
     };
@@ -399,8 +406,9 @@ fn mixer_strip(
         volume_rect,
         id.with("volume"),
         format!("{} volume", column.name),
-        widgets::format_db(volume_shown),
+        widgets::format_db(label_volume),
     );
+    let mut committed_volume = None;
     let mut preview = match state.drag {
         Some((t, Control::Volume, v)) if t == track => Some(v),
         _ => None,
@@ -409,11 +417,16 @@ fn mixer_strip(
         Drag::Moving(v) => state.drag = Some((track, Control::Volume, v)),
         Drag::Done(v) => {
             state.drag = None;
+            committed_volume = Some(v);
             let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
             actions.push(Action::new("track.setVolume", json!({ "track": track.0, "db": db })));
         }
         Drag::None => {}
     }
+    let volume_shown = match state.drag {
+        Some((t, Control::Volume, v)) if t == track => v,
+        _ => committed_volume.unwrap_or(column.volume_db),
+    };
     let volume_color = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, widgets::hover(ui, &volume_response));
     widgets::text_in(painter, values, Align2::RIGHT_CENTER, &widgets::format_db(volume_shown), mono, volume_color);
 

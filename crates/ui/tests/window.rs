@@ -172,6 +172,29 @@ fn dragging_a_clip_moves_it_on_the_bar_grid() {
 }
 
 #[test]
+fn dragging_a_clip_down_moves_it_to_the_next_track() {
+    let mut harness = arrangement_app();
+    let from = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().center();
+    // Lanes are 48 points high with a line between them.
+    let to = from + egui::vec2(0.0, 49.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + egui::vec2(0.0, 20.0));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    let project = harness.state().session().map(|s| s.project().clone()).unwrap_or_default();
+    let drums: Vec<f64> = project.arrangement.lanes[0].clips.iter().map(|c| c.start).collect();
+    let bass: Vec<f64> = project.arrangement.lanes[1].clips.iter().map(|c| c.start).collect();
+    assert!(!drums.contains(&64.0), "{drums:?}");
+    assert!(bass.contains(&64.0), "{bass:?}");
+}
+
+#[test]
 fn arrangement_headers_turn_tracks_off() {
     let mut harness = arrangement_app();
     harness.get_by_label("Turn Keys off").click();

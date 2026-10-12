@@ -37,6 +37,11 @@ pub fn value(ctx: &Context, id: Id, target: f32, seconds: f32) -> f32 {
     if enabled(ctx) && target.is_finite() { ctx.animate_value_with_time(id, target, seconds) } else { target }
 }
 
+/// Sets an animated value without easing, so the next change eases from here.
+pub fn jump(ctx: &Context, id: Id, target: f32) -> f32 {
+    if target.is_finite() { ctx.animate_value_with_time(id, target, 0.0) } else { target }
+}
+
 /// A slow breath between 0 and 1 for things that wait (a queued clip); 1 with animations off.
 pub fn pulse(ctx: &Context) -> f32 {
     if !enabled(ctx) {

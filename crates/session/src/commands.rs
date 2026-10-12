@@ -2,7 +2,7 @@
 //! [`COMMANDS`] with tests below.
 
 use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
-use loopwerk_model::{Channel, Clip, LaneData, Project, Track, TrackId};
+use loopwerk_model::{ArrangementLane, Channel, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
 use crate::{CommandError, Session};
@@ -175,11 +175,16 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.move",
-        label: "Move an arrangement clip to a new start position",
+        label: "Move an arrangement clip to a new start position, and to another track if asked",
         params: &[
             TRACK,
             param("index", ParamType::Integer, "clip index on the track, from project.clips"),
             param("start", ParamType::Number, "new start in beats from the beginning, at least 0"),
+            optional(
+                "to_track",
+                ParamType::Track,
+                "track to move the clip to (id or name); it must take the clip's kind: notes or audio",
+            ),
         ],
         kind: CommandKind::Edit,
         run: move_clip,
@@ -438,21 +443,48 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     if start < 0.0 {
         return Err(format!("start must be at least 0, got {start}").into());
     }
-    let lane = session
-        .project
-        .arrangement
-        .lanes
-        .iter_mut()
-        .find(|l| l.track == Some(track))
-        .ok_or("the track has no arrangement lane")?;
-    let count = lane.clips.len();
-    let clip = usize::try_from(index)
+    let to = match params.get("to_track") {
+        Some(_) => track_at(&session.project, params, "to_track")?,
+        None => track,
+    };
+    let p = &mut session.project;
+    let from_lane =
+        p.arrangement.lanes.iter().position(|l| l.track == Some(track)).ok_or("the track has no arrangement lane")?;
+    let count = p.arrangement.lanes.get(from_lane).map_or(0, |l| l.clips.len());
+    let index = usize::try_from(index)
         .ok()
-        .and_then(|i| lane.clips.get_mut(i))
+        .filter(|i| *i < count)
         .ok_or_else(|| format!("clip index {index} does not exist; the track has {count} arrangement clips"))?;
+    if to != track {
+        let clip = p.arrangement.lanes.get(from_lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?;
+        let kinds = p.content(clip.content).map_or((false, false), |c| {
+            (
+                c.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_))),
+                c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))),
+            )
+        });
+        let target = p.tracks.iter().find(|t| t.id == to).ok_or("the target track is missing")?;
+        let fits = (!kinds.0 || target.content.notes) && (!kinds.1 || target.content.audio) && (kinds.0 || kinds.1);
+        if !fits {
+            let what = if kinds.1 { "an audio clip" } else { "a MIDI clip" };
+            return Err(format!("track {:?} cannot hold {what}", target.name).into());
+        }
+    }
+    let to_lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(to)) {
+        Some(lane) => lane,
+        None => {
+            let name = p.tracks.iter().find(|t| t.id == to).map(|t| t.name.clone()).unwrap_or_default();
+            p.arrangement.lanes.push(ArrangementLane { name, track: Some(to), clips: Vec::new() });
+            p.arrangement.lanes.len() - 1
+        }
+    };
+    let mut clip = p.arrangement.lanes.get_mut(from_lane).ok_or("the lane is missing")?.clips.remove(index);
     clip.start = start;
+    let lane = p.arrangement.lanes.get_mut(to_lane).ok_or("the lane is missing")?;
+    lane.clips.push(clip);
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-    Ok(json!({ "start": start }))
+    let new_index = lane.clips.iter().position(|c| c.start == start).unwrap_or_default();
+    Ok(json!({ "start": start, "track": to.0, "index": new_index }))
 }
 
 fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
@@ -663,7 +695,12 @@ fn redo(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
 /// Resolves `params.track`: a track id (number) or a name. Names match exactly first, then
 /// ignoring case, and must be unambiguous.
 fn track_id(p: &Project, params: &Value) -> Result<TrackId, CommandError> {
-    match params.get("track") {
+    track_at(p, params, "track")
+}
+
+/// Resolves the track id or name in `params[key]`.
+fn track_at(p: &Project, params: &Value, key: &str) -> Result<TrackId, CommandError> {
+    match params.get(key) {
         Some(Value::Number(n)) => {
             let id = n.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("track id must be a whole number")?;
             p.tracks
@@ -683,7 +720,7 @@ fn track_id(p: &Project, params: &Value) -> Result<TrackId, CommandError> {
                 _ => Err(format!("several tracks are named {name:?}; use the track id").into()),
             }
         }
-        _ => Err("track must be a track id or name".into()),
+        _ => Err(format!("{key} must be a track id or name").into()),
     }
 }
 

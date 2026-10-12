@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use egui::{Align2, Id, Key, KeyboardShortcut, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
-use loopwerk_session::Session;
+use loopwerk_session::{CommandKind, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
@@ -57,6 +57,10 @@ pub struct App {
     launches: HashMap<TrackId, (usize, f64)>,
     tempo_drag: Option<f64>,
     open_request: Option<PathBuf>,
+    /// Counts changes to the project, so views derived from it are rebuilt only when it changed.
+    revision: u64,
+    /// The Arrangement view's data and the revision it was built from.
+    timeline: Option<(u64, Timeline)>,
 }
 
 impl Default for App {
@@ -77,6 +81,8 @@ impl App {
             launches: HashMap::new(),
             tempo_drag: None,
             open_request: None,
+            revision: 0,
+            timeline: None,
         }
     }
 
@@ -98,6 +104,7 @@ impl App {
             self.status = Status::Hint(format!("Opened {name} without audio output; launching needs one"));
         }
         self.session = Some(session);
+        self.revision += 1;
         self.view = SessionViewState::default();
         self.arrangement = ArrangementViewState::default();
         self.launches.clear();
@@ -135,6 +142,13 @@ impl App {
         let Some(session) = self.session.as_mut() else { return };
         match session.execute(action.id, &action.params) {
             Ok(_) => {
+                let changes_project = loopwerk_session::commands()
+                    .iter()
+                    .find(|c| c.id == action.id)
+                    .is_some_and(|c| matches!(c.kind, CommandKind::Edit | CommandKind::History));
+                if changes_project {
+                    self.revision += 1;
+                }
                 if action.id == "launcher.setQuantization"
                     && let Some(value) = action.params["value"].as_str()
                     && let Some(known) = QUANTIZATION.iter().find(|q| **q == value)
@@ -174,8 +188,18 @@ impl App {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
                     if let Some(session) = &self.session {
-                        let timeline = Timeline::build(session.project(), session.player().map(|p| p.monitor()));
+                        let monitor = session.player().map(|p| p.monitor());
+                        // Clips and their notes are rebuilt only after the project changed; the
+                        // playhead is read every frame.
+                        let timeline = match self.timeline.take() {
+                            Some((revision, mut timeline)) if revision == self.revision => {
+                                timeline.follow(monitor);
+                                timeline
+                            }
+                            _ => Timeline::build(session.project(), monitor),
+                        };
                         arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                        self.timeline = Some((self.revision, timeline));
                     }
                 }
                 (None, _) => empty(ui),

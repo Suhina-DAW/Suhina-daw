@@ -197,3 +197,24 @@ fn unknown_commands_and_non_object_params_are_errors() {
     assert!(err.contains("\"temp\""), "{err}");
     assert_eq!(session.project().transport.tempo_bpm, 120.0);
 }
+
+#[test]
+fn a_clip_moves_to_another_track_that_takes_its_kind() {
+    let mut session = Session::new(project());
+    let moved =
+        run(&mut session, "clip.move", json!({ "track": "Bass", "index": 1, "start": 2, "to_track": "Lead" })).unwrap();
+    assert_eq!(moved["track"], 2);
+    let p = session.project();
+    assert_eq!(p.arrangement.lanes[0].clips.len(), 1);
+    let lead = p.arrangement.lanes.iter().find(|l| l.track == Some(TrackId(2))).unwrap();
+    assert!(lead.clips.iter().any(|c| c.start == 2.0));
+    assert_eq!(moved["index"], lead.clips.iter().position(|c| c.start == 2.0).unwrap());
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &project());
+    assert!(
+        run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 0, "to_track": "Nobody" }))
+            .is_err()
+    );
+    assert!(run(&mut session, "clip.move", json!({ "track": "Bass", "index": 9, "start": 0, "to_track": 2 })).is_err());
+}

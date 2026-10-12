@@ -14,7 +14,9 @@ use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
 use crate::widgets::{self, Action, Drag};
 
+/// Width of the track header column: the default and how far it can be dragged.
 pub const HEADER_COLUMN: f32 = 232.0;
+const HEADER_COLUMN_RANGE: (f32, f32) = (160.0, 520.0);
 const RULER: f32 = ROW;
 const DEFAULT_LANE: f32 = 48.0;
 const MIN_LANE: f32 = 20.0;
@@ -46,17 +48,36 @@ enum Control {
     Pan,
 }
 
-/// What the view keeps between frames: scrolling, zoom, lane heights, the selected clip and
-/// whatever is being dragged.
+/// A clip being dragged: where it came from, its unsnapped start and the lane under the pointer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClipDrag {
+    track: TrackId,
+    index: usize,
+    start: f64,
+    target: TrackId,
+}
+
+/// A lane on screen this frame: its track, where it is, and whether it can take notes or audio.
+#[derive(Debug, Clone, Copy)]
+struct Row {
+    track: TrackId,
+    time: Rect,
+    clip: Rect,
+}
+
+/// What the view keeps between frames: scrolling, zoom, lane heights, the header column, the
+/// selected clip and whatever is being dragged.
 #[derive(Debug)]
 pub struct ArrangementViewState {
     pub scroll: Vec2,
     /// Points per beat.
     pub beat_width: f32,
+    /// Track headers on the left of the timeline instead of the right.
+    pub headers_left: bool,
+    pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     selected: Option<(TrackId, usize)>,
-    /// A clip being moved: its track, index and unsnapped start.
-    clip_drag: Option<(TrackId, usize, f64)>,
+    clip_drag: Option<ClipDrag>,
     value_drag: Option<(TrackId, Control, f64)>,
 }
 
@@ -65,6 +86,8 @@ impl Default for ArrangementViewState {
         Self {
             scroll: Vec2::ZERO,
             beat_width: DEFAULT_BEAT_WIDTH,
+            headers_left: false,
+            header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: None,
             clip_drag: None,
@@ -115,8 +138,17 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::SURFACE_0);
 
-    let headers_x = (area.right() - HEADER_COLUMN).max(area.left());
-    let time = Rect::from_min_max(area.min, Pos2::new(headers_x - 1.0, area.bottom()));
+    // The header column, on either side, and the timeline beside it.
+    let max_header = (area.width() - 120.0).max(HEADER_COLUMN_RANGE.0);
+    state.header_width = state.header_width.clamp(HEADER_COLUMN_RANGE.0, HEADER_COLUMN_RANGE.1.min(max_header));
+    let (headers, time_x) = if state.headers_left {
+        let headers = egui::Rangef::new(area.left(), area.left() + state.header_width);
+        (headers, egui::Rangef::new(headers.max + 1.0, area.right()))
+    } else {
+        let headers = egui::Rangef::new(area.right() - state.header_width, area.right());
+        (headers, egui::Rangef::new(area.left(), headers.min - 1.0))
+    };
+    let time = Rect::from_x_y_ranges(time_x, area.y_range());
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
     // Return tracks and the main track are fixed rows along the bottom.
     let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
@@ -191,32 +223,56 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
 
-    // Header column top: above the headers, beside the ruler.
-    let corner = Rect::from_min_max(Pos2::new(headers_x, area.top()), Pos2::new(area.right(), ruler.bottom()));
+    // Header column top, beside the ruler: right-click moves the headers to the other side.
+    let corner = Rect::from_x_y_ranges(headers, ruler.y_range());
     painter.rect_filled(corner, 0.0, theme::SURFACE_1);
-    painter.vline(headers_x - 0.5, area.y_range(), theme::hairline(theme::LINE_STRONG));
+    let corner_response = ui.interact(corner, Id::new("arrangement-header-corner"), Sense::click());
+    corner_response.context_menu(|ui| {
+        let text = if state.headers_left { "Track headers on the right" } else { "Track headers on the left" };
+        if ui.button(text).clicked() {
+            state.headers_left = !state.headers_left;
+            ui.close();
+        }
+    });
+    let edge_x = if state.headers_left { headers.max + 0.5 } else { headers.min - 0.5 };
+    painter.vline(edge_x, area.y_range(), theme::hairline(theme::LINE_STRONG));
+
+    // Where every lane is this frame, so a dragged clip can find the lane under the pointer.
+    let mut rows = Vec::new();
+    let mut y = lanes_area.top() - state.scroll.y;
+    for lane in timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return) {
+        let height = state.height(lane);
+        let lane_time = Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(y, y + height));
+        rows.push(Row { track: lane.track, time: lane_time, clip: lane_time.intersect(lanes_area) });
+        y += height + 1.0;
+    }
+    let mut y = fixed.top();
+    for lane in &returns {
+        let lane_time = Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(y, y + ROW));
+        rows.push(Row { track: lane.track, time: lane_time, clip: lane_time.intersect(fixed) });
+        y += ROW + 1.0;
+    }
+    let row_of = |track: TrackId| rows.iter().find(|r| r.track == track).copied();
+    let lane_at = |pos: Pos2| rows.iter().find(|r| r.clip.y_range().contains(pos.y)).map(|r| r.track);
 
     // Lanes.
     let lanes_painter = painter.with_clip_rect(lanes_area);
-    let mut y = lanes_area.top() - state.scroll.y;
     let mut track_number = 0;
+    let mut ghost = None;
     for lane in timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return) {
-        let height = state.height(lane);
         track_number += 1;
-        let lane_rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
-        y += height + 1.0;
+        let Some(row) = row_of(lane.track) else { continue };
+        let lane_rect = Rect::from_x_y_ranges(area.x_range(), row.time.y_range());
         if lane_rect.bottom() < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
         }
-        let lane_time = Rect::from_min_max(lane_rect.min, Pos2::new(time.right(), lane_rect.bottom()));
-        let clips_painter = painter.with_clip_rect(lane_time.intersect(lanes_area));
         for clip in &lane.clips {
-            if clip.start + clip.length < first_beat || clip.start > last_beat {
-                continue;
+            if clip.start + clip.length >= first_beat && clip.start <= last_beat {
+                let found = clip_box(ui, &painter, row, lane, clip, &x_of, bar_beats, &lane_at, state, actions);
+                ghost = ghost.or(found);
             }
-            clip_box(ui, &clips_painter, lane_time, lane, clip, &x_of, bar_beats, state, actions);
         }
-        let header = Rect::from_min_max(Pos2::new(headers_x, lane_rect.top()), lane_rect.max);
+        let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, state, actions);
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
     }
@@ -224,29 +280,49 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     // Fixed rows: return tracks, then the main track, each a name and a volume.
     painter.hline(area.x_range(), fixed.top() - 0.5, theme::hairline(theme::LINE_STRONG));
     let fixed_painter = painter.with_clip_rect(fixed);
-    let mut y = fixed.top();
     for lane in &returns {
-        let row = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + ROW));
-        y += ROW + 1.0;
-        let lane_time = Rect::from_min_max(row.min, Pos2::new(time.right(), row.bottom()));
-        let clips_painter = painter.with_clip_rect(lane_time.intersect(fixed));
+        let Some(row) = row_of(lane.track) else { continue };
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
-                clip_box(ui, &clips_painter, lane_time, lane, clip, &x_of, bar_beats, state, actions);
+                let found = clip_box(ui, &painter, row, lane, clip, &x_of, bar_beats, &lane_at, state, actions);
+                ghost = ghost.or(found);
             }
         }
-        let header = Rect::from_min_max(Pos2::new(headers_x, row.top()), row.max);
+        let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         fixed_row(ui, &fixed_painter, header, fixed, lane, state, actions);
-        fixed_painter.hline(area.x_range(), row.bottom() + 0.5, theme::hairline(theme::LINE));
+        fixed_painter.hline(area.x_range(), row.time.bottom() + 0.5, theme::hairline(theme::LINE));
     }
     if let Some(db) = timeline.main_volume_db {
-        let header = Rect::from_min_max(Pos2::new(headers_x, y), Pos2::new(area.right(), y + ROW));
+        let y = fixed.bottom() - ROW;
+        let header = Rect::from_x_y_ranges(headers, egui::Rangef::new(y, y + ROW));
         fixed_painter.rect_filled(header, 0.0, theme::SURFACE_1);
         let inner = header.shrink2(Vec2::new(PAD, 2.0));
         let font = theme::ui_font(theme::TEXT);
         widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::TEXT_PRIMARY);
         let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
         volume_text(&fixed_painter, field, db, 0.0);
+    }
+
+    // A clip dragged onto another lane is drawn there, over everything in that lane.
+    if let Some((lane, clip, start)) = ghost
+        && let Some(drag) = state.clip_drag
+        && let Some(row) = row_of(drag.target)
+        && let Some(target) = timeline.lanes.iter().find(|l| l.track == drag.target)
+    {
+        let rect = clip_rect(row.time, start, clip.length, &x_of);
+        let lane_look = Lane { color: lane.color, mute: target.mute, ..target.clone() };
+        paint_clip(&painter.with_clip_rect(row.clip), rect, &lane_look, clip, start, &x_of, state.beat_width, true);
+    }
+
+    // The header column's inner edge resizes it.
+    let edge = Rect::from_x_y_ranges(egui::Rangef::new(edge_x - 3.0, edge_x + 3.0), area.y_range());
+    let response = ui
+        .interact(edge, Id::new("arrangement-header-edge"), Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+    if response.dragged() {
+        let dx = response.drag_delta().x;
+        let width = if state.headers_left { state.header_width + dx } else { state.header_width - dx };
+        state.header_width = width.clamp(HEADER_COLUMN_RANGE.0, HEADER_COLUMN_RANGE.1.min(max_header));
     }
 
     // Playhead through ruler and lanes.
@@ -258,33 +334,43 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
 }
 
+fn clip_rect(lane_time: Rect, start: f64, length: f64, x_of: &dyn Fn(f64) -> f32) -> Rect {
+    let left = x_of(start).round();
+    Rect::from_min_max(
+        Pos2::new(left, lane_time.top()),
+        Pos2::new((x_of(start + length).round() - 1.0).max(left + 1.0), lane_time.bottom()),
+    )
+}
+
+/// One arrangement clip: draws it and moves it when dragged, along its lane or onto another.
+/// Returns the clip and its start when it is being dragged onto another lane, to be drawn there.
 #[allow(clippy::too_many_arguments)]
-fn clip_box(
+fn clip_box<'a>(
     ui: &Ui,
     painter: &egui::Painter,
-    lane_time: Rect,
-    lane: &Lane,
-    clip: &ClipBox,
+    row: Row,
+    lane: &'a Lane,
+    clip: &'a ClipBox,
     x_of: &dyn Fn(f64) -> f32,
     bar_beats: f64,
+    lane_at: &dyn Fn(Pos2) -> Option<TrackId>,
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
-) {
+) -> Option<(&'a Lane, &'a ClipBox, f64)> {
     let key = (lane.track, clip.index);
+    let mine = |drag: &ClipDrag| (drag.track, drag.index) == key;
     let grid = snap(state.beat_width, bar_beats);
-    let start = match state.clip_drag {
-        Some((t, i, raw)) if (t, i) == key => ((raw / grid).round() * grid).max(0.0),
+    let snapped = |raw: f64| ((raw / grid).round() * grid).max(0.0);
+    let at = match state.clip_drag {
+        Some(drag) if mine(&drag) => snapped(drag.start),
         _ => clip.start,
     };
-    let rect = Rect::from_min_max(
-        Pos2::new(x_of(start).round(), lane_time.top()),
-        Pos2::new((x_of(start + clip.length).round() - 1.0).max(x_of(start).round() + 1.0), lane_time.bottom()),
-    );
-    let visible = rect.intersect(painter.clip_rect());
+    // Where it was last frame takes the pointer; it is drawn where this frame's drag puts it.
+    let visible = clip_rect(row.time, at, clip.length, x_of).intersect(row.clip);
     if visible.width() <= 0.0 || visible.height() <= 0.0 {
-        return;
+        return None;
     }
-    let bar = (start / bar_beats).floor() as u64 + 1;
+    let bar = (clip.start / bar_beats).floor() as u64 + 1;
     let name = if clip.name.is_empty() { "clip" } else { clip.name.as_str() };
     let response = ui
         .interact(visible, Id::new(("arrangement-clip", lane.track.0, clip.index)), Sense::click_and_drag())
@@ -295,24 +381,66 @@ fn clip_box(
         state.selected = Some(key);
     }
     if response.drag_started() {
-        state.clip_drag = Some((lane.track, clip.index, clip.start));
+        state.clip_drag =
+            Some(ClipDrag { track: lane.track, index: clip.index, start: clip.start, target: lane.track });
     }
     if response.dragged()
-        && let Some((t, i, raw)) = state.clip_drag
-        && (t, i) == key
+        && let Some(drag) = state.clip_drag.as_mut()
+        && (drag.track, drag.index) == key
     {
-        let moved = raw + f64::from(response.drag_delta().x / state.beat_width);
-        state.clip_drag = Some((t, i, moved));
+        drag.start += f64::from(response.drag_delta().x / state.beat_width);
+        if let Some(target) = response.interact_pointer_pos().and_then(lane_at) {
+            drag.target = target;
+        }
     }
     if response.drag_stopped()
-        && let Some((t, i, _)) = state.clip_drag.take()
-        && (t, i) == key
-        && (start - clip.start).abs() > 1e-9
+        && let Some(drag) = state.clip_drag.take()
+        && (drag.track, drag.index) == key
     {
-        actions.push(Action::new("clip.move", json!({ "track": lane.track.0, "index": clip.index, "start": start })));
+        let start = snapped(drag.start);
+        if drag.target != lane.track {
+            actions.push(Action::new(
+                "clip.move",
+                json!({ "track": lane.track.0, "index": clip.index, "start": start, "to_track": drag.target.0 }),
+            ));
+        } else if (start - clip.start).abs() > 1e-9 {
+            actions
+                .push(Action::new("clip.move", json!({ "track": lane.track.0, "index": clip.index, "start": start })));
+        }
+        // Drawn where it was dropped until the project has moved it.
+        let rect = clip_rect(row.time, start, clip.length, x_of);
+        paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, true);
+        return None;
     }
 
-    let selected = state.selected == Some(key);
+    match state.clip_drag {
+        Some(drag) if mine(&drag) && drag.target != lane.track => Some((lane, clip, snapped(drag.start))),
+        drag => {
+            let start = drag.filter(mine).map_or(clip.start, |d| snapped(d.start));
+            let rect = clip_rect(row.time, start, clip.length, x_of);
+            let selected = state.selected == Some(key);
+            paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, selected);
+            None
+        }
+    }
+}
+
+/// Draws a clip's body, colour strip, name and the marks of its notes (only those in view).
+#[allow(clippy::too_many_arguments)]
+fn paint_clip(
+    painter: &egui::Painter,
+    rect: Rect,
+    lane: &Lane,
+    clip: &ClipBox,
+    start: f64,
+    x_of: &dyn Fn(f64) -> f32,
+    beat_width: f32,
+    selected: bool,
+) {
+    let view = painter.clip_rect();
+    if !rect.intersects(view) {
+        return;
+    }
     let dim = |c: Color32| if lane.mute || !clip.enabled { c.gamma_multiply(0.55) } else { c };
     painter.rect_filled(rect, 0.0, if selected { theme::SURFACE_3 } else { theme::SURFACE_2 });
     let color = if clip.enabled { rgb(lane.color) } else { theme::TEXT_TERTIARY };
@@ -320,8 +448,10 @@ fn clip_box(
     let text_color = if clip.enabled && !lane.mute { theme::TEXT_VALUE } else { theme::TEXT_TERTIARY };
     let has_name = rect.height() >= 20.0;
     if has_name {
+        // The name stays in view while the clip's start is scrolled off to the left.
+        let left = rect.left().max(view.left()) + 4.0;
         let name_rect =
-            Rect::from_min_max(rect.min + Vec2::new(4.0, 3.0), Pos2::new(rect.right() - 2.0, rect.top() + 15.0));
+            Rect::from_min_max(Pos2::new(left, rect.top() + 3.0), Pos2::new(rect.right() - 2.0, rect.top() + 15.0));
         widgets::text_in(
             painter,
             name_rect,
@@ -341,9 +471,12 @@ fn clip_box(
         let low = clip.notes.iter().map(|n| n.key).min().unwrap_or(0);
         let high = clip.notes.iter().map(|n| n.key).max().unwrap_or(low);
         let rows = f32::from(high - low) + 1.0;
-        for note in &clip.notes {
+        // Only the notes in view are drawn; a long looped clip has thousands.
+        let first = f64::from((view.left() - x_of(start)) / beat_width) - 1.0;
+        let last = f64::from((view.right() - x_of(start)) / beat_width) + 1.0;
+        for note in clip.notes.iter().filter(|n| n.start + n.length >= first && n.start <= last) {
             let x = x_of(start + note.start);
-            let width = (note.length as f32 * state.beat_width - 1.0).max(1.0);
+            let width = (note.length as f32 * beat_width - 1.0).max(1.0);
             let row = f32::from(note.key - low);
             let y = marks.bottom() - (row + 0.5) / rows * marks.height();
             painter.rect_filled(Rect::from_min_size(Pos2::new(x, y - 1.0), Vec2::new(width, 2.0)), 0.0, dim(color));
@@ -393,13 +526,12 @@ fn track_header(
         Pos2::new(rect.right() - PAD, rect.bottom() - HEADER_PAD_Y),
     );
 
-    // Row 1: colour, name, track on.
+    // Row 1: track on, colour, name.
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
-    let square = Rect::from_min_size(Pos2::new(row.left(), row.center().y - 3.0), Vec2::splat(6.0));
+    let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
+    let square = Rect::from_min_size(Pos2::new(toggle.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     painter.rect_filled(square, 0.0, if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) });
-    let toggle = Rect::from_min_max(Pos2::new(row.right() - ON_TOGGLE, row.top()), row.max);
-    let name =
-        Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), Pos2::new(toggle.left() - PAD, row.bottom()));
+    let name = Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), row.max);
     let name_color = if lane.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), name_color);
     if toggle.intersects(clip) {
@@ -465,6 +597,7 @@ fn value_control(
     };
     let shown = preview.unwrap_or(value);
     let mut hover = 0.0;
+    let mut committed = None;
     if rect.intersects(clip) {
         let (label, text) = match control {
             Control::Volume => (format!("{} volume", lane.name), widgets::format_db(shown)),
@@ -476,6 +609,7 @@ fn value_control(
             Drag::Moving(v) => state.value_drag = Some((track, control, v)),
             Drag::Done(v) => {
                 state.value_drag = None;
+                committed = Some(v);
                 actions.push(match control {
                     Control::Volume => {
                         let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
@@ -489,16 +623,20 @@ fn value_control(
             Drag::None => {}
         }
     }
-    let shown = match state.value_drag {
-        Some((t, c, v)) if t == track && c == control => v,
-        _ => value,
+    // A drag (and the value it commits) follows the pointer directly and keeps the animation
+    // there, so nothing glides back afterwards; other changes (an undo, say) glide.
+    let anim = id.with(("shown", control as u8));
+    let dragged = match state.value_drag {
+        Some((t, c, v)) if t == track && c == control => Some(v),
+        _ => committed,
     };
-    // The fill glides to a new value (after an undo, say); a drag follows the pointer directly.
-    let dragging = matches!(state.value_drag, Some((t, c, _)) if t == track && c == control);
-    let shown = if dragging || !shown.is_finite() {
-        shown
-    } else {
-        f64::from(motion::value(ui.ctx(), id.with(("shown", control as u8)), shown as f32, motion::VALUE))
+    let shown = match dragged {
+        Some(v) => {
+            motion::jump(ui.ctx(), anim, v as f32);
+            v
+        }
+        None if value.is_finite() => f64::from(motion::value(ui.ctx(), anim, value as f32, motion::VALUE)),
+        None => value,
     };
     match control {
         Control::Volume if plain => volume_text(painter, rect, shown, hover),
@@ -513,8 +651,8 @@ fn volume_field(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
     let x = rect.left() + rect.width() * volume_position(db);
     painter.rect_filled(Rect::from_min_max(rect.min, Pos2::new(x, rect.bottom())), 0.0, theme::SURFACE_3_BRIGHT);
     let tick = x.round() - 0.5;
-    painter.vline(tick, egui::Rangef::new(rect.top(), rect.top() + 3.0), theme::hairline(theme::TEXT_VALUE));
-    painter.vline(tick, egui::Rangef::new(rect.bottom() - 3.0, rect.bottom()), theme::hairline(theme::TEXT_VALUE));
+    painter.vline(tick, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(theme::TEXT_VALUE));
+    painter.vline(tick, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(theme::TEXT_VALUE));
     let text = rect.shrink2(Vec2::new(4.0, 0.0));
     widgets::text_in(
         painter,
@@ -543,8 +681,8 @@ fn volume_text(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
 fn pan_field(painter: &egui::Painter, rect: Rect, pan: f64, hover: f32) {
     painter.rect_filled(rect, 0.0, motion::mix(PAN_BACKGROUND, theme::HOVER_ON_SURFACE_1, hover));
     let centre = rect.center().x.round() - 0.5;
-    painter.vline(centre, egui::Rangef::new(rect.top(), rect.top() + 3.0), theme::hairline(PAN_CENTRE));
-    painter.vline(centre, egui::Rangef::new(rect.bottom() - 3.0, rect.bottom()), theme::hairline(PAN_CENTRE));
+    painter.vline(centre, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(PAN_CENTRE));
+    painter.vline(centre, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(PAN_CENTRE));
     let to = rect.center().x + rect.width() / 2.0 * pan.clamp(-1.0, 1.0) as f32;
     let bar =
         Rect::from_min_max(Pos2::new(centre.min(to), rect.bottom() - 2.0), Pos2::new(centre.max(to), rect.bottom()));
