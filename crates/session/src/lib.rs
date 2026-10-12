@@ -77,11 +77,13 @@ pub struct Session {
     undo: Vec<Project>,
     redo: Vec<Project>,
     player: Option<Player>,
+    /// A copied arrangement clip and the content it plays, for `clip.paste`.
+    clipboard: Option<(loopwerk_model::Clip, loopwerk_model::ClipContent)>,
 }
 
 impl Session {
     pub fn new(project: Project) -> Self {
-        Self { project, source: None, undo: Vec::new(), redo: Vec::new(), player: None }
+        Self { project, source: None, undo: Vec::new(), redo: Vec::new(), player: None, clipboard: None }
     }
 
     /// Connects an audio engine playing this session's project; transport and launcher commands

@@ -545,12 +545,14 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     let base = std::env::temp_dir().join(format!("loopwerk-ui-plugins-{}", std::process::id()));
     let folder = base.join("my plug-ins");
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
-    let library =
-        loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host")).without_standard_folders();
+    let library = loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host"))
+        .without_standard_folders();
     let mut app = App::with_library(library);
     app.set_session(Session::new(demo_project()), &[]);
     let mut harness = window(app);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Plug-ins").click();
     harness.run();
 
     let field = harness.get_by_role(egui::accesskit::Role::TextInput);
@@ -564,7 +566,8 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     assert_eq!(remove, 1, "the added folder is listed with a Remove button");
 
     harness.get_by_label("Scan").click();
-    harness.run();
+    // The window keeps redrawing while the scan runs, so it is stepped, not run until still.
+    harness.step();
     for _ in 0..200 {
         if !harness.state().scanning() {
             break;
@@ -582,6 +585,54 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     harness.run();
     assert_eq!(harness.query_all_by_label_contains("Remove ").count(), 0);
     let _cleanup = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn a_key_set_in_settings_runs_its_action_and_is_saved() {
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Shortcuts").click();
+    harness.run();
+    harness.get_by_label("Change keys of view.arrangement").click();
+    harness.run();
+    harness.key_press(Key::A);
+    harness.run();
+    assert_eq!(harness.state().keymap().label("view.arrangement").as_deref(), Some("A"));
+    assert!(harness.state_mut().take_changed_keymap().is_some());
+
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    harness.key_press(Key::A);
+    harness.run();
+    assert_eq!(harness.state().view(), View::Arrangement);
+}
+
+#[test]
+fn keys_copy_paste_and_delete_the_selected_clip() {
+    let mut harness = arrangement_app();
+    let spans = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    harness.get_by_label("Clip Fill on Drums at bar 29").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    harness.run();
+    // The copy lands right after Fill (bar 33) and shortens what it covers.
+    assert!(spans(&harness).contains(&(128.0, 16.0)), "{:?}", spans(&harness));
+
+    let before = spans(&harness).len();
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click();
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(spans(&harness).len(), before - 1);
+    assert!(!spans(&harness).contains(&(0.0, 64.0)));
 }
 
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
@@ -613,6 +664,14 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.get_by_label("Settings page: Shortcuts").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("shortcuts.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
 
     let mut harness = Harness::builder()
         .with_size(SIZE)

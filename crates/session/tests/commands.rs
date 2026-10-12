@@ -402,3 +402,22 @@ fn an_audio_clip_takes_a_gain_and_a_midi_clip_does_not() {
     assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 0, "db": 0 })).is_err());
     assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 1, "db": 30 })).is_err());
 }
+
+#[test]
+fn clips_copy_cut_and_paste_with_their_own_content() {
+    let mut session = Session::new(project());
+    assert!(run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 0 })).is_err(), "nothing copied yet");
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    let pasted = run(&mut session, "clip.paste", json!({ "track": "Lead", "start": 16 })).unwrap();
+    let p = session.project();
+    let lead = p.arrangement.lanes.iter().find(|l| l.track == Some(TrackId(2))).unwrap();
+    let copy = &lead.clips[usize::try_from(pasted["index"].as_u64().unwrap()).unwrap()];
+    assert_eq!(copy.start, 16.0);
+    assert_ne!(copy.content, ContentId(1), "the copy has its own content");
+    assert_eq!(p.validate(), Ok(()));
+
+    run(&mut session, "clip.cut", json!({ "track": "Bass", "index": 1 })).unwrap();
+    assert_eq!(session.project().arrangement.lanes[0].clips.len(), 1);
+    run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 20 })).unwrap();
+    assert_eq!(session.project().arrangement.lanes[0].clips.len(), 2);
+}

@@ -119,6 +119,15 @@ impl Default for ArrangementViewState {
 }
 
 impl ArrangementViewState {
+    /// The selected clip: its track and index.
+    pub fn selected_clip(&self) -> Option<(TrackId, usize)> {
+        self.selected
+    }
+
+    pub fn clear_selected_clip(&mut self) {
+        self.selected = None;
+    }
+
     /// Sets a lane's height, as dragging its lower edge does.
     pub fn set_lane_height(&mut self, track: TrackId, height: f32) {
         self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
@@ -352,31 +361,6 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
         if to != source.position {
             actions.push(Action::new("track.move", json!({ "track": dragged.0, "to": to })));
-        }
-    }
-
-    // Keys: Delete removes the selected clip, Ctrl+D duplicates it, Ctrl+G groups the selected
-    // tracks.
-    if !ui.ctx().egui_wants_keyboard_input() {
-        let (delete, duplicate, group) = ui.input_mut(|i| {
-            (
-                i.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
-                i.consume_key(egui::Modifiers::COMMAND, egui::Key::D),
-                i.consume_key(egui::Modifiers::COMMAND, egui::Key::G),
-            )
-        });
-        if let Some((track, index)) = state.selected {
-            if delete {
-                actions.push(Action::new("clip.delete", json!({ "track": track.0, "index": index })));
-                state.selected = None;
-            } else if duplicate {
-                actions.push(Action::new("clip.duplicate", json!({ "track": track.0, "index": index })));
-            }
-        }
-        if group && !state.selected_tracks.is_empty() {
-            let tracks: Vec<u32> = state.selected_tracks.iter().map(|t| t.0).collect();
-            actions.push(Action::new("track.group", json!({ "tracks": tracks })));
-            state.selected_tracks.clear();
         }
     }
 

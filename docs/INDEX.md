@@ -38,6 +38,7 @@ are changing (*Code and its documents*).
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
+| [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
 
 ## Code and its documents
@@ -78,10 +79,11 @@ Change this code, and check these documents.
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/settings_view.rs` | [Components](design/components.md) |
+| `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/waveform.rs` | [Components](design/components.md) |

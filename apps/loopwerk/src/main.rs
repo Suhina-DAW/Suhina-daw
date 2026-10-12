@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 use loopwerk_engine::AudioPool;
 use loopwerk_session::{ProjectId, Session};
+use loopwerk_ui::keymap::Keymap;
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
 use loopwerk_ui::{App, OpenAs, Status};
@@ -23,11 +24,13 @@ usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations
                      default is the one chosen in Options > Settings
   --no-animations    turn the interface's animations off this time
 Without a project the window opens empty; drop a .als file on it to open one.
-Settings are kept in settings.txt in Loopwerk's folder of the user's app data.";
+Settings are kept in settings.txt and the keys in keymap.json, in Loopwerk's folder of the
+user's app data.";
 
 /// The folder eframe keeps Loopwerk's window state in; the settings file lives beside it.
 const APP_ID: &str = "Loopwerk";
 const SETTINGS_FILE: &str = "settings.txt";
+const KEYMAP_FILE: &str = "keymap.json";
 
 #[derive(Debug, PartialEq)]
 enum Source {
@@ -56,7 +59,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let (settings, settings_warnings) = load_settings();
+    let (settings, mut settings_warnings) = load_settings();
+    let (keymap, keymap_warnings) = load_keymap();
+    settings_warnings.extend(keymap_warnings);
     let renderer = args.renderer.unwrap_or(match settings.graphics {
         Graphics::Gpu => eframe::Renderer::Wgpu,
         Graphics::OpenGl => eframe::Renderer::Glow,
@@ -98,6 +103,7 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
             window.app.set_settings(&cc.egui_ctx, settings);
+            window.app.set_keymap(keymap);
             if !animations {
                 App::set_animations(&cc.egui_ctx, false);
             }
@@ -183,6 +189,11 @@ impl eframe::App for Window {
         {
             self.app.set_status(Status::Error(e));
         }
+        if let Some(keymap) = self.app.take_changed_keymap()
+            && let Err(e) = save_file(KEYMAP_FILE, &keymap.to_json())
+        {
+            self.app.set_status(Status::Error(e));
+        }
     }
 }
 
@@ -245,11 +256,26 @@ fn load_settings() -> (Settings, Vec<String>) {
 }
 
 fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = settings_path().ok_or("there is no folder to keep the settings in")?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("could not save the settings: {e}"))?;
+    save_file(SETTINGS_FILE, &settings.to_text())
+}
+
+/// The saved keymap over the default keys, or the defaults when there is none yet.
+fn load_keymap() -> (Keymap, Vec<String>) {
+    let path = eframe::storage_dir(APP_ID).map(|dir| dir.join(KEYMAP_FILE));
+    match path.map(std::fs::read_to_string) {
+        Some(Ok(text)) => Keymap::from_json(&text),
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
+            (Keymap::default(), vec![format!("could not read the keymap: {e}")])
+        }
+        _ => (Keymap::default(), Vec::new()),
     }
-    std::fs::write(&path, settings.to_text()).map_err(|e| format!("could not save the settings: {e}"))
+}
+
+/// Writes one of Loopwerk's files in its app-data folder.
+fn save_file(name: &str, text: &str) -> Result<(), String> {
+    let dir = eframe::storage_dir(APP_ID).ok_or("there is no folder to keep settings in")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not save {name}: {e}"))?;
+    std::fs::write(dir.join(name), text).map_err(|e| format!("could not save {name}: {e}"))
 }
 
 #[cfg(test)]

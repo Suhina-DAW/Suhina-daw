@@ -245,6 +245,31 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_clip_gain,
     },
     CommandSpec {
+        id: "clip.copy",
+        label: "Copy an arrangement clip, with what it plays, for clip.paste",
+        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        kind: CommandKind::Read,
+        run: copy_clip,
+    },
+    CommandSpec {
+        id: "clip.cut",
+        label: "Copy an arrangement clip for clip.paste and delete it",
+        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        kind: CommandKind::Edit,
+        run: cut_clip,
+    },
+    CommandSpec {
+        id: "clip.paste",
+        label: "Place the copied clip on a track, replacing what it covers unless stacked",
+        params: &[
+            TRACK,
+            param("start", ParamType::Number, "where it starts, in beats from the beginning, at least 0"),
+            optional("stack", ParamType::Bool, "true leaves clips under it as they are"),
+        ],
+        kind: CommandKind::Edit,
+        run: paste_clip,
+    },
+    CommandSpec {
         id: "clip.duplicate",
         label: "Place a copy of an arrangement clip right after it, replacing what the copy covers",
         params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
@@ -756,6 +781,62 @@ fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, Command
         return Err("only an audio clip has a gain".into());
     }
     Ok(json!({ "gain_db": to_db(gain) }))
+}
+
+fn copy_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    let clip = session.project.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).cloned();
+    let clip = clip.ok_or("the clip is missing")?;
+    let content = session.project.content(clip.content).cloned().ok_or("the clip's content is missing")?;
+    let name = content.name.clone();
+    session.clipboard = Some((clip, content));
+    Ok(json!({ "copied": name }))
+}
+
+fn cut_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    copy_clip(session, params)?;
+    delete_clip(session, params)
+}
+
+fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let (clip, content) = session.clipboard.clone().ok_or("nothing has been copied")?;
+    let start = number(params, "start")?;
+    if start < 0.0 {
+        return Err(format!("start must be at least 0, got {start}").into());
+    }
+    let stack = match params.get("stack") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("stack must be true or false")?,
+    };
+    let track = track_id(&session.project, params)?;
+    let p = &mut session.project;
+    let target = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
+    let notes = content.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_)));
+    let audio = content.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)));
+    if (notes && !target.content.notes) || (audio && !target.content.audio) {
+        let what = if audio { "an audio clip" } else { "a MIDI clip" };
+        return Err(format!("track {:?} cannot hold {what}", target.name).into());
+    }
+    // The copy plays its own content, so editing one does not change the other.
+    let id = loopwerk_model::ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    p.contents.push(loopwerk_model::ClipContent { id, ..content });
+    let placed = Clip { content: id, start, ..clip };
+    let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
+        Some(lane) => lane,
+        None => {
+            let name = p.tracks.iter().find(|t| t.id == track).map(|t| t.name.clone()).unwrap_or_default();
+            p.arrangement.lanes.push(ArrangementLane { name, track: Some(track), clips: Vec::new() });
+            p.arrangement.lanes.len() - 1
+        }
+    };
+    let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
+    if !stack {
+        make_room(&mut lane.clips, start, start + placed.length);
+    }
+    lane.clips.push(placed.clone());
+    lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+    let index = lane.clips.iter().position(|c| *c == placed).unwrap_or_default();
+    Ok(json!({ "track": track.0, "index": index, "start": start }))
 }
 
 fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

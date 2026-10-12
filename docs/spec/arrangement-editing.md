@@ -29,6 +29,14 @@ plays through that track's instrument and effects. The move is one undo step.
 as a moved clip does; `clip.delete {track, index}` removes it. In the Arrangement view a clip's
 right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
 
+## Copy, cut and paste
+
+`clip.copy {track, index}` keeps a copy of a clip and what it plays; `clip.cut` also deletes it;
+`clip.paste {track, start, stack?}` places the copy on a track that takes its kind, replacing what
+it covers unless stacked. The pasted clip plays its own copy of the content, so editing one does
+not change the other. The window's keys paste after the selected clip, or at the playhead on the
+selected track ([shortcuts](../shortcuts.md)).
+
 ## Tracks
 
 | Command | Does |

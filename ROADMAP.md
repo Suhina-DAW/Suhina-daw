@@ -191,7 +191,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `track.group`, `track.ungroup`, `track.move`, `track.rename`,
-  `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`,
+  `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`, `clip.copy`, `clip.cut`, `clip.paste`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
@@ -277,5 +277,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Remember and a setting). A project file dragged over the window darkens it.
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
+- Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
+  that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
+  group) and the window's own ([shortcuts](docs/shortcuts.md)).
 - Still to do: clip fades, input routing and sends, arm, meters, the browser, the detail area
-  (devices, clip editor), configurable shortcuts, installers.
+  (devices, clip editor), installers.

@@ -170,7 +170,9 @@ A number field that is its own slider: drag vertically to change, double-click t
 ## Settings page
 
 Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
-no dialogs. A centred column at most 560 px wide: a title with Close on the right, then sections
+no dialogs. Three pages, picked with a segmented control under the title: General (the table
+below), Shortcuts (every action with its keys, Change, Clear, Reset all; [shortcuts](../shortcuts.md))
+and Plug-ins. A centred column at most 560 px wide: a title with Close on the right, then sections
 (10 px `text.tertiary` heading over a 1 px `line`), each setting a 34 px row with its name (11 px
 `text.primary`), a note under it (10 px `text.secondary`) and its control on the right, a
 segmented control of 64 px per part. A change applies at once and is saved; one that needs a

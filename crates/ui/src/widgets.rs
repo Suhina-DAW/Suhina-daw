@@ -22,6 +22,17 @@ impl Action {
     pub fn new(id: &'static str, params: Value) -> Self {
         Self { id, params }
     }
+
+    /// An action for a command named at run time (from the keymap); unknown ids run nothing.
+    pub fn new_owned(id: &str, params: Value) -> Self {
+        let known = loopwerk_session::commands()
+            .iter()
+            .map(|c| c.id)
+            .chain(loopwerk_session::project_commands().iter().map(|c| c.id))
+            .find(|known| *known == id)
+            .unwrap_or("commands.list");
+        Self { id: known, params }
+    }
 }
 
 /// One line of text cut to `max_width` with an ellipsis.

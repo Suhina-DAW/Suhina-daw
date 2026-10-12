@@ -6,17 +6,18 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use egui::{Align2, Id, Key, KeyboardShortcut, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
 use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
 use crate::grid::{Grid, SlotState};
+use crate::keymap::Keymap;
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{OnOpen, Settings, Side};
-use crate::settings_view::{self, About, PluginRequest, PluginsView};
+use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView};
 use crate::theme::{self, PAD};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
@@ -28,12 +29,6 @@ const QUANTIZATION: [&str; 14] = [
 /// The engine's quantisation before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
 
-const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
-const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z);
-const REDO_Y: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
-const SETTINGS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma);
-const NEXT_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Tab);
-const PREVIOUS_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Tab);
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
 /// How dark the window gets while a project file is dragged over it.
@@ -113,6 +108,10 @@ pub struct App {
     plugins: PluginsView,
     plugins_read: bool,
     scan: Option<std::sync::mpsc::Receiver<ScanDone>>,
+    /// Which keys run which action, and whether that changed and should be saved.
+    keymap: Keymap,
+    keymap_changed: bool,
+    page: PageState,
     settings: Settings,
     /// The settings changed and should be saved.
     settings_changed: bool,
@@ -151,6 +150,9 @@ impl App {
             plugins: PluginsView::default(),
             plugins_read: false,
             scan: None,
+            keymap: Keymap::default(),
+            keymap_changed: false,
+            page: PageState::default(),
             settings: Settings::default(),
             settings_changed: false,
             settings_open: false,
@@ -339,6 +341,20 @@ impl App {
     pub fn set_waveforms(&mut self, waveforms: crate::waveform::Waveforms) {
         self.waveforms = std::sync::Arc::new(waveforms);
         self.timeline = None;
+    }
+
+    /// Uses `keymap` for the keys from now on, as loaded from the keymap file.
+    pub fn set_keymap(&mut self, keymap: Keymap) {
+        self.keymap = keymap;
+    }
+
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+
+    /// The keymap, once after each change, for the app to save.
+    pub fn take_changed_keymap(&mut self) -> Option<Keymap> {
+        std::mem::take(&mut self.keymap_changed).then(|| self.keymap.clone())
     }
 
     pub fn settings(&self) -> &Settings {
@@ -673,7 +689,17 @@ impl App {
         if !self.plugins_read {
             self.read_plugins();
         }
-        let outcome = settings_view::show(ui, &mut self.settings, &self.about, &mut self.plugins);
+        let outcome = settings_view::show(
+            ui,
+            &mut self.settings,
+            &self.about,
+            &mut self.plugins,
+            &mut self.keymap,
+            &mut self.page,
+        );
+        if outcome.keymap_changed {
+            self.keymap_changed = true;
+        }
         if let Some(request) = outcome.plugins.clone() {
             self.plugin_request(request);
         }
@@ -692,6 +718,8 @@ impl App {
         let has_project = self.session().is_some();
         let (can_undo, can_redo) = self.session().map_or((false, false), |s| (s.can_undo(), s.can_redo()));
         let several = self.projects.len() >= 2;
+        let keymap = self.keymap.clone();
+        let keys = move |action: &str| keymap.label(action).unwrap_or_default();
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::TEXT_SECONDARY);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -700,29 +728,41 @@ impl App {
                 }
             });
             ui.menu_button("Edit", |ui| {
-                if ui.add_enabled(can_undo, egui::Button::new("Undo").shortcut_text("Ctrl+Z")).clicked() {
+                if ui.add_enabled(can_undo, egui::Button::new("Undo").shortcut_text(keys("edit.undo"))).clicked() {
                     actions.push(Action::new("edit.undo", json!({})));
                 }
-                if ui.add_enabled(can_redo, egui::Button::new("Redo").shortcut_text("Ctrl+Shift+Z")).clicked() {
+                if ui.add_enabled(can_redo, egui::Button::new("Redo").shortcut_text(keys("edit.redo"))).clicked() {
                     actions.push(Action::new("edit.redo", json!({})));
                 }
             });
             ui.menu_button("View", |ui| {
-                if ui.add_enabled(has_project, egui::Button::new("Session").shortcut_text("Tab")).clicked() {
+                if ui
+                    .add_enabled(has_project, egui::Button::new("Session").shortcut_text(keys("view.session")))
+                    .clicked()
+                {
                     self.shown = View::Session;
                     self.settings_open = false;
                 }
-                if ui.add_enabled(has_project, egui::Button::new("Arrangement").shortcut_text("Tab")).clicked() {
+                if ui
+                    .add_enabled(has_project, egui::Button::new("Arrangement").shortcut_text(keys("view.arrangement")))
+                    .clicked()
+                {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
             });
             ui.menu_button("Projects", |ui| {
-                if ui.add_enabled(several, egui::Button::new("Next project").shortcut_text("Ctrl+Tab")).clicked() {
+                if ui
+                    .add_enabled(several, egui::Button::new("Next project").shortcut_text(keys("projects.next")))
+                    .clicked()
+                {
                     actions.push(Action::new("projects.next", json!({})));
                 }
                 if ui
-                    .add_enabled(several, egui::Button::new("Previous project").shortcut_text("Ctrl+Shift+Tab"))
+                    .add_enabled(
+                        several,
+                        egui::Button::new("Previous project").shortcut_text(keys("projects.previous")),
+                    )
                     .clicked()
                 {
                     actions.push(Action::new("projects.previous", json!({})));
@@ -734,7 +774,7 @@ impl App {
                 }
             });
             ui.menu_button("Options", |ui| {
-                if ui.add(egui::Button::new("Settings").shortcut_text("Ctrl+,")).clicked() {
+                if ui.add(egui::Button::new("Settings").shortcut_text(keys("settings.open"))).clicked() {
                     self.settings_open = true;
                 }
             });
@@ -754,36 +794,78 @@ impl App {
         }
     }
 
+    /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
+    /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        if self.projects.is_empty() || ui.ctx().egui_wants_keyboard_input() {
+        if ui.ctx().egui_wants_keyboard_input() || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        let (next, previous) = ui.input_mut(|i| (i.consume_shortcut(&NEXT_TAB), i.consume_shortcut(&PREVIOUS_TAB)));
-        if previous && self.projects.len() >= 2 {
-            actions.push(Action::new("projects.previous", json!({})));
-        } else if next && self.projects.len() >= 2 {
-            actions.push(Action::new("projects.next", json!({})));
+        let pressed = ui.input_mut(|i| self.keymap.pressed(i));
+        for action in pressed {
+            self.do_action(&action, actions);
         }
-        if ui.input_mut(|i| i.consume_shortcut(&SETTINGS)) {
-            self.settings_open = !self.settings_open;
-        }
-        ui.input_mut(|i| {
-            if i.consume_shortcut(&REDO) || i.consume_shortcut(&REDO_Y) {
-                actions.push(Action::new("edit.redo", json!({})));
-            } else if i.consume_shortcut(&UNDO) {
-                actions.push(Action::new("edit.undo", json!({})));
-            }
-            if i.consume_key(Modifiers::NONE, Key::Tab) {
+    }
+
+    /// Does one keymap action: the window's own, one on the selection, or a command that needs
+    /// no parameters.
+    pub fn do_action(&mut self, action: &str, actions: &mut Vec<Action>) {
+        let has_project = !self.projects.is_empty();
+        match action {
+            "settings.open" => self.settings_open = !self.settings_open,
+            _ if !has_project => {}
+            "view.toggle" => {
                 self.shown = match self.shown {
                     View::Session => View::Arrangement,
                     View::Arrangement => View::Session,
                 };
             }
-            if i.consume_key(Modifiers::NONE, Key::Space) {
+            "view.session" => self.shown = View::Session,
+            "view.arrangement" => self.shown = View::Arrangement,
+            "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(Action::new(if running { "transport.stop" } else { "transport.play" }, json!({})));
             }
-        });
+            "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
+                let Some((track, index)) = self.arrangement.selected_clip() else { return };
+                let id = match action {
+                    "selection.copy" => "clip.copy",
+                    "selection.cut" => "clip.cut",
+                    "selection.duplicate" => "clip.duplicate",
+                    _ => "clip.delete",
+                };
+                if matches!(id, "clip.cut" | "clip.delete") {
+                    self.arrangement.clear_selected_clip();
+                }
+                actions.push(Action::new(id, json!({ "track": track.0, "index": index })));
+            }
+            "selection.paste" => {
+                // After the selected clip, or at the playhead on the selected track.
+                let timeline = self.timeline.as_ref().map(|(_, t)| t);
+                let target = match self.arrangement.selected_clip() {
+                    Some((track, index)) => timeline
+                        .and_then(|t| t.lanes.iter().find(|l| l.track == track))
+                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                        .map(|c| (track, c.start + c.length)),
+                    None => self.arrangement.selected_tracks.first().map(|t| (*t, timeline.map_or(0.0, |t| t.beat))),
+                };
+                match target {
+                    Some((track, start)) => {
+                        actions.push(Action::new("clip.paste", json!({ "track": track.0, "start": start })))
+                    }
+                    None => self.status = Status::Hint("Select a clip or a track to paste on".into()),
+                }
+            }
+            "selection.group" => {
+                if self.arrangement.selected_tracks.is_empty() {
+                    return;
+                }
+                let tracks: Vec<u32> = self.arrangement.selected_tracks.iter().map(|t| t.0).collect();
+                actions.push(Action::new("track.group", json!({ "tracks": tracks })));
+                self.arrangement.selected_tracks.clear();
+            }
+            "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
+            command => actions.push(Action::new_owned(command, json!({}))),
+        }
     }
 
     /// How far each column's playing clip is, from the beat it was first seen playing.
