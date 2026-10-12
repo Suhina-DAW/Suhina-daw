@@ -734,7 +734,8 @@ fn row_menu(
         ui.ctx().data_mut(|d| d.insert_temp(id, name.clone()));
         if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !name.trim().is_empty() {
             let palette = loopwerk_library::store::default_tags();
-            let color = palette.get(tags.len() % palette.len().max(1)).map_or("#8C8A85".to_string(), |t| t.color.clone());
+            let color =
+                palette.get(tags.len() % palette.len().max(1)).map_or("#8C8A85".to_string(), |t| t.color.clone());
             let name = name.trim().to_string();
             if run(projects, "library.setTag", json!({ "name": name, "color": color }), out) {
                 run(projects, "library.tag", json!({ "item": item.key, "tag": name, "on": true }), out);
@@ -1001,7 +1002,8 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
                 ui.close();
             }
             let mut color = tag_color(&tag.color);
-            if egui::color_picker::color_edit_button_srgba(ui, &mut color, egui::color_picker::Alpha::Opaque).changed() {
+            if egui::color_picker::color_edit_button_srgba(ui, &mut color, egui::color_picker::Alpha::Opaque).changed()
+            {
                 let hex = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
                 run(projects, "library.setTag", json!({ "name": tag.name, "color": hex }), out);
             }
