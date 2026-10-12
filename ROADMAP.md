@@ -10,7 +10,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP and edits heard while playing work; more commands and a native project format to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5); VST3 after | |
+| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; not in the engine yet |
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
 
@@ -194,7 +194,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `clip.move`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
-  `projects.next`, `projects.previous`, `projects.close`.
+  `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
+  `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
+  `loopwerk-cli plugins …`).
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access

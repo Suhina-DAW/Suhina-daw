@@ -271,6 +271,9 @@ impl LoopwerkMcp {
         description = "Run one command by id with its parameters. Editing commands record one undo step; on error the project is unchanged."
     )]
     async fn command_run(&self, Parameters(p): Parameters<RunParams>) -> Result<CallToolResult, McpError> {
+        if let Some(why) = refused(&p.id) {
+            return Ok(fail(why));
+        }
         let params = p.params.unwrap_or_else(|| json!({}));
         let output = self.audio_output.clone();
         let target = p.project.map(ProjectId);
@@ -304,7 +307,10 @@ impl LoopwerkMcp {
                 let mut failed = false;
                 for step in p.steps {
                     let params = step.params.unwrap_or_else(|| json!({}));
-                    let outcome = projects.execute_in(target, &step.id, &params);
+                    let outcome = match refused(&step.id) {
+                        Some(why) => Err(why.into()),
+                        None => projects.execute_in(target, &step.id, &params),
+                    };
                     if outcome.is_ok() {
                         play_active(projects, &step.id, output.as_deref());
                     }
@@ -419,6 +425,18 @@ fn start_audio(session: &mut Session, output: &dyn AudioOutput, warnings: &mut V
     }
 }
 
+/// Commands agents may not run. They choose the folders whose plug-ins a scan loads and runs,
+/// so an agent could otherwise add its write root and run code it wrote there. The user chooses
+/// plug-in folders (`loopwerk-cli plugins add-folder`, later the UI); agents may still scan them.
+const NOT_FOR_AGENTS: [&str; 2] = ["plugins.addFolder", "plugins.removeFolder"];
+
+/// Why an agent may not run command `id`, if it may not.
+fn refused(id: &str) -> Option<String> {
+    NOT_FOR_AGENTS.contains(&id).then(|| {
+        format!("{id} is not available to agents: the user chooses plug-in folders (loopwerk-cli plugins add-folder)")
+    })
+}
+
 /// After a project command, starts the newly active project playing when the server has audio
 /// output, since switching closes the previous project's player. Returns what was started.
 fn play_active(projects: &mut Projects, id: &str, output: Option<&dyn AudioOutput>) -> Option<Value> {
@@ -480,5 +498,19 @@ impl ServerHandler for LoopwerkMcp {
             }
         }
         self.tool_router.call(ToolCallContext::new(self, request, context)).await
+    }
+}
+
+#[cfg(test)]
+mod refused_tests {
+    use super::refused;
+
+    #[test]
+    fn agents_may_scan_but_not_choose_plugin_folders() {
+        assert!(refused("plugins.addFolder").is_some());
+        assert!(refused("plugins.removeFolder").is_some());
+        for id in ["plugins.scan", "plugins.list", "plugins.folders", "track.setPan"] {
+            assert!(refused(id).is_none(), "{id}");
+        }
     }
 }

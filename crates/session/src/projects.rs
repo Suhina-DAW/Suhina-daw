@@ -3,7 +3,10 @@
 
 use serde_json::{Value, json};
 
+use loopwerk_plugins::library::Library;
+
 use crate::commands::{CommandKind, CommandSpec, Param, ParamType, commands, param};
+use crate::plugins::plugin_commands;
 use crate::{CommandError, Session};
 
 /// Projects that may be open at once; opening more is refused. Each holds its own undo history.
@@ -20,12 +23,14 @@ struct Open {
     session: Session,
 }
 
-/// The open projects in tab order, and which one is active.
+/// The open projects in tab order, and which one is active; and the plug-in library, which
+/// belongs to Loopwerk rather than to any one project.
 #[derive(Default)]
 pub struct Projects {
     open: Vec<Open>,
     active: Option<ProjectId>,
     last_id: u32,
+    library: Library,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -164,8 +169,18 @@ impl Projects {
         Ok(closed.session)
     }
 
-    /// Runs command `id`: a `projects.*` command on the open projects, anything else on the
-    /// active project. `commands.list` lists both kinds.
+    /// Uses `library` for the `plugins.*` commands instead of the one in Loopwerk's settings
+    /// folder (for tests, or a portable setup).
+    pub fn with_library(library: Library) -> Self {
+        Self { library, ..Self::default() }
+    }
+
+    pub fn library_mut(&mut self) -> &mut Library {
+        &mut self.library
+    }
+
+    /// Runs command `id`: a `projects.*` or `plugins.*` command on the open projects (and the
+    /// plug-in library), anything else on the active project. `commands.list` lists every kind.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value, CommandError> {
         self.execute_in(None, id, params)
     }
@@ -177,9 +192,9 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) = PROJECT_COMMANDS.iter().find(|c| c.id == id) {
+        if let Some(spec) = PROJECT_COMMANDS.iter().chain(plugin_commands()).find(|c| c.id == id) {
             if project.is_some() {
-                return Err(format!("{id} runs on the open projects; it takes no target project").into());
+                return Err(format!("{id} does not run on one project; it takes no target project").into());
             }
             check_params(id, spec.params, params)?;
             return (spec.run)(self, params);
@@ -200,7 +215,7 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects = PROJECT_COMMANDS.iter().map(CommandSpec::describe);
+    let projects = PROJECT_COMMANDS.iter().chain(plugin_commands()).map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 
