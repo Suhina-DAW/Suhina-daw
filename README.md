@@ -17,7 +17,7 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 - Session-style clip launching with quantisation, plus a linear arrangement.
 - Reading `.als` projects you made yourself; later other formats such as DAWproject and `.flp`,
   so projects are not locked to one program.
-- CLAP plug-in hosting, every plug-in sandboxed in its own process.
+- CLAP and VST3 plug-in hosting, sandboxed outside Loopwerk's process: a crashing plug-in never takes the project down.
 - Every action available headlessly: CLI and MCP for automation and agents.
 
 ## Downloads

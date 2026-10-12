@@ -147,3 +147,38 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
     assert_eq!(run(&mut p, "plugins.check", json!({})).unwrap(), checked);
     assert!(run(&mut p, "plugins.check", json!({ "project": 99 })).is_err());
 }
+
+#[test]
+fn hosting_is_chosen_per_plug_in_and_reaches_the_sessions() {
+    use loopwerk_plugins::scan::{Catalog, PluginInfo};
+    let (_, dir) = projects("hosting");
+    let settings = dir.join("settings");
+    std::fs::create_dir_all(&settings).unwrap();
+    let mut catalog = Catalog::new();
+    let verb = PluginInfo {
+        path: PathBuf::from("Verb.vst3"),
+        id: "ABCDEF0123456789ABCDEF0123456789".into(),
+        name: "Verb".into(),
+        vendor: "Vendor".into(),
+        version: "1".into(),
+        features: vec!["Fx".into()],
+        replaces: Vec::new(),
+    };
+    catalog.insert(verb.path.clone(), vec![verb.clone()]);
+    std::fs::write(settings.join("plugin-catalog.json"), catalog.to_json()).unwrap();
+    let mut p = Projects::with_library(Library::new(Some(settings.clone()), dir.join("no-such-host")));
+    // By default every instance of a plug-in file shares a process.
+    let group = |p: &mut Projects| (p.plugin_env().group)(&verb);
+    assert_eq!(group(&mut p), Some("file:Verb.vst3".into()));
+    assert_eq!(run(&mut p, "plugins.list", json!({})).unwrap()["plugins"][0]["hosting"], "binary");
+    let set = run(&mut p, "plugins.setHosting", json!({ "plugin": "Verb", "hosting": "instance" })).unwrap();
+    assert_eq!(set, json!({ "plugin": "Verb", "hosting": "instance" }));
+    assert_eq!(group(&mut p), None, "a process of its own from its next start");
+    run(&mut p, "plugins.setHosting", json!({ "plugin": "Verb", "hosting": "vendor" })).unwrap();
+    assert_eq!(group(&mut p), Some("vendor:Vendor".into()));
+    // Kept for the next start.
+    let mut later = Projects::with_library(Library::new(Some(settings), dir.join("no-such-host")));
+    assert_eq!(run(&mut later, "plugins.list", json!({})).unwrap()["plugins"][0]["hosting"], "vendor");
+    assert!(run(&mut p, "plugins.setHosting", json!({ "plugin": "Verb", "hosting": "shared" })).is_err());
+    assert!(run(&mut p, "plugins.setHosting", json!({ "plugin": "Nothing", "hosting": "binary" })).is_err());
+}

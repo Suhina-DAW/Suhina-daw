@@ -16,7 +16,7 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli fm-synth voices <file.syx>
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
-                             | check <project.als>)
+                             | check <project.als> | set-hosting <plug-in> (binary | vendor | instance))
        loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
        loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
@@ -33,7 +33,9 @@ commands:
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
             folders shows where scans look, add-folder and remove-folder change that; check
-            lists a project's plug-ins and the installed plug-in found for each, or none
+            lists a project's plug-ins and the installed plug-in found for each, or none;
+            set-hosting chooses whether a plug-in's instances share a process per file (the
+            default), per vendor, or each run in one of their own
   fm-synth  fm-synth voices: list the voices in a DX7 voice or bank file (.syx)
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
@@ -533,6 +535,9 @@ fn plugins(args: &[String]) -> Result<(), String> {
         ["folders"] => ("plugins.folders", serde_json::json!({})),
         ["add-folder", folder] => ("plugins.addFolder", serde_json::json!({ "folder": folder })),
         ["remove-folder", folder] => ("plugins.removeFolder", serde_json::json!({ "folder": folder })),
+        ["set-hosting", plugin, hosting] => {
+            ("plugins.setHosting", serde_json::json!({ "plugin": plugin, "hosting": hosting }))
+        }
         _ => {
             return Err(format!(
                 "unknown plugins command

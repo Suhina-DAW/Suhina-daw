@@ -52,6 +52,9 @@ the layer that owns sessions.
 - Background projects stay in memory with their undo history; decoded audio is held only by
   the active project's player over MCP. The desktop app shows the projects as tabs and keeps
   each open project's decoded audio, so a switch there opens only a new output stream.
+- Only the active project's plug-ins run: `Projects::poll_plugins` starts them while it plays,
+  and a project that stops playing (another tab made active) stops them, each keeping its last
+  state for when the project plays again ([ADR 0006](0006-plug-in-hosting.md)).
 - `Projects` is where Loopwerk-wide state lives too: it also holds the plug-in library that the
   `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)), shared by every open
   project.

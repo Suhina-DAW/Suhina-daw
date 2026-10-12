@@ -10,7 +10,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP and edits heard while playing work; more commands and a native project format to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); not in the engine yet |
+| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
@@ -202,8 +202,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
-  `plugins.check` (also as `loopwerk-cli plugins …`); for devices `devices.list`,
-  `track.devices`, `device.add`, `device.remove`, `device.setEnabled`, `device.setParam`.
+  `plugins.check`, `plugins.setHosting` (also as `loopwerk-cli plugins …`); for devices
+  `devices.list`, `track.devices`, `device.add`, `device.remove`, `device.setEnabled`,
+  `device.setParam`, `device.addPlugin`, `device.plugin`, `device.openEditor`,
+  `device.closeEditor`, `device.restart`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
@@ -250,6 +252,22 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
   vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
 
+### M6 Plug-ins (in progress)
+- CLAP and VST3 plug-ins run in `loopwerk-plugin-host` processes, never in Loopwerk's: by
+  default one process per plug-in file, or per vendor, or one per instance
+  (`plugins.setHosting`); a crash or hang costs that plug-in's sound, not the project
+  ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)).
+- An opened Live Set's plug-ins play in the app: each is found among the installed ones (a VST3
+  version for a VST2 plug-in too) and started with the settings the project saved; instruments
+  play their track's notes, effects process their track. Missing ones are named in the status
+  bar and keep their settings untouched.
+- Tracks are lined up for the latency of their devices and plug-ins.
+- The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
+  editor, Close editor or Restart; the same commands work from the CLI and MCP.
+- Renders (`loopwerk-cli render`, MCP `project_render`) run the same plug-ins.
+- Still to do: plug-ins of one process in one round trip, plug-in parameters as automation,
+  editors embedded in Loopwerk's window, Wayland and macOS editors, VST2 hosting (not decided).
+
 ### M8 UI (started)
 - `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
   stopped on the default output and shows the **Session view**: tracks as columns, return tracks
@@ -290,7 +308,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
 - A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
-  clip's properties or the selected track's devices with their parameters; Shift+Tab hides it.
+  clip's properties or the selected track's devices with their parameters, and each plug-in's
+  state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
 - Still to do: clip fades, input routing and sends, arm, meters, the browser, device editing
   and the clip editor in the detail area, installers.

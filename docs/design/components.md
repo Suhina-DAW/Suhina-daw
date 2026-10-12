@@ -247,8 +247,9 @@ are skipped with a warning in the status bar.
 | Header | 20 px, `surface.2`, 6 px padding: on switch, name, and what it is on the right in 9 px `text.tertiary` (Loopwerk, CLAP, VST3, VST2, or "Not supported" for a device of another DAW) |
 | On switch | 9 × 9 square, 1 px border; on: filled `text.primary`; off: outline `text.tertiary`, name `text.tertiary` |
 | Parameter | A 16 px row: its id in 10 px `text.secondary` on the left, its value in 10 px mono `#C9C4BB` on the right. (planned, with the device commands and parameter ranges) a 44 px column: 26 px knob (r 11, pointer to r 10), value 10 px mono, label 10 px `text.secondary`; 14 px between columns; pointer `accent` when the device is on |
-| No parameters | A plug-in: "Its own window"; another DAW's device: "Kept so the chain keeps its shape" (10 px `text.tertiary`) |
-| Stacked | In a column, each device is as tall as its parameters (20 px header, 6 px padding, 16 px a parameter), 1 px apart |
+| Plug-in | A 16 px row with where it stands, 10 px: the plug-in's name and vendor (and its latency in frames) in `text.secondary` while it runs; "Loading …", "Not running" (the project is not playing) or "Not installed; kept with its settings" in `text.tertiary`; "Crashed: …" or "Could not start: …" in `recording`. Under it a 96 × 18 px button, `surface.2` (hover `hover.surface.2`), 1 px `line.strong` border, 10 px `text.primary`: "Open editor" or "Close editor" while it runs, "Restart" after a crash; none otherwise. It runs `device.openEditor`, `device.closeEditor` or `device.restart` |
+| No parameters | Another DAW's device: "Kept so the chain keeps its shape"; a built-in device without parameters: "No parameters" (10 px `text.tertiary`) |
+| Stacked | In a column, each device is as tall as its parameters (20 px header, 6 px padding, 16 px a parameter; a plug-in as tall as its state row and button), 1 px apart |
 
 ## Clip properties
 

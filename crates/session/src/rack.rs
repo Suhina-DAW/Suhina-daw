@@ -17,6 +17,7 @@ use loopwerk_engine::{
     DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, model::DeviceKind, plugin_devices,
 };
 use loopwerk_model::{Device, Project};
+use loopwerk_plugins::library::{Hosting, group_for};
 use loopwerk_plugins::scan::{Catalog, PluginInfo};
 use loopwerk_plugins::{Event, EventKind, Health, Launch, MAX_EVENTS, Plugin, PluginAudio, PluginError, SavedState};
 
@@ -49,13 +50,28 @@ impl PluginEnv {
     /// `catalog` with plug-ins run by `host`, every instance of one plug-in file in one process
     /// (the default).
     pub fn new(catalog: Catalog, host: PathBuf) -> Self {
-        Self { catalog, host, group: Box::new(|plugin| Some(plugin.path.display().to_string())) }
+        Self { catalog, host, group: Box::new(|plugin| group_for(Hosting::default(), plugin)) }
     }
 
-    /// What `library` gives: its catalog, its host, and how each plug-in is hosted.
+    /// What `library` gives: its catalog, its host, and how each plug-in is hosted (its
+    /// `plugins.setHosting` choice, else one process per plug-in file).
     pub fn from_library(library: &mut loopwerk_plugins::library::Library) -> Self {
         let host = library.host().to_path_buf();
-        Self::new(library.catalog().clone(), host)
+        let catalog = library.catalog().clone();
+        let chosen: HashMap<String, Hosting> = catalog
+            .plugins()
+            .map(PluginInfo::spec)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|spec| {
+                let hosting = library.hosting(&spec);
+                (spec, hosting)
+            })
+            .filter(|(_, hosting)| *hosting != Hosting::default())
+            .collect();
+        let group: ProcessGroup =
+            Box::new(move |plugin| group_for(chosen.get(&plugin.spec()).copied().unwrap_or_default(), plugin));
+        Self { catalog, host, group }
     }
 }
 

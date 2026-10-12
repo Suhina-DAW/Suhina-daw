@@ -117,7 +117,9 @@ volume, pan or sends, only the MIDI meter. The height of this section is a saved
 Devices left to right in chain order. Each device has a header (on/off switch, name, fold,
 options) and its controls. Instruments come first on MIDI tracks; effects follow. An empty
 area at the end accepts dropped devices. Plug-ins show their name and an option to open their
-own window.
+own window. Loopwerk shows where the plug-in stands (loading, running, missing, crashed) and a
+button that opens or closes its editor, or restarts it after a crash
+([components](../design/components.md) › Device panel).
 
 ## Shortcuts (to observe and list)
 

@@ -71,6 +71,14 @@ not to a project, so these also run on `Projects`, never change a project and re
 step. Agents over MCP may scan and list but not add or remove folders: a folder decides whose
 code a scan runs.
 
+## Amendment: running plug-ins (2026-10-12)
+
+A seventh kind, **plugin**, acts on one of the project's running plug-ins:
+`device.openEditor`, `device.closeEditor` and `device.restart` ([ADR 0006](0006-plug-in-hosting.md)).
+They run on the session, never change the project and record no undo step. Adding a plug-in
+(`device.addPlugin`) is an edit like `device.add`; `device.plugin` reads where a plug-in device
+stands. `plugins.setHosting` (kind plugins) chooses how a plug-in shares host processes.
+
 ## Amendment: device commands (2026-10-12)
 
 Devices on tracks are edited with ordinary **edit** commands, one undo step each:

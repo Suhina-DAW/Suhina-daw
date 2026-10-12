@@ -8,6 +8,8 @@ covers:
   - crates/ipc/**
   - crates/plugins/**
   - crates/plugin-host/**
+  - crates/engine/src/plugin.rs
+  - crates/session/src/rack.rs
 ---
 
 # 0006: Plug-in hosting
@@ -256,7 +258,40 @@ workspace forbids.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
-  engine's track chain together with built-in devices (LOOP-35); editors (Windows and X11 done).
+  engine's track chain together with built-in devices (LOOP-35, done, #100); editors (Windows
+  and X11 done).
+- **In the engine (#100).** The engine never sees `plugins`: a plug-in device's slot in a
+  track's chain holds a `PluginProcessor` (`crates/engine/src/plugin.rs`), which the session
+  implements over `PluginAudio` (`Hosted`, `crates/session/src/rack.rs`). A slot runs once per
+  block with the block's notes at their frames (VST3 `inputEvents`, CLAP note events; an
+  all-notes-off becomes the sustain pedal and controller 123), so the chain runs its devices
+  one after another over the whole block rather than piece by piece. The block's plug-ins wait
+  together until 60 % of the block's playing time has passed (decision 4); a slot that misses
+  leaves the sound as it was (an effect) or silent (an instrument) and counts the miss, and the
+  next block goes on. Offline (`Renderer::set_offline`, every `render_*` function, the CLI's
+  and MCP's WAV renders) each block waits up to 10 s, through the same `process`.
+  Each plug-in device has a key made from its channel, its plug-in and how many of the same
+  plug-in come before it on that channel, so it keeps its running plug-in when devices are
+  added, removed or moved around it; its processor reaches the audio thread as a message
+  (`Controller::send_plugin`), waits there for a graph that has its slot, and is handed from
+  graph to graph; a restarted plug-in's processor replaces the crashed one, which goes back to
+  be dropped off the audio thread.
+- **Projects.** While a project plays, the session finds each plug-in device in the catalog
+  (`plugins.check`'s matching), starts it with the saved state (and VST3 controller state) on a
+  thread of its own, and hands it over; a project's plug-ins stop when it stops playing (a
+  tab switch) and each keeps its last state for when it starts again, as one whose device is
+  removed does for an undo. A plug-in that is not installed is *missing*: no slot, the sound
+  passes, its state stays in the project untouched and is saved back as it was; the status bar
+  names it. Every 30 s the session reads each running plug-in's state, so a restart after a
+  crash gets back what was set in its editor (decision 5); it does not go into the project
+  yet, which has no save. Crashes and hangs are noticed within 250 ms and shown on the
+  device; `device.restart` starts it again.
+- **Latency** is compensated: every track is heard as late as the one whose devices (built-in
+  and plug-ins, as each reports) delay it most, up to 2 s, through delay lines made with the
+  graph. A plug-in's latency is known once it has started, which builds a new graph. The
+  playhead shows what the engine renders, so it runs ahead of what is heard by that delay.
+- Not built yet: consecutive plug-ins of one process in one round trip; automating plug-in
+  parameters from the engine; latency a plug-in changes while it runs (read once, at start).
 
 ## Sources
 

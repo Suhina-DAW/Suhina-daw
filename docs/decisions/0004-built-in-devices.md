@@ -96,7 +96,10 @@ the device code should not have to change when it lands.
    and launched) go to it as note events at their frames, the chain running in pieces split at
    each event, and note-offs follow from each note's end; stopping the transport or a column
    releases them. A track without devices is mixed straight into the output exactly as
-   before. Unknown ids, plug-ins and other DAWs' devices pass the sound through for now. Chains
+   before. Unknown ids, plug-ins that are not installed and other DAWs' devices pass the sound
+   through; installed plug-ins run in the same chain ([ADR 0006](0006-plug-in-hosting.md)), so
+   the devices of a chain run one after another over a whole block, each split at the events.
+   Chains
    hold at most 1024 frames, so the renderer splits longer blocks. A graph swap (ADR 0005)
    hands a chain's running devices to the new graph when the same devices sit on the same
    track, so held notes and tails carry on through an edit and the new parameter values
@@ -108,8 +111,9 @@ the device code should not have to change when it lands.
 - **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
   `track.devices`, `device.add` (an instrument always first, one per track), `device.remove`,
   `device.setEnabled` and `device.setParam` (values stored limited to the parameter's range).
-- **Chains on group, return and master channels**, and latency compensation for devices that
-  report latency (the overdrive and vinyl distortion, 31 frames).
+- **Chains on group, return and master channels.** Latency compensation is built for track
+  chains: a device's `latency()` (the overdrive and vinyl distortion, 31 frames) delays every
+  other track to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences).
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI

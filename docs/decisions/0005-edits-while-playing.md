@@ -66,6 +66,17 @@ clip; devices (ADR 0004) will add many more parameters.
    `Session::execute` calls `Player::update`, so the CLI, MCP and a future UI all get the same
    behaviour.
 
+## Amendment: running plug-ins across graphs (2026-10-12)
+
+A plug-in's audio half is not part of any graph's project: it is started by the session and
+sent to the audio thread as a message (`Controller::send_plugin`), placed in its slot in the
+playing graph or kept until a graph with its slot takes over. A swap hands every running
+plug-in to its slot in the new graph, by key, even where the chain around it changed, and the
+delay lines of latency compensation carry their sound over when their length stays the same.
+What a graph knows about plug-in devices (`Controller::set_plugin_info`: which have a slot,
+which play notes, their latency) is set before the graph is built
+([ADR 0006](0006-plug-in-hosting.md)).
+
 ## Amendment: edits in the next block (2026-10-12)
 
 In a DAW an edit should be heard at once; with a graph per edit taken one per audio block and

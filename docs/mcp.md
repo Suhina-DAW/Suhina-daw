@@ -52,7 +52,20 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   project's plug-in devices with the installed plug-in found for each (also a VST3 version
   standing in for a VST2 one), how it was found and whether its settings carry over. `plugins.addFolder` and
   `plugins.removeFolder` are refused for agents, since a folder decides whose code a scan runs;
-  the user adds folders with `loopwerk-cli plugins add-folder`.
+  the user adds folders with `loopwerk-cli plugins add-folder`. `plugins.setHosting` chooses
+  how a plug-in's instances share host processes (`binary`, the default, `vendor` or
+  `instance`), from their next start.
+
+- **Plug-in devices.** `device.addPlugin` adds an installed plug-in (by name, id or file, from
+  `plugins.list`) to a track, an instrument first; one undo step. With an audio engine
+  (`--audio`) the active project's plug-ins run: each is found in the catalog and started with
+  its saved settings in the background, between commands; `device.plugin` (and `plugin` in
+  `track.devices`) says where one stands (`loading`, `running`, `missing`, `crashed`, `failed`,
+  or `stopped` while the project does not play) with the plug-in found, its latency and whether
+  its editor is open. `device.openEditor` and `device.closeEditor` open its editor in a window
+  of its own on the user's screen, and `device.restart` starts a crashed one again with its
+  last settings. Renders run the installed plug-ins with their saved settings; their result's
+  `plugins` lists those that are missing or did not start.
 
 ## Tools
 
