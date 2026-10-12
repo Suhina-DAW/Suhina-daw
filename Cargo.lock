@@ -2531,6 +2531,7 @@ dependencies = [
  "loopwerk-media",
  "loopwerk-plugins",
  "loopwerk-session",
+ "loopwerk-soundmap",
  "serde_json",
 ]
 

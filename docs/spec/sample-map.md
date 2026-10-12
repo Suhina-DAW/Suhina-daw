@@ -2,10 +2,11 @@
 description: How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map
 read_when: sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands
 type: spec
-status: planned
+status: draft
 last_verified: 2026-10-12
 covers:
   - crates/soundmap/**
+  - crates/ui/src/sample_map.rs
 ---
 
 # Sample map
@@ -25,7 +26,11 @@ presets that come with audio previews (NKS) take part in the same map.
   ([ADR 0011](../decisions/0011-preview-and-added-audio.md)).
 - **Architecture:** [ADR 0013](../decisions/0013-sample-map-analysis.md): the analysis crate,
   the features, the layout methods and the cache.
-- **Status:** planned; nothing is implemented. Statements marked **(to decide)** are open.
+- **Status:** in progress. Built: the analysis, layout, grid, kinds and caches
+  (`crates/soundmap`) and the map view (`crates/ui/src/sample_map.rs`, drawn and tested on its
+  own). Not yet: the browser's List | Map switch and the large view that show it, the
+  `soundmap.*` commands, the settings, and NKS presets. Statements marked **(to decide)** are
+  open.
 
 ## What was observed
 
