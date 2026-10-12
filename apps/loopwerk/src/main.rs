@@ -12,21 +12,31 @@ use loopwerk_session::Session;
 use loopwerk_ui::{App, Status};
 
 const USAGE: &str = "\
-usage: loopwerk [<project.als> | --demo]
+usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
 
-  <project.als>  a Live Set to import and open
-  --demo         open a small built-in project
+  <project.als>      a Live Set to import and open
+  --demo             open a small built-in project
+  --renderer         how the window is drawn: wgpu (default) or glow (OpenGL)
+  --no-animations    turn the interface's animations off
 Without a project the window opens empty; drop a .als file on it to open one.";
 
+#[derive(Debug, PartialEq)]
 enum Source {
     Nothing,
     Demo,
     Als(PathBuf),
 }
 
+#[derive(Debug, PartialEq)]
+struct Args {
+    source: Source,
+    renderer: eframe::Renderer,
+    animations: bool,
+}
+
 fn main() -> ExitCode {
-    let source = match parse_args(&std::env::args().skip(1).collect::<Vec<_>>()) {
-        Ok(Some(source)) => source,
+    let args = match parse_args(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        Ok(Some(args)) => args,
         Ok(None) => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -37,7 +47,7 @@ fn main() -> ExitCode {
         }
     };
     let mut app = App::new();
-    match source {
+    match args.source {
         Source::Nothing => {}
         Source::Demo => {
             let (session, warnings) = with_audio(Session::new(loopwerk_ui::demo::demo_project()), &AudioPool::new());
@@ -52,13 +62,16 @@ fn main() -> ExitCode {
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
             .with_drag_and_drop(true),
+        renderer: args.renderer,
         ..Default::default()
     };
+    let animations = args.animations;
     let result = eframe::run_native(
         "Loopwerk",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
+            App::set_animations(&cc.egui_ctx, animations);
             Ok(Box::new(Window { app }))
         }),
     );
@@ -71,15 +84,35 @@ fn main() -> ExitCode {
     }
 }
 
-fn parse_args(args: &[String]) -> Result<Option<Source>, String> {
-    match args {
-        [] => Ok(Some(Source::Nothing)),
-        [flag] if flag == "--help" || flag == "-h" => Ok(None),
-        [flag] if flag == "--demo" => Ok(Some(Source::Demo)),
-        [flag] if flag.starts_with('-') => Err(format!("unknown argument: {flag}")),
-        [path] => Ok(Some(Source::Als(PathBuf::from(path)))),
-        _ => Err("give one project".into()),
+/// `Ok(None)` asks for the usage text.
+fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
+    let mut parsed = Args { source: Source::Nothing, renderer: eframe::Renderer::Wgpu, animations: true };
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let source = match arg.as_str() {
+            "--help" | "-h" => return Ok(None),
+            "--demo" => Source::Demo,
+            "--no-animations" => {
+                parsed.animations = false;
+                continue;
+            }
+            "--renderer" => {
+                parsed.renderer = match it.next().map(String::as_str) {
+                    Some("wgpu") => eframe::Renderer::Wgpu,
+                    Some("glow") => eframe::Renderer::Glow,
+                    other => return Err(format!("--renderer takes wgpu or glow, not {other:?}")),
+                };
+                continue;
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown argument: {flag}")),
+            path => Source::Als(PathBuf::from(path)),
+        };
+        if parsed.source != Source::Nothing {
+            return Err("give one project".into());
+        }
+        parsed.source = source;
     }
+    Ok(Some(parsed))
 }
 
 struct Window {
@@ -125,14 +158,26 @@ fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>)
 mod tests {
     use super::*;
 
+    fn parse(v: &[&str]) -> Result<Option<Args>, String> {
+        parse_args(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
     #[test]
     fn one_project_or_none() {
-        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(matches!(parse_args(&args(&[])), Ok(Some(Source::Nothing))));
-        assert!(matches!(parse_args(&args(&["--demo"])), Ok(Some(Source::Demo))));
-        assert!(matches!(parse_args(&args(&["set.als"])), Ok(Some(Source::Als(_)))));
-        assert!(matches!(parse_args(&args(&["--help"])), Ok(None)));
-        assert!(parse_args(&args(&["--bogus"])).is_err());
-        assert!(parse_args(&args(&["a.als", "b.als"])).is_err());
+        assert_eq!(parse(&[]).ok().flatten().map(|a| a.source), Some(Source::Nothing));
+        assert_eq!(parse(&["--demo"]).ok().flatten().map(|a| a.source), Some(Source::Demo));
+        assert_eq!(parse(&["set.als"]).ok().flatten().map(|a| a.source), Some(Source::Als("set.als".into())));
+        assert!(matches!(parse(&["--help"]), Ok(None)));
+        assert!(parse(&["--bogus"]).is_err());
+        assert!(parse(&["a.als", "b.als"]).is_err());
+    }
+
+    #[test]
+    fn renderer_and_animations_can_be_chosen() {
+        let args = parse(&["--demo", "--renderer", "glow", "--no-animations"]).ok().flatten();
+        assert_eq!(args.as_ref().map(|a| a.renderer), Some(eframe::Renderer::Glow));
+        assert_eq!(args.map(|a| a.animations), Some(false));
+        assert!(parse(&["--renderer", "metal"]).is_err());
+        assert!(parse(&["--renderer"]).is_err());
     }
 }

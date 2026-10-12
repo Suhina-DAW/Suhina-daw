@@ -9,29 +9,33 @@ use loopwerk_ui::demo::demo_project;
 use loopwerk_ui::grid::Grid;
 use loopwerk_ui::session_view::{self, SessionViewState};
 use loopwerk_ui::widgets::Action;
-use loopwerk_ui::{App, Status, theme};
+use loopwerk_ui::{App, Status, View, theme};
 use serde_json::json;
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
-struct View {
+struct SessionHarness {
     grid: Grid,
     state: SessionViewState,
     actions: Vec<Action>,
 }
 
-fn view() -> Harness<'static, View> {
-    let view =
-        View { grid: Grid::build(&demo_project(), None), state: SessionViewState::default(), actions: Vec::new() };
-    let mut harness = Harness::builder()
-        .with_size(SIZE)
-        .build_ui_state(|ui, v: &mut View| session_view::show(ui, &v.grid, &[], &mut v.state, &mut v.actions), view);
+fn view() -> Harness<'static, SessionHarness> {
+    let view = SessionHarness {
+        grid: Grid::build(&demo_project(), None),
+        state: SessionViewState::default(),
+        actions: Vec::new(),
+    };
+    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(
+        |ui, v: &mut SessionHarness| session_view::show(ui, &v.grid, &[], &mut v.state, &mut v.actions),
+        view,
+    );
     theme::install(&harness.ctx);
     harness.run();
     harness
 }
 
-fn clicked(harness: &mut Harness<'static, View>, label: &str) -> Vec<Action> {
+fn clicked(harness: &mut Harness<'static, SessionHarness>, label: &str) -> Vec<Action> {
     harness.state_mut().actions.clear();
     harness.get_by_label(label).click();
     harness.run();
@@ -122,8 +126,63 @@ fn an_empty_window_asks_for_a_project() {
     assert!(matches!(harness.state().status(), Status::Hint(_)));
 }
 
-/// Renders the window with the demo project to `target/ui-snapshots/session.png`, to compare
-/// with `docs/design/reference/session-minimal-v3.png`. Needs a GPU adapter, so it runs only
+#[test]
+fn tab_and_the_view_switch_change_the_view() {
+    let mut harness = window(demo_app());
+    assert_eq!(harness.state().view(), View::Session);
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(harness.state().view(), View::Arrangement);
+    assert!(harness.query_by_label("Clip Beat B on Drums at bar 17").is_some());
+    harness.get_by_label("Session view").click();
+    harness.run();
+    assert_eq!(harness.state().view(), View::Session);
+}
+
+fn arrangement_app() -> Harness<'static, App> {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness
+}
+
+#[test]
+fn dragging_a_clip_moves_it_on_the_bar_grid() {
+    let mut harness = arrangement_app();
+    let from = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().center();
+    // 8 points a beat by default, so 64 points are two bars.
+    let to = from + egui::vec2(64.0, 0.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + egui::vec2(30.0, 0.0));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    let starts: Vec<f64> = harness
+        .state()
+        .session()
+        .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect())
+        .unwrap_or_default();
+    assert!(starts.contains(&72.0), "{starts:?}");
+    assert!(!starts.contains(&64.0), "{starts:?}");
+}
+
+#[test]
+fn arrangement_headers_turn_tracks_off() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Turn Keys off").click();
+    harness.run();
+    assert_eq!(harness.state().session().map(|s| s.project().channels[2].mute), Some(true));
+    assert!(harness.query_by_label("Keys volume").is_some());
+    assert!(harness.query_by_label("Keys pan").is_some());
+}
+
+/// Renders the window with the demo project to `target/ui-snapshots/session.png` and
+/// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.
 #[test]
 #[ignore = "needs a GPU adapter; run with --ignored"]
@@ -139,4 +198,11 @@ fn render_the_session_window() {
     let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
     image.save(folder.join("session.png")).unwrap_or_else(|e| panic!("{e}"));
+
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("arrangement.png")).unwrap_or_else(|e| panic!("{e}"));
 }

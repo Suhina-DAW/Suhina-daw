@@ -244,8 +244,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   beside the scene column, clip slots with their state (stopped, queued, playing with progress),
   scene launch, stop buttons, and a mixer strip with pan, volume and track on/off
   ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md), [spec](docs/spec/ui-session-view.md)).
+- The **Arrangement view** (Tab switches): bar ruler, one lane per track with its clips and their
+  notes (loops repeated), the playhead, track headers on the right that show volume and pan once
+  a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
+  by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
+  switch); `--no-animations` turns them off until Settings exists.
 - The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
   stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every click is a command, the same the CLI and
   MCP run.
-- Still to do: the Arrangement view, browser, detail area (devices, clip editor), menu bar and
+- Still to do: the browser, detail area (devices, clip editor), menu bar and
   settings, project tabs, meters, solo and arm, the design's monospace font, installers.

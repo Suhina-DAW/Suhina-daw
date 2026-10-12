@@ -1,4 +1,5 @@
-//! The main window: control bar, the Session view and the status bar around an open session.
+//! The main window: control bar, the Session or Arrangement view and the status bar around an
+//! open session.
 //! Every change goes through `Session::execute` (AGENTS.md rule 6); the window only reads the
 //! project and the engine's monitor to draw them.
 
@@ -10,9 +11,12 @@ use loopwerk_engine::model::TrackId;
 use loopwerk_session::Session;
 use serde_json::json;
 
+use crate::arrangement_view::{self, ArrangementViewState};
 use crate::grid::{Grid, SlotState};
+use crate::motion;
 use crate::session_view::{self, SessionViewState};
 use crate::theme::{self, PAD};
+use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
 
 /// Launch quantisation choices, as `launcher.setQuantization` takes them.
@@ -26,6 +30,14 @@ const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z);
 const REDO_Y: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
 
+/// The main view; Tab switches between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum View {
+    #[default]
+    Session,
+    Arrangement,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     Hint(String),
@@ -36,7 +48,9 @@ pub enum Status {
 /// The window's state.
 pub struct App {
     session: Option<Session>,
+    shown: View,
     view: SessionViewState,
+    arrangement: ArrangementViewState,
     status: Status,
     quantization: &'static str,
     /// Where each column's playing clip started, in beats, to show its progress.
@@ -55,7 +69,9 @@ impl App {
     pub fn new() -> Self {
         Self {
             session: None,
+            shown: View::Session,
             view: SessionViewState::default(),
+            arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
             quantization: DEFAULT_QUANTIZATION,
             launches: HashMap::new(),
@@ -83,6 +99,7 @@ impl App {
         }
         self.session = Some(session);
         self.view = SessionViewState::default();
+        self.arrangement = ArrangementViewState::default();
         self.launches.clear();
         self.quantization = DEFAULT_QUANTIZATION;
     }
@@ -91,8 +108,17 @@ impl App {
         self.session.as_ref()
     }
 
+    pub fn view(&self) -> View {
+        self.shown
+    }
+
     pub fn status(&self) -> &Status {
         &self.status
+    }
+
+    /// Turns animations on or off (a setting; on by default).
+    pub fn set_animations(ctx: &egui::Context, on: bool) {
+        motion::set_enabled(ctx, on);
     }
 
     pub fn set_status(&mut self, status: Status) {
@@ -144,9 +170,15 @@ impl App {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match &grid {
-                Some(grid) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
-                None => empty(ui),
+            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
+                (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
+                (Some(_), View::Arrangement) => {
+                    if let Some(session) = &self.session {
+                        let timeline = Timeline::build(session.project(), session.player().map(|p| p.monitor()));
+                        arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                    }
+                }
+                (None, _) => empty(ui),
             });
         });
 
@@ -182,6 +214,12 @@ impl App {
                 actions.push(Action::new("edit.redo", json!({})));
             } else if i.consume_shortcut(&UNDO) {
                 actions.push(Action::new("edit.undo", json!({})));
+            }
+            if i.consume_key(Modifiers::NONE, Key::Tab) {
+                self.shown = match self.shown {
+                    View::Session => View::Arrangement,
+                    View::Arrangement => View::Session,
+                };
             }
             if i.consume_key(Modifiers::NONE, Key::Space) {
                 let running = self.session.as_ref().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
@@ -246,7 +284,7 @@ impl App {
         painter.rect_filled(
             tempo_rect,
             0.0,
-            if response.hovered() || response.dragged() { theme::HOVER_ON_SURFACE_2 } else { theme::SURFACE_2 },
+            motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response)),
         );
         let mono = theme::mono_font(theme::TEXT);
         widgets::text_in(
@@ -288,15 +326,10 @@ impl App {
         if response.clicked() {
             actions.push(Action::new("transport.play", json!({})));
         }
-        let fill = if grid.running {
-            theme::SURFACE_3
-        } else if response.hovered() {
-            theme::HOVER_ON_SURFACE_2
-        } else {
-            theme::SURFACE_2
-        };
-        painter.rect_filled(play, 0.0, fill);
-        let glyph = if grid.running { theme::ACCENT } else { theme::TEXT_PRIMARY };
+        let running = motion::toward(ui.ctx(), response.id.with("running"), grid.running, motion::VALUE);
+        let hover = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
+        painter.rect_filled(play, 0.0, motion::mix(hover, theme::SURFACE_3, running));
+        let glyph = motion::mix(theme::TEXT_PRIMARY, theme::ACCENT, running);
         let c = play.center();
         painter.add(egui::Shape::convex_polygon(
             vec![c + Vec2::new(-3.5, -5.0), c + Vec2::new(5.0, 0.0), c + Vec2::new(-3.5, 5.0)],
@@ -309,7 +342,11 @@ impl App {
         if response.clicked() {
             actions.push(Action::new("transport.stop", json!({})));
         }
-        painter.rect_filled(stop, 0.0, if response.hovered() { theme::HOVER_ON_SURFACE_2 } else { theme::SURFACE_2 });
+        painter.rect_filled(
+            stop,
+            0.0,
+            motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response)),
+        );
         painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::TEXT_PRIMARY);
         x = stop.right() + PAD;
         let position = row(x, 64.0);
@@ -323,30 +360,33 @@ impl App {
             theme::TEXT_PRIMARY,
         );
 
-        // Right: the views. Only the Session view exists so far.
-        let font = theme::ui_font(theme::TEXT);
-        let arrangement = Rect::from_min_max(
-            Pos2::new(bar.right() - PAD - 72.0, bar.top()),
-            Pos2::new(bar.right() - PAD, bar.bottom()),
-        );
-        widgets::text_in(
-            &painter,
-            arrangement,
-            Align2::RIGHT_CENTER,
-            "Arrangement",
-            font.clone(),
-            theme::TEXT_TERTIARY,
-        );
-        let session_rect = Rect::from_min_max(
-            Pos2::new(arrangement.left() - 52.0, bar.top()),
-            Pos2::new(arrangement.left() - 10.0, bar.bottom()),
-        );
-        let galley = widgets::fitted(&painter, "Session", font, theme::TEXT_PRIMARY, session_rect.width());
-        let pos = Align2::RIGHT_CENTER.align_size_within_rect(galley.size(), session_rect).min;
-        let underline =
-            Rect::from_min_size(Pos2::new(pos.x, pos.y + galley.size().y + 1.0), Vec2::new(galley.size().x, 1.0));
-        painter.galley(pos, galley, theme::TEXT_PRIMARY);
-        painter.rect_filled(underline, 0.0, theme::TEXT_PRIMARY);
+        // Right: the view switch; the current view is underlined.
+        let mut right = bar.right() - PAD;
+        let mut underline_at = None;
+        for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
+            let color = if self.shown == view { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+            let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
+            let size = galley.size();
+            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
+            let response = widgets::button_area(ui, rect, Id::new(("view", name)), format!("{name} view"));
+            if response.clicked() {
+                self.shown = view;
+            }
+            let color = motion::mix(color, theme::TEXT_PRIMARY, widgets::hover(ui, &response));
+            let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
+            painter.galley(pos, galley, color);
+            if self.shown == view {
+                underline_at = Some((pos.x, pos.y + size.y + 1.0, size.x));
+            }
+            right = rect.left() - 12.0;
+        }
+        // The underline slides to the view that was picked.
+        if let Some((x, y, width)) = underline_at {
+            let ctx = ui.ctx();
+            let x = motion::value(ctx, Id::new("view-underline-x"), x, motion::SLIDE);
+            let width = motion::value(ctx, Id::new("view-underline-width"), width, motion::SLIDE);
+            painter.rect_filled(Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, 1.0)), 0.0, theme::TEXT_PRIMARY);
+        }
         painter.hline(bar.x_range(), bar.bottom() - 0.5, theme::hairline(theme::LINE));
     }
 

@@ -7,6 +7,7 @@ use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
+use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action, Drag};
 
@@ -242,11 +243,12 @@ fn column_body(
                 ))
             }
         };
-        let hovered = response.as_ref().is_some_and(|r| r.hovered());
+        let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
+        let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         if response.is_some_and(|r| r.clicked()) {
             actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
         }
-        slot_cell(painter, rect, column, slot, hovered, progress);
+        slot_cell(painter, rect, column, slot, hover, pulse, progress);
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::LINE));
     }
 
@@ -268,7 +270,7 @@ fn column_body(
     if response.clicked() {
         actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
     }
-    let fill = if response.hovered() { theme::HOVER_ON_SURFACE_1 } else { theme::SURFACE_1 };
+    let fill = motion::mix(theme::SURFACE_1, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response));
     painter.rect_filled(stop_rect, 0.0, fill);
     let square = Rect::from_center_size(stop_rect.center(), Vec2::splat(7.0));
     let color = if column.stop_queued { theme::ACCENT } else { theme::TEXT_SECONDARY };
@@ -280,7 +282,8 @@ fn slot_cell(
     rect: Rect,
     column: &Column,
     slot: &crate::grid::Slot,
-    hovered: bool,
+    hover: f32,
+    pulse: f32,
     progress: Option<f32>,
 ) {
     let track_color = rgb(column.color);
@@ -296,11 +299,11 @@ fn slot_cell(
             painter.rect_filled(rect, 0.0, theme::SURFACE_0);
         }
         SlotState::EmptyStop => {
-            painter.rect_filled(rect, 0.0, if hovered { theme::SURFACE_1 } else { theme::SURFACE_0 });
+            painter.rect_filled(rect, 0.0, motion::mix(theme::SURFACE_0, theme::SURFACE_1, hover));
             painter.rect_filled(mark_rect(EMPTY_MARK), 0.0, theme::EMPTY_MARK);
         }
         SlotState::Stopped | SlotState::Queued => {
-            let fill = if hovered { theme::HOVER_ON_SURFACE_2 } else { theme::SURFACE_2 };
+            let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
             painter.rect_filled(rect, 0.0, lane(fill, column.mute));
             let (mark, text) = if slot.enabled {
                 (track_color, theme::TEXT_VALUE)
@@ -309,8 +312,10 @@ fn slot_cell(
             };
             if slot.state == SlotState::Queued {
                 painter.rect_filled(mark_rect(CLIP_MARK), 0.0, mark.gamma_multiply(0.5));
-                painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(theme::ACCENT), StrokeKind::Outside);
-                painter.rect_stroke(rect, 0.0, theme::hairline(theme::ACCENT), StrokeKind::Inside);
+                // The outline breathes while the clip waits for its launch.
+                let accent = theme::ACCENT.gamma_multiply(0.45 + 0.55 * pulse);
+                painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(accent), StrokeKind::Outside);
+                painter.rect_stroke(rect, 0.0, theme::hairline(accent), StrokeKind::Inside);
             } else {
                 painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(mark, column.mute));
             }
@@ -409,8 +414,7 @@ fn mixer_strip(
         }
         Drag::None => {}
     }
-    let volume_color =
-        if volume_response.hovered() || volume_response.dragged() { theme::TEXT_PRIMARY } else { theme::TEXT_VALUE };
+    let volume_color = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, widgets::hover(ui, &volume_response));
     widgets::text_in(painter, values, Align2::RIGHT_CENTER, &widgets::format_db(volume_shown), mono, volume_color);
 
     // Toggle row: track on, showing the track number.
@@ -423,12 +427,7 @@ fn mixer_strip(
     if response.clicked() {
         actions.push(Action::new("track.setMute", json!({ "track": track.0, "mute": !column.mute })));
     }
-    let (fill, text) = match (column.mute, response.hovered()) {
-        (false, false) => (theme::TEXT_VALUE, theme::SURFACE_0),
-        (false, true) => (theme::TEXT_PRIMARY, theme::SURFACE_0),
-        (true, false) => (theme::SURFACE_2, theme::TEXT_TERTIARY),
-        (true, true) => (theme::HOVER_ON_SURFACE_2, theme::TEXT_SECONDARY),
-    };
+    let (fill, text) = widgets::toggle_colors(ui, &response, !column.mute);
     painter.rect_filled(toggle, 0.0, fill);
     let number = if column.kind == ColumnKind::Return {
         column.name.chars().next().map(String::from).unwrap_or_default()
@@ -462,11 +461,9 @@ fn scene_column(
         if response.clicked() {
             actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
         }
-        let fill = match (scene.playing, response.hovered()) {
-            (true, _) => theme::SURFACE_3_BRIGHT,
-            (false, true) => theme::HOVER_ON_SURFACE_2,
-            (false, false) => theme::SURFACE_2,
-        };
+        let hover = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
+        let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
+        let fill = motion::mix(hover, theme::SURFACE_3_BRIGHT, playing);
         painter.rect_filled(rect, 0.0, fill);
         let inner = rect.shrink2(Vec2::new(PAD, 0.0));
         let mut name = scene.name.clone();
@@ -500,7 +497,11 @@ fn scene_column(
         if response.clicked() {
             actions.push(Action::new("launcher.stopAll", json!({})));
         }
-        painter.rect_filled(rect, 0.0, if response.hovered() { theme::HOVER_ON_SURFACE_1 } else { theme::SURFACE_1 });
+        painter.rect_filled(
+            rect,
+            0.0,
+            motion::mix(theme::SURFACE_1, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response)),
+        );
         let square = Rect::from_min_size(Pos2::new(rect.left() + PAD, rect.center().y - 3.5), Vec2::splat(7.0));
         painter.rect_stroke(square, 0.0, theme::hairline(theme::TEXT_SECONDARY), StrokeKind::Inside);
         let text = Rect::from_min_max(Pos2::new(square.right() + PAD, rect.top()), rect.max);

@@ -1,9 +1,10 @@
-//! A small self-made project with a filled clip launcher: four tracks, two return tracks and six
-//! scenes. The app opens it with `--demo`, and the UI tests draw it.
+//! A small self-made project: four tracks, two return tracks, six scenes with clips and a
+//! 48-bar arrangement. The app opens it with `--demo`, and the UI tests draw it.
 
 use loopwerk_engine::model::{
-    Arrangement, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds, ContentLane, Extensions,
-    LaneData, Launcher, LauncherColumn, Note, Project, Scene, Send, Slot, Track, TrackId, Transport,
+    Arrangement, ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds,
+    ContentLane, Extensions, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Scene, Send, Slot, Track,
+    TrackId, Transport,
 };
 
 /// Clip names per track and scene; `None` is an empty slot with a stop button.
@@ -15,6 +16,15 @@ const CLIPS: [(&str, [Option<&str>; 6]); 4] = [
 ];
 
 const SCENES: [&str; 6] = ["Intro", "Groove", "Build", "Break", "Drop", "Outro"];
+
+/// Arrangement clips per track: the scene whose clip content they place, start and length in
+/// beats. Clips longer than their one-bar content loop it.
+const ARRANGEMENT: [&[(usize, f64, f64)]; 4] = [
+    &[(0, 0.0, 64.0), (2, 64.0, 48.0), (3, 112.0, 16.0), (2, 128.0, 64.0)],
+    &[(0, 32.0, 32.0), (1, 64.0, 64.0), (4, 128.0, 32.0), (0, 160.0, 32.0)],
+    &[(1, 64.0, 32.0), (2, 96.0, 32.0), (4, 128.0, 64.0)],
+    &[(2, 96.0, 32.0), (3, 128.0, 16.0), (5, 160.0, 32.0)],
+];
 
 pub fn demo_project() -> Project {
     let mut project = Project {
@@ -56,6 +66,17 @@ pub fn demo_project() -> Project {
             })
             .collect();
         columns.push(LauncherColumn { track: TrackId(id), slots });
+        let placed = ARRANGEMENT.get(index).copied().unwrap_or_default();
+        let clips = placed
+            .iter()
+            .map(|&(scene, start, length)| Clip {
+                start,
+                length,
+                loop_range: Some(LoopRange { start: 0.0, end: 4.0 }),
+                ..clip_of(ContentId(id * 10 + scene as u32))
+            })
+            .collect();
+        project.arrangement.lanes.push(ArrangementLane { name: (*name).into(), track: Some(TrackId(id)), clips });
     }
     for (offset, (channel_id, name)) in returns.iter().enumerate() {
         let id = 10 + offset as u32;

@@ -8,6 +8,9 @@ covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
   - crates/ui/src/widgets.rs
+  - crates/ui/src/arrangement_view.rs
+  - crates/ui/src/timeline.rs
+  - crates/ui/src/motion.rs
 ---
 
 # Components
@@ -38,6 +41,19 @@ replaces them.
 | Keyboard focus | 1 px inset outline in `accent` |
 | Disabled | Text `text.tertiary`, no fills |
 | Track off (muted) | The whole header and its lane at reduced contrast: text `text.tertiary`, fills `#34322F`, lane opacity 0.55 |
+
+### Motion
+
+Animations are short and only show a change of state; with animations off (a setting, and
+`--no-animations` until Settings exists) every value jumps straight to its end.
+
+| What | How |
+|---|---|
+| Hover | Fill and text fade to the hover colour in 80 ms |
+| States (playing scene, transport running, track on) | Fade in 120 ms |
+| Queued clip | The accent outline breathes between 45 % and 100 % every 0.8 s |
+| Values changed from elsewhere (undo, another client) | The fill eases to the new value in 120 ms; a drag follows the pointer directly |
+| View switch | The underline slides to the chosen view in 160 ms |
 
 ## Window
 
@@ -107,7 +123,7 @@ replaces them.
 |---|---|
 | Bar ruler | 20 px; 10 px mono bar numbers; 1 px `line` at each bar |
 | Loop brace | 14 px row; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
-| Lanes | Separated by 1 px `line.strong`; empty area `surface.0` |
+| Lanes | Separated by 1 px `line.strong`; empty area `surface.0`; default height 48 px, the lower edge of a header resizes it (20–400 px) |
 | Clip | `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB` at 4/5 px; selected clip `surface.3` with 1 px `text.primary` inset |
 | MIDI marks | 2 px high lines in the track colour |
 | Audio marks | 1 px vertical lines in the track colour, centred |

@@ -71,10 +71,13 @@ Change this code, and check these documents.
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/arrangement_view.rs` | [Components](design/components.md) |
 | `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/timeline.rs` | [Components](design/components.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |

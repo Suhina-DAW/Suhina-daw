@@ -61,7 +61,7 @@ The engine does not run them yet (see *Planned parts*).
 | `session` | An open project with its undo history (`Session`), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over the open projects, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
 | `output` | The audio device: plays a `Renderer` on the default output (cpal), and `open_player`, a `Player` whose stream lives on its own thread. The only code that opens an audio device. | engine, session |
-| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window and the Session view, drawn with egui from the project and the `LauncherMonitor`; every change is a command. Design tokens in `theme.rs`. No windowing or GPU code, so tests drive it headless (egui_kittest). | engine, session |
+| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the Session and Arrangement views, drawn with egui from the project and the `LauncherMonitor`; every change is a command. Design tokens in `theme.rs`. No windowing or GPU code, so tests drive it headless (egui_kittest). | engine, session |
 | `loopwerk-cli` | The command line: render, play, mcp. | all of the above |
 | `loopwerk` | The desktop app: opens a project (argument or a dropped `.als`), decodes its audio, plays it stopped through `output` and runs `ui` in an eframe window. | session, media, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
@@ -174,6 +174,6 @@ queued clips.
   (AGENTS.md rule 5). The engine talks to them over shared-memory audio buffers with a per-block
   deadline; plug-in state and parameters go over messages. A crashing plug-in is reported and
   restarted without losing the project. An ADR comes first (M6).
-- **UI:** the Arrangement view, the browser, the detail area (device chain, clip editor), the
+- **UI:** the browser, the detail area (device chain, clip editor), the
   menu bar and settings, meters, and the commands they need (solo, arm, sends); the monospace
   font the design brief asks for (M8).

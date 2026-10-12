@@ -9,7 +9,7 @@ use egui::{
 };
 use serde_json::Value;
 
-use crate::theme;
+use crate::{motion, theme};
 
 /// A command for the session to run, made by a view: the same ids the CLI and MCP use.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +45,21 @@ pub fn button_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString) -> R
     let label = label.to_string();
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
     response
+}
+
+/// How hovered (or dragged) a control is, 0 … 1, fading in and out.
+pub fn hover(ui: &Ui, response: &Response) -> f32 {
+    motion::toward(ui.ctx(), response.id.with("hover"), response.hovered() || response.dragged(), motion::HOVER)
+}
+
+/// Fill and text of a track-on toggle: light when on, dark when off, a step brighter hovered.
+pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color32) {
+    let hover = hover(ui, response);
+    let lit = motion::toward(ui.ctx(), response.id.with("on"), on, motion::VALUE);
+    let off_fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
+    let off_text = motion::mix(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hover);
+    let on_fill = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, hover);
+    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::SURFACE_0, lit))
 }
 
 /// What a value control did this frame.
