@@ -57,6 +57,10 @@ pub struct Column {
     pub mute: bool,
     pub solo: bool,
     pub volume_db: f64,
+    /// The track's place in the project's track order, as `track.move` counts it, and how many
+    /// groups it is inside.
+    pub position: usize,
+    pub depth: usize,
     /// -1 is full left, 1 full right.
     pub pan: f64,
 }
@@ -147,6 +151,8 @@ impl Grid {
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
+                position: index,
+                depth: crate::timeline::depth(project, track.parent),
                 pan: channel.map_or(0.0, |c| c.pan),
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }

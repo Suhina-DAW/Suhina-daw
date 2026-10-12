@@ -28,6 +28,9 @@ pub struct SessionViewState {
     pub scroll: Vec2,
     /// The track whose header was clicked; the detail area shows its devices.
     pub selected: Option<TrackId>,
+    /// A column header being dragged to move its track, and where it was let go.
+    track_drag: Option<TrackId>,
+    track_drop: Option<(TrackId, f32)>,
     drag: Option<(TrackId, Control, f64)>,
 }
 
@@ -94,6 +97,8 @@ pub fn show(
     painter.hline(area.x_range(), mixer.top() - 1.0, theme::hairline(theme::LINE_STRONG));
 
     let bands = Bands { header, body, mixer, top: body.top() - state.scroll.y, scenes: grid.scenes.len() };
+    // Where each track column is this frame, for a dragged header to find its place.
+    let mut spans: Vec<(&Column, egui::Rangef)> = Vec::new();
     let mut track_x = area.left() - state.scroll.x;
     let mut return_x = returns_x;
     let mut track_number = 0;
@@ -107,12 +112,43 @@ pub fn show(
         };
         let span = egui::Rangef::new(*x, *x + width);
         *x += width + 1.0;
+        if column.kind != ColumnKind::Return {
+            spans.push((column, span));
+        }
         if span.max < clip.left() || span.min > clip.right() {
             continue;
         }
         let progress = progress.get(index).copied().flatten();
         draw_column(ui, &painter, &bands, clip, span, column, track_number, progress, state, actions);
     }
+    // A header let go over a column moves its track there: before the column under the
+    // pointer, or after it from its right half; a group moves with its tracks.
+    let target_of = |x: f32| spans.iter().find(|(_, span)| span.contains(x)).map(|(c, span)| (*c, x > span.center()));
+    if let Some(dragged) = state.track_drag
+        && let Some(pointer) = ui.ctx().pointer_interact_pos()
+        && let Some((column, after)) = target_of(pointer.x)
+        && column.track != dragged
+        && let Some((_, span)) = spans.iter().find(|(c, _)| c.track == column.track)
+    {
+        let x = if after { span.max + 0.5 } else { span.min - 0.5 };
+        painter.with_clip_rect(tracks_clip).vline(x, area.y_range(), egui::Stroke::new(2.0, theme::ACCENT));
+    }
+    if let Some((dragged, x)) = state.track_drop.take()
+        && let Some((target, after)) = target_of(x)
+        && let Some(index) = spans.iter().position(|(c, _)| c.track == dragged)
+        && let Some((source, _)) = spans.get(index)
+        && target.track != dragged
+    {
+        let block = 1 + spans.iter().skip(index + 1).take_while(|(c, _)| c.depth > source.depth).count();
+        let mut to = target.position + usize::from(after);
+        if target.position > source.position {
+            to = to.saturating_sub(block);
+        }
+        if to != source.position {
+            actions.push(Action::new("track.move", json!({ "track": dragged.0, "to": to })));
+        }
+    }
+
     if returns_width > 0.0 {
         painter.vline(returns_x - 0.5, area.y_range(), theme::hairline(theme::LINE_STRONG));
     }
@@ -167,7 +203,7 @@ fn draw_column(
 ) {
     let id = Id::new(("session-column", column.track.0));
     let header = Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip);
-    column_header(ui, painter, header, column, &mut state.selected, actions);
+    column_header(ui, painter, header, column, state, actions);
     let body_clip = bands.body.intersect(clip);
     column_body(
         ui,
@@ -194,14 +230,24 @@ fn column_header(
     painter: &egui::Painter,
     rect: Rect,
     column: &Column,
-    selected: &mut Option<TrackId>,
+    state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
     if rect.width() <= 0.0 {
         return;
     }
     // Right-click opens the track's menu.
-    let response = ui.interact(rect, Id::new(("session-header", column.track.0)), Sense::click());
+    // A click selects the track, a drag moves it, a right-click opens its menu.
+    let response = ui.interact(rect, Id::new(("session-header", column.track.0)), Sense::click_and_drag());
+    if response.drag_started() {
+        state.track_drag = Some(column.track);
+    }
+    if response.drag_stopped()
+        && let Some(dragged) = state.track_drag.take()
+        && let Some(pointer) = response.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
+    {
+        state.track_drop = Some((dragged, pointer.x));
+    }
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Track {}", column.name)));
     response.context_menu(|ui| {
@@ -214,9 +260,9 @@ fn column_header(
         menus::track_menu(ui, &menu, actions);
     });
     if response.clicked() {
-        *selected = Some(column.track);
+        state.selected = Some(column.track);
     }
-    let fill = if *selected == Some(column.track) { theme::SURFACE_3 } else { theme::SURFACE_2 };
+    let fill = if state.selected == Some(column.track) { theme::SURFACE_3 } else { theme::SURFACE_2 };
     painter.rect_filled(rect, 0.0, fill);
     let strip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
     painter.rect_filled(strip, 0.0, lane(rgb(column.color), column.mute));

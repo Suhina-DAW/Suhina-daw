@@ -674,6 +674,25 @@ fn the_detail_area_shows_the_selected_tracks_devices_in_a_row_or_stacked() {
     assert!(harness.query_by_label("Device Utility").is_none(), "Shift+Tab hides the detail area");
 }
 
+#[test]
+fn dragging_a_session_column_header_moves_the_track() {
+    let mut harness = window(demo_app());
+    let from = harness.get_by_label("Track Vox").rect().center();
+    // Three columns left (117 points each), into the left half of Drums.
+    let to = from - egui::vec2(3.0 * 117.0 + 30.0, 0.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from - egui::vec2(60.0, 0.0));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    assert_eq!(names(&harness)[..4], ["Vox", "Drums", "Bass", "Keys"]);
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.

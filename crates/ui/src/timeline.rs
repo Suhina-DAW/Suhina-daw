@@ -250,7 +250,7 @@ fn sub_rows(mut clips: Vec<ClipBox>) -> Vec<ClipBox> {
 }
 
 /// How many groups a track is nested in; a broken chain stops counting.
-fn depth(project: &Project, mut parent: Option<TrackId>) -> usize {
+pub(crate) fn depth(project: &Project, mut parent: Option<TrackId>) -> usize {
     let mut depth = 0;
     while let Some(id) = parent {
         depth += 1;
