@@ -636,7 +636,7 @@ impl App {
         // The splitter: dragged to make the detail area bigger or smaller.
         let cursor = if stacked { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical };
         let response = ui.interact(splitter, Id::new("detail-splitter"), Sense::drag()).on_hover_cursor(cursor);
-        if response.dragged() {
+        if response.dragged_by(egui::PointerButton::Primary) {
             let delta = response.drag_delta();
             if stacked {
                 self.detail_width -= delta.x;

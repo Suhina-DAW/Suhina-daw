@@ -239,10 +239,10 @@ fn column_header(
     // Right-click opens the track's menu.
     // A click selects the track, a drag moves it, a right-click opens its menu.
     let response = ui.interact(rect, Id::new(("session-header", column.track.0)), Sense::click_and_drag());
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(column.track);
     }
-    if response.drag_stopped()
+    if response.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(dragged) = state.track_drag.take()
         && let Some(pointer) = response.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
     {

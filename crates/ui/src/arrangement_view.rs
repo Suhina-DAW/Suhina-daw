@@ -605,7 +605,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let response = ui
         .interact(edge, Id::new("arrangement-header-edge"), Sense::drag())
         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-    if response.dragged() {
+    if response.dragged_by(egui::PointerButton::Primary) {
         let dx = response.drag_delta().x;
         let width = if state.headers_left { state.header_width + dx } else { state.header_width - dx };
         state.header_width = width.clamp(HEADER_COLUMN_RANGE.0, HEADER_COLUMN_RANGE.1.min(max_header));
@@ -674,14 +674,14 @@ fn clip_box<'a>(
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
     response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, actions));
-    if response.clicked() || response.drag_started() {
+    if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
         state.selected = Some(key);
     }
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         state.clip_drag =
             Some(ClipDrag { track: lane.track, index: clip.index, start: clip.start, target: lane.track });
     }
-    if response.dragged()
+    if response.dragged_by(egui::PointerButton::Primary)
         && let Some(drag) = state.clip_drag.as_mut()
         && (drag.track, drag.index) == key
     {
@@ -690,7 +690,7 @@ fn clip_box<'a>(
             drag.target = target;
         }
     }
-    if response.drag_stopped()
+    if response.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(drag) = state.clip_drag.take()
         && (drag.track, drag.index) == key
     {
@@ -810,16 +810,16 @@ fn clip_box<'a>(
                 state.fade_drag = None;
                 done = Some(0.0);
             } else {
-                if response.drag_started() {
+                if response.drag_started_by(egui::PointerButton::Primary) {
                     state.fade_drag = Some(FadeDrag { key, edge, raw: current });
                 }
-                if response.dragged()
+                if response.dragged_by(egui::PointerButton::Primary)
                     && let Some(drag) = state.fade_drag.as_mut().filter(|d| mine_fade(d))
                 {
                     let dx = f64::from(response.drag_delta().x / state.beat_width);
                     drag.raw += if edge == FadeEdge::In { dx } else { -dx };
                 }
-                if response.drag_stopped()
+                if response.drag_stopped_by(egui::PointerButton::Primary)
                     && let Some(drag) = state.fade_drag.take_if(|d| mine_fade(d))
                 {
                     done = Some(fade_length(drag.raw, edge, clip, other, grid));
@@ -1091,10 +1091,10 @@ fn track_header(
             state.selected_tracks = vec![lane.track];
         }
     }
-    if body.drag_started() {
+    if body.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(lane.track);
     }
-    if body.drag_stopped()
+    if body.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(dragged) = state.track_drag.take()
         && let Some(pointer) = body.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
     {
@@ -1173,7 +1173,7 @@ fn track_header(
         let response = ui
             .interact(edge.intersect(lanes_area), id.with("resize"), Sense::drag())
             .on_hover_cursor(egui::CursorIcon::ResizeVertical);
-        if response.dragged() {
+        if response.dragged_by(egui::PointerButton::Primary) {
             let height = (state.height(lane) + response.drag_delta().y).clamp(MIN_LANE, MAX_LANE);
             state.heights.insert(lane.track, height);
         }
