@@ -15,7 +15,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use crate::ahead::StretchThread;
 use crate::audio::AudioPool;
 use crate::launcher::Controller;
-use crate::{Graph, MAX_AUDIO_VOICES, Renderer};
+use crate::{Graph, MAX_AUDIO_VOICES, Renderer, bus_chain};
 
 /// How far ahead of the playhead a new graph takes over, in seconds: time to move its stretch
 /// voices and fill their rings before the audio thread reaches it.
@@ -108,6 +108,23 @@ impl Renderer {
             self.origin = self.position;
         }
         self.graph.launcher.adopt(&mut old.launcher);
+        // A chain with the same devices on the same track keeps them running, so held notes,
+        // envelopes and tails carry on; the new parameter values apply (ADR 0004).
+        for chain in &mut self.graph.chains {
+            for old_chain in &mut old.chains {
+                if chain.adopt(old_chain) {
+                    break;
+                }
+            }
+        }
+        // Sine voices follow their track to its chain in the new graph.
+        for voice in self.voices.iter_mut().filter(|v| v.active && v.bus != 0) {
+            let track = bus_chain(&mut old.chains, voice.bus).map(|c| c.track);
+            match track.and_then(|t| self.graph.chains.iter().position(|c| c.track == t)) {
+                Some(index) => voice.bus = u32::try_from(index + 1).unwrap_or(0),
+                None => voice.active = false,
+            }
+        }
         let time = self.time();
         // Cursors into the new lists: what has started by now has been handled.
         self.next_event = self.graph.events.partition_point(|e| e.start < time);

@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -46,7 +46,10 @@ clip; devices (ADR 0004) will add many more parameters.
    new event lists are found by binary search; playing audio clips are found again by their
    time; an unwarped audio clip plays at its own speed, not the beat's, so it carries on from
    the file position it was at (after a tempo edit its beat position moves, as in other DAWs).
-   Sounding note voices ring on. The launcher's runtime is copied column by column (a
+   Sounding note voices ring on, on their track's chain in the new graph. A track's device
+   chain keeps its running devices when the new graph has the same devices on the same track,
+   with the new parameter values, so instrument notes and effect tails carry on (ADR 0004
+   decision 9). The launcher's runtime is copied column by column (a
    column or slot that no longer exists is dropped). A playing launched clip whose prepared
    audio is unchanged keeps its stretch voice (moved from the old graph to the new); otherwise
    the new voice is moved to the clip's position.

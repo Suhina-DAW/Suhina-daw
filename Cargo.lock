@@ -678,6 +678,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopwerk-device-registry"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-device-auto-pan",
+ "loopwerk-device-dj-eq",
+ "loopwerk-device-fm-synth",
+ "loopwerk-device-overdrive",
+ "loopwerk-device-utility",
+ "loopwerk-device-vinyl-distortion",
+]
+
+[[package]]
 name = "loopwerk-device-utility"
 version = "0.0.1"
 dependencies = [
@@ -701,6 +714,8 @@ version = "0.0.1"
 name = "loopwerk-engine"
 version = "0.0.1"
 dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-device-registry",
  "loopwerk-model",
  "loopwerk-stretch",
  "rtrb",

@@ -1,0 +1,241 @@
+//! Device chains in the renderer: effects on a track, instruments playing its notes, launched
+//! clips, the transport, graph swaps.
+
+use loopwerk_model::*;
+
+use crate::{LaunchCommand, Renderer, render_launches, render_offline};
+
+const SR: u32 = 48_000;
+/// Frames per beat at 120 bpm.
+const BEAT: usize = SR as usize / 2;
+
+fn note(time: f64, duration: f64, key: u8) -> Note {
+    Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+}
+
+fn device(id: &str, params: &[(&str, f64)]) -> Device {
+    Device {
+        name: id.into(),
+        kind: DeviceKind::Builtin(id.into()),
+        enabled: true,
+        state: None,
+        params: params.iter().map(|(p, v)| DeviceParam::new(*p, *v)).collect(),
+        extensions: Extensions::default(),
+    }
+}
+
+/// One track playing `notes` from an arrangement clip of `length` beats and, in its launcher
+/// slot, a looping clip of the same notes; `devices` on its channel.
+fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
+    let clip = |start: f64, looping: bool| Clip {
+        content: ContentId(1),
+        start,
+        length,
+        offset: 0.0,
+        loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
+        enabled: true,
+        extensions: Extensions::default(),
+    };
+    Project {
+        tracks: vec![Track {
+            id: TrackId(1),
+            name: "T".into(),
+            color: None,
+            content: ContentKinds { notes: true, audio: false },
+            channel: Some(ChannelId(1)),
+            parent: None,
+            extensions: Extensions::default(),
+        }],
+        channels: vec![Channel {
+            id: ChannelId(1),
+            name: "C".into(),
+            role: ChannelRole::Regular,
+            volume: 1.0,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+            output: None,
+            sends: Vec::new(),
+            devices,
+            extensions: Extensions::default(),
+        }],
+        contents: vec![ClipContent {
+            id: ContentId(1),
+            name: "c".into(),
+            length,
+            lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
+            extensions: Extensions::default(),
+        }],
+        arrangement: Arrangement {
+            lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip(0.0, false)] }],
+        },
+        launcher: Launcher {
+            scenes: vec![Scene::default()],
+            columns: vec![LauncherColumn {
+                track: TrackId(1),
+                slots: vec![Slot { clip: Some(clip(0.0, true)), has_stop: true }],
+            }],
+        },
+        ..Project::default()
+    }
+}
+
+fn left(out: &[f32]) -> Vec<f32> {
+    out.as_chunks::<2>().0.iter().map(|[l, _]| *l).collect()
+}
+
+fn peak(out: &[f32]) -> f32 {
+    out.iter().fold(0.0, |m, s| m.max(s.abs()))
+}
+
+fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
+}
+
+/// Frequency from upward zero crossings (mono).
+fn frequency(signal: &[f32]) -> f64 {
+    let crossings: Vec<usize> =
+        signal.windows(2).enumerate().filter(|(_, w)| w[0] <= 0.0 && w[1] > 0.0).map(|(i, _)| i).collect();
+    let (Some(first), Some(last)) = (crossings.first(), crossings.last()) else { return 0.0 };
+    (crossings.len() - 1) as f64 * f64::from(SR) / (last - first) as f64
+}
+
+fn blocks(renderer: &mut Renderer, count: usize, frames: usize) -> Vec<f32> {
+    let mut out = Vec::new();
+    let mut block = vec![0.0f32; frames * 2];
+    for _ in 0..count {
+        renderer.process(&mut block);
+        out.extend_from_slice(&block);
+    }
+    out
+}
+
+#[test]
+fn an_effect_on_a_track_processes_its_sound_before_the_fader() {
+    let notes = vec![note(0.0, 2.0, 69)];
+    let plain = render_offline(&project(notes.clone(), 2.0, vec![]), SR, 512).unwrap();
+    let half =
+        render_offline(&project(notes.clone(), 2.0, vec![device("utility", &[("gain", -6.0206)])]), SR, 512).unwrap();
+    let neutral = render_offline(&project(notes.clone(), 2.0, vec![device("utility", &[])]), SR, 512).unwrap();
+    // The chain adds a tail to the render.
+    assert!(half.len() > plain.len());
+    assert!(max_diff(&neutral[..plain.len()], &plain) < 1e-5, "{}", max_diff(&neutral[..plain.len()], &plain));
+    let scaled: Vec<f32> = plain.iter().map(|s| s * 0.5).collect();
+    assert!(max_diff(&half[..plain.len()], &scaled) < 1e-4);
+    assert!(peak(&half[plain.len()..]) < 1e-6, "the tail is silent");
+
+    // The fader comes after the chain: pan moves the processed sound.
+    let mut panned = project(notes.clone(), 2.0, vec![device("utility", &[])]);
+    panned.channels[0].pan = 1.0;
+    let panned = render_offline(&panned, SR, 512).unwrap();
+    let (l, r): (Vec<f32>, Vec<f32>) = panned.as_chunks::<2>().0.iter().map(|[l, r]| (*l, *r)).unzip();
+    assert!(peak(&l) < 1e-6 && peak(&r) > 0.1);
+}
+
+#[test]
+fn unknown_and_disabled_devices_pass_the_sound_through() {
+    let notes = vec![note(0.0, 1.0, 60)];
+    let plain = render_offline(&project(notes.clone(), 1.0, vec![]), SR, 512).unwrap();
+    let mut off = device("utility", &[("gain", -40.0)]);
+    off.enabled = false;
+    let mut plugin = device("x", &[]);
+    plugin.kind = DeviceKind::Clap { id: "com.example.reverb".into() };
+    for devices in [vec![device("no-such-device", &[])], vec![off], vec![plugin]] {
+        assert_eq!(render_offline(&project(notes.clone(), 1.0, devices), SR, 512).unwrap(), plain);
+    }
+}
+
+#[test]
+fn an_instrument_plays_the_tracks_notes() {
+    let notes = vec![note(0.0, 1.0, 69), note(2.0, 1.0, 81)];
+    let out = render_offline(&project(notes, 4.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let out = left(&out);
+    // Key 69 is 440 Hz, key 81 an octave up; the synth's sine, not the fallback voices.
+    assert!((frequency(&out[2_400..BEAT - 2_400]) - 440.0).abs() < 1.0);
+    assert!((frequency(&out[BEAT * 2 + 2_400..BEAT * 3 - 2_400]) - 880.0).abs() < 2.0);
+    // One operator at full level is -18 dB (an eighth), at the track's unity gain.
+    let level = peak(&out[2_400..BEAT - 2_400]);
+    assert!((0.11..0.14).contains(&level), "{level}");
+    // Released after its beat: silent between the notes and at the end.
+    assert!(peak(&out[BEAT + 4_800..BEAT * 2]) < 1e-4);
+    assert!(peak(&out[BEAT * 3 + 4_800..]) < 1e-4);
+}
+
+#[test]
+fn a_chain_sounds_the_same_in_any_block_size() {
+    let notes = vec![note(0.0, 0.5, 60), note(0.31, 0.7, 64), note(1.13, 0.2, 67), note(1.5, 1.0, 60)];
+    for devices in [
+        vec![device("fm-synth", &[("feedback", 5.0)]), device("overdrive", &[])],
+        vec![device("auto-pan", &[]), device("utility", &[("width", 0.0)])],
+    ] {
+        let p = project(notes.clone(), 3.0, devices);
+        let reference = render_offline(&p, SR, 512).unwrap();
+        for size in [1, 64, 333, 4_096] {
+            let other = render_offline(&p, SR, size).unwrap();
+            assert!(max_diff(&reference, &other) < 1e-6, "block {size}: {}", max_diff(&reference, &other));
+        }
+    }
+}
+
+#[test]
+fn launched_clips_play_on_the_instrument_and_stop() {
+    let p = project(vec![note(0.0, 0.5, 69)], 1.0, vec![device("fm-synth", &[])]);
+    let commands = [
+        (0.0, LaunchCommand::SetQuantization(crate::Quantization::None)),
+        (0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
+        (2.0, LaunchCommand::StopColumn { column: 0 }),
+    ];
+    let out = left(&render_launches(&p, &crate::AudioPool::new(), SR, &commands, 3.0).unwrap());
+    // The clip loops every beat (0.5 s): a note in each.
+    for beat in 0..4 {
+        let from = beat * BEAT + 1_000;
+        assert!(peak(&out[from..from + 4_000]) > 0.05, "beat {beat}");
+    }
+    assert!(peak(&out[SR as usize * 5 / 2..]) < 1e-4, "stopped");
+}
+
+#[test]
+fn stopping_the_transport_releases_an_instruments_notes() {
+    let p = project(vec![note(0.0, 8.0, 60)], 8.0, vec![device("fm-synth", &[])]);
+    let mut renderer = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+    let before = blocks(&mut renderer, 20, 480);
+    assert!(peak(&before[9_600..]) > 0.05);
+    renderer.handle(LaunchCommand::Stop);
+    let after = blocks(&mut renderer, 100, 480);
+    assert!(peak(&after[24_000..]) < 1e-4, "{}", peak(&after[24_000..]));
+}
+
+#[test]
+fn an_edit_keeps_a_chain_playing_and_takes_its_new_values() {
+    let p = project(vec![note(0.0, 8.0, 69)], 8.0, vec![device("fm-synth", &[]), device("utility", &[])]);
+    let mut edited = p.clone();
+    edited.channels[0].devices[1].params = vec![DeviceParam::new("gain", -6.0206)];
+    let mut renderer = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+    let mut controller = renderer.controller();
+    let mut out = blocks(&mut renderer, 50, 480);
+    controller.update(&edited).unwrap();
+    out.extend(blocks(&mut renderer, 100, 480));
+    let mut untouched = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+    let reference = blocks(&mut untouched, 150, 480);
+    // The note carries on through the swap (no new attack): after the utility's 20 ms ramp the
+    // output is the untouched render at half the level.
+    let at = 50 * 480 + (0.15 * f64::from(SR)) as usize;
+    assert_eq!(max_diff(&out[..at * 2], &reference[..at * 2]), 0.0);
+    let settled = (at + 2_400) * 2;
+    let half: Vec<f32> = reference[settled..].iter().map(|s| s * 0.5).collect();
+    assert!(max_diff(&out[settled..], &half) < 1e-4, "{}", max_diff(&out[settled..], &half));
+}
+
+#[test]
+fn hostile_notes_and_devices_do_not_break_a_render() {
+    let mut notes: Vec<Note> = (0..200).map(|i| note(f64::from(i) * 0.001, 0.5, (i % 128) as u8)).collect();
+    notes.push(Note { time: 0.1, duration: f64::NAN, key: 200, velocity: f32::NAN, release_velocity: 0.0, channel: 9 });
+    notes.push(Note { time: 0.2, duration: -1.0, key: 60, velocity: -3.0, release_velocity: 0.0, channel: 0 });
+    let devices = vec![
+        device("fm-synth", &[("algorithm", 1e9), ("op1.level", f64::NAN), ("volume", f64::INFINITY)]),
+        device("overdrive", &[("drive", -5.0)]),
+        device("fm-synth", &[]),
+    ];
+    let out = render_offline(&project(notes, 1.0, devices), SR, 300).unwrap();
+    assert!(out.iter().all(|s| s.is_finite() && s.abs() < 100.0));
+}

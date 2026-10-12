@@ -8,6 +8,8 @@ covers:
   - crates/dsp/**
   - crates/device-api/**
   - devices/**
+  - crates/device-registry/**
+  - crates/engine/src/chain.rs
 ---
 
 # 0004: Built-in devices
@@ -81,14 +83,31 @@ the device code should not have to change when it lands.
    `reset` while notes sound, hostile events (keys over 127, values that are not numbers, far
    more notes than voices), silence after all notes are released, and every sample rate.
 
+9. **The engine runs device chains on tracks** (added 2026-10-12, LOOP-35).
+   `crates/device-registry` makes a device from its `DeviceKind::Builtin` id. When the renderer's
+   graph is built, a track whose channel holds enabled built-in devices gets a chain: the
+   devices made, prepared, given the project's parameter values (`Device::params`, by
+   parameter id; missing ones at their defaults) and reset. Everything the track plays in a
+   block (sine voices, audio clips, stretched and launched clips) goes into the chain's buffer
+   at a centred unity gain instead of the output; the devices run over it in order, and then
+   the track's pan and volume (and those of the channels it feeds) apply, so the fader is
+   after the devices. When the first device is an instrument, the track's notes (arrangement
+   and launched) go to it as note events at their frames, the chain running in pieces split at
+   each event, and note-offs follow from each note's end; stopping the transport or a column
+   releases them. A track without devices is mixed straight into the output exactly as
+   before. Unknown ids, plug-ins and other DAWs' devices pass the sound through for now. Chains
+   hold at most 1024 frames, so the renderer splits longer blocks. A graph swap (ADR 0005)
+   hands a chain's running devices to the new graph when the same devices sit on the same
+   track, so held notes and tails carry on through an edit and the new parameter values
+   apply; otherwise the new chain starts fresh and the old devices are freed with the old
+   graph, off the audio thread. A render with chains is 2 s longer, for releases and tails.
+
 ## Not decided yet
 
-- **Where parameter values live in the project.** The model's `Device` has no parameter list
-  yet; built-in devices will need one (values by parameter id). It is added together with the
-  engine side, below.
-- **The engine side:** per-track buffers, device chains in the renderer, a registry from
-  `DeviceKind::Builtin` ids to constructors, parameter commands in `session`, and automation
-  lanes. This needs the renderer swap from LOOP-26/LOOP-32 and gets its own task.
+- **Parameter commands and automation lanes:** `device.*` commands in `session` and
+  automation of device parameters (LOOP-39).
+- **Chains on group, return and master channels**, and latency compensation for devices that
+  report latency (the overdrive and vinyl distortion, 31 frames).
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI

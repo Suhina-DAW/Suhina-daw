@@ -30,8 +30,10 @@ the first device.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
 - **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
   overdrive and the FM synth (the first instrument: the DX7-style engine ported from MSFA, with
-  DX7 voice files) exist and are tested on their own; the engine does not run devices yet
-  (per-track chains, LOOP-35).
+  DX7 voice files) exist and are tested on their own. The engine runs them in chains on tracks:
+  a track's sound goes through its devices before its fader, and an instrument first in the
+  chain plays the track's notes (LOOP-35). Commands to add devices and set their parameters,
+  chains on group and master channels, and automation come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
   most used ones. After import, the user sees which devices came in exactly, approximately or as
@@ -186,7 +188,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M2 Playing
 - `loopwerk-cli play` plays a set, or one launcher scene, on the default audio device; `render`
   writes a 32-bit float WAV. Both run the same engine code.
-- MIDI notes play as sine tones until instruments arrive. Group and master volume and mute apply.
+- Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
+  instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
+  master volume and mute apply.
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits

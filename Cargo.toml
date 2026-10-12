@@ -26,6 +26,7 @@ loopwerk-device-dj-eq = { path = "devices/dj-eq" }
 loopwerk-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
 loopwerk-device-overdrive = { path = "devices/overdrive" }
 loopwerk-device-fm-synth = { path = "devices/fm-synth" }
+loopwerk-device-registry = { path = "crates/device-registry" }
 loopwerk-stretch = { path = "crates/stretch" }
 
 # external (licences must be GPLv3-compatible)

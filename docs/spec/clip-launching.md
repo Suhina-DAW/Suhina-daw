@@ -3,7 +3,7 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
@@ -65,6 +65,9 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
 
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
   marker of a clip without a loop) is shortened to end there.
+- **Instruments.** A launched clip's notes play on the track's instrument when its device
+  chain starts with one, like arrangement notes; a launch that replaces a clip, stopping the
+  column or stopping the transport releases them (ADR 0004).
 - **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
   launched audio clip fades in over 2 ms, to avoid clicks.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR

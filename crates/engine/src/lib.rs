@@ -4,6 +4,9 @@
 
 mod ahead;
 mod audio;
+mod chain;
+#[cfg(test)]
+mod chain_tests;
 mod launcher;
 mod metronome;
 mod stretch;
@@ -16,8 +19,10 @@ use ahead::AheadReader;
 pub use ahead::StretchWorker;
 use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
+use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
+use loopwerk_device_api::ProcessContext;
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use stretch::StretchVoice;
@@ -39,6 +44,8 @@ const RELEASE_SECONDS: f64 = 0.05;
 const ATTACK_SECONDS: f64 = 0.002;
 /// Upper bound for an offline render, so a malformed project cannot exhaust memory.
 const MAX_RENDER_SECONDS: f64 = 60.0 * 60.0;
+/// Extra length of a render when tracks have devices, for instrument releases and effect tails.
+const CHAIN_TAIL_SECONDS: f64 = 2.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderError {
@@ -78,6 +85,8 @@ struct StretchEvent {
     gain_right: f32,
     /// The launcher column of the clip's track, or `NO_COLUMN`.
     column: u32,
+    /// 0 for the output, or 1 + the index of the track's chain.
+    bus: u32,
 }
 
 /// A note with its position resolved to sample frames and its mix resolved from the channel.
@@ -86,14 +95,18 @@ struct NoteEvent {
     start: u64,
     end: u64,
     frequency: f64,
+    key: u8,
+    velocity: f32,
     gain_left: f32,
     gain_right: f32,
     /// The launcher column of the note's track, or `NO_COLUMN`.
     column: u32,
+    /// 0 for the output, or 1 + the index of the track's chain.
+    bus: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct Voice {
+pub(crate) struct Voice {
     active: bool,
     started_at: u64,
     end: u64,
@@ -103,6 +116,8 @@ struct Voice {
     gain_right: f32,
     /// The launcher column whose track this voice plays on, or `NO_COLUMN`.
     column: u32,
+    /// 0 for the output, or 1 + the index of the track's chain.
+    bus: u32,
 }
 
 /// An arrangement audio clip and the launcher column of its track.
@@ -110,6 +125,7 @@ struct Voice {
 struct ArrangedAudio {
     event: AudioEvent,
     column: u32,
+    bus: u32,
     /// Which clip of the project this is (arrangement lane, clip, content lane), so a graph swap
     /// can find the same clip in the old graph (ADR 0005).
     key: (usize, usize, usize),
@@ -128,6 +144,8 @@ pub(crate) struct Graph {
     length: u64,
     launcher: Launcher,
     frames_per_beat: f64,
+    /// Device chains of the tracks that have devices (ADR 0004).
+    chains: Vec<Chain>,
 }
 
 pub struct Renderer {
@@ -157,6 +175,8 @@ pub struct Renderer {
     /// Stretch underruns counted by graphs swapped out.
     underruns_before: u64,
     metronome: metronome::Metronome,
+    /// The frame of the current block being rendered, for events sent to device chains.
+    block_frame: usize,
 }
 
 impl Renderer {
@@ -193,6 +213,7 @@ impl Renderer {
             swap: swap::SwapState::default(),
             underruns_before: 0,
             metronome: metronome::Metronome::new(sample_rate),
+            block_frame: 0,
         })
     }
 
@@ -259,16 +280,37 @@ impl Renderer {
     }
 
     fn process_block(&mut self, out: &mut [f32]) {
+        // Device chains hold at most MAX_BLOCK frames; longer blocks are rendered in pieces.
+        for chunk in out.chunks_mut(MAX_BLOCK * 2) {
+            self.process_chunk(chunk);
+        }
+    }
+
+    fn process_chunk(&mut self, out: &mut [f32]) {
+        let frames = out.len() / 2;
+        for chain in &mut self.graph.chains {
+            chain.begin(frames);
+        }
+        self.block_frame = 0;
         self.drain_commands();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
         // ready again by the next start.
         self.graph.ahead.service();
+        let context = ProcessContext {
+            tempo: self.graph.launcher.tempo_bpm(),
+            beat: self.graph.launcher.beat_and_bar().0,
+            playing: self.running,
+        };
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
         // The transport changes only through commands, which are applied above.
         let running = self.running;
-        for [out_left, out_right] in out.as_chunks_mut::<2>().0 {
+        for (frame, [out_left, out_right]) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+            self.block_frame = frame;
+            for chain in self.graph.chains.iter_mut().filter(|c| c.instrument) {
+                chain.release_due(frame, self.position);
+            }
             // The click for this frame's beat, read before the launcher moves the beat on.
             let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
             let click = self.metronome.frame(self.running, beat, bar_beats);
@@ -284,9 +326,16 @@ impl Renderer {
                 self.next_event += 1;
                 if !self.graph.launcher.overrides(event.column) {
                     let end = self.position + event.end.saturating_sub(event.start);
-                    let gains = (event.gain_left, event.gain_right);
-                    let (voices, position, sample_rate) = (&mut self.voices, self.position, self.sample_rate);
-                    start_voice(voices, position, sample_rate, end, event.frequency, gains, event.column);
+                    let start = NoteStart {
+                        frequency: event.frequency,
+                        key: event.key,
+                        velocity: event.velocity,
+                        gains: (event.gain_left, event.gain_right),
+                        column: event.column,
+                        bus: event.bus,
+                    };
+                    let Self { voices, graph, position, sample_rate, .. } = self;
+                    start_note(voices, &mut graph.chains, frame, *position, *sample_rate, end, start);
                 }
             }
 
@@ -306,10 +355,16 @@ impl Renderer {
                 };
                 let sample = (voice.phase * std::f64::consts::TAU).sin() * envelope;
                 voice.phase = (voice.phase + voice.phase_step).fract();
-                left += sample as f32 * voice.gain_left;
-                right += sample as f32 * voice.gain_right;
+                let (l, r) = (sample as f32 * voice.gain_left, sample as f32 * voice.gain_right);
+                match bus_chain(&mut self.graph.chains, voice.bus) {
+                    Some(chain) => chain.add(frame, l, r),
+                    None => {
+                        left += l;
+                        right += r;
+                    }
+                }
             }
-            let (audio_left, audio_right) = if self.running { self.audio_frame(time) } else { (0.0, 0.0) };
+            let (audio_left, audio_right) = if self.running { self.audio_frame(time, frame) } else { (0.0, 0.0) };
             *out_left = left + audio_left + launched_left + click;
             *out_right = right + audio_right + launched_right + click;
             self.position += 1;
@@ -317,6 +372,10 @@ impl Renderer {
         if running {
             self.mix_stretched(out, block_start);
         }
+        for chain in &mut self.graph.chains {
+            chain.finish(out, frames, &context);
+        }
+        self.block_frame = 0;
     }
 
     /// Adds the stretched clips that overlap the block starting at frame `block_start` to `out`.
@@ -330,6 +389,7 @@ impl Renderer {
         let scratch = &mut self.stretch_scratch;
         let launcher = &self.graph.launcher;
         let ahead = &mut self.graph.ahead;
+        let chains = &mut self.graph.chains;
         self.stretch_fresh = false;
         for (index, event) in self.graph.stretch_events.iter().enumerate() {
             if event.end <= time_start || event.start >= time_end {
@@ -349,10 +409,15 @@ impl Renderer {
                     let since_start = (frame - event.start) as f64;
                     let until_end = (event.end - frame) as f64;
                     let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
-                    let at = ((frame - time_start) * 2) as usize;
-                    if let Some([l, r]) = out.get_mut(at..at + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok()) {
-                        *l += left * event.gain_left * fade;
-                        *r += right * event.gain_right * fade;
+                    let at = (frame - time_start) as usize;
+                    let (l, r) = (left * event.gain_left * fade, right * event.gain_right * fade);
+                    if let Some(chain) = bus_chain(chains, event.bus) {
+                        chain.add(at, l, r);
+                    } else if let Some([ol, or]) =
+                        out.get_mut(at * 2..at * 2 + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok())
+                    {
+                        *ol += l;
+                        *or += r;
                     }
                 }
                 time += frames as u64;
@@ -361,8 +426,9 @@ impl Renderer {
     }
 
     /// Starts arrangement audio clips that begin at arrangement frame `time`, mixes the playing
-    /// ones and drops the ones that have ended.
-    fn audio_frame(&mut self, time: u64) -> (f32, f32) {
+    /// ones and drops the ones that have ended. Clips on a track with devices go to its chain at
+    /// `frame` of the block; the rest are returned.
+    fn audio_frame(&mut self, time: u64, frame: usize) -> (f32, f32) {
         while let Some(arranged) = self.graph.audio_events.get(self.next_audio) {
             if arranged.event.start > time {
                 break;
@@ -383,8 +449,13 @@ impl Renderer {
                 Some(arranged) if time < arranged.event.end => {
                     if !self.graph.launcher.overrides(arranged.column) {
                         let (l, r) = arranged.event.sample(time);
-                        left += l;
-                        right += r;
+                        match bus_chain(&mut self.graph.chains, arranged.bus) {
+                            Some(chain) => chain.add(frame, l, r),
+                            None => {
+                                left += l;
+                                right += r;
+                            }
+                        }
                     }
                     i += 1;
                 }
@@ -402,17 +473,40 @@ impl Renderer {
     }
 }
 
-/// Starts a sine voice at frame `position` that ends at frame `end`, stealing the oldest voice
-/// when all are busy.
-fn start_voice(
+/// A note to start: its sine voice's pitch and gains, or the key and velocity an instrument
+/// gets.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NoteStart {
+    pub(crate) frequency: f64,
+    pub(crate) key: u8,
+    pub(crate) velocity: f32,
+    pub(crate) gains: (f32, f32),
+    pub(crate) column: u32,
+    pub(crate) bus: u32,
+}
+
+/// The chain behind `bus`, or `None` for the output.
+pub(crate) fn bus_chain(chains: &mut [Chain], bus: u32) -> Option<&mut Chain> {
+    let index = usize::try_from(bus).ok()?.checked_sub(1)?;
+    chains.get_mut(index)
+}
+
+/// Starts a note at renderer frame `position` (`frame` of the block) that ends at frame `end`:
+/// on the track's instrument when its chain starts with one, otherwise as a sine voice, stealing
+/// the oldest voice when all are busy.
+pub(crate) fn start_note(
     voices: &mut [Voice; MAX_VOICES],
+    chains: &mut [Chain],
+    frame: usize,
     position: u64,
     sample_rate: u32,
     end: u64,
-    frequency: f64,
-    (gain_left, gain_right): (f32, f32),
-    column: u32,
+    note: NoteStart,
 ) {
+    if let Some(chain) = bus_chain(chains, note.bus).filter(|c| c.instrument) {
+        chain.note_on(frame, position, note.key, note.velocity, end);
+        return;
+    }
     let slot = match voices.iter().position(|v| !v.active) {
         Some(free) => free,
         None => voices.iter().enumerate().min_by_key(|(_, v)| v.started_at).map_or(0, |(i, _)| i),
@@ -423,11 +517,23 @@ fn start_voice(
             started_at: position,
             end: end.max(position + 1),
             phase: 0.0,
-            phase_step: frequency / f64::from(sample_rate),
-            gain_left,
-            gain_right,
-            column,
+            phase_step: note.frequency / f64::from(sample_rate),
+            gain_left: note.gains.0,
+            gain_right: note.gains.1,
+            column: note.column,
+            bus: note.bus,
         };
+    }
+}
+
+/// Where a track's sound goes: its bus (0 for the output, 1 + the chain's index when the track
+/// has devices) and the gains its sources are mixed at; `None` when the track is silent. A track
+/// with a chain is mixed at a centred unity gain, and its own gains apply after the chain.
+pub(crate) fn route(project: &Project, chains: &[Chain], track: TrackId) -> Option<(u32, (f32, f32))> {
+    let gains = track_gains(project, track)?;
+    match chains.iter().position(|c| c.track == track) {
+        Some(index) => Some((u32::try_from(index + 1).ok()?, (CHAIN_INPUT_GAIN, CHAIN_INPUT_GAIN))),
+        None => Some((0, gains)),
     }
 }
 
@@ -454,6 +560,14 @@ impl Graph {
                 .and_then(|i| u32::try_from(i).ok())
                 .unwrap_or(NO_COLUMN)
         };
+        let chains: Vec<Chain> = project
+            .tracks
+            .iter()
+            .filter_map(|track| {
+                let gains = track_gains(project, track.id)?;
+                Chain::build(project, track.id, column_of(track.id), gains, sample_rate)
+            })
+            .collect();
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
@@ -463,14 +577,14 @@ impl Graph {
                 let Some(content) = project.content(clip.content) else { continue };
                 for (content_index, content_lane) in content.lanes.iter().enumerate() {
                     let Some(track) = content_lane.target.or(lane.track) else { continue };
-                    let Some((gain_left, gain_right)) = track_gains(project, track) else { continue };
+                    let Some((bus, (gain_left, gain_right))) = route(project, &chains, track) else { continue };
                     let column = column_of(track);
                     match &content_lane.data {
                         LaneData::Notes(_) => collect_notes(
                             clip,
                             content_lane,
                             frames_per_beat,
-                            (gain_left, gain_right, column),
+                            (gain_left, gain_right, column, bus),
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
@@ -492,12 +606,18 @@ impl Graph {
                                     gain_left: gains.0 * gain,
                                     gain_right: gains.1 * gain,
                                     column,
+                                    bus,
                                 });
                                 continue;
                             }
                             let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
                             audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
-                                |event| ArrangedAudio { event, column, key: (lane_index, clip_index, content_index) },
+                                |event| ArrangedAudio {
+                                    event,
+                                    column,
+                                    bus,
+                                    key: (lane_index, clip_index, content_index),
+                                },
                             ));
                         }
                     }
@@ -516,6 +636,8 @@ impl Graph {
             .max()
             .unwrap_or(0)
             .max(notes_end);
+        let tail = if chains.is_empty() { 0 } else { (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64 };
+        let length = if length > 0 { length + tail } else { 0 };
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
             return Err(RenderError::TooLong { seconds });
@@ -527,8 +649,9 @@ impl Graph {
             stretch_events,
             ahead: AheadReader::new(stretch_voices, sample_rate),
             length,
-            launcher: Launcher::new(project, audio, sample_rate),
+            launcher: Launcher::new(project, audio, sample_rate, &chains),
             frames_per_beat,
+            chains,
         }))
     }
 }
@@ -630,7 +753,7 @@ fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
     frames_per_beat: f64,
-    (gain_left, gain_right, column): (f32, f32, u32),
+    (gain_left, gain_right, column, bus): (f32, f32, u32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
     let LaneData::Notes(notes) = &lane.data else { return };
@@ -655,9 +778,12 @@ fn collect_notes(
                 start: to_frame(start),
                 end: to_frame(end),
                 frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
+                key: note.key.min(127),
+                velocity: note.velocity.clamp(0.0, 1.0),
                 gain_left: gain_left * note.velocity.clamp(0.0, 1.0),
                 gain_right: gain_right * note.velocity.clamp(0.0, 1.0),
                 column,
+                bus,
             });
         }
     };

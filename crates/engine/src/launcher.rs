@@ -12,8 +12,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use loopwerk_model::{LaneData, Project, TimeSignature};
 
 use crate::audio::{AudioEvent, AudioPool, Timing};
+use crate::chain::Chain;
 use crate::stretch::StretchVoice;
-use crate::{AUDIO_HEADROOM, Renderer, start_voice, track_gains};
+use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, route, start_note};
 
 /// Commands that can wait in the queue between two audio blocks.
 const QUEUE_CAPACITY: usize = 256;
@@ -194,8 +195,12 @@ struct PlanNote {
     time: f64,
     duration: f64,
     frequency: f64,
+    key: u8,
+    velocity: f32,
     gain_left: f32,
     gain_right: f32,
+    /// 0 for the output, or 1 + the index of the track's chain.
+    bus: u32,
 }
 
 struct PlanAudio {
@@ -212,6 +217,8 @@ struct PlanAudio {
     /// Identifies what the stretch voice plays (region, placement, tempo, sample rate), so a
     /// graph swap can keep a playing voice whose audio has not changed (ADR 0005).
     fingerprint: u64,
+    /// 0 for the output, or 1 + the index of the track's chain.
+    bus: u32,
 }
 
 /// A slot's clip, ready to play.
@@ -296,7 +303,7 @@ pub(crate) struct Launcher {
 }
 
 impl Launcher {
-    pub(crate) fn new(project: &Project, audio: &AudioPool, sample_rate: u32) -> Self {
+    pub(crate) fn new(project: &Project, audio: &AudioPool, sample_rate: u32, chains: &[Chain]) -> Self {
         let tempo = project.transport.tempo_bpm;
         let frames_per_beat = 60.0 / tempo * f64::from(sample_rate);
         let columns: Vec<Column> = project
@@ -308,11 +315,9 @@ impl Launcher {
                     .slots
                     .iter()
                     .map(|slot| SlotPlan {
-                        clip: slot
-                            .clip
-                            .as_ref()
-                            .filter(|c| c.enabled)
-                            .and_then(|c| plan_clip(project, audio, c, column.track, frames_per_beat, sample_rate)),
+                        clip: slot.clip.as_ref().filter(|c| c.enabled).and_then(|c| {
+                            plan_clip(project, audio, chains, c, column.track, frames_per_beat, sample_rate)
+                        }),
                         has_stop: slot.has_stop,
                     })
                     .collect(),
@@ -377,6 +382,11 @@ impl Launcher {
     /// Like [`Launcher::overrides`], at frame `position` of the block just rendered.
     pub(crate) fn overrides_at(&self, column: u32, position: u64) -> bool {
         self.columns.get(column as usize).and_then(|c| c.overrides_since).is_some_and(|since| since <= position)
+    }
+
+    /// The tempo playing now.
+    pub(crate) fn tempo_bpm(&self) -> f64 {
+        self.tempo_bpm
     }
 
     /// The beat playing now and the beats in a bar, for the metronome.
@@ -476,6 +486,7 @@ fn bar_beats(ts: TimeSignature) -> f64 {
 fn plan_clip(
     project: &Project,
     audio: &AudioPool,
+    chains: &[Chain],
     clip: &loopwerk_model::Clip,
     track: loopwerk_model::TrackId,
     frames_per_beat: f64,
@@ -492,7 +503,9 @@ fn plan_clip(
     let mut notes = Vec::new();
     let mut audio_plans = Vec::new();
     for lane in &content.lanes {
-        let Some((gain_left, gain_right)) = track_gains(project, lane.target.unwrap_or(track)) else { continue };
+        let Some((bus, (gain_left, gain_right))) = route(project, chains, lane.target.unwrap_or(track)) else {
+            continue;
+        };
         match &lane.data {
             LaneData::Notes(lane_notes) => {
                 for note in lane_notes.iter().filter(|n| n.time.is_finite() && n.duration.is_finite()) {
@@ -501,8 +514,11 @@ fn plan_clip(
                         time: note.time,
                         duration: note.duration.max(0.0),
                         frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
+                        key: note.key.min(127),
+                        velocity,
                         gain_left: gain_left * velocity,
                         gain_right: gain_right * velocity,
+                        bus,
                     });
                 }
             }
@@ -541,6 +557,7 @@ fn plan_clip(
                     stretch_beats,
                     stretch_gains: (gains.0 * region_gain, gains.1 * region_gain),
                     fingerprint,
+                    bus,
                 });
             }
         }
@@ -665,6 +682,10 @@ impl Renderer {
         for voice in self.voices.iter_mut().filter(|v| v.active) {
             voice.end = voice.end.min(self.position);
         }
+        let frame = self.block_frame;
+        for chain in &mut self.graph.chains {
+            chain.release_all(frame);
+        }
         let launcher = &mut self.graph.launcher;
         for column in &mut launcher.columns {
             column.pending = None;
@@ -695,6 +716,7 @@ impl Renderer {
     /// audio and fades. Returns the launcher's stereo output for this frame.
     pub(crate) fn launcher_frame(&mut self) -> (f32, f32) {
         let mut out = (0.0f32, 0.0f32);
+        let frame = self.block_frame;
         if self.running {
             self.apply_due();
         }
@@ -704,6 +726,7 @@ impl Renderer {
                 self.play_notes(index, beats_per_frame);
             }
             let launcher = &mut self.graph.launcher;
+            let chains = &mut self.graph.chains;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
             let fade_in = self.fade_frames;
@@ -735,8 +758,13 @@ impl Renderer {
                             a.event.sample_elapsed(at)
                         }
                     };
-                    out.0 += l * gain;
-                    out.1 += r * gain;
+                    match bus_chain(chains, a.bus) {
+                        Some(chain) => chain.add(frame, l * gain, r * gain),
+                        None => {
+                            out.0 += l * gain;
+                            out.1 += r * gain;
+                        }
+                    }
                 }
                 p.elapsed_beats += beats_per_frame;
                 p.elapsed_frames += 1.0;
@@ -820,13 +848,19 @@ impl Renderer {
         for voice in self.voices.iter_mut().filter(|v| v.active && v.column == column) {
             voice.end = voice.end.min(position);
         }
+        let frame = self.block_frame;
+        for chain in self.graph.chains.iter_mut().filter(|c| c.column == column) {
+            chain.release_all(frame);
+        }
         // Arrangement audio on this track goes silent through the override check.
     }
 
     /// Starts the notes of a column's playing clip that are due at this frame.
     fn play_notes(&mut self, index: usize, beats_per_frame: f64) {
-        let Self { graph, voices, position, sample_rate, .. } = self;
+        let Self { graph, voices, position, sample_rate, block_frame, .. } = self;
+        let frame = *block_frame;
         let launcher = &mut graph.launcher;
+        let chains = &mut graph.chains;
         let Ok(column_id) = u32::try_from(index) else { return };
         let Some(column) = launcher.columns.get_mut(index) else { return };
         let Some(p) = column.playing.as_mut() else { return };
@@ -836,15 +870,15 @@ impl Renderer {
         let mut start = |note: &PlanNote| {
             let beats = note.duration.min(limit - note.time).max(0.0);
             let end = position.saturating_add((beats / beats_per_frame).round() as u64);
-            start_voice(
-                voices,
-                *position,
-                *sample_rate,
-                end,
-                note.frequency,
-                (note.gain_left, note.gain_right),
-                column_id,
-            );
+            let start = NoteStart {
+                frequency: note.frequency,
+                key: note.key,
+                velocity: note.velocity,
+                gains: (note.gain_left, note.gain_right),
+                column: column_id,
+                bus: note.bus,
+            };
+            start_note(voices, chains, frame, *position, *sample_rate, end, start);
         };
         if let Some((loop_start, loop_end)) = plan.loop_range
             && beat < p.last_clip_beat
