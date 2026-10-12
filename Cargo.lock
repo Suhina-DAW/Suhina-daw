@@ -2341,6 +2341,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "loopwerk-engine",
+ "loopwerk-plugins",
  "loopwerk-session",
  "serde_json",
 ]

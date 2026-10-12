@@ -184,6 +184,7 @@ restart (the renderer) says so in its note.
 | Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
+| Plug-ins | Folders, Scan | The standard folders (read only) and the added ones (Remove), a field to add one; Scan (new and changed files) and Rescan all, run in the background; the plug-ins found and the files that failed, in a list that scrolls. Read and changed through the `plugins.*` commands |
 
 The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder; unknown lines
 are skipped with a warning in the status bar.

@@ -275,5 +275,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
+- Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
+  and the plug-ins found and the files that failed.
 - Still to do: clip fades, input routing and sends, arm, meters, the browser, the detail area
-  (devices, clip editor), configurable shortcuts, the plug-ins section in Settings, installers.
+  (devices, clip editor), configurable shortcuts, installers.

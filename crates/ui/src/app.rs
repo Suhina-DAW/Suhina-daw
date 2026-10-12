@@ -16,7 +16,7 @@ use crate::grid::{Grid, SlotState};
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{OnOpen, Settings, Side};
-use crate::settings_view::{self, About};
+use crate::settings_view::{self, About, PluginRequest, PluginsView};
 use crate::theme::{self, PAD};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
@@ -45,6 +45,13 @@ pub enum OpenAs {
     NewTab,
     /// In place of the active project, which is closed.
     Replace,
+}
+
+/// A finished plug-in scan: the library with its new catalog, and how many files were read and
+/// failed, or why the scan could not run.
+struct ScanDone {
+    library: loopwerk_plugins::library::Library,
+    report: Result<(usize, usize), String>,
 }
 
 /// A project's view state, kept while another project's tab is showing.
@@ -102,6 +109,10 @@ pub struct App {
     timeline: Option<(u64, Timeline)>,
     /// Waveforms of the open project's audio files.
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
+    /// The plug-in library as Settings shows it, and a scan running in the background.
+    plugins: PluginsView,
+    plugins_read: bool,
+    scan: Option<std::sync::mpsc::Receiver<ScanDone>>,
     settings: Settings,
     /// The settings changed and should be saved.
     settings_changed: bool,
@@ -137,11 +148,20 @@ impl App {
             revision: 0,
             timeline: None,
             waveforms: std::sync::Arc::default(),
+            plugins: PluginsView::default(),
+            plugins_read: false,
+            scan: None,
             settings: Settings::default(),
             settings_changed: false,
             settings_open: false,
             about: About::default(),
         }
+    }
+
+    /// A window whose `plugins.*` commands use `library` instead of the one in Loopwerk's
+    /// settings folder (tests, portable setups).
+    pub fn with_library(library: loopwerk_plugins::library::Library) -> Self {
+        Self { projects: Projects::with_library(library), ..Self::new() }
     }
 
     /// Shows `session`, replacing the active project. `warnings` are what the importer skipped.
@@ -384,6 +404,7 @@ impl App {
     pub fn ui(&mut self, ui: &mut Ui) {
         let mut actions = Vec::new();
         self.follow_active();
+        self.poll_scan(ui.ctx());
         self.dropped_files(ui);
         self.shortcuts(ui, &mut actions);
 
@@ -548,9 +569,114 @@ impl App {
         }
     }
 
+    /// Reads the plug-in library through its commands, for the Settings page.
+    fn read_plugins(&mut self) {
+        self.plugins_read = true;
+        let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_string();
+        let list = |v: &serde_json::Value| v.as_array().map(|a| a.iter().map(text).collect()).unwrap_or_default();
+        match self.projects.execute("plugins.folders", &json!({})) {
+            Ok(folders) => {
+                self.plugins.standard = list(&folders["standard"]);
+                self.plugins.added = list(&folders["added"]);
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+        match self.projects.execute("plugins.list", &json!({})) {
+            Ok(found) => {
+                let empty = Vec::new();
+                self.plugins.found = found["plugins"]
+                    .as_array()
+                    .unwrap_or(&empty)
+                    .iter()
+                    .map(|p| [text(&p["name"]), text(&p["vendor"]), text(&p["format"]), text(&p["version"])])
+                    .collect();
+                self.plugins.failed = found["failed"]
+                    .as_array()
+                    .unwrap_or(&empty)
+                    .iter()
+                    .map(|f| (text(&f["file"]), text(&f["reason"])))
+                    .collect();
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
+    /// Does what the Settings page asked of the plug-in library. Folders change through their
+    /// commands; a scan runs `Library::scan` (what `plugins.scan` runs) on a copy of the library
+    /// on another thread, so the window keeps drawing, and the result replaces the library.
+    fn plugin_request(&mut self, request: PluginRequest) {
+        match request {
+            PluginRequest::AddFolder(folder) => {
+                match self.projects.execute("plugins.addFolder", &json!({ "folder": folder })) {
+                    Ok(_) => self.plugins.new_folder.clear(),
+                    Err(e) => self.status = Status::Error(e.0),
+                }
+                self.plugins_read = false;
+            }
+            PluginRequest::RemoveFolder(folder) => {
+                if let Err(e) = self.projects.execute("plugins.removeFolder", &json!({ "folder": folder })) {
+                    self.status = Status::Error(e.0);
+                }
+                self.plugins_read = false;
+            }
+            PluginRequest::Scan { all } => {
+                let mut library = self.projects.library_mut().clone();
+                let (done, receive) = std::sync::mpsc::channel();
+                let started = std::thread::Builder::new().name("loopwerk-plugin-scan".into()).spawn(move || {
+                    let report = library.scan(all).map(|r| (r.read.len(), r.failed.len()));
+                    let _unheard = done.send(ScanDone { library, report });
+                });
+                match started {
+                    Ok(_) => {
+                        self.scan = Some(receive);
+                        self.plugins.scanning = true;
+                        self.status = Status::Hint("Scanning for plug-ins".into());
+                    }
+                    Err(e) => self.status = Status::Error(format!("could not start the scan: {e}")),
+                }
+            }
+        }
+    }
+
+    /// Picks up a finished background scan.
+    fn poll_scan(&mut self, ctx: &egui::Context) {
+        let Some(receive) = &self.scan else { return };
+        match receive.try_recv() {
+            Ok(ScanDone { library, report }) => {
+                *self.projects.library_mut() = library;
+                self.status = match report {
+                    Ok((read, failed)) => Status::Done(format!("Scan done: {read} files read, {failed} failed")),
+                    Err(e) => Status::Error(e),
+                };
+                self.scan = None;
+                self.plugins.scanning = false;
+                self.plugins_read = false;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.status = Status::Error("the plug-in scan stopped without a result".into());
+                self.scan = None;
+                self.plugins.scanning = false;
+            }
+        }
+    }
+
+    /// Whether a plug-in scan is running.
+    pub fn scanning(&self) -> bool {
+        self.scan.is_some()
+    }
+
     /// The Settings page, applying each change as it is made.
     fn settings_page(&mut self, ui: &mut Ui) {
-        let outcome = settings_view::show(ui, &mut self.settings, &self.about);
+        if !self.plugins_read {
+            self.read_plugins();
+        }
+        let outcome = settings_view::show(ui, &mut self.settings, &self.about, &mut self.plugins);
+        if let Some(request) = outcome.plugins.clone() {
+            self.plugin_request(request);
+        }
         if outcome.changed {
             motion::set_enabled(ui.ctx(), self.settings.animations);
             self.arrangement.headers_left = self.settings.track_headers == Side::Left;

@@ -23,15 +23,43 @@ pub struct About {
     pub graphics_now: Option<Graphics>,
 }
 
+/// The plug-in library as the page shows it, read through the `plugins.*` commands.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PluginsView {
+    /// The system's standard folders, and the ones the user added.
+    pub standard: Vec<String>,
+    pub added: Vec<String>,
+    /// Name, vendor, format and version of each plug-in found.
+    pub found: Vec<[String; 4]>,
+    /// Files that failed to load, and why.
+    pub failed: Vec<(String, String)>,
+    /// A scan is running in the background.
+    pub scanning: bool,
+    /// The folder typed into the add field.
+    pub new_folder: String,
+}
+
+/// What the page asks the app to do with the plug-in library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginRequest {
+    /// Scan new and changed files, or every file again.
+    Scan {
+        all: bool,
+    },
+    AddFolder(String),
+    RemoveFolder(String),
+}
+
 /// What the user did on the page this frame.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub changed: bool,
     pub close: bool,
+    pub plugins: Option<PluginRequest>,
 }
 
 /// Draws the page into the space left in `ui`.
-pub fn show(ui: &mut Ui, settings: &mut Settings, about: &About) -> Outcome {
+pub fn show(ui: &mut Ui, settings: &mut Settings, about: &About, plugins: &mut PluginsView) -> Outcome {
     let mut outcome = Outcome::default();
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
@@ -164,7 +192,122 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, about: &About) -> Outcome {
     let r = row(&mut y);
     let output = about.audio_output.as_deref().unwrap_or("None: no project is playing");
     label(&painter, r, "Output", output);
+    y += SECTION_GAP;
+
+    section(&mut y, "Plug-ins");
+    outcome.plugins = plugin_section(ui, &painter, page, &mut y, area.bottom(), plugins);
     outcome
+}
+
+/// Folders, scanning and what was found. Returns what the user asked for.
+fn plugin_section(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    page: Rect,
+    y: &mut f32,
+    bottom: f32,
+    plugins: &mut PluginsView,
+) -> Option<PluginRequest> {
+    let mut request = None;
+    let small = theme::ui_font(theme::TEXT_SMALL);
+    let line = |y: &mut f32, height: f32| {
+        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), height));
+        *y += height;
+        rect
+    };
+
+    // Folders: the standard ones, then the added ones with a way to remove each.
+    let r = line(y, 18.0);
+    widgets::text_in(painter, r, Align2::LEFT_CENTER, "Folders", theme::ui_font(theme::TEXT), theme::TEXT_PRIMARY);
+    for folder in &plugins.standard {
+        let r = line(y, 16.0);
+        let text = format!("{folder}  (standard)");
+        widgets::text_in(painter, r, Align2::LEFT_CENTER, &text, small.clone(), theme::TEXT_TERTIARY);
+    }
+    for folder in &plugins.added {
+        let r = line(y, 18.0);
+        let remove =
+            Rect::from_min_max(Pos2::new(r.right() - 64.0, r.top() + 1.0), Pos2::new(r.right(), r.bottom() - 1.0));
+        widgets::text_in(painter, r, Align2::LEFT_CENTER, folder, small.clone(), theme::TEXT_SECONDARY);
+        let response = widgets::button_area(ui, remove, Id::new(("remove-folder", folder)), format!("Remove {folder}"));
+        let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
+        painter.rect_filled(remove, 0.0, fill);
+        widgets::text_in(painter, remove, Align2::CENTER_CENTER, "Remove", small.clone(), theme::TEXT_SECONDARY);
+        if response.clicked() {
+            request = Some(PluginRequest::RemoveFolder(folder.clone()));
+        }
+    }
+    *y += 4.0;
+    let r = line(y, 20.0);
+    let add = Rect::from_min_max(Pos2::new(r.right() - 64.0, r.top()), r.max);
+    let field = Rect::from_min_max(r.min, Pos2::new(add.left() - 4.0, r.bottom()));
+    let edit = ui.put(
+        field,
+        egui::TextEdit::singleline(&mut plugins.new_folder)
+            .hint_text("A folder to look in as well")
+            .font(small.clone()),
+    );
+    let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add folder");
+    let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
+    painter.rect_filled(add, 0.0, fill);
+    widgets::text_in(painter, add, Align2::CENTER_CENTER, "Add", small.clone(), theme::TEXT_PRIMARY);
+    let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    if (response.clicked() || entered) && !plugins.new_folder.trim().is_empty() {
+        request = Some(PluginRequest::AddFolder(plugins.new_folder.trim().to_string()));
+    }
+    *y += 8.0;
+
+    // Scanning.
+    let r = line(y, SETTING_ROW);
+    let summary = if plugins.scanning {
+        "Scanning: each file is loaded in a separate process, so a plug-in that crashes is only reported".to_string()
+    } else {
+        format!("{} plug-ins found, {} files failed to load", plugins.found.len(), plugins.failed.len())
+    };
+    label(painter, r, "Scan", &summary);
+    let buttons = control_rect(r, 2);
+    let half = (buttons.width() - 1.0) / 2.0;
+    for (index, (text, all)) in [("Scan", false), ("Rescan all", true)].into_iter().enumerate() {
+        let cell = Rect::from_min_size(
+            Pos2::new(buttons.left() + index as f32 * (half + 1.0), buttons.top()),
+            Vec2::new(half, buttons.height()),
+        );
+        let response = widgets::button_area(ui, cell, Id::new(("scan", index)), text);
+        let base = if plugins.scanning { theme::SURFACE_1 } else { theme::SURFACE_2 };
+        let fill = motion::mix(
+            base,
+            theme::HOVER_ON_SURFACE_2,
+            if plugins.scanning { 0.0 } else { widgets::hover(ui, &response) },
+        );
+        painter.rect_filled(cell, 0.0, fill);
+        let color = if plugins.scanning { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
+        widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, small.clone(), color);
+        if response.clicked() && !plugins.scanning {
+            request = Some(PluginRequest::Scan { all });
+        }
+    }
+
+    // What was found, in the space left.
+    let list =
+        Rect::from_min_max(Pos2::new(page.left(), *y + 4.0), Pos2::new(page.right(), (bottom - 12.0).max(*y + 40.0)));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for [name, vendor, format, version] in &plugins.found {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(name).font(small.clone()).color(theme::TEXT_PRIMARY));
+                    ui.label(
+                        egui::RichText::new(format!("{vendor} · {format} {version}"))
+                            .font(small.clone())
+                            .color(theme::TEXT_TERTIARY),
+                    );
+                });
+            }
+            for (file, why) in &plugins.failed {
+                ui.label(egui::RichText::new(format!("{file}: {why}")).font(small.clone()).color(theme::RECORDING));
+            }
+        });
+    });
+    request
 }
 
 /// A setting's name and a note under it, on the left of its row.

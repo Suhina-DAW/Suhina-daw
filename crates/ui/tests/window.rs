@@ -540,6 +540,50 @@ fn opening_while_a_project_is_open_asks_and_can_remember() {
     assert_eq!(harness.state_mut().take_open_request(), Some(("third.als".into(), OpenAs::NewTab)));
 }
 
+#[test]
+fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
+    let base = std::env::temp_dir().join(format!("loopwerk-ui-plugins-{}", std::process::id()));
+    let folder = base.join("my plug-ins");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    let library =
+        loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host")).without_standard_folders();
+    let mut app = App::with_library(library);
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+
+    let field = harness.get_by_role(egui::accesskit::Role::TextInput);
+    field.focus();
+    field.type_text(&folder.display().to_string());
+    harness.run();
+    harness.get_by_label("Add folder").click();
+    harness.run();
+    harness.run();
+    let remove = harness.query_all_by_label_contains("Remove ").count();
+    assert_eq!(remove, 1, "the added folder is listed with a Remove button");
+
+    harness.get_by_label("Scan").click();
+    harness.run();
+    for _ in 0..200 {
+        if !harness.state().scanning() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.step();
+    }
+    match harness.state().status() {
+        Status::Error(message) => assert!(message.contains("plug-in host"), "{message}"),
+        other => panic!("expected the missing host to be reported, got {other:?}"),
+    }
+
+    harness.get_by_label_contains("Remove ").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.query_all_by_label_contains("Remove ").count(), 0);
+    let _cleanup = std::fs::remove_dir_all(&base);
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.
