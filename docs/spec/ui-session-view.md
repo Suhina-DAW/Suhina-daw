@@ -21,7 +21,8 @@ Items marked **(to observe)** still need checking in Live.
 
 From top to bottom:
 
-1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help.
+1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help. (Loopwerk has File,
+   Edit, View, Projects and Options so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
    - groove amount, metronome, global launch quantisation
@@ -46,6 +47,9 @@ From top to bottom:
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
 6. **Status bar:** messages, the selected track's name and a mini overview.
 
+Loopwerk keeps one 20 px status bar for messages and counts and has no separate info view; where
+this list and `docs/design/components.md` differ, components.md describes Loopwerk.
+
 ## Session view
 
 A grid. **Columns are tracks** in project order: regular tracks, then a gap, then return tracks,
@@ -55,7 +59,9 @@ create a new scene or track.
 
 ### Track header
 
-Track name, coloured with the track colour. Clicking selects the track; double-clicking renames.
+Track name over a strip in the track colour (Live colours the name itself). Clicking selects the
+track; dragging moves it; right-clicking opens its menu (rename, colour, group, ungroup, delete).
+Double-clicking to rename is planned.
 Dropping a device or file on the empty area right of the last track creates a new track.
 
 ### Clip slots

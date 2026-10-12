@@ -28,26 +28,35 @@ replaces them.
 
 - Radius 0 everywhere. No shadows, gradients or cards.
 - Regions are separated by 1 px gaps that show `line` beneath them.
-- Type: 11 px `Encode Sans Semi Expanded` for UI text; 10 px for small values and labels;
-  `IBM Plex Mono` for every number, time and position; 9 px only in rulers and key labels.
-  Fonts live in `crates/ui/fonts/<font>/` with their licence and a row in `ATTRIBUTION.md`.
+- Parts marked **(planned)** are designed but not built yet; everything else is what the app
+  draws today.
+- Type, by role:
+  - 11 px `Encode Sans Semi Expanded` for UI text (names, labels of controls, menu items);
+  - 10 px for small values and labels, and every number, time and position in `IBM Plex Mono`
+    (bar numbers in the ruler too);
+  - 9 px only for tags beside a name: a device's kind, a clip's gain, key labels in the clip
+    editor;
+  - 13 px only for a page title (Settings) and the drop overlay.
 - Text colours: `text.primary` for values and names, `text.secondary` for labels,
-  `text.tertiary` for inactive and hints.
+  `text.tertiary` for inactive and hints. The one pure white (`#FFFFFF`) is the name of a playing
+  or recording clip.
+- Fonts live in `crates/ui/fonts/<font>/` with their licence and a row in `ATTRIBUTION.md`.
 
-### Interaction states (proposed)
+### Interaction states
 
 | State | Change |
 |---|---|
-| Hover | Background one step lighter (`surface.2` → `#34332F`, `surface.1` → `#2A2926`) |
+| Hover | Background one step lighter: `surface.0` → `surface.1`, `surface.1` → `#2A2926`, `surface.2` → `#34332F` |
 | Pressed / dragging | `surface.3` |
-| Keyboard focus | 1 px inset outline in `accent` |
+| Selected | A track header: `surface.2` in the Arrangement view, `surface.3` in the Session view; a clip: `surface.3` with a 1 px `text.primary` inset |
+| Keyboard focus | (planned) 1 px inset outline in `accent` |
 | Disabled | Text `text.tertiary`, no fills |
-| Track off (muted) | The whole header and its lane at reduced contrast: text `text.tertiary`, fills `#34322F`, lane opacity 0.55 |
+| Track off (muted) | Its name in `text.tertiary`; its slots, clips, marks and colour strip at 55 % opacity |
 
 ### Motion
 
-Animations are short and only show a change of state; with animations off (a setting, and
-`--no-animations` until Settings exists) every value jumps straight to its end.
+Animations are short and only show a change of state; with animations off (Settings ›
+Animations, or `--no-animations` for one run) every value jumps straight to its end.
 
 | What | How |
 |---|---|
@@ -59,21 +68,24 @@ Animations are short and only show a change of state; with animations off (a set
 
 ## Window
 
+From top to bottom: menu bar, tab row (when shown), control bar, the open prompt (when shown),
+the view with the detail area, status bar.
+
 | Region | Size |
 |---|---|
-| Menu bar | 20 px high, items 14 px apart, `text.secondary`; File, Edit, View, Projects, Options so far |
+| Menu bar | 20 px, `surface.1`, items 14 px apart in `text.secondary`: File, Edit, View, Projects, Options; Create, Playback, Navigate and Help (planned) |
 | Tab row | 22 px, `surface.0`, shown while two or more projects are open (ADR 0007): one tab per project, name and a 12 px × to close; the active tab `surface.1` with `text.primary`, others `text.secondary`; Ctrl+Tab and Ctrl+Shift+Tab move between them |
+| Control bar | 28 px, `surface.1`, a 1 px `line` under it. Left, 6 px apart: tempo (56 × 20 value field, `surface.2`, 11 px mono right-aligned, dragged up or down), time signature (40 px, 11 px mono `text.secondary`, "4 / 4"), launch quantisation (64 px dropdown, 11 px mono). Centre: play and stop (28 × 20 each, 1 px apart), the position (64 × 20 on `surface.0`, 11 px mono, "bar.beat.sixteenth"). Right: the view switch. (planned): metronome, record, loop, CPU |
+| Transport button | 28 × 20, `surface.2`; play shows `surface.3` while playing, its glyph in `accent`; stop is an 8 × 8 square in `text.primary`; record (planned) a 1.5 px red ring |
+| View switch | Text only, 11 px, right-aligned, 12 px apart: "Session", "Arrangement"; the current one `text.primary` with a 1 px underline, the other `text.secondary` |
 | Open prompt | When a project is dropped while another is open and the setting says Ask: a 32 px row on `surface.1` above the view: "Open x:" In a new tab, In place of y, Cancel, Remember (which sets the setting) |
 | Drop overlay | While a project file is dragged over the window: `surface.0` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
-| Control bar | 28 px high, three groups on `surface.1`: tempo and meter left, transport centre, status and view switch right |
-| Transport button | 28 × 20, `surface.2`; play shows `surface.3` while playing, glyph in `accent`; record glyph is a 1.5 px red ring |
-| View switch | Text only; current view `text.primary` with a 1 px underline |
-| Browser | 300 px wide (resizable) |
-| Detail splitter | 6 px, `surface.2`, 1 px `line.strong` above and below, 32 × 2 grip in `text.tertiary`; cursor `ns-resize` |
-| Detail area | 200 px by default, resizable from 80 px to nearly full height; Shift+Tab hides and shows it. Shows the selected clip's properties (it wins), or the selected track's device chain: in a row under the view (220 px per device), or stacked in a column beside it (260 px, resizable) — Settings › Devices |
-| Status bar | 20 px, hint text left, selection right |
+| Browser | (planned) 300 px wide, resizable, left of the view |
+| Detail splitter | 6 px, `surface.2`, a 32 × 2 grip in `text.tertiary` in the middle; the cursor shows which way it moves |
+| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected clip's properties (a clip wins over a track), or the selected track's device chain: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Devices. With nothing selected: "Select a track or a clip to see it here" in `text.tertiary` |
+| Status bar | 20 px, `surface.1`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.tertiary`). There is no separate info view |
 
-## Browser
+## Browser (planned)
 
 | Part | Spec |
 |---|---|
@@ -88,13 +100,24 @@ Animations are short and only show a change of state; with animations off (a set
 
 ## Session view
 
+From left to right: the track columns (groups and their tracks in project order), empty space
+(`surface.0`) if any is left, the return columns pinned against the scene column, and the scene
+column pinned to the right edge. The track columns scroll sideways when they do not fit; the
+returns and the scene column stay. From top to bottom: header row, scene rows, the stop row, empty
+space, the mixer at the bottom.
+
 | Part | Spec |
 |---|---|
-| Track column | 116 px; return column 84 px; scene column 96 px |
-| Column separator | 1 px `line.strong` through grid and mixer |
+| Track column | 116 px; return column 84 px; scene ("Main") column 96 px |
+| Column separator | 1 px `line.strong` through header, grid and mixer |
 | Row separator | 1 px `line` between scene rows, continued through returns and scenes |
-| Track header | 20 px, `surface.2`, 2 px bottom strip in the track colour; muted track name `text.tertiary` |
-| Scene button | 20 px, name left, number right in 10 px mono `text.tertiary`; playing scene `#4A4843` |
+| Track header | 20 px, `surface.2` (`surface.3` when selected), 2 px bottom strip in the track colour; name 11 px `text.primary` (`text.tertiary` when off). A click selects the track, a drag moves it, a right-click opens its menu |
+| Main header | 20 px, `surface.2`, "Main" in `text.primary`, no colour strip |
+| Scene button | 20 px, `surface.2` (hover `#34332F`), name left in 11 px, number right in 10 px mono `text.tertiary`; a playing scene `surface.3.bright` |
+| Stop row | 20 px under the last scene, `surface.1`: per track a 7 × 7 square outline in `text.secondary` (`accent` while the stop is queued), centred; in the scene column the square and "Stop all" |
+| Drop area | (planned) the empty space under the stop row takes dropped clips and devices |
+
+Track colours: the track's own colour if it has one, else `track.1`–`track.4` in track order.
 
 ### Clip slot
 
@@ -102,55 +125,65 @@ Animations are short and only show a change of state; with animations off (a set
 
 | State | Background | Mark | Extra |
 |---|---|---|---|
-| Empty | `surface.0` | 3 × 3 `#4A4743` | |
+| Empty without a stop button | `surface.0` | none | |
+| Empty with a stop button | `surface.0` | 3 × 3 `#4A4743` | |
 | Stopped | `surface.2`, text `#C9C4BB` | 6 × 6 track colour | |
 | Queued | `surface.2` | 6 × 6 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
-| Playing | `#4A4843`, text white | 6 × 6 track colour | 2 px `accent` progress line along the bottom |
-| Recording | `#3A2B2A`, text white | 6 px red dot | 2 px red progress line |
+| Playing | `surface.3.bright`, text `#FFFFFF` | 6 × 6 track colour | 2 px `accent` progress line along the bottom |
+| Recording | (planned) `#3A2B2A`, text `#FFFFFF` | 6 px red dot | 2 px red progress line |
 
 ### Mixer strip (Session)
 
-6 px padding, `surface.1`.
+72 px high, `surface.1`, 6 px padding, under every track and return column; the scene column's
+part is empty (the main track's strip is planned). From top to bottom:
 
 | Part | Spec |
 |---|---|
-| Knob | 22 px; circle r 9, `surface.2` fill, 1 px `text.tertiary` stroke; pointer 1.5 px from centre to r 8, round cap; travel −135° … +135°; sends `#C9C4BB`, pan `text.primary` |
-| Values row | Pan left, volume right, 10 px mono |
-| Toggles | 18 px high in one row: track on (flex 2, shows the track number), solo (flex 1); arm (flex 1) to come |
-| Track on | On: `#C9C4BB` with `surface.0` text. Off: `surface.2` |
-| Solo | "S". On: `accent` with `surface.0` text; off: `surface.2`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
-| Arm | Off: 1.2 px `text.secondary` ring. On: `#3A2B2A` background, filled red dot |
-| Meter | Two 4 px bars, 2 px apart, on `surface.0`; `meter.ok`, the top 12 % `meter.hot` when above −3 dB |
+| Knob row | 22 px: the pan knob at the left. Sends (planned) as more knobs in the same row |
+| Knob | 22 px; circle r 9, `surface.2` fill, 1 px `text.tertiary` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |
+| Values row | 12 px, 4 px under the knobs: pan left (10 px mono `text.secondary`, "C", "15L"), volume right (10 px mono `#C9C4BB`, dragged up or down) |
+| Toggles | 18 px at the bottom: track on (two thirds, the track number, or the return's letter, in 10 px mono) and solo (one third, "S" in 10 px), 2 px apart; arm (planned) |
+| Track on | On: `#C9C4BB` with `surface.0` text. Off: `surface.2` with `text.tertiary` |
+| Solo | On: `accent` with `surface.0` text; off: `surface.2`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
+| Arm | (planned) Off: 1.2 px `text.secondary` ring. On: `#3A2B2A` background, filled red dot |
+| Meter | (planned) Two 4 px bars, 2 px apart, on `surface.0`, beside the values; `meter.ok`, the top 12 % `meter.hot` when above −3 dB |
 
 ## Arrangement view
 
+The timeline on one side, the track header column on the other (right by default). From top to
+bottom: the ruler, the track lanes (scrolling), and fixed rows for the return tracks and the main
+track along the bottom edge.
+
 | Part | Spec |
 |---|---|
-| Bar ruler | 20 px; 10 px mono bar numbers; 1 px `line` at each bar |
-| Loop brace | 14 px row; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
-| Lanes | Overlapping (stacked) clips share the lane in sub-rows; separated by 1 px `line.strong`; empty area `surface.0`; default height 48 px, the lower edge of a header resizes it (20–400 px) |
-| Clip | `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB` at 4/5 px; selected clip `surface.3` with 1 px `text.primary` inset |
-| MIDI marks | 2 px high lines in the track colour |
+| Bar ruler | 20 px, `surface.1`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `line`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart |
+| Loop brace | (planned) a 14 px row under the ruler; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
+| Zoom | 8 px per beat by default, 1–400 px; Ctrl and the wheel zoom around the pointer, the wheel scrolls |
+| Grid lines | In the lanes and the fixed rows (not the empty space below the lanes): a 1 px `line` at each bar, and a 1 px `surface.1` line at each beat once beats are 10 px apart |
+| Lanes | Default height 48 px, the lower edge of a header resizes it (20–400 px); separated by 1 px `line.strong`; empty area `surface.0`. Overlapping (stacked) clips share the lane in equal sub-rows |
+| Clip | Fills its lane (or sub-row) from top to bottom, 1 px short of its end; `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB`, 4 px from the left and 3 px from the top (it stays in view while the clip's start is scrolled off); selected clip `surface.3` with 1 px `text.primary` inset; a drag moves it along its lane or to another |
+| MIDI marks | Under the name: one 2 px line per note in the track colour, its length the note's; the clip's lowest note at the bottom, its highest at the top |
 | Audio marks | The waveform: one 1 px vertical line per pixel column in the track colour, from the lowest to the highest sample it covers (the engine's beat-to-file mapping: offset, loop, warp markers), scaled by the clip gain; a centred line until the file is decoded. Clips at least 80 × 30 px show their gain at the top right (12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
-| Playhead | 1 px `accent` through all lanes |
-| Header column | A selected track's header is `surface.2`; right-click opens its menu (name field, colour swatches, group, ungroup, delete). 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
+| Playhead | 1 px `accent` through the ruler and all lanes while playing |
+| Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1` (`surface.2` when selected), 5 px top/bottom and 6 px side padding (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
+| Return and main rows | 20 px each along the bottom, `surface.1` headers: the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only) |
 
 ### Track header levels
 
-The header reveals groups as the track grows. Thresholds are the heights at which a group fits.
+The header reveals groups as the track grows. Thresholds are the heights at which a group fits;
+a lane between 20 and 26 px shows the first row clipped.
 
 | Track height | Shows |
 |---|---|
-| ≥ 26 px | Row 1: track on (30 px, the track number), solo (18 px), 6 px colour square, name; arm (18 px) to come |
-| ≥ 48 px | Volume field (full width) and pan field (46 px) |
-| ≥ 70 px | Routing, with 4 px extra space above it: the output dropdown ("→ Main" or a group track, `track.setOutput`); input and channel dropdowns and monitor In / Auto / Off once recording exists |
+| ≥ 26 px | Row 1, 15 px: track on (30 px, the track number in 10 px mono), solo (18 px, "S"), a 6 px colour square, the name in 11 px; arm (planned) |
+| ≥ 48 px | Row 2, 6 px under row 1: the volume field (the rest of the row) and the pan field (46 px), 4 px apart |
+| ≥ 70 px | Routing, 4 px under row 2: "→" and the output dropdown ("Main" or a group track, `track.setOutput`); input and channel dropdowns and monitor In / Auto / Off (planned, with recording) |
 | ≥ 114 px | (planned) Send fields, one per return, labelled "Send A", "Send B", once the engine plays sends; routing then moves below them |
-
-Return and main headers are single 20 px rows: name and volume.
 
 ### Value field (slider)
 
-A number field that is its own slider: drag vertically to change, double-click to type.
+A number field that is its own slider: drag vertically to change (Shift for fine steps),
+double-click to reset (typing a value is planned).
 
 | Part | Volume | Pan | Send |
 |---|---|---|---|
@@ -166,29 +199,42 @@ A number field that is its own slider: drag vertically to change, double-click t
 | Part | Spec |
 |---|---|
 | Dropdown | 15 px high, `surface.2`, 4 px padding, 10 px text `#C9C4BB`, 6 × 4 chevron `text.tertiary` right |
-| Segmented (monitor) | 15 px, three equal parts 1 px apart; selected `#C9C4BB` with `surface.0` text |
+| Segmented | 15 px, equal parts 1 px apart (64 px each in Settings); selected `#C9C4BB` with `surface.0` text, others `surface.2` with `text.secondary`, 10 px text |
 
 ## Settings page
 
 Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
-no dialogs. Three pages, picked with a segmented control under the title: General (the table
-below), Shortcuts (every action with its keys, Change, Clear, Reset all; [shortcuts](../shortcuts.md))
-and Plug-ins. A centred column at most 560 px wide: a title with Close on the right, then sections
-(10 px `text.tertiary` heading over a 1 px `line`), each setting a 34 px row with its name (11 px
-`text.primary`), a note under it (10 px `text.secondary`) and its control on the right, a
-segmented control of 64 px per part. A change applies at once and is saved; one that needs a
+no dialogs. A centred column at most 560 px wide on `surface.0`: the title "Settings" in 13 px
+with a 52 px Close button on the right, then the pages as a segmented control (General,
+Shortcuts, Plug-ins), then the page. A change applies at once and is saved; one that needs a
 restart (the renderer) says so in its note.
+
+**General** has sections (10 px `text.tertiary` heading over a 1 px `line`, 18 px between
+sections); each setting is a 34 px row with its name (11 px `text.primary`), a note under it
+(10 px `text.secondary`) and its control on the right, a segmented control of 64 px per part. A
+read-only setting (Output) shows its value as the note.
 
 | Section | Setting | Values |
 |---|---|---|
 | Interface | Animations | On (default), Off |
 | Projects | When opening a project | Ask (default), New tab, Replace |
 | Arrangement | Track headers | Left, Right (default) |
-| Devices | Device chain | Row (default), Stack |
 | Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
+| Devices | Device chain | Row (default), Stack |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
-| Plug-ins | Folders, Scan | The standard folders (read only) and the added ones (Remove), a field to add one; Scan (new and changed files) and Rescan all, run in the background; the plug-ins found and the files that failed, in a list that scrolls. Read and changed through the `plugins.*` commands |
+
+**Shortcuts** lists every action under its group (Transport, View, Edit, Tracks, Commands): its
+label (300 px, 10 px), its keys (130 px, 10 px mono `#C9C4BB`, "Press keys" in `accent` while
+waiting), Change and Clear; Reset all at the top; a key bound twice in red above the list
+([shortcuts](../shortcuts.md)).
+
+**Plug-ins**: "Folders" (11 px), the standard folders in 10 px `text.tertiary` with "(standard)",
+the added ones in `text.secondary` with a 64 px Remove button, a 20 px field to add one with a
+64 px Add button; a 34 px Scan row (the count found and failed as its note, Scan and Rescan all
+on the right, run in the background); then the plug-ins found (name, vendor · format version) and
+the files that failed (in the recording red), in a list that scrolls. Read and changed through
+the `plugins.*` commands.
 
 The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder; unknown lines
 are skipped with a warning in the status bar.
@@ -200,9 +246,18 @@ are skipped with a warning in the status bar.
 | Panel | `surface.1`, panels 1 px apart, end of chain is empty `surface.0` |
 | Header | 20 px, `surface.2`, 6 px padding: on switch, name, and what it is on the right in 9 px `text.tertiary` (Loopwerk, CLAP, VST3, VST2, or "Not supported" for a device of another DAW) |
 | On switch | 9 × 9 square, 1 px border; on: filled `text.primary`; off: outline `text.tertiary`, name `text.tertiary` |
-| Parameter | 44 px column: 26 px knob (r 11, pointer to r 10), value 10 px mono, label 10 px `text.secondary`; 14 px between columns; pointer `accent` when the device is on |
+| Parameter | A 16 px row: its id in 10 px `text.secondary` on the left, its value in 10 px mono `#C9C4BB` on the right. (planned, with the device commands and parameter ranges) a 44 px column: 26 px knob (r 11, pointer to r 10), value 10 px mono, label 10 px `text.secondary`; 14 px between columns; pointer `accent` when the device is on |
+| No parameters | A plug-in: "Its own window"; another DAW's device: "Kept so the chain keeps its shape" (10 px `text.tertiary`) |
+| Stacked | In a column, each device is as tall as its parameters (20 px header, 6 px padding, 16 px a parameter), 1 px apart |
 
-## Clip editor (MIDI)
+## Clip properties
+
+The detail area for a selected arrangement clip: a 196 px `surface.1` column with the clip's name
+(20 px title, 11 px) and 16 px rows of label (10 px `text.secondary`) and value (10 px mono
+`#C9C4BB`): Track, Start (bar.beat), Length (bars.beats), Loop, and Gain for an audio clip or
+Notes for a MIDI clip. Editing them, and the clip editor beside them, are planned.
+
+## Clip editor (MIDI, planned)
 
 | Part | Spec |
 |---|---|
