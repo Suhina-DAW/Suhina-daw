@@ -356,7 +356,8 @@ fn menus_delete_a_track_and_duplicate_a_clip() {
     harness.run();
     assert!(!names(&harness).contains(&"Keys".to_string()));
 
-    let clips = |h: &Harness<'static, App>| h.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
+    let clips =
+        |h: &Harness<'static, App>| h.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
     let before = clips(&harness);
     harness.get_by_label("Clip Fill on Drums at bar 29").click_secondary();
     harness.run();
@@ -364,10 +365,9 @@ fn menus_delete_a_track_and_duplicate_a_clip() {
     harness.run();
     // The copy sits after Fill and shortens the clip it lands on, so there is one more clip.
     assert_eq!(clips(&harness), before + 1);
-    let fill_copies = harness
-        .state()
-        .session()
-        .map_or(0, |s| s.project().arrangement.lanes[0].clips.iter().filter(|c| c.start == 128.0 && c.length == 16.0).count());
+    let fill_copies = harness.state().session().map_or(0, |s| {
+        s.project().arrangement.lanes[0].clips.iter().filter(|c| c.start == 128.0 && c.length == 16.0).count()
+    });
     assert_eq!(fill_copies, 1, "the copy of Fill sits at bar 33");
 }
 
