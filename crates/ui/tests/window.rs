@@ -5,9 +5,11 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use loopwerk_session::Session;
+use loopwerk_ui::arrangement_view::{self, ArrangementViewState};
 use loopwerk_ui::demo::demo_project;
 use loopwerk_ui::grid::Grid;
 use loopwerk_ui::session_view::{self, SessionViewState};
+use loopwerk_ui::timeline::Timeline;
 use loopwerk_ui::widgets::Action;
 use loopwerk_ui::{App, Status, View, theme};
 use serde_json::json;
@@ -244,6 +246,52 @@ fn solo_is_exclusive_unless_ctrl_is_held() {
     harness.get_by_label("End solo on Keys").click();
     harness.run();
     assert_eq!(solos(&harness), Some(vec![false, false, false, true]));
+}
+
+/// The demo project with a group track, "Group", that tracks can play into.
+fn project_with_a_group() -> loopwerk_engine::model::Project {
+    use loopwerk_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
+    let mut project = demo_project();
+    project.tracks.push(Track {
+        id: TrackId(20),
+        name: "Group".into(),
+        content: ContentKinds::default(),
+        channel: Some(ChannelId(120)),
+        ..project.tracks[0].clone()
+    });
+    project.channels.push(Channel {
+        id: ChannelId(120),
+        name: "Group".into(),
+        role: ChannelRole::Submix,
+        sends: Vec::new(),
+        ..project.channels[0].clone()
+    });
+    project
+}
+
+#[test]
+fn a_tall_header_routes_its_track_into_a_group() {
+    struct Arrangement {
+        timeline: Timeline,
+        state: ArrangementViewState,
+        actions: Vec<Action>,
+    }
+    let mut state = ArrangementViewState::default();
+    state.set_lane_height(loopwerk_engine::model::TrackId(2), 90.0);
+    let view = Arrangement { timeline: Timeline::build(&project_with_a_group(), None), state, actions: Vec::new() };
+    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(
+        |ui, v: &mut Arrangement| arrangement_view::show(ui, &v.timeline, &mut v.state, &mut v.actions),
+        view,
+    );
+    theme::install(&harness.ctx);
+    harness.run();
+    // Only the tall lane shows its output.
+    assert_eq!(harness.query_all_by_label_contains("output:").count(), 1);
+    harness.get_by_label("Bass output: Main").click();
+    harness.run();
+    harness.get_by_label("Group").click();
+    harness.run();
+    assert_eq!(harness.state().actions, [Action::new("track.setOutput", json!({ "track": 2, "to": 20 }))]);
 }
 
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and

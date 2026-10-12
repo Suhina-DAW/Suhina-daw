@@ -139,8 +139,8 @@ The header reveals groups as the track grows. Thresholds are the heights at whic
 |---|---|
 | ≥ 26 px | Row 1: track on (30 px, the track number), solo (18 px), 6 px colour square, name; arm (18 px) to come |
 | ≥ 48 px | Volume field (full width) and pan field (46 px) |
-| ≥ 70 px | Send fields, one per return, labelled "Send A", "Send B" |
-| ≥ 114 px | Routing, with 4 px extra space above it: input and channel dropdowns, output dropdown ("→ Main"), monitor In / Auto / Off |
+| ≥ 70 px | Routing, with 4 px extra space above it: the output dropdown ("→ Main" or a group track, `track.setOutput`); input and channel dropdowns and monitor In / Auto / Off once recording exists |
+| ≥ 114 px | (planned) Send fields, one per return, labelled "Send A", "Send B", once the engine plays sends; routing then moves below them |
 
 Return and main headers are single 20 px rows: name and volume.
 

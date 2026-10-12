@@ -190,7 +190,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
-  `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `clip.move`,
+  `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `clip.move`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
@@ -261,5 +261,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
-- Still to do: routing, waveforms, clip fades and gain, overlapping clips, the browser, detail area (devices, clip editor), menu bar and
+- A track header 70 px or taller shows where the track plays: the main output or a group
+  (`track.setOutput`, loops refused).
+- Still to do: input routing and sends, waveforms, clip fades and gain, overlapping clips, the browser, detail area (devices, clip editor), menu bar and
   settings, project tabs, meters, solo and arm, the design's monospace font, installers.

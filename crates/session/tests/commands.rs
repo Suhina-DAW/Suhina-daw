@@ -234,3 +234,27 @@ fn solo_is_an_edit_and_can_be_exclusive() {
     assert_eq!(solos(&session), [true, true]);
     assert!(run(&mut session, "track.setSolo", json!({ "track": "Bass", "solo": "yes" })).is_err());
 }
+
+#[test]
+fn a_track_routes_into_a_group_and_back_to_main() {
+    let mut p = project();
+    p.tracks.push(Track { id: TrackId(3), name: "Group".into(), channel: Some(ChannelId(3)), ..p.tracks[0].clone() });
+    p.channels.push(Channel {
+        id: ChannelId(3),
+        name: "Group".into(),
+        role: ChannelRole::Submix,
+        ..p.channels[0].clone()
+    });
+    let mut session = Session::new(p);
+
+    assert_eq!(run(&mut session, "track.setOutput", json!({ "track": "Bass", "to": "Group" })).unwrap()["to"], "Group");
+    assert_eq!(session.project().channels[0].output, Some(ChannelId(3)));
+    // Not into a track that is not a group, and not into a loop.
+    assert!(run(&mut session, "track.setOutput", json!({ "track": "Bass", "to": "Lead" })).is_err());
+    assert!(run(&mut session, "track.setOutput", json!({ "track": "Group", "to": "Group" })).is_err());
+
+    run(&mut session, "track.setOutput", json!({ "track": "Bass", "to": "main" })).unwrap();
+    assert_eq!(session.project().channels[0].output, None);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].output, Some(ChannelId(3)));
+}

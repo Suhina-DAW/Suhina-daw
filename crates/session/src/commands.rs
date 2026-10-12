@@ -2,7 +2,7 @@
 //! [`COMMANDS`] with tests below.
 
 use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
-use loopwerk_model::{ArrangementLane, Channel, Clip, LaneData, Project, Track, TrackId};
+use loopwerk_model::{ArrangementLane, Channel, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
 use crate::{CommandError, Session};
@@ -172,6 +172,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[TRACK, param("mute", ParamType::Bool, "true mutes the track")],
         kind: CommandKind::Edit,
         run: set_mute,
+    },
+    CommandSpec {
+        id: "track.setOutput",
+        label: "Route a track's audio to the main output or into a group track",
+        params: &[TRACK, param("to", ParamType::Track, "\"main\", or a group track (id or name) to play into")],
+        kind: CommandKind::Edit,
+        run: set_output,
     },
     CommandSpec {
         id: "track.setSolo",
@@ -424,6 +431,46 @@ fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError
     let mute = params.get("mute").and_then(Value::as_bool).ok_or("mute must be true or false")?;
     channel_param(session, params)?.mute = mute;
     Ok(json!({ "mute": mute }))
+}
+
+fn set_output(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let from = channel_param(session, params)?.id;
+    let p = &session.project;
+    let to = match params.get("to") {
+        Some(Value::String(main)) if main.eq_ignore_ascii_case("main") => None,
+        Some(_) => {
+            let track = track_at(p, params, "to")?;
+            let target = p
+                .tracks
+                .iter()
+                .find(|t| t.id == track)
+                .and_then(|t| t.channel)
+                .and_then(|id| p.channels.iter().find(|c| c.id == id))
+                .ok_or("the target track has no mixer channel")?;
+            if target.role != ChannelRole::Submix {
+                return Err(format!("{:?} is not a group track; route to \"main\" or a group", target.name).into());
+            }
+            // The group must not play, directly or through other groups, into the track itself.
+            let mut next = Some(target.id);
+            for _ in 0..=p.channels.len() {
+                match next {
+                    Some(id) if id == from => {
+                        return Err(format!("routing into {:?} would make a loop", target.name).into());
+                    }
+                    Some(id) => next = p.channels.iter().find(|c| c.id == id).and_then(|c| c.output),
+                    None => break,
+                }
+            }
+            Some(target.id)
+        }
+        None => return Err("to must be \"main\" or a group track".into()),
+    };
+    let channel = channel_param(session, params)?;
+    channel.output = to;
+    let name = to
+        .and_then(|id| session.project.tracks.iter().find(|t| t.channel == Some(id)))
+        .map_or_else(|| "main".to_string(), |t| t.name.clone());
+    Ok(json!({ "to": name }))
 }
 
 fn set_solo(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

@@ -90,6 +90,22 @@ pub fn solo_button(
     ))
 }
 
+/// A dropdown field (components › Dropdown): the current choice and a chevron; the caller opens
+/// its menu from `response`.
+pub fn dropdown(ui: &Ui, painter: &Painter, rect: Rect, response: &Response, text: &str) {
+    let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, response));
+    painter.rect_filled(rect, 0.0, fill);
+    let inner = rect.shrink2(Vec2::new(4.0, 0.0));
+    let chevron = Rect::from_center_size(Pos2::new(inner.right() - 3.0, rect.center().y), Vec2::new(6.0, 4.0));
+    painter.add(egui::Shape::convex_polygon(
+        vec![chevron.left_top(), chevron.right_top(), chevron.center_bottom()],
+        theme::TEXT_TERTIARY,
+        Stroke::NONE,
+    ));
+    let label = Rect::from_min_max(inner.min, Pos2::new(chevron.left() - 4.0, inner.bottom()));
+    text_in(painter, label, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::TEXT_VALUE);
+}
+
 /// What a value control did this frame.
 pub enum Drag {
     None,

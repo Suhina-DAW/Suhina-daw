@@ -23,6 +23,8 @@ const MIN_LANE: f32 = 20.0;
 const MAX_LANE: f32 = 400.0;
 /// Heights at which a header shows its next group (components › Track header levels).
 const SHOWS_MIXER: f32 = 48.0;
+const SHOWS_ROUTING: f32 = 70.0;
+const DROPDOWN: f32 = 15.0;
 /// Padding inside a header: top and bottom, and the sides.
 const HEADER_PAD_Y: f32 = 5.0;
 const HEADER_ROW: f32 = 15.0;
@@ -98,6 +100,11 @@ impl Default for ArrangementViewState {
 }
 
 impl ArrangementViewState {
+    /// Sets a lane's height, as dragging its lower edge does.
+    pub fn set_lane_height(&mut self, track: TrackId, height: f32) {
+        self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
+    }
+
     fn height(&self, lane: &Lane) -> f32 {
         self.heights.get(&lane.track).copied().unwrap_or(DEFAULT_LANE)
     }
@@ -256,6 +263,10 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let row_of = |track: TrackId| rows.iter().find(|r| r.track == track).copied();
     let lane_at = |pos: Pos2| rows.iter().find(|r| r.clip.y_range().contains(pos.y)).map(|r| r.track);
 
+    // Group tracks a track can play into.
+    let groups: Vec<(TrackId, String)> =
+        timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Group).map(|l| (l.track, l.name.clone())).collect();
+
     // Lanes.
     let lanes_painter = painter.with_clip_rect(lanes_area);
     let mut track_number = 0;
@@ -274,7 +285,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             }
         }
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
-        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, state, actions);
+        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &groups, state, actions);
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
     }
 
@@ -488,6 +499,39 @@ fn paint_clip(
     }
 }
 
+/// The output dropdown: "→ Main" or a group; picking one runs `track.setOutput`.
+fn routing(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    lane: &Lane,
+    groups: &[(TrackId, String)],
+    actions: &mut Vec<Action>,
+) {
+    let current = lane.output.and_then(|t| groups.iter().find(|(g, _)| *g == t)).map_or("Main", |(_, name)| name);
+    let label = Rect::from_min_size(rect.min, Vec2::new(18.0, rect.height()));
+    widgets::text_in(painter, label, Align2::LEFT_CENTER, "→", theme::ui_font(theme::TEXT_SMALL), theme::TEXT_TERTIARY);
+    let field = Rect::from_min_max(Pos2::new(label.right(), rect.top()), rect.max);
+    let mut picked = None;
+    let response =
+        widgets::button_area(ui, field, Id::new(("output", lane.track.0)), format!("{} output: {current}", lane.name));
+    widgets::dropdown(ui, painter, field, &response, current);
+    egui::Popup::menu(&response).show(|ui| {
+        let text = |t: &str| egui::RichText::new(t).font(theme::ui_font(theme::TEXT_SMALL));
+        if ui.selectable_label(lane.output.is_none(), text("Main")).clicked() && lane.output.is_some() {
+            picked = Some(serde_json::Value::from("main"));
+        }
+        for (group, name) in groups.iter().filter(|(g, _)| *g != lane.track) {
+            if ui.selectable_label(lane.output == Some(*group), text(name)).clicked() && lane.output != Some(*group) {
+                picked = Some(serde_json::Value::from(group.0));
+            }
+        }
+    });
+    if let Some(to) = picked {
+        actions.push(Action::new("track.setOutput", json!({ "track": lane.track.0, "to": to })));
+    }
+}
+
 /// A return track's row: its name and its volume.
 fn fixed_row(
     ui: &Ui,
@@ -510,12 +554,13 @@ fn fixed_row(
 
 #[allow(clippy::too_many_arguments)]
 fn track_header(
-    ui: &Ui,
+    ui: &mut Ui,
     painter: &egui::Painter,
     rect: Rect,
     lanes_area: Rect,
     lane: &Lane,
     track_number: usize,
+    groups: &[(TrackId, String)],
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) {
@@ -565,6 +610,15 @@ fn track_header(
         let volume = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(pan.left() - 4.0, top + FIELD));
         value_control(ui, painter, volume, clip, lane, Control::Volume, false, id, state, actions);
         value_control(ui, painter, pan, clip, lane, Control::Pan, false, id, state, actions);
+    }
+
+    // Row 3, taller still: where the track's audio goes.
+    if rect.height() >= SHOWS_ROUTING {
+        let top = row.bottom() + PAD + FIELD + PAD + 4.0;
+        let line = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), top + DROPDOWN));
+        if line.intersects(clip) {
+            routing(ui, painter, line, lane, groups, actions);
+        }
     }
 
     // The bottom edge resizes the lane.

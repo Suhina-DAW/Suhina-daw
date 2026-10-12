@@ -42,6 +42,8 @@ pub struct Lane {
     pub solo: bool,
     pub volume_db: f64,
     pub pan: f64,
+    /// The group track this track plays into; `None` is the main output.
+    pub output: Option<TrackId>,
     pub clips: Vec<ClipBox>,
 }
 
@@ -109,6 +111,10 @@ impl Timeline {
                 solo: channel.is_some_and(|c| c.solo),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 pan: channel.map_or(0.0, |c| c.pan),
+                output: channel
+                    .and_then(|c| c.output)
+                    .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
+                    .map(|t| t.id),
                 clips,
             };
             if kind == ColumnKind::Return { returns.push(lane) } else { lanes.push(lane) }
