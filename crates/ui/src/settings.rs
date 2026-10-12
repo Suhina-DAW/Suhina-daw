@@ -111,6 +111,9 @@ impl WarpMode {
 pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
 pub const BROWSER_WIDTH: u32 = 300;
 /// The preview's level, in dB: its range and its default.
+/// The longest sample the sample map shows by default, and the range it may be set to.
+pub const MAP_MAX_SECONDS: u32 = 10;
+pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
 pub const PREVIEW_VOLUME: i32 = -6;
 
@@ -145,6 +148,11 @@ pub struct Settings {
     /// Several dropped files go one track each without Ctrl (and onto one track with it).
     pub drop_separate: bool,
     pub warp_mode: WarpMode,
+    /// The sample map (`docs/spec/sample-map.md`): grid rather than cloud, preview on hover,
+    /// and the longest sample it shows, in seconds.
+    pub map_grid: bool,
+    pub map_hover_preview: bool,
+    pub map_max_seconds: u32,
 }
 
 impl Default for Settings {
@@ -168,6 +176,9 @@ impl Default for Settings {
             preview_volume: PREVIEW_VOLUME,
             drop_separate: false,
             warp_mode: WarpMode::Beats,
+            map_grid: false,
+            map_hover_preview: true,
+            map_max_seconds: MAP_MAX_SECONDS,
         }
     }
 }
@@ -194,7 +205,7 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -206,6 +217,9 @@ impl Settings {
             on(self.preview_autoplay),
             self.preview_volume,
             self.warp_mode.param(),
+            on(self.map_hover_preview),
+            self.map_max_seconds,
+            map_layout = if self.map_grid { "grid" } else { "cloud" },
             stop = self.stop.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
@@ -260,6 +274,14 @@ impl Settings {
                     settings.preview_volume =
                         db.parse::<i32>().unwrap_or(PREVIEW_VOLUME).clamp(PREVIEW_VOLUMES.0, PREVIEW_VOLUMES.1);
                 }
+                ("map_layout", "cloud" | "grid") => settings.map_grid = value == "grid",
+                ("map_hover_preview", "on" | "off") => settings.map_hover_preview = value == "on",
+                ("map_max_seconds", seconds) if seconds.parse::<u32>().is_ok() => {
+                    settings.map_max_seconds = seconds
+                        .parse::<u32>()
+                        .unwrap_or(MAP_MAX_SECONDS)
+                        .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
+                }
                 ("drop_files", "one_track") => settings.drop_separate = false,
                 ("drop_files", "separate") => settings.drop_separate = true,
                 ("warp_mode", mode) if WarpMode::parse(mode).is_some() => {
@@ -304,6 +326,9 @@ mod tests {
             preview_volume: -12,
             drop_separate: true,
             warp_mode: WarpMode::Tonal,
+            map_grid: true,
+            map_hover_preview: false,
+            map_max_seconds: 30,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());

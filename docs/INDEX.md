@@ -105,6 +105,7 @@ Change this code, and check these documents.
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/src/rack.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/session/src/soundmap.rs` | [Sample map](spec/sample-map.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
@@ -121,6 +122,7 @@ Change this code, and check these documents.
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/project_dialog.rs` | [Components](design/components.md) |
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
+| `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |

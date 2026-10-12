@@ -30,6 +30,8 @@ const FILTER_PAD: f32 = 7.0;
 const FILTER_GAP: f32 = 2.0;
 const DOT: f32 = 6.0;
 const PLAY: f32 = 22.0;
+/// The List | Map switch above the results.
+const MODE_SWITCH: f32 = 22.0;
 
 /// What the window has to do for the browser.
 #[derive(Debug, Default)]
@@ -206,6 +208,15 @@ pub fn show(ui: &mut Ui, area: Rect, state: &mut BrowserState, cx: Context<'_>) 
     if let Err(e) = state.refresh_rows(projects) {
         out.status = Some(Status::Error(e));
     }
+    // With another view to offer, a List | Map switch above the results chooses.
+    let results = match &other_results {
+        Some(_) => {
+            let switch = Rect::from_min_size(results.min, Vec2::new(results.width(), MODE_SWITCH));
+            mode_switch(ui, switch, state);
+            Rect::from_min_max(Pos2::new(results.left(), switch.bottom()), results.max)
+        }
+        None => results,
+    };
     match (state.mode, other_results) {
         (crate::browser::ResultsMode::Other, Some(draw)) => draw(ui, results, state, projects),
         _ => results_view(ui, results, state, projects, settings, selected_track, &mut out),
@@ -792,6 +803,32 @@ fn start_preview(
             }
         }
         _ => {}
+    }
+}
+
+/// The List | Map switch.
+fn mode_switch(ui: &mut Ui, area: Rect, state: &mut BrowserState) {
+    use crate::browser::ResultsMode;
+    let painter = ui.painter_at(area);
+    painter.hline(area.x_range(), area.bottom() - 0.5, theme::hairline(theme::border()));
+    let small = theme::ui_font(theme::TEXT_SMALL);
+    let mut x = area.left() + PAD;
+    for (mode, name, hint) in [
+        (ResultsMode::List, "List", "Show the results as a list"),
+        (ResultsMode::Other, "Map", "Show the samples laid out by how they sound"),
+    ] {
+        let width = widgets::text_width(ui, name, small.clone()) + FILTER_PAD * 2.0;
+        let rect = Rect::from_min_size(Pos2::new(x, area.top() + 2.0), Vec2::new(width, FILTER));
+        let response = widgets::button_area(ui, rect, Id::new(("browser-mode", name)), hint.to_string());
+        let chosen = state.mode == mode;
+        if response.clicked() && !chosen {
+            state.mode = mode;
+        }
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, if chosen { theme::text_value() } else { idle });
+        let text = if chosen { theme::window_background() } else { theme::text_secondary() };
+        widgets::text_in(&painter, rect, Align2::CENTER_CENTER, name, small.clone(), text);
+        x = rect.right() + FILTER_GAP;
     }
 }
 

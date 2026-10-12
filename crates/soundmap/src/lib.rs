@@ -42,7 +42,8 @@ pub struct SourceFile {
     /// Its absolute path.
     pub path: PathBuf,
     pub size: u64,
-    /// Modification time, seconds since the epoch.
+    /// Modification time, in any unit, as long as it changes when the file does (the library
+    /// gives nanoseconds since 1970).
     pub modified: u64,
 }
 
@@ -77,6 +78,7 @@ pub struct Map {
     pub failed: usize,
     /// Items left out over [`MAX_ITEMS`].
     pub over_limit: usize,
+    key: u64,
     standardised: Standardised,
 }
 
@@ -302,10 +304,19 @@ impl SoundMap {
         self.cache(&file.folder).current(&relative, file.size, file.modified).cloned()
     }
 
-    /// Lays out a scope: the analysed files among `files` no longer than `max_seconds`. The
-    /// layout is computed here (seconds for tens of thousands of items); call it off the UI
-    /// thread.
+    /// Lays out a scope: the analysed files among `files` no longer than `max_seconds`. A new
+    /// layout is computed here (seconds for tens of thousands of items); the window uses
+    /// [`SoundMap::prepare`] and [`Prepared::compute`] to compute it off its thread.
     pub fn map(&mut self, files: &[SourceFile], max_seconds: f32) -> Map {
+        let map = self.prepare(files, max_seconds).compute();
+        self.keep(&map);
+        map
+    }
+
+    /// What a scope's layout needs, taken from the caches: quick, on the caller's thread. The
+    /// layout itself is [`Prepared::compute`], which may run anywhere; [`SoundMap::keep`] then
+    /// keeps a new one.
+    pub fn prepare(&mut self, files: &[SourceFile], max_seconds: f32) -> Prepared {
         let max_seconds = max_seconds.clamp(MAX_SECONDS_RANGE.0, MAX_SECONDS_RANGE.1);
         let mut chosen: Vec<(&SourceFile, features::Features)> = Vec::new();
         let (mut pending, mut too_long, mut failed, mut over_limit) = (0, 0, 0, 0);
@@ -327,27 +338,79 @@ impl SoundMap {
                 None => pending += 1,
             }
         }
-        let features: Vec<features::Features> = chosen.iter().map(|(_, f)| *f).collect();
-        let standardised = Standardised::new(&features);
-        let named: Vec<Option<Kind>> = chosen.iter().map(|(f, _)| kinds::kind_of_path(&f.path, &f.folder)).collect();
-        let kinds = standardised.guess_kinds(&named);
-        let seed = scope_seed(chosen.iter().map(|(f, _)| f.path.as_path()));
         let key = layout_key(chosen.iter().map(|(f, _)| *f));
-        let positions = match self.cached_layout(key, chosen.len()) {
+        let cached = self.cached_layout(key, chosen.len());
+        Prepared {
+            items: chosen.into_iter().map(|(f, features)| (f.path.clone(), f.folder.clone(), features)).collect(),
+            pending,
+            too_long,
+            failed,
+            over_limit,
+            key,
+            cached,
+        }
+    }
+
+    /// Keeps a map's layout, so its scope opens with it next time.
+    pub fn keep(&mut self, map: &Map) {
+        if self.layouts.get(&map.key).is_none_or(|p| p.len() != map.points.len()) {
+            let positions: Vec<[f32; 2]> = map.points.iter().map(|p| p.position).collect();
+            self.keep_layout(map.key, &positions);
+        }
+    }
+}
+
+/// A scope ready to be laid out.
+#[derive(Debug, Clone)]
+pub struct Prepared {
+    /// Path, library folder and features of each item, by path.
+    items: Vec<(PathBuf, PathBuf, features::Features)>,
+    pending: usize,
+    too_long: usize,
+    failed: usize,
+    over_limit: usize,
+    key: u64,
+    cached: Option<Vec<[f32; 2]>>,
+}
+
+impl Prepared {
+    /// Whether the layout is known already, so [`Prepared::compute`] is quick.
+    pub fn is_laid_out(&self) -> bool {
+        self.cached.is_some() || self.items.len() < 2
+    }
+
+    /// The scope's key: the same items with the same sizes and times give the same key.
+    pub fn key(&self) -> u64 {
+        self.key
+    }
+
+    /// Lays the scope out (or takes the kept layout) and finds the kinds.
+    pub fn compute(self) -> Map {
+        let features: Vec<features::Features> = self.items.iter().map(|(_, _, f)| *f).collect();
+        let standardised = Standardised::new(&features);
+        let named: Vec<Option<Kind>> =
+            self.items.iter().map(|(path, folder, _)| kinds::kind_of_path(path, folder)).collect();
+        let kinds = standardised.guess_kinds(&named);
+        let positions = match self.cached {
             Some(positions) => positions,
-            None => {
-                let positions = layout::layout(&standardised, seed);
-                self.keep_layout(key, &positions);
-                positions
-            }
+            None => layout::layout(&standardised, scope_seed(self.items.iter().map(|(p, _, _)| p.as_path()))),
         };
-        let points = chosen
-            .iter()
+        let points = self
+            .items
+            .into_iter()
             .zip(positions)
             .zip(kinds)
-            .map(|(((file, _), position), (kind, guessed))| Point { path: file.path.clone(), position, kind, guessed })
+            .map(|(((path, _, _), position), (kind, guessed))| Point { path, position, kind, guessed })
             .collect();
-        Map { points, pending, too_long, failed, over_limit, standardised }
+        Map {
+            points,
+            pending: self.pending,
+            too_long: self.too_long,
+            failed: self.failed,
+            over_limit: self.over_limit,
+            key: self.key,
+            standardised,
+        }
     }
 }
 

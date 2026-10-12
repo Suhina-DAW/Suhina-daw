@@ -215,7 +215,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   browser's library `library.folders`, `library.addFolder`, `library.removeFolder`,
   `library.refresh`, `library.list`, `library.search`, `library.info`, `library.pinned`,
   `library.pin`, `library.unpin`, `library.recent`, `library.tags`, `library.setTag`,
-  `library.removeTag`, `library.tag`.
+  `library.removeTag`, `library.tag`; for the sample map `soundmap.status`, `soundmap.analyse`,
+  `soundmap.layout`, `soundmap.similar`, `soundmap.info`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
@@ -322,6 +323,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- The **sample map** (the browser's List | Map switch, or large in the main area): the samples
+  of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
+  toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
+  samples), as a free cloud or snapped to a grid, with the kinds' names over their regions and a
+  legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
+  arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
+  and lists the 16 that sound most alike. Samples are analysed in the background once and kept
+  ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
 - A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or

@@ -3,10 +3,12 @@ description: How the sample map behaves: samples laid out by how they sound, col
 read_when: sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/soundmap/**
+  - crates/session/src/soundmap.rs
   - crates/ui/src/sample_map.rs
+  - crates/ui/src/sample_map_panel.rs
 ---
 
 # Sample map
@@ -26,11 +28,12 @@ presets that come with audio previews (NKS) take part in the same map.
   ([ADR 0011](../decisions/0011-preview-and-added-audio.md)).
 - **Architecture:** [ADR 0013](../decisions/0013-sample-map-analysis.md): the analysis crate,
   the features, the layout methods and the cache.
-- **Status:** in progress. Built: the analysis, layout, grid, kinds and caches
-  (`crates/soundmap`) and the map view (`crates/ui/src/sample_map.rs`, drawn and tested on its
-  own). Not yet: the browser's List | Map switch and the large view that show it, the
-  `soundmap.*` commands, the settings, and NKS presets. Statements marked **(to decide)** are
-  open.
+- **Status:** built, except NKS presets: the analysis, layout, grid, kinds and caches
+  (`crates/soundmap`), the `soundmap.*` commands (`crates/session/src/soundmap.rs`), the map
+  view (`crates/ui/src/sample_map.rs`) and its place in the browser and the main area
+  (`crates/ui/src/sample_map_panel.rs`). NKS presets wait for the format to be checked on our
+  own files ([`nks-format.md`](nks-format.md) › To observe). Statements marked **(to decide)**
+  are open.
 
 ## What was observed
 
@@ -67,12 +70,17 @@ Both play a sample as soon as the pointer is over it.
 - **In the browser.** A **List | Map** switch above the results changes the results area into
   the map. The sidebar, the category filters, search, tags and the preview strip stay as they
   are. The browser can be widened to 600 px.
-- **Large.** A button at the map's corner (and View › Sample map, **Ctrl+Shift+M**) shows the
-  map in the main area in place of the Session or Arrangement view, at full size; the same
-  button, Escape or the view switches go back. The browser panel stays beside it.
+- **Large.** The **Large** button at the map's corner (and View › Sample map,
+  **Ctrl+Shift+M**) shows the map in the main area in place of the Session or Arrangement view,
+  at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
+  switches go back. The browser stays beside it and shows its list meanwhile. While something is
+  dragged from the large map, the main view shows instead, so the drop can land on a track.
 
-The map holds samples only (and NKS previews). The Samples category is implied; the
-Instruments, Effects, MIDI and Plug-ins filters show the list instead.
+The map holds the samples of the browser's place, whichever category filter is chosen (the
+filters choose what the list shows).
+
+**Loopwerk:** analysis starts with the desktop app and the MCP server, as indexing does; tests
+and the command line never analyse a user's folders unasked.
 
 ## Analysis
 
@@ -83,13 +91,13 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
 - Analysis uses at most half of the computer's cores, never the audio thread, and the
   results are kept on disk, so a library is analysed once.
 - A sample is analysed from its first 4 seconds. Samples longer than the **map length limit**
-  (Settings › Interface › Browser › Map: longest sample, 10 s by default, 1–60 s) are not
-  analysed and not shown: the map is for one-shots and short loops.
-- While a scope has items not analysed yet, the map shows "Analysing 1 240 of 8 000" with a
-  progress bar and places what is done; the layout is computed again when the analysis
-  finishes.
-- A file that cannot be decoded is left out and counted ("12 files could not be read"); the
-  count opens a list of them with the reason.
+  (Settings › Interface › Browser › Map: longest sample: 5, 10, 30 or 60 s, 10 by default;
+  `soundmap.layout` takes 1–60) are not shown: the map is for one-shots and short loops. The
+  length is kept with the analysis, so changing the limit needs no new analysis.
+- The map's top bar says what it holds: "1 240 samples, analysing, 6 760 to go, 12 too long,
+  3 could not be read". While the analysis goes on, the layout is computed again at most every
+  2 seconds, on a thread of its own ("arranging…"), so the window never waits for it.
+- A file that cannot be decoded is left out and counted; `soundmap.info` gives the reason.
 
 ## Layout
 
@@ -153,11 +161,12 @@ Every item has a kind. The kinds and the words in names that give them:
 - **In use:** items used by a clip of the active project are drawn larger with a ring.
 - **Selected:** items selected in the browser have a light outline; the map and the list share
   one selection.
-- **Playing:** the previewing item pulses while it plays.
+- **Previewed:** the item last previewed, and the one under the pointer, have an accent ring.
+- **Similar:** while Show similar is on, the similar items have an accent ring and the others
+  are dimmed.
 - **Dimmed:** items that do not match the search text, the tag filter or the legend are drawn
   faint but stay in place, so the map does not jump while typing.
-- **Tooltip** after 400 ms over a point: the file name, its folder, the kind, the duration, and
-  the tempo and key when known.
+- **Tooltip** over a point: the file name, the kind ("guessed" when it is), and its folder.
 
 ## Pointing, clicking and moving
 

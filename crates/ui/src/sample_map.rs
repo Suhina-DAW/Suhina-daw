@@ -45,6 +45,9 @@ pub struct MapPoint {
     pub matches: bool,
     /// An NKS preset, drawn as a ring.
     pub preset: bool,
+    pub pinned: bool,
+    /// The colour tags it carries.
+    pub tags: Vec<String>,
 }
 
 /// Cloud or grid.
@@ -72,8 +75,14 @@ pub enum MapEvent {
     /// The user asked for items similar to this one; the browser answers with
     /// [`MapView::show_similar`].
     Similar(usize),
+    /// Pin it, or unpin it when it is pinned.
     Pin(usize),
-    Tag(usize),
+    /// Set (`on`) or clear a colour tag on it.
+    Tag {
+        item: usize,
+        tag: String,
+        on: bool,
+    },
     ShowInFolder(usize),
     /// The layout switch changed.
     Layout(Layout),
@@ -279,6 +288,7 @@ pub fn show(
     points: &[MapPoint],
     grid: Option<&Grid>,
     status: &str,
+    tags: &[String],
     events: &mut Vec<MapEvent>,
 ) {
     let full = ui.available_rect_before_wrap();
@@ -294,7 +304,7 @@ pub fn show(
 
     top_bar(ui, top, view, status, events);
     let positions = positions(points, view.layout, grid);
-    map_area(ui, area, view, points, &positions, grid, events);
+    map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
     }
@@ -336,15 +346,18 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
     });
 }
 
-fn map_area(
-    ui: &mut Ui,
-    rect: Rect,
-    view: &mut MapView,
-    points: &[MapPoint],
-    positions: &[[f32; 2]],
-    grid: Option<&Grid>,
-    events: &mut Vec<MapEvent>,
-) {
+/// What the map area draws.
+struct Content<'a> {
+    points: &'a [MapPoint],
+    /// Where each point is, in map coordinates.
+    positions: &'a [[f32; 2]],
+    grid: Option<&'a Grid>,
+    /// The library's colour tags, for the right-click menu.
+    tags: &'a [String],
+}
+
+fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, events: &mut Vec<MapEvent>) {
+    let Content { points, positions, grid, tags } = *content;
     view.area = rect;
     let id = ui.id().with("sample-map");
     let response = ui.interact(rect, id, Sense::click_and_drag());
@@ -424,13 +437,21 @@ fn map_area(
                 events.push(MapEvent::Similar(i));
                 ui.close();
             }
-            if ui.button("Pin or unpin").clicked() {
+            let pinned = points.get(i).is_some_and(|p| p.pinned);
+            if ui.button(if pinned { "Unpin" } else { "Pin" }).clicked() {
                 events.push(MapEvent::Pin(i));
                 ui.close();
             }
-            if ui.button("Tag…").clicked() {
-                events.push(MapEvent::Tag(i));
-                ui.close();
+            if !tags.is_empty() {
+                ui.menu_button("Tag", |ui| {
+                    for tag in tags {
+                        let mut on = points.get(i).is_some_and(|p| p.tags.contains(tag));
+                        if ui.checkbox(&mut on, tag.as_str()).clicked() {
+                            events.push(MapEvent::Tag { item: i, tag: tag.clone(), on });
+                            ui.close();
+                        }
+                    }
+                });
             }
             if ui.button("Show in folder").clicked() {
                 events.push(MapEvent::ShowInFolder(i));
@@ -486,7 +507,10 @@ fn map_area(
             }
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
-            view.similar = None;
+            // Escape ends Show similar first, then closes the large map.
+            if view.similar.take().is_none() && view.large {
+                events.push(MapEvent::ToggleLarge);
+            }
         }
     }
 
@@ -693,6 +717,8 @@ mod tests {
             selected: false,
             matches: true,
             preset: false,
+            pinned: false,
+            tags: Vec::new(),
         }
     }
 
@@ -783,7 +809,9 @@ mod tests {
             (0..20).map(|i| point((i % 5) as f32 / 4.0, (i / 5) as f32 / 3.0, Kind::Kick)).collect();
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
-            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "20 samples", events),
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "20 samples", &[], events)
+            },
             state,
         );
         harness.run();
@@ -849,6 +877,8 @@ mod look {
                     selected: false,
                     matches: true,
                     preset: i % 25 == 0,
+                    pinned: false,
+                    tags: Vec::new(),
                 };
                 p.position = [p.position[0].clamp(0.0, 1.0), p.position[1].clamp(0.0, 1.0)];
                 points.push(p);
@@ -862,7 +892,7 @@ mod look {
                 |ui, view: &mut MapView| {
                     crate::theme::install(ui.ctx());
                     let mut events = Vec::new();
-                    show(ui, view, &points, Some(&grid), "1 200 samples", &mut events);
+                    show(ui, view, &points, Some(&grid), "1 200 samples", &[], &mut events);
                 },
                 view,
             );

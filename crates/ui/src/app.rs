@@ -12,7 +12,7 @@ use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
-use crate::browser::BrowserState;
+use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
 use crate::detail_view;
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
@@ -173,6 +173,8 @@ pub struct App {
     window_title: String,
     /// The browser panel (`docs/spec/browser.md`), the same for every project.
     pub browser: BrowserState,
+    /// The sample map, in the browser's results or large in the main area.
+    pub sample_map: crate::sample_map_panel::Panel,
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
@@ -229,6 +231,7 @@ impl App {
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
             window_title: String::new(),
             browser: BrowserState::default(),
+            sample_map: crate::sample_map_panel::Panel::default(),
             pending_drop: None,
             detail_drop: None,
         }
@@ -733,6 +736,8 @@ impl App {
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
+        // The sample map's analysis goes on in the background; take in what it finished.
+        self.projects.poll_sound_map();
         self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
@@ -787,38 +792,50 @@ impl App {
                 .and_then(|items| ui.ctx().pointer_latest_pos().map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
-                (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
-                (Some(_), View::Arrangement) => {
-                    if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
-                        self.arrangement.stack_audio = self.settings.sample_stacking;
-                        self.arrangement.stack_midi = self.settings.midi_stacking;
-                        let monitor = session.player().map(|p| p.monitor());
-                        // Clips and their notes are rebuilt only after the project changed; the
-                        // playhead is read every frame.
-                        let timeline = match self.timeline.take() {
-                            Some((revision, mut timeline)) if revision == self.revision => {
-                                timeline.follow(monitor);
-                                timeline
+            // The large sample map takes the main area, except while something is dragged from
+            // it, so the drop can land on a track.
+            if self.sample_map.view.large && self.browser.drag.is_none() {
+                let (panel, browser, projects, settings) =
+                    (&mut self.sample_map, &mut self.browser, &mut self.projects, &mut self.settings);
+                if panel.show(ui, inner, browser, projects, settings, self.revision) {
+                    self.settings_changed = true;
+                }
+            } else {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
+                    (Some(grid), View::Session) => {
+                        session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
+                    }
+                    (Some(_), View::Arrangement) => {
+                        if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
+                            self.arrangement.stack_audio = self.settings.sample_stacking;
+                            self.arrangement.stack_midi = self.settings.midi_stacking;
+                            let monitor = session.player().map(|p| p.monitor());
+                            // Clips and their notes are rebuilt only after the project changed; the
+                            // playhead is read every frame.
+                            let timeline = match self.timeline.take() {
+                                Some((revision, mut timeline)) if revision == self.revision => {
+                                    timeline.follow(monitor);
+                                    timeline
+                                }
+                                _ => {
+                                    let mut timeline = Timeline::build(session.project(), monitor);
+                                    timeline.waveforms = self.waveforms.clone();
+                                    timeline
+                                }
+                            };
+                            arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                            self.timeline = Some((self.revision, timeline));
+                            // The headers can be moved from the view itself; that is the setting too.
+                            let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
+                            if side != self.settings.track_headers {
+                                self.settings.track_headers = side;
+                                self.settings_changed = true;
                             }
-                            _ => {
-                                let mut timeline = Timeline::build(session.project(), monitor);
-                                timeline.waveforms = self.waveforms.clone();
-                                timeline
-                            }
-                        };
-                        arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
-                        self.timeline = Some((self.revision, timeline));
-                        // The headers can be moved from the view itself; that is the setting too.
-                        let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
-                        if side != self.settings.track_headers {
-                            self.settings.track_headers = side;
-                            self.settings_changed = true;
                         }
                     }
-                }
-                (None, _) => empty(ui),
-            });
+                    (None, _) => empty(ui),
+                });
+            }
             drop_overlay(ui, view_area);
         });
         self.browser_drag(ui);
@@ -1205,6 +1222,11 @@ impl App {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
+                let label = if self.sample_map.view.large { "Hide sample map" } else { "Sample map" };
+                if ui.add(egui::Button::new(label).shortcut_text(keys("view.sampleMap"))).clicked() {
+                    self.settings_open = false;
+                    self.toggle_large_map();
+                }
                 let label = if self.settings.browser_open { "Hide browser" } else { "Show browser" };
                 if ui.add(egui::Button::new(label).shortcut_text(keys("view.browser"))).clicked() {
                     self.toggle_browser();
@@ -1294,6 +1316,10 @@ impl App {
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
             "view.browser" => self.toggle_browser(),
+            "view.sampleMap" => {
+                self.settings_open = false;
+                self.toggle_large_map();
+            }
             "browser.search" => {
                 if !self.settings.browser_open {
                     self.toggle_browser();
@@ -1311,9 +1337,15 @@ impl App {
                     View::Arrangement => View::Session,
                 };
             }
-            "view.session" => self.shown = View::Session,
+            "view.session" => {
+                self.shown = View::Session;
+                self.close_large_map();
+            }
             "view.detail" => self.detail_open = !self.detail_open,
-            "view.arrangement" => self.shown = View::Arrangement,
+            "view.arrangement" => {
+                self.shown = View::Arrangement;
+                self.close_large_map();
+            }
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
@@ -1416,6 +1448,12 @@ impl App {
         }
         let search_key = self.keymap.label("browser.search").unwrap_or_default();
         let selected_track = self.selected_track();
+        let revision = self.revision;
+        let mut map_settings = self.settings.clone();
+        let map_panel = &mut self.sample_map;
+        let mut draw_map = |ui: &mut Ui, rect: Rect, state: &mut BrowserState, projects: &mut Projects| {
+            map_panel.show(ui, rect, state, projects, &mut map_settings, revision);
+        };
         let out = ui
             .scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                 let cx = browser_view::Context {
@@ -1423,11 +1461,19 @@ impl App {
                     settings: &self.settings,
                     selected_track,
                     search_key,
-                    other_results: None,
+                    other_results: Some(&mut draw_map),
                 };
                 browser_view::show(ui, panel, &mut self.browser, cx)
             })
             .inner;
+        if map_settings != self.settings {
+            self.settings = map_settings;
+            self.settings_changed = true;
+        }
+        let added = std::mem::take(&mut self.sample_map.add);
+        if !added.is_empty() {
+            self.add_to_selected(added);
+        }
         if let Some(status) = out.status {
             self.status = status;
         }
@@ -1438,6 +1484,19 @@ impl App {
             self.add_to_selected(out.add);
         }
         rest
+    }
+
+    /// Shows the sample map large in the main area, or closes it back into the browser.
+    fn toggle_large_map(&mut self) {
+        let large = !self.sample_map.view.large;
+        self.sample_map.view.large = large;
+        self.browser.mode = if large { ResultsMode::List } else { ResultsMode::Other };
+    }
+
+    fn close_large_map(&mut self) {
+        if self.sample_map.view.large {
+            self.toggle_large_map();
+        }
     }
 
     /// Adds browser items to the selected track, as Enter and a double-click do: devices to its

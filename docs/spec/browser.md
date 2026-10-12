@@ -62,7 +62,8 @@ From top to bottom (sizes in components.md › Browser):
 1. **Search** with the shortcut hint (Ctrl+F).
 2. **Category filters**, a wrapping row of buttons: All, Samples, MIDI, Instruments, Effects,
    Presets, Plug-ins. One is selected; All at first.
-3. **Sidebar** (left part) and **results** (right part).
+3. **Sidebar** (left part) and **results** (right part). Above the results a **List | Map**
+   switch shows them as the list or as the sample map ([`sample-map.md`](sample-map.md)).
 4. **Preview strip** for the selected sample or MIDI file.
 5. **Footer:** the tags (dots that filter) and the count ("312 items", "3 selected").
 

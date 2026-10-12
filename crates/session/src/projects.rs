@@ -39,6 +39,12 @@ pub struct Projects {
     /// The browser's library (ADR 0012); kept nowhere until one is given with
     /// [`Projects::set_file_library`].
     files: loopwerk_library::Library,
+    /// The sample map's analysis (ADR 0013), made when first needed.
+    pub(crate) sound_map: Option<loopwerk_soundmap::SoundMap>,
+    /// Analysis runs only once started ([`Projects::start_sound_map`]), as indexing does.
+    pub(crate) sound_map_started: bool,
+    /// The library revision the sound map was last brought in line with.
+    pub(crate) sound_map_revision: Option<u64>,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -210,6 +216,9 @@ impl Projects {
     /// MCP server give it Loopwerk's settings folder.
     pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
         self.files = library;
+        // The sound map keeps its caches beside the library's indexes.
+        self.sound_map = None;
+        self.sound_map_revision = None;
     }
 
     /// The browser's library.
@@ -253,8 +262,12 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) =
-            PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).find(|c| c.id == id)
+        if let Some(spec) = PROJECT_COMMANDS
+            .iter()
+            .chain(plugin_commands())
+            .chain(crate::library_commands())
+            .chain(crate::sound_map_commands())
+            .find(|c| c.id == id)
         {
             if project.is_some() {
                 return Err(format!("{id} does not run on one project; it takes no target project").into());
@@ -295,8 +308,12 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects =
-        PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).map(CommandSpec::describe);
+    let projects = PROJECT_COMMANDS
+        .iter()
+        .chain(plugin_commands())
+        .chain(crate::library_commands())
+        .chain(crate::sound_map_commands())
+        .map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 
