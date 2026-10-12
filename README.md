@@ -42,11 +42,18 @@ cargo run --release -p loopwerk-cli -- play path/to/set.als --launcher
 # Render to a 32-bit float WAV
 cargo run --release -p loopwerk-cli -- render path/to/set.als -o out.wav
 
+# Play every MIDI track on the built-in FM synth, with voice 3 of a DX7 bank (.syx)
+cargo run --release -p loopwerk-cli -- play --demo --fm --voices path/to/bank.syx --voice 3
+
+# List the voices in a DX7 voice or bank file
+cargo run --release -p loopwerk-cli -- fm-synth voices path/to/bank.syx
+
 # Serve the Model Context Protocol for agents (see docs/mcp.md)
 cargo run --release -p loopwerk-cli -- mcp --read-root path/to/projects --write-root path/to/renders
 ```
 
-`--demo` instead of a file uses a small built-in project.
+`--demo` instead of a file uses a small built-in project. `--fm` works with `play` and `render`,
+for the demo or any set; without `--voices` the synth plays its initial voice, a plain sine.
 
 With `--launcher` the set starts stopped and Loopwerk reads one command per line:
 

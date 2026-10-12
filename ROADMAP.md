@@ -190,7 +190,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   writes a 32-bit float WAV. Both run the same engine code.
 - Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
   instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
-  master volume and mute apply.
+  master volume and mute apply. `--fm` on `play` and `render` puts the FM synth on every MIDI
+  track, with a voice from a DX7 file; `loopwerk-cli fm-synth voices` lists a file's voices.
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
