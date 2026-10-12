@@ -449,6 +449,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     // An instrument's notes: its track's arrangement, from the bar asked for or the first clip.
     let events = match &device_source {
@@ -616,6 +617,7 @@ fn edit_plugin<'a>(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
@@ -661,6 +663,7 @@ fn print_params(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state

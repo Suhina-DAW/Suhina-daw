@@ -331,6 +331,11 @@ impl ClapPlugin {
         self.latency
     }
 
+    /// Asks the audio thread to stop and waits up to `wait` for it; whether it stopped.
+    pub(crate) fn stop_audio(&mut self, wait: Duration) -> bool {
+        crate::audio_stopped(&self.stop, self.audio.as_ref(), wait)
+    }
+
     /// Runs the plug-in's main-thread callback if it asked for one.
     pub(crate) fn tick(&mut self) {
         if self.instance.access_shared_handler(|s| s.callback_requested.swap(false, Ordering::AcqRel)) {
@@ -440,10 +445,10 @@ impl ClapPlugin {
         let Some(editor) = &mut self.editor else { return false };
         if let Some(size) = wanted {
             let size = crate::window::Size { width: size.width.clamp(1, 16_384), height: size.height.clamp(1, 16_384) };
-            crate::window::resize(size);
+            crate::window::resize(editor.window.id(), size);
             editor.size = size;
         } else if editor.resizable {
-            let now = crate::window::client_size();
+            let now = crate::window::client_size(editor.window.id());
             if now != editor.size && now.width > 0 && now.height > 0 {
                 if let Some(gui) = gui {
                     let asked = GuiSize { width: now.width, height: now.height };
@@ -454,7 +459,8 @@ impl ClapPlugin {
             }
         }
         let gone = self.instance.access_shared_handler(|s| s.gui_closed.swap(false, Ordering::AcqRel));
-        let closed = crate::window::take_close_request() || gone;
+        let asked = self.editor.as_ref().is_some_and(|e| crate::window::take_close_request(e.window.id()));
+        let closed = asked || gone;
         if closed {
             self.close_editor();
         }

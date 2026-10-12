@@ -1,16 +1,21 @@
 //! The control messages between the engine and a plug-in host process (ADR 0006): one JSON
 //! object per line over a local socket. Audio does not go here; it goes through `loopwerk-ipc`.
 //!
-//! Every message has an `op`. Engine to host: `hello`, `load`, `ping`, `get_state`,
+//! Every message has an `op`. Engine to host: `hello`, `load`, `unload`, `ping`, `get_state`,
 //! `set_state`, `get_params`, `set_param`, `open_editor`, `close_editor`, `quit`. Host to
-//! engine: `hello`, `loaded`, `pong`, `state`, `params`, `param`, `editor_opened`,
-//! `editor_closed`, `error`. `editor_closed` also comes unasked, when the user closes the
+//! engine: `hello`, `loaded`, `unloaded`, `pong`, `state`, `params`, `param`, `editor_opened`,
+//! `editor_closed`, `error`. `editor_closed` also comes unasked, when the user closes an
 //! editor's window.
+//!
+//! One host process runs several plug-in instances. The engine names each with an `instance`
+//! number when it loads it; every message about one instance, and its reply, carries that
+//! number. `hello`, `ping`/`pong` and `quit` are about the whole process. An `error` carries the
+//! instance of the request it answers, or none for one about the process.
 
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 4;
+pub const VERSION: u64 = 5;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -73,14 +78,24 @@ pub enum Message {
     Hello {
         version: u64,
     },
-    /// Load `plugin`, activate it at `sample_rate` and serve audio on the link at `link`.
+    /// Load `plugin` as `instance`, activate it at `sample_rate` and serve audio on the link
+    /// at `link`.
     Load {
+        instance: u32,
         plugin: String,
         link: String,
         sample_rate: f64,
     },
     Loaded {
+        instance: u32,
         latency: u32,
+    },
+    /// Stop and let go of `instance`; the other instances in the process go on.
+    Unload {
+        instance: u32,
+    },
+    Unloaded {
+        instance: u32,
     },
     Ping {
         id: u64,
@@ -88,73 +103,120 @@ pub enum Message {
     Pong {
         id: u64,
     },
-    GetState,
+    GetState {
+        instance: u32,
+    },
     /// `controller` is a VST3 plug-in's controller state, when it has one apart from the
     /// component's (`data`).
     SetState {
+        instance: u32,
         data: Vec<u8>,
         controller: Option<Vec<u8>>,
     },
     State {
+        instance: u32,
         data: Vec<u8>,
         controller: Option<Vec<u8>>,
     },
-    GetParams,
+    GetParams {
+        instance: u32,
+    },
     Params {
+        instance: u32,
         params: Vec<ParamInfo>,
     },
     /// Set parameter `id` to `value` (in its own range); answered with `Param`.
     SetParam {
+        instance: u32,
         id: u32,
         value: f64,
     },
     Param {
+        instance: u32,
         param: ParamInfo,
     },
     /// Open the plug-in's editor in a window of its own; answered with `EditorOpened` and the
     /// size of its inside.
-    OpenEditor,
+    OpenEditor {
+        instance: u32,
+    },
     EditorOpened {
+        instance: u32,
         width: u32,
         height: u32,
     },
-    CloseEditor,
-    EditorClosed,
+    CloseEditor {
+        instance: u32,
+    },
+    EditorClosed {
+        instance: u32,
+    },
+    /// What went wrong with a request about `instance`, or with the process (`None`).
     Error {
+        instance: Option<u32>,
         message: String,
     },
     Quit,
 }
 
 impl Message {
+    /// The instance the message is about; `None` for the process-wide ones.
+    pub fn instance(&self) -> Option<u32> {
+        match self {
+            Self::Load { instance, .. }
+            | Self::Loaded { instance, .. }
+            | Self::Unload { instance }
+            | Self::Unloaded { instance }
+            | Self::GetState { instance }
+            | Self::SetState { instance, .. }
+            | Self::State { instance, .. }
+            | Self::GetParams { instance }
+            | Self::Params { instance, .. }
+            | Self::SetParam { instance, .. }
+            | Self::Param { instance, .. }
+            | Self::OpenEditor { instance }
+            | Self::EditorOpened { instance, .. }
+            | Self::CloseEditor { instance }
+            | Self::EditorClosed { instance } => Some(*instance),
+            Self::Error { instance, .. } => *instance,
+            Self::Hello { .. } | Self::Ping { .. } | Self::Pong { .. } | Self::Quit => None,
+        }
+    }
+
     /// One line of JSON, without the newline.
     pub fn encode(&self) -> String {
         let value = match self {
             Self::Hello { version } => json!({ "op": "hello", "version": version }),
-            Self::Load { plugin, link, sample_rate } => {
-                json!({ "op": "load", "plugin": plugin, "link": link, "sample_rate": sample_rate })
-            }
-            Self::Loaded { latency } => json!({ "op": "loaded", "latency": latency }),
+            Self::Load { instance, plugin, link, sample_rate } => json!({
+                "op": "load", "instance": instance, "plugin": plugin, "link": link, "sample_rate": sample_rate,
+            }),
+            Self::Loaded { instance, latency } => json!({ "op": "loaded", "instance": instance, "latency": latency }),
+            Self::Unload { instance } => json!({ "op": "unload", "instance": instance }),
+            Self::Unloaded { instance } => json!({ "op": "unloaded", "instance": instance }),
             Self::Ping { id } => json!({ "op": "ping", "id": id }),
             Self::Pong { id } => json!({ "op": "pong", "id": id }),
-            Self::GetState => json!({ "op": "get_state" }),
-            Self::SetState { data, controller } => {
-                json!({ "op": "set_state", "data": hex(data), "controller": controller.as_deref().map(hex) })
+            Self::GetState { instance } => json!({ "op": "get_state", "instance": instance }),
+            Self::SetState { instance, data, controller } => json!({
+                "op": "set_state", "instance": instance, "data": hex(data), "controller": controller.as_deref().map(hex),
+            }),
+            Self::State { instance, data, controller } => json!({
+                "op": "state", "instance": instance, "data": hex(data), "controller": controller.as_deref().map(hex),
+            }),
+            Self::Error { instance, message } => json!({ "op": "error", "instance": instance, "message": message }),
+            Self::GetParams { instance } => json!({ "op": "get_params", "instance": instance }),
+            Self::Params { instance, params } => json!({
+                "op": "params", "instance": instance, "params": params.iter().map(ParamInfo::to_json).collect::<Vec<_>>(),
+            }),
+            Self::SetParam { instance, id, value } => {
+                json!({ "op": "set_param", "instance": instance, "id": id, "value": value })
             }
-            Self::State { data, controller } => {
-                json!({ "op": "state", "data": hex(data), "controller": controller.as_deref().map(hex) })
+            Self::Param { instance, param } => json!({ "op": "param", "instance": instance, "param": param.to_json() }),
+            Self::OpenEditor { instance } => json!({ "op": "open_editor", "instance": instance }),
+            Self::EditorOpened { instance, width, height } => {
+                json!({ "op": "editor_opened", "instance": instance, "width": width, "height": height })
             }
-            Self::Error { message } => json!({ "op": "error", "message": message }),
-            Self::GetParams => json!({ "op": "get_params" }),
-            Self::Params { params } => {
-                json!({ "op": "params", "params": params.iter().map(ParamInfo::to_json).collect::<Vec<_>>() })
-            }
-            Self::SetParam { id, value } => json!({ "op": "set_param", "id": id, "value": value }),
-            Self::Param { param } => json!({ "op": "param", "param": param.to_json() }),
-            Self::OpenEditor => json!({ "op": "open_editor" }),
-            Self::EditorOpened { width, height } => json!({ "op": "editor_opened", "width": width, "height": height }),
-            Self::CloseEditor => json!({ "op": "close_editor" }),
-            Self::EditorClosed => json!({ "op": "editor_closed" }),
+            Self::CloseEditor { instance } => json!({ "op": "close_editor", "instance": instance }),
+            Self::EditorClosed { instance } => json!({ "op": "editor_closed", "instance": instance }),
             Self::Quit => json!({ "op": "quit" }),
         };
         value.to_string()
@@ -168,46 +230,67 @@ impl Message {
         let value: Value = serde_json::from_str(line).ok()?;
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
         let number = |key: &str| value.get(key).and_then(Value::as_u64);
+        let small = |key: &str| number(key).and_then(|n| u32::try_from(n).ok());
         let bytes = |key: &str| value.get(key).and_then(Value::as_str).and_then(unhex);
         // Absent or null is `None`; anything else must be hex.
         let optional_bytes = |key: &str| match value.get(key) {
             None | Some(Value::Null) => Some(None),
             Some(v) => v.as_str().and_then(unhex).map(Some),
         };
+        let instance = || small("instance");
         Some(match value.get("op")?.as_str()? {
             "hello" => Self::Hello { version: number("version")? },
             "load" => Self::Load {
+                instance: instance()?,
                 plugin: text("plugin")?,
                 link: text("link")?,
                 sample_rate: value.get("sample_rate").and_then(Value::as_f64).filter(|r| r.is_finite() && *r > 0.0)?,
             },
-            "loaded" => Self::Loaded { latency: u32::try_from(number("latency")?).ok()? },
+            "loaded" => Self::Loaded { instance: instance()?, latency: small("latency")? },
+            "unload" => Self::Unload { instance: instance()? },
+            "unloaded" => Self::Unloaded { instance: instance()? },
             "ping" => Self::Ping { id: number("id")? },
             "pong" => Self::Pong { id: number("id")? },
-            "get_state" => Self::GetState,
-            "set_state" => Self::SetState { data: bytes("data")?, controller: optional_bytes("controller")? },
-            "state" => Self::State { data: bytes("data")?, controller: optional_bytes("controller")? },
-            "error" => Self::Error { message: text("message")? },
-            "get_params" => Self::GetParams,
+            "get_state" => Self::GetState { instance: instance()? },
+            "set_state" => Self::SetState {
+                instance: instance()?,
+                data: bytes("data")?,
+                controller: optional_bytes("controller")?,
+            },
+            "state" => {
+                Self::State { instance: instance()?, data: bytes("data")?, controller: optional_bytes("controller")? }
+            }
+            "error" => Self::Error {
+                // Absent or null is the process; anything else must be an instance number.
+                instance: match value.get("instance") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(u32::try_from(v.as_u64()?).ok()?),
+                },
+                message: text("message")?,
+            },
+            "get_params" => Self::GetParams { instance: instance()? },
             "params" => {
                 let list = value.get("params")?.as_array()?;
                 if list.len() > MAX_PARAMS {
                     return None;
                 }
-                Self::Params { params: list.iter().map(ParamInfo::from_json).collect::<Option<Vec<_>>>()? }
+                Self::Params {
+                    instance: instance()?,
+                    params: list.iter().map(ParamInfo::from_json).collect::<Option<Vec<_>>>()?,
+                }
             }
             "set_param" => Self::SetParam {
-                id: u32::try_from(number("id")?).ok()?,
+                instance: instance()?,
+                id: small("id")?,
                 value: value.get("value").and_then(Value::as_f64).filter(|v| v.is_finite())?,
             },
-            "param" => Self::Param { param: ParamInfo::from_json(value.get("param")?)? },
-            "open_editor" => Self::OpenEditor,
-            "editor_opened" => Self::EditorOpened {
-                width: u32::try_from(number("width")?).ok()?,
-                height: u32::try_from(number("height")?).ok()?,
-            },
-            "close_editor" => Self::CloseEditor,
-            "editor_closed" => Self::EditorClosed,
+            "param" => Self::Param { instance: instance()?, param: ParamInfo::from_json(value.get("param")?)? },
+            "open_editor" => Self::OpenEditor { instance: instance()? },
+            "editor_opened" => {
+                Self::EditorOpened { instance: instance()?, width: small("width")?, height: small("height")? }
+            }
+            "close_editor" => Self::CloseEditor { instance: instance()? },
+            "editor_closed" => Self::EditorClosed { instance: instance()? },
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -250,27 +333,34 @@ mod tests {
 
     #[test]
     fn every_message_round_trips() {
+        assert_eq!(VERSION, 5);
         let messages = [
             Message::Hello { version: VERSION },
-            Message::Load { plugin: "test:gain".into(), link: "/dev/shm/x".into(), sample_rate: 44_100.0 },
-            Message::Loaded { latency: 64 },
+            Message::Load { instance: 3, plugin: "test:gain".into(), link: "/dev/shm/x".into(), sample_rate: 44_100.0 },
+            Message::Loaded { instance: u32::MAX, latency: 64 },
+            Message::Unload { instance: 0 },
+            Message::Unloaded { instance: 7 },
             Message::Ping { id: u64::MAX },
             Message::Pong { id: 7 },
-            Message::GetState,
-            Message::SetState { data: vec![0, 1, 0xab, 0xff], controller: None },
-            Message::SetState { data: vec![1], controller: Some(vec![2, 3]) },
-            Message::State { data: Vec::new(), controller: None },
-            Message::State { data: vec![4], controller: Some(Vec::new()) },
-            Message::GetParams,
-            Message::Params { params: vec![gain(), ParamInfo { id: u32::MAX, steps: 1, hidden: true, ..gain() }] },
-            Message::Params { params: Vec::new() },
-            Message::SetParam { id: 7, value: -0.5 },
-            Message::Param { param: gain() },
-            Message::OpenEditor,
-            Message::EditorOpened { width: 800, height: 600 },
-            Message::CloseEditor,
-            Message::EditorClosed,
-            Message::Error { message: "no such plug-in: \"x\"\n".into() },
+            Message::GetState { instance: 1 },
+            Message::SetState { instance: 1, data: vec![0, 1, 0xab, 0xff], controller: None },
+            Message::SetState { instance: 2, data: vec![1], controller: Some(vec![2, 3]) },
+            Message::State { instance: 1, data: Vec::new(), controller: None },
+            Message::State { instance: 9, data: vec![4], controller: Some(Vec::new()) },
+            Message::GetParams { instance: 4 },
+            Message::Params {
+                instance: 4,
+                params: vec![gain(), ParamInfo { id: u32::MAX, steps: 1, hidden: true, ..gain() }],
+            },
+            Message::Params { instance: 4, params: Vec::new() },
+            Message::SetParam { instance: 5, id: 7, value: -0.5 },
+            Message::Param { instance: 5, param: gain() },
+            Message::OpenEditor { instance: 6 },
+            Message::EditorOpened { instance: 6, width: 800, height: 600 },
+            Message::CloseEditor { instance: 6 },
+            Message::EditorClosed { instance: 6 },
+            Message::Error { instance: None, message: "no such plug-in: \"x\"\n".into() },
+            Message::Error { instance: Some(8), message: "the plug-in has no editor".into() },
             Message::Quit,
         ];
         for message in messages {
@@ -278,6 +368,16 @@ mod tests {
             assert!(!line.contains('\n'), "{line}");
             assert_eq!(Message::decode(&line), Some(message), "{line}");
         }
+    }
+
+    #[test]
+    fn messages_name_their_instance() {
+        assert_eq!(Message::Unload { instance: 4 }.instance(), Some(4));
+        assert_eq!(Message::EditorClosed { instance: 2 }.instance(), Some(2));
+        assert_eq!(Message::Error { instance: Some(1), message: String::new() }.instance(), Some(1));
+        assert_eq!(Message::Error { instance: None, message: String::new() }.instance(), None);
+        assert_eq!(Message::Ping { id: 1 }.instance(), None);
+        assert_eq!(Message::Quit.instance(), None);
     }
 
     #[test]
@@ -289,19 +389,35 @@ mod tests {
             r#"{"op":"nope"}"#,
             r#"{"op":"ping"}"#,
             r#"{"op":"ping","id":-1}"#,
-            r#"{"op":"loaded","latency":5000000000}"#,
-            r#"{"op":"state","data":"abc"}"#,
-            r#"{"op":"state","data":"zz"}"#,
-            r#"{"op":"state","data":"","controller":5}"#,
-            r#"{"op":"set_state","data":"","controller":"z"}"#,
-            r#"{"op":"load","plugin":"x","link":"y","sample_rate":0}"#,
-            r#"{"op":"load","plugin":"x","link":"y"}"#,
+            r#"{"op":"loaded","instance":1,"latency":5000000000}"#,
+            r#"{"op":"loaded","latency":5}"#,
+            r#"{"op":"state","instance":1,"data":"abc"}"#,
+            r#"{"op":"state","instance":1,"data":"zz"}"#,
+            r#"{"op":"state","instance":1,"data":"","controller":5}"#,
+            r#"{"op":"state","data":""}"#,
+            r#"{"op":"set_state","instance":1,"data":"","controller":"z"}"#,
+            r#"{"op":"load","instance":1,"plugin":"x","link":"y","sample_rate":0}"#,
+            r#"{"op":"load","instance":1,"plugin":"x","link":"y"}"#,
+            r#"{"op":"load","plugin":"x","link":"y","sample_rate":48000}"#,
+            r#"{"op":"load","instance":-1,"plugin":"x","link":"y","sample_rate":48000}"#,
+            r#"{"op":"load","instance":5000000000,"plugin":"x","link":"y","sample_rate":48000}"#,
             r#"{"op":42}"#,
-            r#"{"op":"set_param","id":1}"#,
-            r#"{"op":"set_param","id":-1,"value":0.5}"#,
-            r#"{"op":"params","params":[{"id":1}]}"#,
-            r#"{"op":"param"}"#,
-            r#"{"op":"editor_opened","width":800}"#,
+            r#"{"op":"set_param","instance":1,"id":1}"#,
+            r#"{"op":"set_param","instance":1,"id":-1,"value":0.5}"#,
+            r#"{"op":"set_param","id":1,"value":0.5}"#,
+            r#"{"op":"params","instance":1,"params":[{"id":1}]}"#,
+            r#"{"op":"param","instance":1}"#,
+            r#"{"op":"editor_opened","instance":1,"width":800}"#,
+            r#"{"op":"get_state"}"#,
+            r#"{"op":"get_params"}"#,
+            r#"{"op":"open_editor"}"#,
+            r#"{"op":"close_editor","instance":"1"}"#,
+            r#"{"op":"editor_closed"}"#,
+            r#"{"op":"unload"}"#,
+            r#"{"op":"unloaded","instance":1.5}"#,
+            r#"{"op":"error","instance":"x","message":"m"}"#,
+            r#"{"op":"error","instance":-3,"message":"m"}"#,
+            r#"{"op":"error","instance":1}"#,
         ] {
             assert_eq!(Message::decode(line), None, "{line}");
         }

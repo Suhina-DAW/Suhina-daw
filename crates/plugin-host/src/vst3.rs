@@ -10,8 +10,11 @@
 //! `vst3:<bundle or file>#<class id>`, the class id as 32 hex digits; `test:vst3` is a gain
 //! built into the host for tests ([`crate::test_vst3`]).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -86,7 +89,7 @@ fn ok(result: tresult) -> bool {
 }
 
 /// A loaded plug-in file (or the built-in test plug-in) and its factory.
-struct Module {
+struct ModuleFile {
     factory: Option<ComPtr<IPluginFactory>>,
     library: Option<libloading::Library>,
 }
@@ -109,7 +112,7 @@ fn binary(path: &Path) -> Result<PathBuf, String> {
     if inner.is_file() { Ok(inner) } else { Err(format!("no {} in the bundle", inner.display())) }
 }
 
-impl Module {
+impl ModuleFile {
     fn open(path: &Path) -> Result<Self, String> {
         let file = binary(path)?;
         // SAFETY: loading the library runs its initialisation code, which Rust cannot check;
@@ -238,7 +241,7 @@ impl Module {
     }
 }
 
-impl Drop for Module {
+impl Drop for ModuleFile {
     fn drop(&mut self) {
         // Every object from the factory is gone by now; release the factory, then let the
         // module clean up, then unload it.
@@ -272,17 +275,50 @@ fn blank<T: Copy>() -> T {
     unsafe { std::mem::zeroed() }
 }
 
+/// A module shared by every instance made from it in this process: the file is loaded, and
+/// its `InitDll`/`ModuleEntry` and `ExitDll`/`ModuleExit` run, once however many instances
+/// use it, as the module API asks.
+type Module = Rc<ModuleFile>;
+
+thread_local! {
+    /// The modules loaded, by their binary's path (or `test:vst3`), while anything uses them.
+    /// Plug-ins are loaded on the host's main thread only.
+    static MODULES: RefCell<HashMap<PathBuf, Weak<ModuleFile>>> = RefCell::new(HashMap::new());
+}
+
+/// The module loaded from `key`, or a new one `open` loads (and keeps for the next asker).
+fn shared_module(key: PathBuf, open: impl FnOnce() -> Result<ModuleFile, String>) -> Result<Module, String> {
+    let cached = MODULES.with(|modules| {
+        let modules = modules.try_borrow().ok()?;
+        modules.get(&key).and_then(Weak::upgrade)
+    });
+    if let Some(module) = cached {
+        return Ok(module);
+    }
+    let module = Rc::new(open()?);
+    MODULES.with(|modules| {
+        if let Ok(mut modules) = modules.try_borrow_mut() {
+            modules.retain(|_, module| module.strong_count() > 0);
+            modules.insert(key, Rc::downgrade(&module));
+        }
+    });
+    Ok(module)
+}
+
 /// The module and class a plug-in name points at.
 fn open(spec: &str) -> Result<(Module, Option<TUID>), String> {
     if spec == "test:vst3" {
-        return Ok((Module::test(), None));
+        return Ok((shared_module(PathBuf::from(spec), || Ok(ModuleFile::test()))?, None));
     }
     let file = spec.strip_prefix("vst3:").ok_or_else(|| format!("not a VST3 plug-in: {spec:?}"))?;
     let (path, cid) = match file.rsplit_once('#') {
         Some((path, hex)) => (path, Some(cid_from_hex(hex).ok_or_else(|| format!("not a class id: {hex:?}"))?)),
         None => (file, None),
     };
-    Ok((Module::open(Path::new(path))?, cid))
+    let path = Path::new(path);
+    let key = binary(path)?;
+    let key = key.canonicalize().unwrap_or(key);
+    Ok((shared_module(key, || ModuleFile::open(path))?, cid))
 }
 
 /// The plug-ins the file `spec` names holds, without making any (for scanning).
@@ -658,6 +694,11 @@ impl Vst3Plugin {
         (in_channels, out_channels)
     }
 
+    /// Asks the audio thread to stop and waits up to `wait` for it; whether it stopped.
+    pub(crate) fn stop_audio(&mut self, wait: std::time::Duration) -> bool {
+        crate::audio_stopped(&self.stop, self.audio.as_ref(), wait)
+    }
+
     pub(crate) fn latency(&self) -> u32 {
         self.latency
     }
@@ -973,6 +1014,19 @@ fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_module_is_loaded_once_while_anything_uses_it() {
+        let (first, _) = open("test:vst3").unwrap();
+        let (second, _) = open("test:vst3").unwrap();
+        assert!(Rc::ptr_eq(&first, &second));
+        let weak = Rc::downgrade(&first);
+        drop((first, second));
+        // Once nothing uses it, it is let go of, and the next open loads it again.
+        assert!(weak.upgrade().is_none());
+        let (third, _) = open("test:vst3").unwrap();
+        assert_eq!(Rc::strong_count(&third), 1);
+    }
 
     #[test]
     fn class_ids_round_trip_as_hex() {
