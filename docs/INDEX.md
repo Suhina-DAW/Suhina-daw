@@ -92,6 +92,7 @@ Change this code, and check these documents.
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/waveform.rs` | [Components](design/components.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md) |

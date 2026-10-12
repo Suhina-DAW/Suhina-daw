@@ -52,6 +52,9 @@ pub struct Settings {
     pub midi_stacking: bool,
     pub on_open: OnOpen,
     pub device_layout: DeviceLayout,
+    /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
+    /// without `.json`.
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -64,6 +67,7 @@ impl Default for Settings {
             midi_stacking: false,
             on_open: OnOpen::Ask,
             device_layout: DeviceLayout::Row,
+            theme: crate::theme::BUILT_IN.into(),
         }
     }
 }
@@ -90,10 +94,11 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\ndevice_chain = {devices}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\ndevice_chain = {devices}\ntheme = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
+            self.theme,
         )
     }
 
@@ -125,6 +130,7 @@ impl Settings {
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
+                ("theme", id) if is_theme_id(id) => settings.theme = id.to_string(),
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -132,6 +138,11 @@ impl Settings {
         }
         (settings, warnings)
     }
+}
+
+/// Whether `id` can name a theme file: not empty and not a path.
+pub fn is_theme_id(id: &str) -> bool {
+    !id.is_empty() && !id.contains(['/', '\\', ':']) && id != "." && id != ".."
 }
 
 #[cfg(test)]
@@ -148,6 +159,7 @@ mod tests {
             midi_stacking: false,
             on_open: OnOpen::Replace,
             device_layout: DeviceLayout::Stack,
+            theme: "Night blue".into(),
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());

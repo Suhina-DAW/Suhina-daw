@@ -262,8 +262,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
-- A menu bar and a **Settings** page (Options › Settings, Ctrl+,): animations, which side the
-  track headers are on, the renderer (wgpu or OpenGL); saved in `settings.txt`.
+- A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
+  left: General, Interface (with Theme, Arrangement and Detail area under it), Graphics, Audio,
+  Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
+  OpenGL); saved in `settings.txt`.
+- **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Settings › Interface › Theme picks
+  one, changes its colours, duplicates it and reads the files again; a file saved in an editor
+  shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
 - The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
@@ -293,7 +299,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
-- A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
+- A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
 - Still to do: fades read from Live Sets, input routing and sends, arm, meters, the browser, device editing

@@ -12,6 +12,7 @@ covers:
   - crates/ui/src/timeline.rs
   - crates/ui/src/motion.rs
   - crates/ui/src/settings_view.rs
+  - crates/ui/src/themes.rs
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
 ---
@@ -82,7 +83,7 @@ the view with the detail area, status bar.
 | Drop overlay | While a project file is dragged over the window: `surface.0` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Browser | (planned) 300 px wide, resizable, left of the view |
 | Detail splitter | 6 px, `surface.2`, a 32 × 2 grip in `text.tertiary` in the middle; the cursor shows which way it moves |
-| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Devices. With nothing selected: "Select a track or a clip to see it here" in `text.tertiary` |
+| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.tertiary` |
 | Status bar | 20 px, `surface.1`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.tertiary`). There is no separate info view |
 
 ## Browser (planned)
@@ -206,25 +207,48 @@ double-click to reset (typing a value is planned).
 ## Settings page
 
 Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
-no dialogs. A centred column at most 560 px wide on `surface.0`: the title "Settings" in 13 px
-with a 52 px Close button on the right, then the pages as a segmented control (General,
-Shortcuts, Plug-ins), then the page. A change applies at once and is saved; one that needs a
-restart (the renderer) says so in its note.
+no dialogs. A centred block at most 724 px wide on `surface.0`: the title "Settings" in 13 px
+with a 52 px Close button on the right; under it the list of pages (140 px), 24 px of space, and
+the page (560 px). A change applies at once and is saved; one that needs a restart (the
+renderer) says so in its note.
 
-**General** has sections (10 px `text.tertiary` heading over a 1 px `line`, 18 px between
-sections); each setting is a 34 px row with its name (11 px `text.primary`), a note under it
+The list of pages: 20 px rows, 11 px names 6 px in, `text.secondary`; the page shown is filled
+`surface.2` with `text.primary`, a hovered one `#2A2926`. Interface's own pages are indented
+12 px more under it:
+
+- General
+- Interface
+  - Theme
+  - Arrangement
+  - Detail area
+- Graphics
+- Audio
+- Shortcuts
+- Plug-ins
+
+A page starts with its title (10 px `text.tertiary` over a 1 px `line`), level with the top of
+the list; each setting is a 34 px row with its name (11 px `text.primary`), a note under it
 (10 px `text.secondary`) and its control on the right, a segmented control of 64 px per part. A
 read-only setting (Output) shows its value as the note.
 
-| Section | Setting | Values |
+| Page | Setting | Values |
 |---|---|---|
+| General | When opening a project | Ask (default), New tab, Replace |
 | Interface | Animations | On (default), Off |
-| Projects | When opening a project | Ask (default), New tab, Replace |
-| Arrangement | Track headers | Left, Right (default) |
-| Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
-| Devices | Device chain | Row (default), Stack |
+| Interface › Arrangement | Track headers | Left, Right (default) |
+| Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
+| Interface › Detail area | Device chain | Row (default), Stack |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
+
+**Interface › Theme**: the themes as 20 px rows, the built-in Loopwerk Dark first and then the
+theme files, the name on the left and `built-in` or the file name on the right (10 px
+`text.tertiary`); a click uses one, the one in use filled like the page list. Under them a 34 px
+row: the name of the theme in use in a field (the built-in one shows "Theme files" instead, since
+it does not change), the folder of the theme files as the note, and Duplicate and Reload on the
+right. Then every colour token in a list that scrolls: an egui colour button, the value
+(10 px mono `#C9C4BB`), the token name and what it is used for. Changing a colour of the
+built-in theme first makes a copy of it ("Custom"). See [brief](brief.md) › Themes.
 
 **Shortcuts** lists every action under its group (Transport, View, Edit, Tracks, Commands): its
 label (300 px, 10 px), its keys (130 px, 10 px mono `#C9C4BB`, "Press keys" in `accent` while
@@ -238,8 +262,8 @@ on the right, run in the background); then the plug-ins found (name, vendor · f
 the files that failed (in the recording red), in a list that scrolls. Read and changed through
 the `plugins.*` commands.
 
-The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder; unknown lines
-are skipped with a warning in the status bar.
+The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder, the theme in
+use as `theme = <id>`; unknown lines are skipped with a warning in the status bar.
 
 ## Device panel
 

@@ -58,7 +58,7 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Colour {hex}")));
             ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(color.0, color.1, color.2));
             if response.hovered() {
-                ui.painter().rect_stroke(rect, 0.0, theme::hairline(theme::TEXT_PRIMARY), egui::StrokeKind::Inside);
+                ui.painter().rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), egui::StrokeKind::Inside);
             }
             if response.clicked() {
                 actions.push(Action::new("track.setColor", json!({ "track": track, "color": hex })));
