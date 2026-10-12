@@ -333,8 +333,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
 - A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
-  Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
-  OpenGL); saved in `settings.txt`.
+  Shortcuts, Plug-ins; animations, the interface zoom (Ctrl+Plus and Ctrl+Minus), which side the
+  track headers are on, the renderer (wgpu or OpenGL); saved in `settings.txt`.
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
   (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Loopwerk (Loopwerk
   Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized

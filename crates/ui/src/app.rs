@@ -22,7 +22,7 @@ use crate::loading_dialog;
 use crate::motion;
 use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt};
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, OnOpen, Settings, Side, ZOOM_DEFAULT, ZOOM_RANGE, ZOOM_STEP};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
@@ -447,6 +447,26 @@ impl App {
         self.arrangement.headers_left = settings.track_headers == Side::Left;
         self.settings = settings;
         theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
+        self.apply_zoom(ctx);
+    }
+
+    /// Scales the whole interface by the zoom setting (a percentage of the normal size).
+    fn apply_zoom(&self, ctx: &egui::Context) {
+        ctx.set_zoom_factor(self.settings.zoom as f32 / 100.0);
+    }
+
+    /// Changes the zoom by `delta` percentage points, within the allowed range.
+    fn zoom_by(&mut self, delta: i32) {
+        let zoom = self.settings.zoom as i32 + delta;
+        self.zoom_to(zoom.clamp(ZOOM_RANGE.0 as i32, ZOOM_RANGE.1 as i32) as u32);
+    }
+
+    /// Sets the zoom to `zoom` percent, saving it when it changed.
+    fn zoom_to(&mut self, zoom: u32) {
+        if zoom != self.settings.zoom {
+            self.settings.zoom = zoom;
+            self.settings_changed = true;
+        }
     }
 
     /// Uses the themes read from the theme files in `folder`, and draws with the one the settings
@@ -733,6 +753,7 @@ impl App {
     pub fn ui(&mut self, ui: &mut Ui) {
         let window = ui.max_rect();
         let mut actions = Vec::new();
+        self.apply_zoom(ui.ctx());
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
@@ -1327,6 +1348,9 @@ impl App {
                 self.settings_open = false;
                 self.browser.focus_search = true;
             }
+            "view.zoomIn" => self.zoom_by(ZOOM_STEP as i32),
+            "view.zoomOut" => self.zoom_by(-(ZOOM_STEP as i32)),
+            "view.zoomReset" => self.zoom_to(ZOOM_DEFAULT),
             _ if !has_project => {}
             "file.save" => self.save_active(false),
             "file.saveAs" => self.save_active(true),

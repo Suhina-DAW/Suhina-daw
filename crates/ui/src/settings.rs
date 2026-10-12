@@ -110,6 +110,10 @@ impl WarpMode {
 /// The browser panel's narrowest and widest, and its width at first.
 pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
 pub const BROWSER_WIDTH: u32 = 300;
+/// The interface zoom, as a percentage: its range, the step the keys change it by, and its default.
+pub const ZOOM_RANGE: (u32, u32) = (50, 200);
+pub const ZOOM_STEP: u32 = 10;
+pub const ZOOM_DEFAULT: u32 = 100;
 /// The preview's level, in dB: its range and its default.
 /// The longest sample the sample map shows by default, and the range it may be set to.
 pub const MAP_MAX_SECONDS: u32 = 10;
@@ -120,6 +124,8 @@ pub const PREVIEW_VOLUME: i32 = -6;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub animations: bool,
+    /// The interface zoom, as a percentage of the normal size.
+    pub zoom: u32,
     pub track_headers: Side,
     pub graphics: Graphics,
     /// Audio clips moved over others stack (all play) instead of replacing them.
@@ -159,6 +165,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             animations: true,
+            zoom: ZOOM_DEFAULT,
             track_headers: Side::Right,
             graphics: Graphics::Gpu,
             sample_stacking: false,
@@ -205,8 +212,9 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\nzoom = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\n",
             on(self.animations),
+            self.zoom,
             on(self.sample_stacking),
             on(self.midi_stacking),
             self.theme,
@@ -246,6 +254,9 @@ impl Settings {
             let (key, value) = (key.trim(), value.trim());
             match (key, value) {
                 ("animations", "on" | "off") => settings.animations = value == "on",
+                ("zoom", z) if z.parse::<u32>().is_ok() => {
+                    settings.zoom = z.parse::<u32>().unwrap_or(ZOOM_DEFAULT).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
+                }
                 ("sample_stacking", "on" | "off") => settings.sample_stacking = value == "on",
                 ("midi_stacking", "on" | "off") => settings.midi_stacking = value == "on",
                 ("track_headers", "left") => settings.track_headers = Side::Left,
@@ -309,6 +320,7 @@ mod tests {
     fn settings_survive_a_round_trip() {
         let settings = Settings {
             animations: false,
+            zoom: 150,
             track_headers: Side::Left,
             graphics: Graphics::OpenGl,
             sample_stacking: true,
@@ -337,9 +349,10 @@ mod tests {
     #[test]
     fn browser_values_out_of_range_are_limited() {
         let (settings, warnings) =
-            Settings::from_text("browser_width = 5000\npreview_volume = -900\nwarp_mode = elastic\n");
+            Settings::from_text("browser_width = 5000\npreview_volume = -900\nwarp_mode = elastic\nzoom = 9000\n");
         assert_eq!((settings.browser_width, settings.preview_volume), (BROWSER_WIDTHS.1, PREVIEW_VOLUMES.0));
         assert_eq!(settings.warp_mode, WarpMode::Beats);
+        assert_eq!(settings.zoom, ZOOM_RANGE.1);
         assert_eq!(warnings.len(), 1);
     }
 

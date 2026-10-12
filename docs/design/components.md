@@ -248,6 +248,7 @@ read-only setting (Output) shows its value as the note.
 | General › Dropping files | Warp mode | Beats (default), Tonal, Texture, Smooth, Pro, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | Interface | Animations | On (default), Off |
+| Interface | Zoom | 50, 75, 100 (default), 125, 150, 200 %: how large the whole interface is, saved with the settings; Ctrl+Plus and Ctrl+Minus step it by 10 within 50–200, Ctrl+0 goes back to 100 ([shortcuts](../shortcuts.md) › Default keys) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Interface › Detail area | Device chain | Row (default), Stack |

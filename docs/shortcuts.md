@@ -59,6 +59,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Show or hide the browser (`view.browser`) | Ctrl+B |
 | Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
+| Zoom the interface in, out, and back to 100% (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`) | Ctrl+Plus (or Ctrl+=), Ctrl+Minus, Ctrl+0 |
 | Search in the browser (`browser.search`; shows it when hidden). In the search field: Up and Down move through the results, Enter adds the selection to the selected track, Escape clears the search and then leaves the field | Ctrl+F |
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
@@ -71,3 +72,8 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 
 Paste places the copy right after the selected clip, or at the playhead on the selected track; it
 replaces what it covers, like a moved clip ([arrangement editing](spec/arrangement-editing.md)).
+
+Zoom in is bound to two keys, `Ctrl+Plus` and `Ctrl+Equals`: on macOS `+` is typed as `Shift+=`,
+and while Command is held the window reports that key as `=`, not `+`, so the `Plus` binding never
+fires there and `Cmd+=` — the usual Mac zoom-in key — is what does. Both bindings work on Windows
+and Linux.

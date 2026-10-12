@@ -343,6 +343,13 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.animations = on;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(&painter, r, "Zoom", "How large the interface is; Ctrl+Plus and Ctrl+Minus change it");
+            let options = [("50%", 50u32), ("75%", 75), ("100%", 100), ("125%", 125), ("150%", 150), ("200%", 200)];
+            if let Some(zoom) = segmented(ui, &painter, control_rect(r, 6), "Zoom", &options, settings.zoom) {
+                settings.zoom = zoom;
+                outcome.changed = true;
+            }
         }
         Page::Browser => {
             section(&mut y, "Browser");
