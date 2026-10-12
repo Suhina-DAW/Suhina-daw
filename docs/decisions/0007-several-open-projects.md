@@ -3,7 +3,7 @@ description: Several projects open at once like tabs, one active; where commands
 read_when: tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/session/src/projects.rs
 ---
@@ -50,7 +50,8 @@ the layer that owns sessions.
   it is not instant for large sets. Keeping one output open and swapping the engine graph
   ([ADR 0005](0005-edits-while-playing.md)) makes it so; that is a follow-up.
 - Background projects stay in memory with their undo history; decoded audio is held only by
-  the active project's player.
+  the active project's player over MCP. The desktop app shows the projects as tabs and keeps
+  each open project's decoded audio, so a switch there opens only a new output stream.
 - `Projects` is where Loopwerk-wide state lives too: it also holds the plug-in library that the
   `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)), shared by every open
   project.

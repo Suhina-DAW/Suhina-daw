@@ -116,6 +116,11 @@ impl Projects {
         self.open.iter().map(|o| o.id).collect()
     }
 
+    /// The name `id` is shown with, as in its tab.
+    pub fn name(&self, id: ProjectId) -> Option<&str> {
+        self.open.iter().find(|o| o.id == id).map(|o| o.name.as_str())
+    }
+
     pub fn get(&self, id: ProjectId) -> Option<&Session> {
         self.open.iter().find(|o| o.id == id).map(|o| &o.session)
     }

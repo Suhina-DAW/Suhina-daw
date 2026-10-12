@@ -16,7 +16,7 @@ loopwerk-session.workspace = true
 loopwerk-automation.workspace = true
 loopwerk-media.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
-cpal.workspace = true
+loopwerk-output.workspace = true
 serde_json.workspace = true
 loopwerk-device-api.workspace = true
 loopwerk-device-registry.workspace = true

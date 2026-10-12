@@ -4,6 +4,8 @@ read_when: UI design, colours, tokens, typography, theme, accent, track colours,
 type: spec
 status: draft
 last_verified: 2026-10-12
+covers:
+  - crates/ui/src/theme.rs
 ---
 
 # Design brief
@@ -37,7 +39,8 @@ From [research](#sources) and the first design rounds:
 1. **Grey first.** Build hierarchy with lightness only, check it in greyscale, add colour last.
 2. **Quiet the surroundings** instead of shouting the important thing.
 3. **States differ in lightness, not hue alone** (playing is brighter, not just "accent").
-4. **Two type sizes:** 11 px for UI text, 10 px for small values. No bold headings.
+4. **Two type sizes:** 11 px for UI text, 10 px for small values. No bold headings. 9 px is
+   kept for tags beside a name, 13 px for a page title (components › Global rules).
 5. **One window, no pop-ups.** Menus and pickers open in place.
 6. **Progressive disclosure.** Controls appear when there is room or need (track height, toggled
    sections), never all at once.
@@ -62,7 +65,7 @@ From [research](#sources) and the first design rounds:
 | Base palette | Warm graphite surfaces in four lightness steps (see tokens) | Live's neutral mid-grey |
 | Accent | Iris `#A6A3FF`, used sparingly: transport play, solo, queued, device on, selected parameter | Orange as the active colour; cyan as the value colour |
 | Track colours | Our own muted palette (terracotta, ochre, steel blue, lavender, …) | Live's saturated pastel palette |
-| Type | IBM Plex Sans Condensed for UI, IBM Plex Mono for numbers and time | Live's typeface |
+| Type | Encode Sans Semi Expanded for UI text, IBM Plex Mono for numbers and time | Live's typeface |
 | Knobs | Small circle with a pointer line, value below | Live's open arc knobs |
 | Value fields | Neutral grey fill; volume fills full height with a level tick at the edges only; pan is a thin bottom bar growing from a centre tick | Live's cyan-filled boxes |
 | Toggles | Track on = light grey number button; solo = accent; arm = red ring, filled when armed | The orange numbered track button |
@@ -81,8 +84,10 @@ From [research](#sources) and the first design rounds:
 - **Grid lines:** Session columns are separated by `line.strong`, scene rows by `line`; the
   separators run through the mixer section. Arrangement tracks are separated by `line.strong`.
 - **Track headers grow with track height** (Arrangement): compact = name and on/solo/arm; then
-  volume and pan; then sends ("Send A", "Send B"); then routing (input, channel, output, monitor
-  In/Auto/Off). Groups are separated by space only, routing gets a little extra space above it.
+  volume and pan; then routing (output, and input, channel and monitor In/Auto/Off with
+  recording); sends ("Send A", "Send B") go above routing once the engine plays them. Groups are
+  separated by space only, routing gets a little extra space above it (components › Track header
+  levels has the heights).
 - **Detail area is resizable** with a splitter, up to nearly the full window height
   ([clip editor spec](../spec/ui-clip-editor.md)).
 - **Clip properties panel:** one label row and one value row per pair, no group titles; Loop is a
@@ -98,7 +103,8 @@ Widgets never contain literal colours. Current values:
 | `surface.0` | `#1D1C1A` | Grid background, empty slots, lanes |
 | `surface.1` | `#252421` | Panels, headers, browser |
 | `surface.2` | `#2E2D2A` | Fields, stopped clips, buttons |
-| `surface.3` | `#45433F` / `#4A4843` | Selected, playing clip, value fill |
+| `surface.3` | `#45433F` | Selected, pressed |
+| `surface.3.bright` | `#4A4843` | Playing clip, playing scene, volume fill |
 | `line` | `#383733` | Separators between regions and rows |
 | `line.strong` | `#45433F` | Session columns, arrangement tracks |
 | `text.primary` | `#ECE8E1` | |

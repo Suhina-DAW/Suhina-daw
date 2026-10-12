@@ -12,7 +12,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); not in the engine yet |
 | M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
 ## Built-in devices
 
@@ -244,3 +244,48 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   their frames (3 % of one core on the same set, 99 % of blocks within 1.3 ms of their 10.7 ms).
 - Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
   vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
+
+### M8 UI (started)
+- `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
+  stopped on the default output and shows the **Session view**: tracks as columns, return tracks
+  beside the scene column, clip slots with their state (stopped, queued, playing with progress),
+  scene launch, stop buttons, and a mixer strip with pan, volume and track on/off
+  ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md), [spec](docs/spec/ui-session-view.md)).
+- The **Arrangement view** (Tab switches): bar ruler, one lane per track with its clips and their
+  notes (loops repeated), the playhead, track headers on the right that show volume and pan once
+  a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
+  by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
+  clip then plays through the new track's instrument and effects.
+- A menu bar and a **Settings** page (Options › Settings, Ctrl+,): animations, which side the
+  track headers are on, the renderer (wgpu or OpenGL); saved in `settings.txt`.
+- Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
+  switch), which Settings turns off.
+- The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
+  stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every click is a command, the same the CLI and
+  MCP run.
+- Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
+  default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
+- A track header 70 px or taller shows where the track plays: the main output or a group
+  (`track.setOutput`, loops refused).
+- A clip dropped over others replaces what it covers (shortens, splits or removes them), or
+  stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
+  sub-rows ([spec](docs/spec/arrangement-editing.md)).
+- Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
+  to move the track (a group moves with its tracks); right-click a header or a Session column for
+  name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Audio clips show their waveform (peaks computed once when the files are decoded) and their
+  gain, which a drag changes (`clip.setGain`).
+- Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
+  only the active one plays; opening one while another is open asks (new tab or replace, with
+  Remember and a setting). A project file dragged over the window darkens it.
+- Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
+  and the plug-ins found and the files that failed.
+- Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
+  that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
+  group) and the window's own ([shortcuts](docs/shortcuts.md)).
+- A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
+  clip's properties or the selected track's devices with their parameters; Shift+Tab hides it.
+  Changing devices from it follows the device commands (#73).
+- Still to do: clip fades, input routing and sends, arm, meters, the browser, device editing
+  and the clip editor in the detail area, installers.

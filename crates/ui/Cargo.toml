@@ -1,0 +1,20 @@
+[package]
+name = "loopwerk-ui"
+description = "Loopwerk's user interface: views and widgets on top of the session's commands (egui)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+loopwerk-plugins.workspace = true
+serde_json.workspace = true
+egui = "0.36"  # MIT OR Apache-2.0
+
+[dev-dependencies]
+egui_kittest = { version = "0.36", features = ["wgpu", "snapshot"] }  # MIT OR Apache-2.0
+
+[lints]
+workspace = true

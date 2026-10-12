@@ -33,12 +33,14 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
+| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking | How arrangement clips behave when moved: along a lane, to another track, and over other clips (replace or stack) |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
+| [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
 
 ## Code and its documents
@@ -50,6 +52,7 @@ Change this code, and check these documents.
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/loopwerk-cli/src/play.rs` | [Architecture](architecture.md) |
+| `apps/loopwerk/src/main.rs` | [Architecture](architecture.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -64,20 +67,34 @@ Change this code, and check these documents.
 | `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/launcher.rs` | [Clip launching](spec/clip-launching.md) |
-| `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) |
+| `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
-| `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
+| `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
+| `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/detail_view.rs` | [Components](design/components.md) |
+| `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
+| `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/motion.rs` | [Components](design/components.md) |
+| `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |
+| `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/waveform.rs` | [Components](design/components.md) |
+| `crates/ui/src/widgets.rs` | [Components](design/components.md) |
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |

@@ -28,6 +28,8 @@ loopwerk-device-overdrive = { path = "devices/overdrive" }
 loopwerk-device-fm-synth = { path = "devices/fm-synth" }
 loopwerk-device-registry = { path = "crates/device-registry" }
 loopwerk-stretch = { path = "crates/stretch" }
+loopwerk-output = { path = "crates/output" }
+loopwerk-ui = { path = "crates/ui" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0

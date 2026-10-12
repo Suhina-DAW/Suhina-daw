@@ -1,0 +1,15 @@
+[package]
+name = "loopwerk-output"
+description = "Plays a Loopwerk engine on the default audio output device"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+cpal.workspace = true
+
+[lints]
+workspace = true

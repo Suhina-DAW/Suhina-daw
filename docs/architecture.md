@@ -11,6 +11,10 @@ covers:
   - crates/engine/src/lib.rs
   - crates/session/src/lib.rs
   - apps/loopwerk-cli/src/play.rs
+  - crates/output/src/lib.rs
+  - crates/ui/src/lib.rs
+  - crates/ui/src/app.rs
+  - apps/loopwerk/src/main.rs
   - crates/automation/src/server.rs
 ---
 
@@ -27,9 +31,10 @@ page wrong updates it in the same pull request (AGENTS.md › Before you finish 
 A crate may depend only on crates in lower layers. Nothing below the UI depends on a GUI toolkit.
 
 ```text
-L3  automation            apps/loopwerk-cli          (planned) UI
-      MCP server, renders     render, play, mcp
-        |                       |
+L3  automation        output          ui                apps/loopwerk-cli, apps/loopwerk
+      MCP server,       audio device    window, views      the CLI; the desktop app
+      renders           (cpal)          (egui)
+        |                 |               |
 L2  session ----------------- media
       commands, undo,           finds and decodes
       the player                audio files
@@ -55,7 +60,10 @@ The engine does not run them yet (see *Planned parts*).
 | `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`. | engine |
 | `session` | An open project with its undo history (`Session`), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over the open projects, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
-| `loopwerk-cli` | The command line, and the only code that opens an audio device (cpal). | all of the above |
+| `output` | The audio device: plays a `Renderer` on the default output (cpal), and `open_player`, a `Player` whose stream lives on its own thread. The only code that opens an audio device. | engine, session |
+| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the Session and Arrangement views and the Settings page, drawn with egui from the project and the `LauncherMonitor`; every change is a command. Design tokens in `theme.rs`. No windowing or GPU code, so tests drive it headless (egui_kittest). | engine, session |
+| `loopwerk-cli` | The command line: render, play, mcp. | all of the above |
+| `loopwerk` | The desktop app: opens a project (argument or a dropped `.als`), decodes its audio, plays it stopped through `output` and runs `ui` in an eframe window; loads and saves the settings file. | session, media, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-registry` | Every built-in device by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
 | `device-api` | The `Device` trait, `DeviceInfo` (an effect or an instrument) and `ParamInfo` (plain values in their unit, conversion to knob travel), `NoteEvent` for instruments, and the contract tests every device runs (`conformance::check`, with note checks for instruments). | nothing |
@@ -101,10 +109,10 @@ The engine does not run them yet (see *Planned parts*).
 
 | Thread | Runs | May allocate, lock, do I/O |
 |---|---|---|
-| Main / session | The CLI, or the MCP server's tokio runtime. Owns the `Session` (the MCP server: all open `Projects`), runs commands, imports and loads audio, builds the `Renderer` and, after each edit, a new graph for it (ADR 0005). | yes |
+| Main / session | The CLI, the desktop app's window (egui, one frame at a time), or the MCP server's tokio runtime. Owns the `Session` (the MCP server: all open `Projects`), runs commands, imports and loads audio, builds the `Renderer` and, after each edit, a new graph for it (ADR 0005). | yes |
 | Audio | The device callback: `Renderer::process`, sample conversion, setting atomics. | **no** (AGENTS.md rule 3) |
 | Stretch worker | One thread, owned by the `Controller`, running a `StretchWorker` per graph: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). A new graph's worker joins it, an old one leaves once its graph is freed. | only when a graph's worker joins; never locks |
-| Audio owner | Over MCP, one thread per open project holds the output stream and closes it when the session drops its `Player`. | yes, but does nothing while playing |
+| Audio owner | In the desktop app and over MCP, one thread per open project holds the output stream (`output::open_player`) and closes it when the session drops its `Player`. | yes, but does nothing while playing |
 | Decode workers | Scoped threads in `media` while a project loads. | yes |
 | Plug-in host processes | Not threads of Loopwerk's process: one `loopwerk-plugin-host` process per plug-in (ADR 0006), with a control thread and an audio thread of its own. Started by `plugins`; not used by the engine yet. | the host's own business; a crash or hang there costs Loopwerk missed blocks only |
 
@@ -155,7 +163,7 @@ audio thread as a message, applied at the next block (ADR 0005, amendment).
 | A way for the user or an agent to change something | a command in `session` | Typed params, undo, a test in `session/tests` |
 | A new kind of file to decode or analyse | `media` | Input sizes are hostile; cap them |
 | Something agents need | `automation`, on top of commands | File roots; `isError` for failed commands |
-| A new front end (UI) | its own crate on top of `session` | Dispatches commands; never edits the model directly |
+| A view or control in the UI | `ui`, drawn from `Grid`-like data built from the project and monitors | Dispatches commands; never edits the model directly; sizes and colours from `theme` and `docs/design/` |
 | A built-in instrument or effect | a crate under `devices/`, blocks in `dsp` | ADR 0004; `conformance::check` in a test; import mapping in the format crate |
 
 ## Planned parts
@@ -178,5 +186,5 @@ audio thread as a message, applied at the next block (ADR 0005, amendment).
   per-block deadline through the `ipc` crate (which exists: blocks, deadline, crash and hang
   tests), state and control over messages, crashed or hung plug-ins restarted from their last
   state. `ipc` and `plugin-host` are the only crates allowed `unsafe` (M6).
-- **UI:** Session and Arrangement views as a crate on top of `session`, using the same commands
-  and reading engine state through monitors like `LauncherMonitor` (M8).
+- **UI:** the browser, the detail area (device chain, clip editor), meters, and the commands
+  they still need (arm, sends) (M8).
