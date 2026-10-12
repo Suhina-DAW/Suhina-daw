@@ -326,13 +326,6 @@ impl Note {
         }
     }
 
-    /// Takes another note's phases, so two notes at the same pitch do not cancel.
-    pub fn take_phases(&mut self, from: &Note) {
-        for (p, q) in self.params.iter_mut().zip(&from.params) {
-            p.phase = q.phase;
-        }
-    }
-
     pub fn key_up(&mut self, t: &Tables) {
         for env in &mut self.env {
             env.key_down(false, t);
