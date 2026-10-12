@@ -219,7 +219,8 @@ fn an_edit_keeps_a_chain_playing_and_takes_its_new_values() {
     let reference = blocks(&mut untouched, 150, 480);
     // The note carries on through the swap (no new attack): after the utility's 20 ms ramp the
     // output is the untouched render at half the level.
-    let at = 50 * 480 + (0.15 * f64::from(SR)) as usize;
+    // No stretched clips: the new graph takes the next block.
+    let at = 50 * 480;
     assert_eq!(max_diff(&out[..at * 2], &reference[..at * 2]), 0.0);
     let settled = (at + 2_400) * 2;
     let half: Vec<f32> = reference[settled..].iter().map(|s| s * 0.5).collect();

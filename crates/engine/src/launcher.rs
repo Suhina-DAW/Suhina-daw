@@ -197,6 +197,7 @@ struct PlanNote {
     frequency: f64,
     key: u8,
     velocity: f32,
+    track: loopwerk_model::TrackId,
     gain_left: f32,
     gain_right: f32,
     /// 0 for the output, or 1 + the index of the track's chain.
@@ -503,7 +504,8 @@ fn plan_clip(
     let mut notes = Vec::new();
     let mut audio_plans = Vec::new();
     for lane in &content.lanes {
-        let Some((bus, (gain_left, gain_right))) = route(project, chains, lane.target.unwrap_or(track)) else {
+        let lane_track = lane.target.unwrap_or(track);
+        let Some((bus, (gain_left, gain_right))) = route(project, chains, lane_track) else {
             continue;
         };
         match &lane.data {
@@ -516,6 +518,7 @@ fn plan_clip(
                         frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
                         key: note.key.min(127),
                         velocity,
+                        track: lane_track,
                         gain_left: gain_left * velocity,
                         gain_right: gain_right * velocity,
                         bus,
@@ -874,6 +877,7 @@ impl Renderer {
                 frequency: note.frequency,
                 key: note.key,
                 velocity: note.velocity,
+                track: note.track,
                 gains: (note.gain_left, note.gain_right),
                 column: column_id,
                 bus: note.bus,

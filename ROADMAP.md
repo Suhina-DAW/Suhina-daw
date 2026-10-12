@@ -206,8 +206,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
   only below granted roots ([`docs/mcp.md`](docs/mcp.md)).
-- Edits and undo/redo are heard by a playing engine about 0.15 s later, without a gap: a new
-  graph is swapped in at an exact frame and playing clips carry on
+- Edits and undo/redo are heard by a playing engine from its next audio block, without a gap:
+  a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
+  as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
 - Still to do: more commands (notes, clips, sends, tracks), a native project format so edits can
   be saved, MCP resources.

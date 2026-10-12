@@ -66,12 +66,42 @@ clip; devices (ADR 0004) will add many more parameters.
    `Session::execute` calls `Player::update`, so the CLI, MCP and a future UI all get the same
    behaviour.
 
+## Amendment: edits in the next block (2026-10-12)
+
+In a DAW an edit should be heard at once; with a graph per edit taken one per audio block and
+0.15 s ahead, two edits in a row took two blocks, and a fader moved only the next note. As in
+other real-time audio graphs (structural changes built off the audio thread and swapped
+atomically, parameter changes as lock-free messages applied at a block boundary, as Firewheel,
+klingt and JUCE's graph do), now:
+
+1. **Every graph due in a block is taken in that block,** at its frame, in order; the swap
+   queue holds 16 graphs.
+2. **`SWAP_AHEAD` only when it is needed:** a graph with stretched arrangement clips still
+   takes over 0.15 s ahead, so their stretch voices are moved and their rings filled first; any
+   other graph takes over at the start of the next block.
+3. **Device parameters are messages, not graphs.** `Controller::set_device_param(track,
+   device, param, value)` sends a numbered message through a lock-free queue; the renderer
+   applies it at the start of the next block. `device.setParam` uses it when an engine plays
+   (the project is updated and an undo step recorded as for any edit). Each graph records the
+   number of the last message its project already held; when a graph built before newer
+   messages takes over, the renderer applies those again (it keeps the last 256), so an older
+   graph never undoes a newer value.
+4. **Sounding notes follow their track's mix.** Each sine voice remembers its track and
+   velocity; at a swap it takes the new graph's volume, pan and mute (and bus, if the track's
+   chain changed) at once instead of keeping them until the note ends.
+
 ## Consequences
 
-- An edit is heard about `SWAP_AHEAD` after the command returns, plus the time to build the
-  graph. Building is proportional to the project; stretch voices are the expensive part.
-- Every edit rebuilds the whole graph. That is simple and covers every edit and device to come;
-  if it becomes too slow for parameter drags in a UI, cheap parameters can get a message path
-  later, on top of this one.
+- An edit is heard from the next audio block after the command returns, plus the time to build
+  the graph; with stretched arrangement clips, 0.15 s after. A device parameter is heard from
+  the next block without building anything.
+- Structural edits still rebuild the whole graph; volume, pan and other mix changes could get
+  the same message path as device parameters if building becomes too slow for fader drags.
 - Offline rendering stays the oracle (rule 4): tests swap graphs inside an offline render and
   compare against renders of the edited project.
+
+## Sources
+
+- Firewheel design document (events flushed together, schedules recompiled only on graph changes): https://docs.rs/crate/firewheel/0.12.1/source/DESIGN_DOC.md
+- klingt (parameter messages through ring buffers, applied at block boundaries): https://docs.rs/klingt
+- Stateful audio graphs and node lifetime (graphs swapped atomically, old graphs freed off the audio thread, node state kept across rebuilds): https://omr.it.com/blog/stateful-audio-graphs-dsp-node-lifetime-management/

@@ -722,7 +722,7 @@ fn redo(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
 
 /// Resolves `params.track`: a track id (number) or a name. Names match exactly first, then
 /// ignoring case, and must be unambiguous.
-fn track_id(p: &Project, params: &Value) -> Result<TrackId, CommandError> {
+pub(crate) fn track_id(p: &Project, params: &Value) -> Result<TrackId, CommandError> {
     match params.get("track") {
         Some(Value::Number(n)) => {
             let id = n.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("track id must be a whole number")?;

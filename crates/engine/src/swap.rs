@@ -4,29 +4,52 @@
 //! picks a frame a little ahead of the playhead, moves the graph's stretch voices there and sends
 //! the graph to the audio thread. [`Renderer::process`] splits its block at that frame, carries
 //! its state over to the new graph and sends the old one back, so nothing is allocated or freed
-//! on the audio thread.
+//! on the audio thread. Every graph whose frame falls in a block is taken in that block.
+//!
+//! A device parameter does not need a new graph: [`Controller::set_device_param`] sends it as a
+//! message, applied at the start of the next block. Messages are numbered and every graph
+//! records the last number it already contains, so a graph built before a message (still on
+//! its way to the audio thread) gets the message again when it takes over.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use loopwerk_model::Project;
+use loopwerk_model::{Project, TrackId};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::ahead::StretchThread;
 use crate::audio::AudioPool;
 use crate::launcher::Controller;
-use crate::{Graph, MAX_AUDIO_VOICES, Renderer, bus_chain};
+use crate::{Graph, MAX_AUDIO_VOICES, Renderer};
 
-/// How far ahead of the playhead a new graph takes over, in seconds: time to move its stretch
-/// voices and fill their rings before the audio thread reaches it.
+/// How far ahead of the playhead a new graph with stretched clips takes over, in seconds: time
+/// to move its stretch voices and fill their rings before the audio thread reaches it. A graph
+/// without stretched clips takes over at the next block.
 const SWAP_AHEAD_SECONDS: f64 = 0.15;
 /// Graphs that can wait in either direction.
-const QUEUE: usize = 4;
+const QUEUE: usize = 16;
+/// Parameter messages that can wait for the audio thread.
+const PARAM_QUEUE: usize = 1024;
+/// Parameter messages the audio thread remembers, to apply again to a graph built before them.
+const RECENT_PARAMS: usize = 256;
+
+/// A new value for one parameter of a device on a track (ADR 0005, amendment).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ParamChange {
+    seq: u64,
+    track: TrackId,
+    /// The device's index among the track channel's devices in the project.
+    device: usize,
+    param: usize,
+    value: f64,
+}
 
 /// A graph and the renderer frame it takes over at.
 pub(crate) struct Swap {
     graph: Box<Graph>,
     at: u64,
+    /// The last parameter message the graph's project already holds.
+    param_seq: u64,
     /// The arrangement frame the graph's stretch voices were moved to for `at`, or `None` if the
     /// transport was stopped (they are at the start).
     arrangement: Option<u64>,
@@ -40,6 +63,10 @@ pub(crate) struct SwapState {
     pending: Option<Swap>,
     /// An old graph the controller has not taken back yet; no new graph is taken until it has.
     held: Option<Box<Graph>>,
+    params: Option<Consumer<ParamChange>>,
+    /// The last parameter messages, oldest overwritten first.
+    recent: Vec<ParamChange>,
+    recent_next: usize,
 }
 
 /// The controller's end: builds graphs and takes old ones back to free them.
@@ -49,6 +76,8 @@ pub(crate) struct Updater {
     audio: Arc<AudioPool>,
     sample_rate: u32,
     stretch: Option<StretchThread>,
+    params: Producer<ParamChange>,
+    param_seq: u64,
 }
 
 impl Updater {
@@ -70,9 +99,21 @@ impl Renderer {
     pub(crate) fn updater(&mut self) -> Updater {
         let (swaps, incoming) = RingBuffer::new(QUEUE);
         let (retired_producer, retired) = RingBuffer::new(QUEUE);
+        let (params, param_consumer) = RingBuffer::new(PARAM_QUEUE);
         self.swap.incoming = Some(incoming);
         self.swap.retired = Some(retired_producer);
-        Updater { swaps, retired, audio: Arc::clone(&self.audio), sample_rate: self.sample_rate, stretch: None }
+        self.swap.params = Some(param_consumer);
+        self.swap.recent = Vec::with_capacity(RECENT_PARAMS);
+        self.swap.recent_next = 0;
+        Updater {
+            swaps,
+            retired,
+            audio: Arc::clone(&self.audio),
+            sample_rate: self.sample_rate,
+            stretch: None,
+            params,
+            param_seq: 0,
+        }
     }
 
     /// Takes the next graph from the queue, once any old graph has gone back. Never blocks.
@@ -91,6 +132,22 @@ impl Renderer {
         }
     }
 
+    /// Applies the parameter messages that have arrived. Never allocates: the list of recent
+    /// messages was allocated with its full capacity.
+    pub(crate) fn receive_params(&mut self) {
+        let Some(consumer) = self.swap.params.as_mut() else { return };
+        while let Ok(change) = consumer.pop() {
+            apply_param(&mut self.graph.chains, change);
+            let recent = &mut self.swap.recent;
+            if recent.len() < RECENT_PARAMS {
+                recent.push(change);
+            } else if let Some(slot) = recent.get_mut(self.swap.recent_next) {
+                *slot = change;
+            }
+            self.swap.recent_next = (self.swap.recent_next + 1) % RECENT_PARAMS;
+        }
+    }
+
     /// The frame the pending graph takes over at, if one is waiting.
     pub(crate) fn swap_at(&self) -> Option<u64> {
         self.swap.pending.as_ref().map(|s| s.at)
@@ -101,6 +158,7 @@ impl Renderer {
         let Some(swap) = self.swap.pending.take() else { return };
         let old_beat_frames = self.graph.frames_per_beat;
         let old_time = self.time();
+        let param_seq = swap.param_seq;
         let mut old = std::mem::replace(&mut self.graph, swap.graph);
         // The playhead stays on the same beat when the tempo changed.
         if self.running && old_beat_frames != self.graph.frames_per_beat {
@@ -117,11 +175,33 @@ impl Renderer {
                 }
             }
         }
-        // Sine voices follow their track to its chain in the new graph.
-        for voice in self.voices.iter_mut().filter(|v| v.active && v.bus != 0) {
-            let track = bus_chain(&mut old.chains, voice.bus).map(|c| c.track);
-            match track.and_then(|t| self.graph.chains.iter().position(|c| c.track == t)) {
-                Some(index) => voice.bus = u32::try_from(index + 1).unwrap_or(0),
+        // Parameter messages newer than the new graph's project apply to it again, in order.
+        let mut newer = [usize::MAX; RECENT_PARAMS];
+        let mut count = 0;
+        for (index, change) in self.swap.recent.iter().enumerate() {
+            if change.seq > param_seq
+                && let Some(slot) = newer.get_mut(count)
+            {
+                *slot = index;
+                count += 1;
+            }
+        }
+        let order = newer.get_mut(..count).unwrap_or_default();
+        order.sort_unstable_by_key(|&i| self.swap.recent.get(i).map_or(0, |c| c.seq));
+        for &i in order.iter() {
+            if let Some(&change) = self.swap.recent.get(i) {
+                apply_param(&mut self.graph.chains, change);
+            }
+        }
+        // Sounding voices follow their track: its mix (volume, pan, mute) and its chain in the
+        // new graph. A voice whose track is gone ends.
+        for voice in self.voices.iter_mut().filter(|v| v.active) {
+            match self.graph.routes.iter().find(|(track, _, _)| track.0 == voice.track) {
+                Some(&(_, bus, (left, right))) => {
+                    voice.bus = bus;
+                    voice.gain_left = left * voice.velocity;
+                    voice.gain_right = right * voice.velocity;
+                }
                 None => voice.active = false,
             }
         }
@@ -177,6 +257,12 @@ impl Renderer {
     }
 }
 
+fn apply_param(chains: &mut [crate::chain::Chain], change: ParamChange) {
+    if let Some(chain) = chains.iter_mut().find(|c| c.track == change.track) {
+        chain.set_param(change.device, change.param, change.value);
+    }
+}
+
 /// Arrangement frame `time` at `from` frames per beat, moved to the same beat at `to` frames per
 /// beat. The controller and the audio thread both use this, so they agree to the frame.
 fn rescale(time: u64, from: f64, to: f64) -> u64 {
@@ -193,7 +279,8 @@ impl Controller {
         let mut graph = Graph::build(project, &updater.audio, updater.sample_rate).map_err(|e| e.to_string())?;
         let monitor = &self.monitor;
         let (at, arrangement) = if monitor.running() {
-            let ahead = (SWAP_AHEAD_SECONDS * f64::from(updater.sample_rate)) as u64;
+            let ahead =
+                if graph.ahead.is_empty() { 0 } else { (SWAP_AHEAD_SECONDS * f64::from(updater.sample_rate)) as u64 };
             let position = monitor.position.load(Ordering::Relaxed);
             let arrangement = monitor.arrangement.load(Ordering::Relaxed);
             // Arrangement frames are in the playing graph's tempo; the swap keeps the beat, so
@@ -213,8 +300,23 @@ impl Controller {
         }
         updater
             .swaps
-            .push(Swap { graph, at, arrangement })
+            .push(Swap { graph, at, arrangement, param_seq: updater.param_seq })
             .map_err(|_| "the audio engine has not taken the previous edits yet".to_string())
+    }
+
+    /// Sets parameter `param` (its index in the device's info) of the device at index `device`
+    /// among `track`'s channel's devices, from the start of the next audio block, without
+    /// building a new graph. The project should hold the new value already, so the next graph
+    /// built from it keeps it. Fails if the message queue is full.
+    pub fn set_device_param(&mut self, track: TrackId, device: usize, param: usize, value: f64) -> Result<(), String> {
+        let updater = &mut self.updater;
+        let seq = updater.param_seq + 1;
+        updater
+            .params
+            .push(ParamChange { seq, track, device, param, value })
+            .map_err(|_| "the audio engine has not taken the previous parameter changes yet".to_string())?;
+        updater.param_seq = seq;
+        Ok(())
     }
 
     /// Runs the renderer's stretch worker on a thread of its own (ADR 0003), for this graph and

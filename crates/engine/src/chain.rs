@@ -25,6 +25,9 @@ pub(crate) struct Chain {
     /// The launcher column of the track, or `NO_COLUMN`.
     pub(crate) column: u32,
     devices: Vec<Box<dyn Device>>,
+    /// Each device's index among the channel's devices in the project (disabled and unknown
+    /// devices have no place in the chain).
+    positions: Vec<usize>,
     /// The project's device ids in order, so a graph swap can tell whether a new chain holds
     /// the same devices as an old one.
     ids: Vec<String>,
@@ -57,9 +60,10 @@ impl Chain {
         let channel = project.tracks.iter().find(|t| t.id == track)?.channel?;
         let channel = project.channels.iter().find(|c| c.id == channel)?;
         let mut devices: Vec<Box<dyn Device>> = Vec::new();
+        let mut positions = Vec::new();
         let mut ids = Vec::new();
         let mut params = Vec::new();
-        for stored in channel.devices.iter().filter(|d| d.enabled) {
+        for (position, stored) in channel.devices.iter().enumerate().filter(|(_, d)| d.enabled) {
             let DeviceKind::Builtin(id) = &stored.kind else { continue };
             let Some(mut device) = loopwerk_device_registry::create(id) else { continue };
             if device.prepare(f64::from(sample_rate)).is_err() {
@@ -77,6 +81,7 @@ impl Chain {
             }
             device.reset();
             devices.push(device);
+            positions.push(position);
             ids.push(id.clone());
             params.push(values);
         }
@@ -85,6 +90,7 @@ impl Chain {
             track,
             column,
             devices,
+            positions,
             ids,
             params,
             instrument,
@@ -203,6 +209,18 @@ impl Chain {
         for ([l, r], [cl, cr]) in out.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
             *l += cl * gain_left;
             *r += cr * gain_right;
+        }
+    }
+
+    /// Sets parameter `param` of the device at `position` among the channel's devices, as a
+    /// parameter message does (ADR 0005, amendment). Never allocates.
+    pub(crate) fn set_param(&mut self, position: usize, param: usize, value: f64) {
+        let Some(index) = self.positions.iter().position(|&p| p == position) else { return };
+        if let Some(device) = self.devices.get_mut(index) {
+            device.set_param(param, value);
+            if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
+                *slot = device.param(param).unwrap_or(value);
+            }
         }
     }
 

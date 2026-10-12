@@ -6,8 +6,8 @@ use loopwerk_device_api::{DeviceInfo, ParamKind, Role, Unit};
 use loopwerk_model::{Device, DeviceKind, DeviceParam, Extensions};
 use serde_json::{Value, json};
 
-use crate::commands::{channel_param, number};
-use crate::{CommandError, Session};
+use crate::commands::{channel_param, number, track_id};
+use crate::{CommandError, ParamEdit, Session};
 
 /// Devices one track may hold.
 const MAX_DEVICES: usize = 64;
@@ -177,6 +177,7 @@ pub(crate) fn set_enabled(session: &mut Session, params: &Value) -> Result<Value
 pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let param = params.get("param").and_then(Value::as_str).ok_or("param must be a parameter id, from devices.list")?;
     let value = number(params, "value")?;
+    let track = track_id(&session.project, params)?;
     let channel = channel_param(session, params)?;
     let index = device_index(channel.devices.len(), params)?;
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
@@ -185,16 +186,17 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     };
     let info =
         loopwerk_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
-    let spec = info
-        .params
-        .iter()
-        .find(|p| p.id == param)
+    let param_index = info
+        .param_index(param)
         .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
+    let spec = info.params.get(param_index).ok_or("the parameter is missing")?;
     // Stored as the device will use it: limited to its range, whole for toggles and choices.
     let value = spec.clamp(value);
     match device.params.iter_mut().find(|p| p.id == param) {
         Some(stored) => stored.value = value,
         None => device.params.push(DeviceParam::new(param, value)),
     }
+    // A playing engine takes this as a message, without a new graph.
+    session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
     Ok(json!({ "device": index, "param": param, "value": value }))
 }

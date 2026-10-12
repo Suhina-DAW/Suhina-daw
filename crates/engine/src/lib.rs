@@ -97,6 +97,7 @@ struct NoteEvent {
     frequency: f64,
     key: u8,
     velocity: f32,
+    track: TrackId,
     gain_left: f32,
     gain_right: f32,
     /// The launcher column of the note's track, or `NO_COLUMN`.
@@ -114,6 +115,10 @@ pub(crate) struct Voice {
     phase_step: f64,
     gain_left: f32,
     gain_right: f32,
+    /// The id of the track it plays on and its velocity, so an edit to the track's mix
+    /// reaches it.
+    track: u32,
+    velocity: f32,
     /// The launcher column whose track this voice plays on, or `NO_COLUMN`.
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
@@ -146,6 +151,9 @@ pub(crate) struct Graph {
     frames_per_beat: f64,
     /// Device chains of the tracks that have devices (ADR 0004).
     chains: Vec<Chain>,
+    /// Every track's bus and the gains its sources are mixed at (muted tracks at zero), so
+    /// sounding voices follow an edit to their track's mix.
+    routes: Vec<(TrackId, u32, (f32, f32))>,
 }
 
 pub struct Renderer {
@@ -262,19 +270,26 @@ impl Renderer {
     /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
         self.receive_swap();
-        let frames = (out.len() / 2) as u64;
-        match self.swap_at() {
-            // A new graph takes over within this block: the frames before it are the old one's.
-            Some(at) if at < self.position + frames => {
-                let split = ((at.saturating_sub(self.position) * 2) as usize).min(out.len());
-                let (before, after) = out.split_at_mut(split);
-                if !before.is_empty() {
-                    self.process_block(before);
+        let mut rest = out;
+        // Every new graph whose frame falls in this block takes over at its frame: the frames
+        // before it are the previous graph's. The queue is bounded, so this ends.
+        loop {
+            let frames = (rest.len() / 2) as u64;
+            match self.swap_at() {
+                Some(at) if at < self.position + frames => {
+                    let split = ((at.saturating_sub(self.position) * 2) as usize).min(rest.len());
+                    let (before, after) = rest.split_at_mut(split);
+                    if !before.is_empty() {
+                        self.process_block(before);
+                    }
+                    self.apply_swap();
+                    rest = after;
                 }
-                self.apply_swap();
-                self.process_block(after);
+                _ => break,
             }
-            _ => self.process_block(out),
+        }
+        if !rest.is_empty() {
+            self.process_block(rest);
         }
         self.publish_position();
     }
@@ -293,6 +308,7 @@ impl Renderer {
         }
         self.block_frame = 0;
         self.drain_commands();
+        self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
         // ready again by the next start.
         self.graph.ahead.service();
@@ -330,6 +346,7 @@ impl Renderer {
                         frequency: event.frequency,
                         key: event.key,
                         velocity: event.velocity,
+                        track: event.track,
                         gains: (event.gain_left, event.gain_right),
                         column: event.column,
                         bus: event.bus,
@@ -480,6 +497,8 @@ pub(crate) struct NoteStart {
     pub(crate) frequency: f64,
     pub(crate) key: u8,
     pub(crate) velocity: f32,
+    pub(crate) track: TrackId,
+    /// The track's gains times the velocity.
     pub(crate) gains: (f32, f32),
     pub(crate) column: u32,
     pub(crate) bus: u32,
@@ -520,6 +539,8 @@ pub(crate) fn start_note(
             phase_step: note.frequency / f64::from(sample_rate),
             gain_left: note.gains.0,
             gain_right: note.gains.1,
+            track: note.track.0,
+            velocity: note.velocity,
             column: note.column,
             bus: note.bus,
         };
@@ -584,7 +605,7 @@ impl Graph {
                             clip,
                             content_lane,
                             frames_per_beat,
-                            (gain_left, gain_right, column, bus),
+                            (track, gain_left, gain_right, column, bus),
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
@@ -651,6 +672,14 @@ impl Graph {
             length,
             launcher: Launcher::new(project, audio, sample_rate, &chains),
             frames_per_beat,
+            routes: project
+                .tracks
+                .iter()
+                .map(|t| {
+                    let (bus, gains) = route(project, &chains, t.id).unwrap_or((0, (0.0, 0.0)));
+                    (t.id, bus, gains)
+                })
+                .collect(),
             chains,
         }))
     }
@@ -753,7 +782,7 @@ fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
     frames_per_beat: f64,
-    (gain_left, gain_right, column, bus): (f32, f32, u32, u32),
+    (track, gain_left, gain_right, column, bus): (TrackId, f32, f32, u32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
     let LaneData::Notes(notes) = &lane.data else { return };
@@ -780,6 +809,7 @@ fn collect_notes(
                 frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
                 key: note.key.min(127),
                 velocity: note.velocity.clamp(0.0, 1.0),
+                track,
                 gain_left: gain_left * note.velocity.clamp(0.0, 1.0),
                 gain_right: gain_right * note.velocity.clamp(0.0, 1.0),
                 column,
@@ -1200,7 +1230,8 @@ mod tests {
         (left.iter().map(|s| s * s).sum::<f64>() / left.len() as f64).sqrt()
     }
 
-    /// Frame where an update sent after `blocks` blocks of 480 frames takes over.
+    /// Frame where an update sent after `blocks` blocks of 480 frames takes over, for a project
+    /// with stretched clips; one without takes over at the next block, `blocks * 480`.
     fn swap_frame(blocks: usize) -> usize {
         blocks * 480 + (0.15 * f64::from(SR)) as usize
     }
@@ -1217,7 +1248,8 @@ mod tests {
             let mut out = blocks(&mut renderer, 50, 480, |_| {});
             controller.update(&edited).unwrap();
             out.extend(blocks(&mut renderer, 100, 480, |_| {}));
-            let at = swap_frame(50);
+            // Read directly, there are no stretch voices to prepare: the edit takes the next block.
+            let at = if mode == StretchMode::Repitch { 50 * 480 } else { swap_frame(50) };
             let ratio = rms(&out, at, at + 9_600) / rms(&out, at - 9_600, at);
             assert!((ratio - 0.5).abs() < 0.01, "{mode:?}: level changed by {ratio}");
             let mut original = Renderer::with_audio(&project, &pool, SR).unwrap();
@@ -1241,11 +1273,12 @@ mod tests {
         slower.transport.tempo_bpm = 60.0;
         let mut renderer = Renderer::with_audio(&project, &AudioPool::new(), SR).unwrap();
         let mut controller = renderer.controller();
-        let mut out = blocks(&mut renderer, 75, 480, |_| {});
+        let mut out = blocks(&mut renderer, 90, 480, |_| {});
         controller.update(&slower).unwrap();
-        out.extend(blocks(&mut renderer, 300, 480, |_| {}));
-        // The swap is at frame 43 200, beat 1.8; beat 2 then comes 0.2 beats of 60 bpm later.
-        let at = swap_frame(75);
+        out.extend(blocks(&mut renderer, 285, 480, |_| {}));
+        // With no stretched clips the swap takes the next block: frame 43 200, beat 1.8; beat 2
+        // then comes 0.2 beats of 60 bpm later.
+        let at = 90 * 480;
         assert_eq!(at, 43_200);
         let expected = [1, 24_001, at + 9_601, at + 9_601 + 48_000, at + 9_601 + 96_000];
         assert_eq!(onsets(&out)[..5], expected);
@@ -1379,15 +1412,96 @@ mod tests {
         let mut controller = renderer.controller();
         renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
         renderer.handle(LaunchCommand::Play);
-        let mut out = blocks(&mut renderer, 75, 480, |_| {});
+        let mut out = blocks(&mut renderer, 90, 480, |_| {});
         project.transport.tempo_bpm = 60.0;
         controller.update(&project).unwrap();
-        out.extend(blocks(&mut renderer, 300, 480, |_| {}));
+        out.extend(blocks(&mut renderer, 285, 480, |_| {}));
         // As with notes: the swap at frame 43 200 is beat 1.8; beat 2 comes 0.2 s later at 60 bpm.
         // The beat clock adds up per frame, so a click may land a frame late.
         let found = onsets(&out);
         for (got, expected) in found.iter().zip([1, 24_001, 52_801, 100_801]) {
             assert!(got.abs_diff(expected) <= 1, "{found:?}");
+        }
+    }
+
+    fn with_utility(project: &mut Project) {
+        project.channels[0].devices.push(Device {
+            name: "Utility".into(),
+            kind: DeviceKind::Builtin("utility".into()),
+            enabled: true,
+            state: None,
+            params: Vec::new(),
+            extensions: Extensions::default(),
+        });
+    }
+
+    #[test]
+    fn edits_sent_together_all_take_the_next_block() {
+        // Audio read directly: a volume edit is heard on the playing clip at once.
+        let (project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Repitch);
+        let mut half = project.clone();
+        half.channels[0].volume = 0.5;
+        let mut quarter = project.clone();
+        quarter.channels[0].volume = 0.25;
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut controller = renderer.controller();
+        let first = blocks(&mut renderer, 20, 480, |_| {});
+        controller.update(&half).unwrap();
+        controller.update(&quarter).unwrap();
+        // One long block: both graphs are taken at its first frame, the second one winning.
+        let next = blocks(&mut renderer, 1, 24_000, |_| {});
+        let ratio = rms(&next, 0, 24_000) / rms(&first, 4_800, 9_600);
+        assert!((ratio - 0.25).abs() < 0.01, "{ratio}");
+    }
+
+    #[test]
+    fn a_device_parameter_is_heard_from_the_next_block_and_outlives_an_older_graph() {
+        // Stretched audio, so a new graph waits 0.15 s before it takes over.
+        let (mut project, pool) = stretched_project(440.0, 4.0, 8.0, 110.0, StretchMode::Smooth);
+        with_utility(&mut project);
+        let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let mut controller = renderer.controller();
+        let mut out = blocks(&mut renderer, 50, 480, |_| {});
+        // A graph built from the project before the change (here with no other edit), then the
+        // parameter: -6 dB on the utility's gain, index 0.
+        controller.update(&project).unwrap();
+        controller.set_device_param(TrackId(1), 0, 0, -6.0206).unwrap();
+        out.extend(blocks(&mut renderer, 100, 480, |_| {}));
+        let mut untouched = Renderer::with_audio(&project, &pool, SR).unwrap();
+        let reference = blocks(&mut untouched, 150, 480, |_| {});
+        let now = 50 * 480;
+        // Heard from the next block, after the utility's 20 ms ramp...
+        let soon = rms(&out, now + 1_200, now + 6_000) / rms(&reference, now + 1_200, now + 6_000);
+        assert!((soon - 0.5).abs() < 0.01, "{soon}");
+        // ... and still after the older graph took over at 0.15 s.
+        let at = swap_frame(50);
+        let later = rms(&out, at + 2_400, at + 12_000) / rms(&reference, at + 2_400, at + 12_000);
+        assert!((later - 0.5).abs() < 0.01, "{later}");
+    }
+
+    #[test]
+    fn a_mix_edit_reaches_a_sounding_note_at_the_next_block() {
+        let project = project_with(untargeted(vec![note(0.0, 8.0, 69)]), vec![clip(0.0, 8.0)], 1);
+        for (edit, expected) in [
+            ((0.5, 0.0, false), (0.5, 0.5)),
+            ((1.0, 1.0, false), (0.0, std::f64::consts::SQRT_2)),
+            ((1.0, 0.0, true), (0.0, 0.0)),
+        ] {
+            let mut edited = project.clone();
+            (edited.channels[0].volume, edited.channels[0].pan, edited.channels[0].mute) = edit;
+            let mut renderer = Renderer::with_audio(&project, &AudioPool::new(), SR).unwrap();
+            let mut controller = renderer.controller();
+            let before = blocks(&mut renderer, 20, 480, |_| {});
+            controller.update(&edited).unwrap();
+            let after = blocks(&mut renderer, 10, 480, |_| {});
+            let side = |out: &[f32], right: usize| {
+                let s: Vec<f64> = out.iter().skip(right).step_by(2).map(|s| f64::from(*s)).collect();
+                (s.iter().map(|x| x * x).sum::<f64>() / s.len() as f64).sqrt()
+            };
+            for (right, want) in [(0, expected.0), (1, expected.1)] {
+                let ratio = side(&after, right) / side(&before[4_800 * 2..], right);
+                assert!((ratio - want).abs() < 0.01, "{edit:?} side {right}: {ratio}");
+            }
         }
     }
 }

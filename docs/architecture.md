@@ -139,9 +139,11 @@ project directly.
 **Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
 History command changes the project, the session calls `Player::update`. The controller builds a
 new `Graph` (everything the renderer derives from the project) on the main thread and the audio
-thread swaps it in at an exact frame about 0.15 s ahead, carrying over the playhead (on the same
-beat when the tempo changed), the transport, sounding notes and the launcher's playing and
-queued clips.
+thread swaps it in at the start of the next block (0.15 s ahead when stretched arrangement clips
+need their voices moved first), carrying over the playhead (on the same beat when the tempo
+changed), the transport, sounding notes (which take their track's new mix), device chains and
+the launcher's playing and queued clips. A device parameter is not a new graph: it goes to the
+audio thread as a message, applied at the next block (ADR 0005, amendment).
 
 ## Where new code goes
 
