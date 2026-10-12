@@ -206,8 +206,14 @@ fn reads_plugins_and_placeholders() {
         <PluginDevice Id="0"><On><Manual Value="true"/></On><UserName Value=""/>
           <PluginDesc><VstPluginInfo Id="0">
             <Path Value="C:/Plugins/Thing.dll"/><PlugName Value="Thing"/><UniqueId Value="-2"/>
-            <Preset><VstPreset Id="0"><Buffer>0A0b
+            <Preset><VstPreset Id="0"><Type Value="1178747752"/><ProgramCount Value="1"/><ParameterCount Value="4"/>
+              <ProgramNumber Value="0"/><PluginVersion Value="5"/><ByteOrder Value="2"/><Buffer>0A0b
               FF</Buffer></VstPreset></Preset>
+          </VstPluginInfo></PluginDesc>
+        </PluginDevice>
+        <PluginDevice Id="3"><On><Manual Value="true"/></On><UserName Value=""/>
+          <PluginDesc><VstPluginInfo Id="0"><PlugName Value="Odd"/><UniqueId Value="9"/>
+            <Preset><VstPreset Id="0"><Type Value="12"/><ProgramCount Value="1"/><ParameterCount Value="0"/><Buffer>01</Buffer></VstPreset></Preset>
           </VstPluginInfo></PluginDesc>
         </PluginDevice>
         <PluginDevice Id="1"><On><Manual Value="false"/></On><UserName Value="My Synth"/>
@@ -224,11 +230,23 @@ fn reads_plugins_and_placeholders() {
     );
     let import = read_xml(&xml).unwrap();
     let channel = import.project.channels.iter().find(|c| c.name == "M").unwrap();
-    let [vst2, vst3, eq] = channel.devices.as_slice() else { panic!("expected three devices: {:?}", channel.devices) };
+    let [vst2, odd, vst3, eq] = channel.devices.as_slice() else {
+        panic!("expected four devices: {:?}", channel.devices)
+    };
 
     assert_eq!(vst2.kind, DeviceKind::Vst2 { id: u32::MAX - 1 });
     assert_eq!(vst2.name, "Thing");
-    assert_eq!(vst2.state.as_deref(), Some(&[0x0a, 0x0b, 0xff][..]));
+    // The chunk becomes a standard VST2 bank: CcnK, size, FBCh, version 2, id, plug-in version,
+    // programs, current program, 124 zero bytes, chunk size, chunk.
+    let bank = vst2.state.as_deref().unwrap();
+    assert_eq!(&bank[..4], b"CcnK");
+    assert_eq!(&bank[8..12], b"FBCh");
+    assert_eq!(&bank[16..24], [0xff, 0xff, 0xff, 0xfe, 0, 0, 0, 5]);
+    assert_eq!(&bank[156..], [0, 0, 0, 3, 0x0a, 0x0b, 0xff]);
+    // State of a kind that cannot be read is kept as it was.
+    assert_eq!(odd.state, None);
+    assert!(odd.extensions.0.iter().any(|e| e.key == "VstPresetBuffer" && e.data == [1]));
+    assert!(import.warnings.iter().any(|w| w.contains("VST2 state not read")));
     assert!(vst2.extensions.0.iter().any(|e| e.key == "VstPath" && e.data == b"C:/Plugins/Thing.dll"));
 
     assert_eq!(vst3.kind, DeviceKind::Vst3 { id: "56535473FFFFFFFF0000000000000010".into() });

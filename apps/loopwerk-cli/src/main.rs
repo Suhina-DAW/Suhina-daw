@@ -1,8 +1,9 @@
 //! Headless Loopwerk CLI.
 
 mod play;
+mod track_notes;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use loopwerk_automation::{LoopwerkMcp, Workspace, render_wav, scene_as_arrangement};
@@ -14,8 +15,13 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>]
        loopwerk-cli fm-synth voices <file.syx>
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
-       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>)
-       loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
+       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
+                             | check <project.als>)
+       loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+                                     [--from <bar>] [--seconds <seconds>]
+       loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -26,11 +32,20 @@ commands:
             --audio, opened projects play on the default output so agents can launch clips
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
-            folders shows where scans look, add-folder and remove-folder change that
+            folders shows where scans look, add-folder and remove-folder change that; check
+            lists a project's plug-ins and the installed plug-in found for each, or none
   fm-synth  fm-synth voices: list the voices in a DX7 voice or bank file (.syx)
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
-            that many seconds of silence for reverbs and delays to ring out (default 2)
+            that many seconds of silence for reverbs and delays to ring out (default 2);
+            plugin run-device does the same with a project's plug-in device (by its name) and
+            the settings the project saved, through the installed plug-in plugins check finds;
+            an instrument plays its track's arrangement notes from --from (a bar, default the
+            first clip) for --seconds (default 16), and `-` as input means silence; --state
+            gives the plug-in a saved state from a file first (its own, or a VST2 .fxb/.fxp);
+            plugin params lists a plug-in's parameters with their values, params-device with
+            the settings a project saved; plugin edit opens a plug-in's editor and waits until
+            its window is closed, then --save writes the state it has to a file
 
 options:
   <project.als>      a Live Set to import
@@ -322,21 +337,80 @@ fn render(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
-/// `plugin run <plug-in> <in> <out> [--tail <seconds>]`.
+/// `plugin run …` and `plugin run-device …`: audio, and an instrument's notes, through one
+/// plug-in offline, written to a WAV file.
 fn plugin(args: &[String]) -> Result<(), String> {
-    let mut words = args.iter().map(String::as_str);
-    let (Some("run"), Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next(), words.next())
-    else {
-        return Err(format!(
-            "usage: loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
+    let usage = || {
+        format!(
+            "usage: loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+                                     [--from <bar>] [--seconds <seconds>]
+       loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 {USAGE}"
-        ));
+        )
+    };
+    let mut words = args.iter().map(String::as_str);
+    let mut library = loopwerk_plugins::library::Library::default();
+    // For a device: the project and the device's channel, to read its track's notes.
+    let mut device_source: Option<(loopwerk_session::Session, ChannelId)> = None;
+    let (spec, mut state, input, output) = match words.next() {
+        Some("run") => {
+            let (Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next()) else {
+                return Err(usage());
+            };
+            (plugin_spec(&mut library, name)?, None, input, output)
+        }
+        Some("params") => {
+            let Some(name) = words.next() else { return Err(usage()) };
+            let spec = plugin_spec(&mut library, name)?;
+            return print_params(&library, spec, None);
+        }
+        Some("edit") => {
+            let Some(name) = words.next() else { return Err(usage()) };
+            let spec = plugin_spec(&mut library, name)?;
+            return edit_plugin(&library, spec, None, words);
+        }
+        Some("edit-device") => {
+            let (Some(project), Some(device)) = (words.next(), words.next()) else { return Err(usage()) };
+            let (_, _, spec, state) = project_device(&mut library, project, device)?;
+            return edit_plugin(&library, spec, state, words);
+        }
+        Some("params-device") => {
+            let (Some(project), Some(device)) = (words.next(), words.next()) else { return Err(usage()) };
+            let (_, _, spec, state) = project_device(&mut library, project, device)?;
+            return print_params(&library, spec, state);
+        }
+        Some("run-device") => {
+            let (Some(project), Some(device), Some(input), Some(output)) =
+                (words.next(), words.next(), words.next(), words.next())
+            else {
+                return Err(usage());
+            };
+            let (session, channel_id, spec, state) = project_device(&mut library, project, device)?;
+            device_source = Some((session, channel_id));
+            (spec, state, input, output)
+        }
+        _ => return Err(usage()),
     };
     let mut tail = 2.0f64;
+    let mut from_bar: Option<f64> = None;
+    let mut seconds = 16.0f64;
+    let positive = |text: Option<&str>, what: &str, max: f64| {
+        text.and_then(|t| t.parse::<f64>().ok())
+            .filter(|t| t.is_finite() && (0.0..=max).contains(t))
+            .ok_or_else(|| format!("{what} needs a number from 0 to {max}"))
+    };
     while let Some(word) = words.next() {
         match word {
+            "--state" => {
+                let file = words.next().ok_or("--state needs a file")?;
+                let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+                state = Some(bytes.into());
+            }
+            "--from" => from_bar = Some(positive(words.next(), "--from", 100_000.0)?),
+            "--seconds" => seconds = positive(words.next(), "--seconds", 3_600.0)?,
             "--tail" => {
                 tail = words
                     .next()
@@ -348,18 +422,16 @@ fn plugin(args: &[String]) -> Result<(), String> {
         }
     }
 
-    let mut library = loopwerk_plugins::library::Library::default();
-    let spec = if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
-        name.to_string()
+    let audio = if input == "-" {
+        let rate = 48_000u32;
+        loopwerk_media::AudioData {
+            sample_rate: rate,
+            channels: 2,
+            samples: vec![0.0; (seconds * f64::from(rate)) as usize * 2],
+        }
     } else {
-        let found = library.catalog().find(name).ok_or_else(|| {
-            format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
-        })?;
-        eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
-        found.spec()
+        loopwerk_media::decode_file(std::path::Path::new(input))?
     };
-
-    let audio = loopwerk_media::decode_file(std::path::Path::new(input))?;
     let channels = usize::from(audio.channels.max(1));
     let stereo: Vec<f32> = audio
         .samples
@@ -378,8 +450,42 @@ fn plugin(args: &[String]) -> Result<(), String> {
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
     };
+    // An instrument's notes: its track's arrangement, from the bar asked for or the first clip.
+    let events = match &device_source {
+        Some((session, channel)) => {
+            let project = session.project();
+            let beats_per_bar = f64::from(project.transport.time_signature.numerator.max(1));
+            let first_clip = || {
+                let track = project.tracks.iter().find(|t| t.channel == Some(*channel))?;
+                project
+                    .arrangement
+                    .lanes
+                    .iter()
+                    .filter(|l| l.track == Some(track.id))
+                    .flat_map(|l| l.clips.iter())
+                    .map(|c| c.start)
+                    .filter(|s| s.is_finite())
+                    .min_by(f64::total_cmp)
+            };
+            let from_beat = match from_bar {
+                Some(bar) => (bar - 1.0).max(0.0) * beats_per_bar,
+                None => first_clip().unwrap_or(0.0),
+            };
+            let frames = (stereo.len() / 2) as u64;
+            let events = track_notes::events(project, *channel, from_beat, frames, audio.sample_rate);
+            if !events.is_empty() {
+                eprintln!("{} note events from bar {:.1}", events.len(), from_beat / beats_per_bar + 1.0);
+            }
+            events
+        }
+        None => Vec::new(),
+    };
     let started = std::time::Instant::now();
-    let rendered = loopwerk_plugins::offline::render(launch, &stereo, tail_frames).map_err(|e| e.to_string())?;
+    let rendered = loopwerk_plugins::offline::render_with_events(launch, state, &stereo, &events, tail_frames)
+        .map_err(|e| e.to_string())?;
+    if let Some(why) = &rendered.state_refused {
+        eprintln!("warning: the plug-in did not take the saved settings ({why}); it ran with its defaults");
+    }
 
     let spec = hound::WavSpec {
         channels: 2,
@@ -405,7 +511,16 @@ fn plugin(args: &[String]) -> Result<(), String> {
 /// `plugins …`: runs the matching `plugins.*` command and prints its result.
 fn plugins(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut projects = loopwerk_session::Projects::new();
     let (id, params) = match words.as_slice() {
+        ["check", project] => {
+            let (session, warnings) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+            for warning in warnings {
+                eprintln!("warning: {warning}");
+            }
+            projects.add(session, None).map_err(|e| e.0)?;
+            ("plugins.check", serde_json::json!({}))
+        }
         ["scan"] => ("plugins.scan", serde_json::json!({})),
         ["scan", "--all"] => ("plugins.scan", serde_json::json!({ "all": true })),
         ["list"] => ("plugins.list", serde_json::json!({})),
@@ -423,11 +538,152 @@ fn plugins(args: &[String]) -> Result<(), String> {
     if id == "plugins.scan" {
         eprintln!("scanning for plug-ins; each new or changed file is loaded in a process of its own");
     }
-    let result = loopwerk_session::Projects::new().execute(id, &params).map_err(|e| e.0)?;
+    let result = projects.execute(id, &params).map_err(|e| e.0)?;
     println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
     Ok(())
 }
 
+/// How the host is asked to load the plug-in `name`: a `clap:`, `vst3:` or `test:` name as it
+/// is, else a name or id from the catalog.
+fn plugin_spec(library: &mut loopwerk_plugins::library::Library, name: &str) -> Result<String, String> {
+    if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
+        return Ok(name.to_string());
+    }
+    let found = library.catalog().find(name).ok_or_else(|| {
+        format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
+    })?;
+    eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
+    Ok(found.spec())
+}
+
+/// A project's plug-in device by name: the opened project, the device's channel, the installed
+/// plug-in found for it and the state the project saved.
+fn project_device(
+    library: &mut loopwerk_plugins::library::Library,
+    project: &str,
+    device: &str,
+) -> Result<(loopwerk_session::Session, ChannelId, String, Option<loopwerk_plugins::SavedState>), String> {
+    let (session, _) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+    let (channel, channel_id, saved) = session
+        .project()
+        .channels
+        .iter()
+        .find_map(|c| c.devices.iter().find(|d| d.name == device).map(|d| (c.name.clone(), c.id, d.clone())))
+        .ok_or_else(|| format!("no device {device:?} in {project}; `loopwerk-cli plugins check` lists them"))?;
+    let (found, state) = loopwerk_session::device_plugin(library.catalog(), &saved)
+        .ok_or_else(|| format!("no installed plug-in stands for {device:?}; `loopwerk-cli plugins check` says why"))?;
+    eprintln!(
+        "{device} on {channel}: {} by {} ({}), found by {}{}",
+        found.plugin.name,
+        found.plugin.vendor,
+        found.plugin.path.display(),
+        found.how.name(),
+        if found.how.keeps_state() { "" } else { "; it may not read the saved settings" }
+    );
+    let spec = found.plugin.spec();
+    Ok((session, channel_id, spec, state))
+}
+
+/// Starts the plug-in `spec` with `state`, opens its editor and waits until its window is
+/// closed (or `--close-after` seconds pass); with `--save <file>`, writes the state it has then
+/// (a VST3 controller's own state next to it, in `<file>.controller`).
+fn edit_plugin<'a>(
+    library: &loopwerk_plugins::library::Library,
+    spec: String,
+    state: Option<loopwerk_plugins::SavedState>,
+    mut words: impl Iterator<Item = &'a str>,
+) -> Result<(), String> {
+    let mut save: Option<String> = None;
+    let mut close_after: Option<std::time::Duration> = None;
+    while let Some(word) = words.next() {
+        match word {
+            "--save" => save = Some(words.next().ok_or("--save needs a file")?.to_string()),
+            "--close-after" => {
+                let seconds = words
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .filter(|s| s.is_finite() && (0.0..=86_400.0).contains(s))
+                    .ok_or("--close-after needs seconds")?;
+                close_after = Some(std::time::Duration::from_secs_f64(seconds));
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+    let launch = loopwerk_plugins::Launch {
+        host: library.host().to_path_buf(),
+        plugin: spec,
+        channels: 2,
+        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        sample_rate: 48_000.0,
+        timeout: std::time::Duration::from_secs(30),
+    };
+    let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
+    if let Some(state) = state
+        && let Err(e) = plugin.load_state(state)
+    {
+        eprintln!("warning: the plug-in did not take the saved settings ({e}); it opens with its defaults");
+    }
+    let (width, height) = plugin.open_editor().map_err(|e| e.to_string())?;
+    eprintln!("editor open ({width} × {height}); close its window to finish");
+    let started = std::time::Instant::now();
+    while plugin.editor_open() {
+        if plugin.health() != loopwerk_plugins::Health::Running {
+            return Err("the plug-in stopped while its editor was open".into());
+        }
+        if close_after.is_some_and(|after| started.elapsed() >= after) {
+            plugin.close_editor().map_err(|e| e.to_string())?;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if let Some(file) = save {
+        let state = plugin.save_state().map_err(|e| e.to_string())?;
+        std::fs::write(&file, &state.data).map_err(|e| format!("{file}: {e}"))?;
+        if let Some(controller) = &state.controller {
+            let other = format!("{file}.controller");
+            std::fs::write(&other, controller).map_err(|e| format!("{other}: {e}"))?;
+        }
+        eprintln!("saved the plug-in's state to {file} ({} bytes)", state.data.len());
+    }
+    Ok(())
+}
+
+/// Starts the plug-in `spec`, gives it `state`, and prints its parameters as JSON.
+fn print_params(
+    library: &loopwerk_plugins::library::Library,
+    spec: String,
+    state: Option<loopwerk_plugins::SavedState>,
+) -> Result<(), String> {
+    let launch = loopwerk_plugins::Launch {
+        host: library.host().to_path_buf(),
+        plugin: spec,
+        channels: 2,
+        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        sample_rate: 48_000.0,
+        timeout: std::time::Duration::from_secs(30),
+    };
+    let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
+    if let Some(state) = state
+        && let Err(e) = plugin.load_state(state)
+    {
+        eprintln!("warning: the plug-in did not take the saved settings ({e}); these are its defaults");
+    }
+    let params = plugin.params().map_err(|e| e.to_string())?;
+    let list: Vec<serde_json::Value> = params
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id, "name": p.name, "group": p.group, "value": p.value, "text": p.text,
+                "min": p.min, "max": p.max, "default": p.default, "steps": p.steps,
+                "automatable": p.automatable, "read_only": p.read_only, "hidden": p.hidden,
+            })
+        })
+        .collect();
+    println!("{}", serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut read_root = None;
     let mut write_root = None;

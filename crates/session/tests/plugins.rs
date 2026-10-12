@@ -88,3 +88,62 @@ fn plugin_commands_belong_to_loopwerk_not_to_a_project() {
     let error = p.execute_in(Some(id), "plugins.folders", &json!({})).unwrap_err().0;
     assert!(error.contains("not run on one project"), "{error}");
 }
+
+#[test]
+fn a_projects_plugins_are_matched_to_the_installed_ones() {
+    use loopwerk_model::{Channel, ChannelId, ChannelRole, Device, DeviceKind, Extensions};
+    let (_, dir) = projects("check");
+    // An installed VST3 plug-in that says it replaces the VST2 plug-in `Gain`.
+    let settings = dir.join("settings");
+    std::fs::create_dir_all(&settings).unwrap();
+    let catalog = json!({ "version": 2, "entries": [{ "path": "/vst3/Gain.vst3", "modified": 1, "size": 1, "plugins": [{
+        "id": "4C6F6F707765726B5465737447616931", "name": "Gain 3", "vendor": "Loopwerk", "version": "3",
+        "features": ["Fx"], "replaces": ["5653544761696E6761696E0000000000"],
+    }]}]});
+    std::fs::write(settings.join("plugin-catalog.json"), catalog.to_string()).unwrap();
+    let mut p = Projects::with_library(Library::new(Some(settings), dir.join("no-such-host")));
+
+    let device = |name: &str, kind: DeviceKind| Device {
+        name: name.into(),
+        kind,
+        enabled: true,
+        state: Some(vec![1, 2, 3]),
+        params: Vec::new(),
+        extensions: Extensions::default(),
+    };
+    let mut project = Project::default();
+    project.channels.push(Channel {
+        id: ChannelId(1),
+        name: "Lead".into(),
+        role: ChannelRole::Regular,
+        volume: 1.0,
+        pan: 0.0,
+        mute: false,
+        solo: false,
+        output: None,
+        sends: Vec::new(),
+        devices: vec![
+            device("Gain_x64", DeviceKind::Vst2 { id: 0x4761_696E }),
+            device("Gain 2", DeviceKind::Vst3 { id: "00000000000000000000000000000001".into() }),
+            device("Missing", DeviceKind::Vst2 { id: 7 }),
+            device("Utility", DeviceKind::Builtin("utility".into())),
+        ],
+        extensions: Extensions::default(),
+    });
+    assert!(run(&mut p, "plugins.check", json!({})).unwrap_err().contains("no project"));
+    let id = p.add(Session::new(project), None).unwrap();
+
+    let checked = run(&mut p, "plugins.check", json!({ "project": id.0 })).unwrap();
+    assert_eq!((checked["plugins"].clone(), checked["missing"].clone()), (json!(3), json!(1)));
+    let devices = checked["devices"].as_array().unwrap();
+    assert_eq!(devices[0]["format"], "vst2");
+    assert_eq!(devices[0]["id"], "4761696E");
+    assert_eq!(devices[0]["found"]["how"], "declared");
+    assert_eq!(devices[0]["found"]["keeps_state"], true);
+    assert_eq!(devices[1]["found"]["how"], "newer-version");
+    assert_eq!(devices[1]["found"]["keeps_state"], false);
+    assert_eq!(devices[1]["found"]["name"], "Gain 3");
+    assert!(devices[2].get("found").is_none());
+    assert_eq!(run(&mut p, "plugins.check", json!({})).unwrap(), checked);
+    assert!(run(&mut p, "plugins.check", json!({ "project": 99 })).is_err());
+}

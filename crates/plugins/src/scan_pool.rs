@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::scan::{PluginInfo, SCAN_MARKER, Scanned, parse_scan};
+use crate::scan::{PluginInfo, SCAN_MARKER, Scanned, apply_compatibility, parse_scan};
 
 /// How long a file a shell may take: one file that carries many plug-ins (Waves' WaveShell,
 /// PreSonus' VST3 Shell) loads each of them, which takes minutes in any host.
@@ -50,7 +50,7 @@ pub fn module_info(bundle: &Path) -> Option<Vec<PluginInfo>> {
     let value: Value = json5::from_str(&text).ok()?;
     let factory_vendor = value.pointer("/Factory Info/Vendor").and_then(Value::as_str).unwrap_or_default();
     let text_of = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
-    let plugins: Vec<PluginInfo> = value
+    let mut plugins: Vec<PluginInfo> = value
         .get("Classes")?
         .as_array()?
         .iter()
@@ -73,9 +73,13 @@ pub fn module_info(bundle: &Path) -> Option<Vec<PluginInfo>> {
                     .and_then(Value::as_array)
                     .map(|s| s.iter().filter_map(Value::as_str).map(str::to_string).collect())
                     .unwrap_or_default(),
+                replaces: Vec::new(),
             })
         })
         .collect();
+    if let Some(list) = value.get("Compatibility") {
+        apply_compatibility(&mut plugins, list);
+    }
     if plugins.is_empty() { None } else { Some(plugins) }
 }
 

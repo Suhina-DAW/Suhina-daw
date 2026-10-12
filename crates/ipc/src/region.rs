@@ -1,4 +1,5 @@
-//! The shared-memory region: a header of atomics, then the input and the output buffer.
+//! The shared-memory region: a header of atomics, then the input and the output buffer, then
+//! the block's events.
 //!
 //! The region is a file mapped by both processes (in `/dev/shm` on Linux, so it stays in
 //! memory; in the temporary directory elsewhere). The engine creates it and removes it when the
@@ -10,10 +11,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use memmap2::MmapMut;
 
+use crate::events::{EVENT_BYTES, Event, MAX_EVENTS};
 use crate::{IpcError, MAX_CHANNELS, MAX_FRAMES};
 
 const MAGIC: u32 = 0x4C57_4950;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// The header's size; the buffers start after it.
 const HEADER_BYTES: usize = 256;
 // Byte offsets of the header fields. The words the two sides write sit on cache lines of their
@@ -25,11 +27,14 @@ const AT_MAX_FRAMES: usize = 12;
 const AT_REQUEST: usize = 64;
 const AT_RESPONSE: usize = 128;
 const AT_FRAMES: usize = 192;
+const AT_EVENTS: usize = 196;
+/// Bytes of the events area.
+const EVENTS_BYTES: usize = MAX_EVENTS * EVENT_BYTES;
 
-/// Bytes a region for `channels` × `max_frames` needs: the header and two buffers.
+/// Bytes a region for `channels` × `max_frames` needs: the header, two buffers and the events.
 fn size(channels: u32, max_frames: u32) -> Option<usize> {
     let samples = (channels as usize).checked_mul(max_frames as usize)?;
-    samples.checked_mul(2 * size_of::<f32>())?.checked_add(HEADER_BYTES)
+    samples.checked_mul(2 * size_of::<f32>())?.checked_add(HEADER_BYTES)?.checked_add(EVENTS_BYTES)
 }
 
 /// Where new regions go.
@@ -186,6 +191,46 @@ impl Region {
         // values, `len` is at most that, and the host has finished with it (its response was
         // read with Acquire ordering before this copy).
         unsafe { std::ptr::copy_nonoverlapping(from, out.as_mut_ptr(), len) };
+    }
+
+    /// Start of the events area, after both buffers.
+    fn events_area(&mut self) -> *mut u8 {
+        let offset = HEADER_BYTES + 2 * self.samples() * size_of::<f32>();
+        self.map.as_mut_ptr().wrapping_add(offset)
+    }
+
+    /// Stores the block's `events` (the first [`MAX_EVENTS`]) and their count.
+    pub(crate) fn write_events(&mut self, events: &[Event]) {
+        let count = events.len().min(MAX_EVENTS);
+        let area = self.events_area();
+        for (index, event) in events.iter().take(count).enumerate() {
+            let bytes = event.encode();
+            let to = area.wrapping_add(index * EVENT_BYTES);
+            // SAFETY: the events area holds `MAX_EVENTS` records of `EVENT_BYTES` (the region's
+            // size includes it, checked on create and open) and `index` is below that; the
+            // source is a local array. As with the input buffer, the host does not read the
+            // area until the request is published, after this copy.
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), to, EVENT_BYTES) };
+        }
+        self.word(AT_EVENTS).store(count as u32, Ordering::Release);
+    }
+
+    /// Reads the block's events into `out` (emptied first; it should have room for
+    /// [`MAX_EVENTS`], so this does not allocate). Records of an unknown kind are skipped.
+    pub(crate) fn read_events(&mut self, out: &mut Vec<Event>) {
+        out.clear();
+        let count = (self.word(AT_EVENTS).load(Ordering::Acquire) as usize).min(MAX_EVENTS);
+        let area = self.events_area();
+        for index in 0..count {
+            let mut bytes = [0u8; EVENT_BYTES];
+            let from = area.wrapping_add(index * EVENT_BYTES);
+            // SAFETY: as in `write_events`, the other way: the record is inside the area, and
+            // the engine wrote it before publishing the request this block answers.
+            unsafe { std::ptr::copy_nonoverlapping(from, bytes.as_mut_ptr(), EVENT_BYTES) };
+            if let Some(event) = Event::decode(&bytes) {
+                out.push(event);
+            }
+        }
     }
 
     /// Runs `process` on the first `samples` values of both buffers, the output zeroed first.

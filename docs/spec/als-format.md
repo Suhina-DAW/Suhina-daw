@@ -3,10 +3,11 @@ description: The Live Set (.als) format as observed: container, tracks, clips, n
 read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
 type: spec
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/als/src/lib.rs
   - crates/als/src/devices.rs
+  - crates/als/src/vst2.rs
   - crates/als/tests/synthetic.rs
 ---
 
@@ -211,8 +212,26 @@ with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, b
 | Location | `Path@Value`: absolute path of the `.dll` on the saving machine (**personal data**) | none |
 | Other | `Version`, `NumberOfParameters`, `Category`, window position | `DeviceType` (`1` for the instrument, `2` for the effect **(hypothesis)**), window position |
 
+The VST3 `Uid` fields, each written as eight hex digits and joined, give the class id in the
+canonical text form the VST3 scanner and `moduleinfo.json` use: checked against the scanned
+catalog for 21 different VST3 plug-ins across 169 Live Sets, all equal.
+
 Plug-in state is the plug-in vendor's own format. Loopwerk keeps it verbatim and hands it back
-to the plug-in. **Never commit a corpus file that contains a commercial plug-in's state.**
+to the plug-in. For VST2, `VstPreset` also says how the `Buffer` is laid out, and the importer
+wraps it in the standard VST2 bank (an `.fxb` file's contents, `crates/als/src/vst2.rs`), which
+is what the model keeps and what a VST3 version of the plug-in reads:
+
+| `VstPreset` child | Meaning |
+|---|---|
+| `Type` | `1178747752` (`FBCh`): `Buffer` is the plug-in's own chunk. `1182286443` (`FxBk`): `Buffer` is `ProgramCount` programs, each a 28-byte name and `ParameterCount` 32-bit floats |
+| `ProgramCount`, `ParameterCount`, `ProgramNumber` | programs, parameters, the current program |
+| `PluginVersion` | the plug-in's version number |
+| `ByteOrder` | `2`: the floats of an `FxBk` buffer are little-endian (the only value seen; `1` is read as big-endian, a **hypothesis**) |
+| `UniqueId` | the plug-in id again |
+
+Checked on a real project's 14 VST2 plug-ins: every `FxBk` buffer is exactly
+`ProgramCount × (28 + 4 × ParameterCount)` bytes. State of another `Type`, or a buffer of the
+wrong length, is kept unread in the `VstPresetBuffer` extension with a warning. **Never commit a corpus file that contains a commercial plug-in's state.**
 
 ### Utility (`StereoGain`)
 

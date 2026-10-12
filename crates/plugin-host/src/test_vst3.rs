@@ -1,7 +1,15 @@
 //! A VST3 plug-in built into the host for tests (`test:vst3`): a gain (0.5 at first) with its
 //! state (the gain as 4 bytes, little-endian `f32`), a reported latency of [`LATENCY`] frames
 //! and a controller of its own. Its factory is handed to the host directly, so the tests run
-//! the host's whole VST3 path except opening a file. Modelled on the `vst3` crate's gain
+//! the host's whole VST3 path except opening a file. A compatibility class says it replaces
+//! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"), and the component reads that plug-in's
+//! saved state as a standard VST2 bank too: a chunk bank whose chunk is the gain. The controller
+//! keeps whatever state it is given, and has one parameter, the gain (id 0), which the
+//! processor follows when a block brings a change. It has an event input too: a note-on adds
+//! its velocity to the first output channel at its frame, and its controller maps MIDI
+//! controller 7 to the gain (`IMidiMapping`). Its editor is an empty 300 × 200 view that
+//! accepts a native window and, when it opens, moves the gain to [`EDITOR_GAIN`] through the
+//! host's component handler, as a user turning a knob would. Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -17,6 +25,13 @@ pub(crate) const LATENCY: u32 = 32;
 
 const PROCESSOR_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x47616931);
 const CONTROLLER_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x43746C31);
+/// The id of its one parameter, the gain.
+const GAIN_PARAMETER: u32 = 0;
+/// The gain the editor sets when it opens.
+const EDITOR_GAIN: f64 = 0.125;
+const COMPATIBILITY_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x436D7031);
+/// The class id of the VST2 plug-in the test plug-in says it replaces: `Gain` named "Gain".
+pub(crate) const REPLACES: &str = "5653544761696E6761696E0000000000";
 
 fn copy_text(text: &str, field: &mut [c_char]) {
     field.fill(0);
@@ -60,7 +75,10 @@ impl IComponentTrait for Processor {
         kResultOk
     }
 
-    unsafe fn getBusCount(&self, media: MediaType, _dir: BusDirection) -> i32 {
+    unsafe fn getBusCount(&self, media: MediaType, dir: BusDirection) -> i32 {
+        if media == MediaTypes_::kEvent as MediaType {
+            return i32::from(dir == BusDirections_::kInput as BusDirection);
+        }
         i32::from(media == MediaTypes_::kAudio as MediaType)
     }
 
@@ -83,12 +101,17 @@ impl IComponentTrait for Processor {
     unsafe fn setState(&self, state: *mut IBStream) -> tresult {
         // SAFETY: the host passes a live stream (or null).
         let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
-        let mut bytes = [0u8; 4];
-        let mut read = 0;
-        // SAFETY: a live stream and a 4-byte buffer.
-        let result = unsafe { stream.read(bytes.as_mut_ptr().cast(), 4, &mut read) };
-        let gain = f32::from_le_bytes(bytes);
-        if result != kResultOk || read != 4 || !gain.is_finite() {
+        let bytes = read_all(&stream);
+        // Its own state is the gain; a VST2 bank holds it as the chunk (after a 160-byte header).
+        let gain = match bytes.as_slice() {
+            [a, b, c, d] => f32::from_le_bytes([*a, *b, *c, *d]),
+            bank if bank.starts_with(b"CcnK") && bank.get(8..12) == Some(b"FBCh") => match bank.get(160..) {
+                Some([a, b, c, d]) => f32::from_le_bytes([*a, *b, *c, *d]),
+                _ => return kResultFalse,
+            },
+            _ => return kResultFalse,
+        };
+        if !gain.is_finite() {
             return kResultFalse;
         }
         self.gain.store(gain.to_bits(), Ordering::Relaxed);
@@ -150,6 +173,24 @@ impl IAudioProcessorTrait for Processor {
         if data.numInputs < 1 || data.numOutputs < 1 {
             return kResultOk;
         }
+        // SAFETY: the host's parameter changes, or null, for the call.
+        if let Some(changes) = unsafe { ComRef::from_raw(data.inputParameterChanges) } {
+            // SAFETY: a live list for the call.
+            for index in 0..unsafe { changes.getParameterCount() } {
+                // SAFETY: as above; the index is below its count.
+                let raw = unsafe { changes.getParameterData(index) };
+                // SAFETY: a queue the list holds for the call, or null.
+                let Some(queue) = (unsafe { ComRef::from_raw(raw) }) else { continue };
+                // SAFETY: a live queue.
+                let (id, points) = (unsafe { queue.getParameterId() }, unsafe { queue.getPointCount() });
+                let (mut offset, mut value) = (0, 0.0);
+                // SAFETY: a live queue and two values to fill.
+                let read = unsafe { queue.getPoint(points - 1, &mut offset, &mut value) };
+                if id == GAIN_PARAMETER && read == kResultOk {
+                    self.gain.store((value as f32).to_bits(), Ordering::Relaxed);
+                }
+            }
+        }
         let gain = f32::from_bits(self.gain.load(Ordering::Relaxed));
         let frames = usize::try_from(data.numSamples).unwrap_or(0);
         // SAFETY: the host gives at least one input bus.
@@ -172,6 +213,9 @@ impl IAudioProcessorTrait for Processor {
             for (o, i) in target.iter_mut().zip(source) {
                 *o = i * gain;
             }
+            if channel == 0 {
+                self.add_notes(data, target);
+            }
         }
         kResultOk
     }
@@ -181,10 +225,27 @@ impl IAudioProcessorTrait for Processor {
     }
 }
 
-struct Controller;
+/// Everything left in `stream`, up to 64 KiB.
+fn read_all(stream: &ComRef<'_, IBStream>) -> Vec<u8> {
+    let mut bytes = vec![0u8; 64 * 1024];
+    let mut read = 0;
+    // SAFETY: a live stream and a buffer of the length given.
+    let result = unsafe { stream.read(bytes.as_mut_ptr().cast(), bytes.len() as i32, &mut read) };
+    bytes.truncate(if result == kResultOk { usize::try_from(read).unwrap_or(0) } else { 0 });
+    bytes
+}
+
+#[derive(Default)]
+struct Controller {
+    state: std::sync::Mutex<Vec<u8>>,
+    /// What it shows for the gain parameter, as `f64` bits.
+    gain: std::sync::atomic::AtomicU64,
+    /// The host's component handler, which edits go through.
+    handler: Arc<std::sync::Mutex<Option<ComPtr<IComponentHandler>>>>,
+}
 
 impl Class for Controller {
-    type Interfaces = (IEditController,);
+    type Interfaces = (IEditController, IMidiMapping);
 }
 
 impl IPluginBaseTrait for Controller {
@@ -198,24 +259,52 @@ impl IPluginBaseTrait for Controller {
 }
 
 impl IEditControllerTrait for Controller {
-    unsafe fn setComponentState(&self, _state: *mut IBStream) -> tresult {
+    unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        // The component's own state is the gain; show it.
+        if let [a, b, c, d] = read_all(&stream)[..] {
+            let gain = f64::from(f32::from_le_bytes([a, b, c, d]));
+            self.gain.store(gain.to_bits(), Ordering::Relaxed);
+        }
         kResultOk
     }
 
-    unsafe fn setState(&self, _state: *mut IBStream) -> tresult {
+    unsafe fn setState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        if let Ok(mut own) = self.state.lock() {
+            *own = read_all(&stream);
+        }
         kResultOk
     }
 
-    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
-        kResultOk
+    unsafe fn getState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        let Ok(own) = self.state.lock() else { return kResultFalse };
+        let mut written = 0;
+        // SAFETY: a live stream and the bytes, which outlive the call.
+        unsafe { stream.write(own.as_ptr() as *mut c_void, own.len() as i32, &mut written) }
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
-        0
+        1
     }
 
-    unsafe fn getParameterInfo(&self, _index: i32, _info: *mut ParameterInfo) -> tresult {
-        kInvalidArgument
+    unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
+        // SAFETY: the host passes a struct to fill.
+        let Some(info) = (unsafe { info.as_mut() }) else { return kInvalidArgument };
+        if index != 0 {
+            return kInvalidArgument;
+        }
+        info.id = GAIN_PARAMETER;
+        info.defaultNormalizedValue = 0.5;
+        info.flags = ParameterInfo_::ParameterFlags_::kCanAutomate as int32;
+        for (slot, unit) in info.title.iter_mut().zip("Gain".encode_utf16().chain(std::iter::once(0))) {
+            *slot = unit as TChar;
+        }
+        kResultOk
     }
 
     unsafe fn getParamStringByValue(&self, _id: u32, _value: f64, _string: *mut String128) -> tresult {
@@ -234,20 +323,178 @@ impl IEditControllerTrait for Controller {
         value
     }
 
-    unsafe fn getParamNormalized(&self, _id: u32) -> f64 {
-        0.0
+    unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if id == GAIN_PARAMETER { f64::from_bits(self.gain.load(Ordering::Relaxed)) } else { 0.0 }
     }
 
-    unsafe fn setParamNormalized(&self, _id: u32, _value: f64) -> tresult {
+    unsafe fn setParamNormalized(&self, id: u32, value: f64) -> tresult {
+        if id != GAIN_PARAMETER {
+            return kInvalidArgument;
+        }
+        self.gain.store(value.to_bits(), Ordering::Relaxed);
         kResultOk
     }
 
-    unsafe fn setComponentHandler(&self, _handler: *mut IComponentHandler) -> tresult {
+    unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
+        if let Ok(mut slot) = self.handler.lock() {
+            // SAFETY: the host's handler (or null); a reference is added while it is kept.
+            *slot = unsafe { ComRef::from_raw(handler) }.map(|h| h.to_com_ptr());
+        }
         kResultOk
     }
 
     unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {
-        std::ptr::null_mut()
+        let view = View { handler: self.handler.clone() };
+        ComWrapper::new(view).to_com_ptr::<IPlugView>().map_or(std::ptr::null_mut(), |view| view.into_raw())
+    }
+}
+
+struct Compatibility;
+
+impl Class for Compatibility {
+    type Interfaces = (IPluginCompatibility,);
+}
+
+impl IPluginCompatibilityTrait for Compatibility {
+    unsafe fn getCompatibilityJSON(&self, stream: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream.
+        let Some(stream) = (unsafe { ComRef::from_raw(stream) }) else { return kInvalidArgument };
+        // The text form is the one on this system ([`crate::vst3::cid_hex`]); trailing commas
+        // as some plug-ins write them.
+        let text =
+            format!(r#"[ {{ "New": "{}", "Old": [ "{REPLACES}", ], }}, ]"#, crate::vst3::cid_hex(&PROCESSOR_CID));
+        let mut written = 0;
+        // SAFETY: the bytes outlive the call; the length fits an i32.
+        unsafe { stream.write(text.as_ptr() as *mut c_void, text.len() as i32, &mut written) }
+    }
+}
+
+impl Processor {
+    /// Adds each note-on's velocity at its frame.
+    fn add_notes(&self, data: &ProcessData, target: &mut [f32]) {
+        // SAFETY: the host's events, or null, for the call.
+        let Some(events) = (unsafe { ComRef::from_raw(data.inputEvents) }) else { return };
+        // SAFETY: a live list for the call.
+        for index in 0..unsafe { events.getEventCount() } {
+            let mut event: Event = blank_event();
+            // SAFETY: as above; one event to fill.
+            if unsafe { events.getEvent(index, &mut event) } != kResultOk
+                || event.r#type != Event_::EventTypes_::kNoteOnEvent as u16
+            {
+                continue;
+            }
+            // SAFETY: a note-on event, so the union holds a note-on.
+            let velocity = unsafe { event.__field0.noteOn.velocity };
+            if let Some(sample) = usize::try_from(event.sampleOffset).ok().and_then(|f| target.get_mut(f)) {
+                *sample += velocity;
+            }
+        }
+    }
+}
+
+fn blank_event() -> Event {
+    Event {
+        busIndex: 0,
+        sampleOffset: 0,
+        ppqPosition: 0.0,
+        flags: 0,
+        r#type: 0,
+        __field0: Event__type0 {
+            noteOn: NoteOnEvent { channel: 0, pitch: 0, tuning: 0.0, velocity: 0.0, length: 0, noteId: -1 },
+        },
+    }
+}
+
+impl IMidiMappingTrait for Controller {
+    unsafe fn getMidiControllerAssignment(
+        &self,
+        bus: i32,
+        channel: i16,
+        number: CtrlNumber,
+        id: *mut ParamID,
+    ) -> tresult {
+        if bus != 0 || channel != 0 || number != 7 || id.is_null() {
+            return kResultFalse;
+        }
+        // SAFETY: the host passes an id to fill.
+        unsafe { *id = GAIN_PARAMETER };
+        kResultOk
+    }
+}
+
+/// An editor that shows nothing.
+struct View {
+    handler: Arc<std::sync::Mutex<Option<ComPtr<IComponentHandler>>>>,
+}
+
+impl Class for View {
+    type Interfaces = (IPlugView,);
+}
+
+impl IPlugViewTrait for View {
+    unsafe fn isPlatformTypeSupported(&self, _platform: FIDString) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn attached(&self, parent: *mut c_void, _platform: FIDString) -> tresult {
+        if parent.is_null() {
+            return kInvalidArgument;
+        }
+        // The user turns the gain as soon as the editor is open.
+        if let Ok(slot) = self.handler.lock()
+            && let Some(handler) = slot.as_ref()
+        {
+            // SAFETY: the host's live handler, told about one whole edit.
+            unsafe { handler.beginEdit(GAIN_PARAMETER) };
+            // SAFETY: as above.
+            unsafe { handler.performEdit(GAIN_PARAMETER, EDITOR_GAIN) };
+            // SAFETY: as above.
+            unsafe { handler.endEdit(GAIN_PARAMETER) };
+        }
+        kResultOk
+    }
+
+    unsafe fn removed(&self) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn onWheel(&self, _distance: f32) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn onKeyDown(&self, _key: char16, _code: int16, _modifiers: int16) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn onKeyUp(&self, _key: char16, _code: int16, _modifiers: int16) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn getSize(&self, size: *mut ViewRect) -> tresult {
+        // SAFETY: the host passes a rectangle to fill.
+        let Some(size) = (unsafe { size.as_mut() }) else { return kInvalidArgument };
+        *size = ViewRect { left: 0, top: 0, right: 300, bottom: 200 };
+        kResultOk
+    }
+
+    unsafe fn onSize(&self, _size: *mut ViewRect) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn onFocus(&self, _state: TBool) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn setFrame(&self, _frame: *mut IPlugFrame) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn canResize(&self) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn checkSizeConstraint(&self, _rect: *mut ViewRect) -> tresult {
+        kResultOk
     }
 }
 
@@ -266,7 +513,7 @@ impl IPluginFactoryTrait for Factory {
     }
 
     unsafe fn countClasses(&self) -> i32 {
-        2
+        3
     }
 
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
@@ -275,6 +522,7 @@ impl IPluginFactoryTrait for Factory {
         let (cid, category) = match index {
             0 => (PROCESSOR_CID, "Audio Module Class"),
             1 => (CONTROLLER_CID, "Component Controller Class"),
+            2 => (COMPATIBILITY_CID, "Plugin Compatibility Class"),
             _ => return kInvalidArgument,
         };
         info.cid = cid;
@@ -291,7 +539,8 @@ impl IPluginFactoryTrait for Factory {
             PROCESSOR_CID => {
                 ComWrapper::new(Processor { gain: Arc::new(AtomicU32::new(0.5f32.to_bits())) }).to_com_ptr::<FUnknown>()
             }
-            CONTROLLER_CID => ComWrapper::new(Controller).to_com_ptr::<FUnknown>(),
+            CONTROLLER_CID => ComWrapper::new(Controller::default()).to_com_ptr::<FUnknown>(),
+            COMPATIBILITY_CID => ComWrapper::new(Compatibility).to_com_ptr::<FUnknown>(),
             _ => None,
         };
         let Some(object) = object else { return kInvalidArgument };

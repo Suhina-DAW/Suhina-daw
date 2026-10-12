@@ -15,7 +15,7 @@ use loopwerk_model::Project;
 use serde_json::Value;
 
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
-pub use plugins::plugin_commands;
+pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 
 /// Undo steps kept per session; the oldest are dropped first.

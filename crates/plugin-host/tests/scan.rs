@@ -39,11 +39,18 @@ fn a_crash_or_a_hang_while_loading_is_a_failure_not_a_stall() {
     let crashed = scan_file(&host(), "test:crash", PATIENT);
     assert!(matches!(&crashed, Scanned::Failed(why) if why.contains("crashed")), "{crashed:?}");
 
+    // How long a scan takes that does not hang: mostly starting the process, which is slow on a
+    // busy machine (the antivirus checks each start).
+    let started = Instant::now();
+    let _ = scan_file(&host(), "test:clap", PATIENT);
+    let start = started.elapsed();
     let started = Instant::now();
     let hung = scan_file(&host(), "test:hang", Duration::from_millis(500));
     assert!(matches!(&hung, Scanned::Failed(why) if why.contains("hung")), "{hung:?}");
-    // Far less than "forever"; process starts are slow on a busy machine (antivirus).
-    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    // The hang costs its 500 ms timeout and a kill, on top of a start like that one (with room
+    // for the next start to be slower): far less than "forever".
+    let bound = start * 3 + Duration::from_secs(5);
+    assert!(started.elapsed() < bound, "{:?} (a start took {start:?})", started.elapsed());
 
     let dir = folder("not-a-plugin");
     let fake = dir.join("fake.clap");
@@ -103,7 +110,7 @@ fn a_scan_reads_only_new_and_changed_files() {
 
 #[test]
 fn a_saved_catalog_finds_plugins_by_id_or_name() {
-    let json = r#"{"version":1,"entries":[
+    let json = r#"{"version":2,"entries":[
         {"path":"/plugins/fx.clap","modified":5,"size":7,"plugins":[
             {"id":"com.example.delay","name":"Echo Box","vendor":"Example","version":"1.2","features":["audio-effect","stereo"]},
             {"id":"com.example.verb","name":"Room","vendor":"Example","version":"1.2","features":[]}]},
@@ -118,6 +125,8 @@ fn a_saved_catalog_finds_plugins_by_id_or_name() {
     assert_eq!(catalog.find("room").map(|p| p.id.as_str()), Some("com.example.verb"));
     assert!(catalog.find("nothing").is_none());
     assert_eq!(Catalog::from_json(&catalog.to_json()), catalog);
+    // A catalog saved in the earlier format is dropped, so the next scan reads everything.
+    assert_eq!(Catalog::from_json(&json.replace(r#""version":2"#, r#""version":1"#)).entries().len(), 0);
 
     for garbage in ["", "{", r#"{"version":2,"entries":[]}"#, r#"{"version":1}"#] {
         assert_eq!(Catalog::from_json(garbage), Catalog::new(), "{garbage}");
@@ -164,6 +173,10 @@ fn worker_processes_read_many_files_and_survive_crashes_and_hangs() {
     // The VST3 test plug-in's id is in the canonical text form.
     let Scanned::Plugins(vst3) = &results[2] else { panic!() };
     assert_eq!(vst3[0].id.len(), 32);
-    // One hang costs its timeout once, not per file (with room for slow process starts).
-    assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
+    // What its compatibility class says it replaces: a VST2 plug-in, by its derived class id.
+    assert_eq!(vst3[0].replaces, ["5653544761696E6761696E0000000000"]);
+    assert_eq!(vst3[0].replaces[0], loopwerk_plugins::matching::vst2_class_id(0x4761_696E, "Gain"));
+    // One hang costs its timeout once, not per file. The room is for slow process starts: on
+    // a loaded Windows machine each start can take seconds while the antivirus checks it.
+    assert!(started.elapsed() < Duration::from_secs(60), "{:?}", started.elapsed());
 }

@@ -509,7 +509,7 @@ mod refused_tests {
     fn agents_may_scan_but_not_choose_plugin_folders() {
         assert!(refused("plugins.addFolder").is_some());
         assert!(refused("plugins.removeFolder").is_some());
-        for id in ["plugins.scan", "plugins.list", "plugins.folders", "track.setPan"] {
+        for id in ["plugins.scan", "plugins.list", "plugins.folders", "plugins.check", "track.setPan"] {
             assert!(refused(id).is_none(), "{id}");
         }
     }

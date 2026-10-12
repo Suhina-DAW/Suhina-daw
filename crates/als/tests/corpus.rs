@@ -195,7 +195,9 @@ fn plugins_keep_id_and_state() {
 
     let vst2 = d.iter().find(|d| matches!(d.kind, DeviceKind::Vst2 { .. })).unwrap();
     assert_eq!(vst2.kind, DeviceKind::Vst2 { id: 1_128_746_035 });
-    assert!(vst2.state.as_ref().is_some_and(|s| s.len() == 3348));
+    // The plug-in's 3348-byte chunk, as a standard VST2 bank (a 160-byte header before it).
+    let bank = vst2.state.as_deref().unwrap();
+    assert_eq!((&bank[..4], &bank[8..12], bank.len()), (&b"CcnK"[..], &b"FBCh"[..], 3348 + 160));
 }
 
 #[test]

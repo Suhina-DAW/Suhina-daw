@@ -7,6 +7,7 @@
 //! [`Import::warnings`], so a project still opens with everything else intact.
 
 mod devices;
+mod vst2;
 
 use std::fmt;
 use std::io::Read;
@@ -370,7 +371,25 @@ impl Reader {
                 // Accept a signed or unsigned decimal and keep the 32 bits; only positive ids
                 // are in the corpus so far (docs/spec/als-format.md).
                 let id = id as u32;
-                let state = path(info, &["Preset", "VstPreset"]).and_then(|p| self.hex_state(p, "Buffer", track_name));
+                let preset = path(info, &["Preset", "VstPreset"]);
+                let buffer = preset.and_then(|p| self.hex_state(p, "Buffer", track_name));
+                let state = match (preset, buffer) {
+                    (Some(preset), Some(buffer)) => match vst2_preset(preset, id).and_then(|p| vst2::bank(&p, &buffer))
+                    {
+                        Ok(bank) => Some(bank),
+                        Err(why) => {
+                            // Keep the bytes as they were, so nothing is lost.
+                            self.warn(format!("track {track_name}: VST2 state not read ({why}); kept as it was"));
+                            extensions.0.push(Extension {
+                                format: "als".into(),
+                                key: "VstPresetBuffer".into(),
+                                data: buffer,
+                            });
+                            None
+                        }
+                    },
+                    _ => None,
+                };
                 if let Some(plugin_path) = value(info, &["Path"]).filter(|p| !p.is_empty()) {
                     extensions.0.push(Extension {
                         format: "als".into(),
@@ -720,4 +739,26 @@ pub(crate) fn boolean(node: Node, names: &[&str]) -> Option<bool> {
 
 fn parse_number(text: &str) -> Option<f64> {
     text.trim().parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+/// What `VstPreset` says about its `Buffer` besides the bytes.
+fn vst2_preset(preset: Node, id: u32) -> Result<vst2::Preset, String> {
+    let int = |name: &str| value(preset, &[name]).and_then(|v| v.trim().parse::<i64>().ok());
+    let count = |name: &str| int(name).and_then(|n| usize::try_from(n).ok()).ok_or(format!("no {name}"));
+    let kind = int("Type").ok_or("no Type")? as u32;
+    // `ByteOrder` 2 is little-endian, the only value seen so far (docs/spec/als-format.md).
+    let little_endian = match int("ByteOrder") {
+        Some(2) | None => true,
+        Some(1) => false,
+        Some(other) => return Err(format!("unknown ByteOrder {other}")),
+    };
+    Ok(vst2::Preset {
+        kind,
+        id,
+        version: int("PluginVersion").unwrap_or(1) as i32,
+        programs: count("ProgramCount")?,
+        current: int("ProgramNumber").unwrap_or(0) as i32,
+        parameters: count("ParameterCount")?,
+        little_endian,
+    })
 }

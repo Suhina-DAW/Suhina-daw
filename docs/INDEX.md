@@ -55,6 +55,7 @@ Change this code, and check these documents.
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
+| `crates/als/src/vst2.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/tests/corpus.rs` | [Making the `.als` test corpus](spec/als-corpus.md) |
 | `crates/als/tests/synthetic.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/automation/src/server.rs` | [Architecture](architecture.md), [MCP server](mcp.md) |

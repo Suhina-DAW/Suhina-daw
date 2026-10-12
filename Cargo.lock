@@ -2324,10 +2324,13 @@ dependencies = [
  "clack-host",
  "clack-plugin",
  "interprocess",
+ "libc",
  "libloading",
  "loopwerk-ipc",
  "loopwerk-plugins",
  "vst3",
+ "windows-sys 0.61.2",
+ "x11rb",
 ]
 
 [[package]]

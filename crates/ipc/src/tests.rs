@@ -150,3 +150,52 @@ fn the_region_is_removed_with_the_link() {
     drop(link);
     assert!(!std::path::Path::new(&address).exists());
 }
+
+#[test]
+fn events_go_with_their_block() {
+    let mut link = Link::create(2, BLOCK as u32).unwrap_or_else(|e| panic!("{e}"));
+    let address = link.address();
+    // A host that writes, for each note-on, its key at the event's frame (left channel).
+    let host = thread::spawn(move || {
+        let mut served = Served::open(&address).unwrap_or_else(|e| panic!("{e}"));
+        let mut seen = Vec::new();
+        while seen.len() < 3 {
+            served.serve_with_events(LONG, |_, events, output| {
+                for event in events {
+                    if let EventKind::NoteOn { key, .. } = event.kind
+                        && let Some(sample) = output.get_mut(event.frame as usize * 2)
+                    {
+                        *sample = f32::from(key);
+                    }
+                }
+                seen.push(events.len());
+            });
+        }
+        seen
+    });
+    let input = vec![0.0; BLOCK * 2];
+    let mut output = vec![0.0; BLOCK * 2];
+    let events = [Event::note_on(0, 0, 60, 1.0), Event::note_on(10, 0, 64, 0.5), Event::note_off(20, 0, 60, 0.0)];
+    assert_eq!(link.process_with_events(&input, &events, &mut output, LONG), Outcome::Done);
+    assert_eq!((output[0], output[20], output[40]), (60.0, 64.0, 0.0));
+    // The next block has none; one past the block's end lands on its last frame.
+    assert_eq!(link.process(&input, &mut output, LONG), Outcome::Done);
+    assert!(output.iter().all(|s| *s == 0.0));
+    let late = [Event::note_on(5_000, 0, 72, 1.0)];
+    assert_eq!(link.process_with_events(&input[..20], &late, &mut output[..20], LONG), Outcome::Done);
+    assert_eq!(output[18], 72.0);
+    assert_eq!(host.join().ok(), Some(vec![3, 0, 1]));
+
+    // Past MAX_EVENTS, the rest are dropped.
+    let many = vec![Event::note_on(0, 0, 1, 1.0); MAX_EVENTS + 5];
+    let mut link = Link::create(1, 16).unwrap_or_else(|e| panic!("{e}"));
+    let address = link.address();
+    let host = thread::spawn(move || {
+        let mut served = Served::open(&address).unwrap_or_else(|e| panic!("{e}"));
+        let mut count = 0;
+        while !served.serve_with_events(LONG, |_, events, _| count = events.len()) {}
+        count
+    });
+    assert_eq!(link.process_with_events(&[0.0; 16], &many, &mut [0.0; 16], LONG), Outcome::Done);
+    assert_eq!(host.join().ok(), Some(MAX_EVENTS));
+}

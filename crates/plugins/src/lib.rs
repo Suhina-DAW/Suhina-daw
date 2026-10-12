@@ -7,10 +7,12 @@
 //! blocks in a row the host has not answered.
 
 pub mod library;
+pub mod matching;
 pub mod offline;
 pub mod protocol;
 pub mod scan;
 pub mod scan_pool;
+pub mod vst2;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -27,8 +29,10 @@ use interprocess::local_socket::{
     GenericFilePath, GenericNamespaced, ListenerNonblockingMode, ListenerOptions, Name, NameType, Stream, ToFsName,
     ToNsName,
 };
+pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS};
 use loopwerk_ipc::{IpcError, Link, Outcome};
 
+pub use protocol::ParamInfo;
 use protocol::{MAX_LINE, Message, VERSION};
 
 /// Blocks in a row without an answer after which a running host counts as hung.
@@ -105,13 +109,39 @@ impl PluginAudio {
     /// One block through the plug-in, waiting at most `timeout`; see [`Link::process`].
     /// Real-time safe.
     pub fn process(&mut self, input: &[f32], output: &mut [f32], timeout: Duration) -> Outcome {
-        let outcome = self.link.process(input, output, timeout);
+        self.process_with_events(input, &[], output, timeout)
+    }
+
+    /// [`PluginAudio::process`] with notes and controllers at frames of the block, for an
+    /// instrument; see [`Link::process_with_events`]. Real-time safe.
+    pub fn process_with_events(
+        &mut self,
+        input: &[f32],
+        events: &[Event],
+        output: &mut [f32],
+        timeout: Duration,
+    ) -> Outcome {
+        let outcome = self.link.process_with_events(input, events, output, timeout);
         if outcome == Outcome::Done {
             self.unanswered.store(0, Ordering::Relaxed);
         } else {
             self.unanswered.fetch_add(1, Ordering::Relaxed);
         }
         outcome
+    }
+}
+
+/// A plug-in's saved state: the component's (CLAP and VST2 have only this), and a VST3
+/// plug-in's controller state when it keeps one apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedState {
+    pub data: Vec<u8>,
+    pub controller: Option<Vec<u8>>,
+}
+
+impl From<Vec<u8>> for SavedState {
+    fn from(data: Vec<u8>) -> Self {
+        Self { data, controller: None }
     }
 }
 
@@ -125,7 +155,12 @@ pub struct Plugin {
     latency: u32,
     next_ping: u64,
     /// The state last read from the plug-in; loaded again after a restart.
-    last_state: Option<Vec<u8>>,
+    last_state: Option<SavedState>,
+    /// Parameters set since the state was last read or loaded, in order; set again after a
+    /// restart, on top of that state.
+    params_since: Vec<(u32, f64)>,
+    /// Whether the plug-in's editor window is open.
+    editor_open: bool,
 }
 
 impl Plugin {
@@ -167,6 +202,8 @@ impl Plugin {
             latency: 0,
             next_ping: 0,
             last_state: None,
+            params_since: Vec::new(),
+            editor_open: false,
         };
         plugin.send(&Message::Hello { version: VERSION })?;
         match plugin.reply("hello", |m| matches!(m, Message::Hello { .. }))? {
@@ -208,21 +245,86 @@ impl Plugin {
     }
 
     /// Reads the plug-in's state and keeps it for a restart.
-    pub fn save_state(&mut self) -> Result<Vec<u8>, PluginError> {
+    pub fn save_state(&mut self) -> Result<SavedState, PluginError> {
         self.send(&Message::GetState)?;
-        let Message::State { data } = self.reply("state", |m| matches!(m, Message::State { .. }))? else {
+        let Message::State { data, controller } = self.reply("state", |m| matches!(m, Message::State { .. }))? else {
             return Err(PluginError::Protocol("expected state".into()));
         };
-        self.last_state = Some(data.clone());
-        Ok(data)
+        let state = SavedState { data, controller };
+        self.last_state = Some(state.clone());
+        self.params_since.clear();
+        Ok(state)
     }
 
-    /// Hands `data` to the plug-in (and keeps it for a restart).
-    pub fn load_state(&mut self, data: Vec<u8>) -> Result<(), PluginError> {
-        self.send(&Message::SetState { data: data.clone() })?;
+    /// Hands `state` to the plug-in (and keeps it for a restart). A plug-in that does not take
+    /// it answers with an error and keeps the state it had.
+    pub fn load_state(&mut self, state: impl Into<SavedState>) -> Result<(), PluginError> {
+        let state = state.into();
+        self.send(&Message::SetState { data: state.data.clone(), controller: state.controller.clone() })?;
         self.reply("set_state", |m| matches!(m, Message::State { .. }))?;
-        self.last_state = Some(data);
+        self.last_state = Some(state);
+        self.params_since.clear();
         Ok(())
+    }
+
+    /// The plug-in's parameters with their current values.
+    pub fn params(&mut self) -> Result<Vec<ParamInfo>, PluginError> {
+        self.send(&Message::GetParams)?;
+        match self.reply("params", |m| matches!(m, Message::Params { .. }))? {
+            Message::Params { params } => Ok(params),
+            _ => Err(PluginError::Protocol("expected parameters".into())),
+        }
+    }
+
+    /// Sets parameter `id` to `value`, in its own range (see [`ParamInfo`]); the plug-in's
+    /// audio follows from its next block. Returns the parameter as it is now. Kept for a
+    /// restart.
+    pub fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, PluginError> {
+        self.send(&Message::SetParam { id, value })?;
+        let Message::Param { param } = self.reply("set_param", |m| matches!(m, Message::Param { .. }))? else {
+            return Err(PluginError::Protocol("expected a parameter".into()));
+        };
+        self.params_since.retain(|(other, _)| *other != id);
+        if self.params_since.len() < protocol::MAX_PARAMS {
+            self.params_since.push((id, param.value));
+        }
+        Ok(param)
+    }
+
+    /// Opens the plug-in's editor in a window of its own (in the host process) and returns the
+    /// size of its inside. Opening an open editor just returns its size.
+    pub fn open_editor(&mut self) -> Result<(u32, u32), PluginError> {
+        self.send(&Message::OpenEditor)?;
+        match self.reply("open_editor", |m| matches!(m, Message::EditorOpened { .. }))? {
+            Message::EditorOpened { width, height } => {
+                self.editor_open = true;
+                Ok((width, height))
+            }
+            _ => Err(PluginError::Protocol("expected the editor".into())),
+        }
+    }
+
+    /// Closes the plug-in's editor, if it is open.
+    pub fn close_editor(&mut self) -> Result<(), PluginError> {
+        self.send(&Message::CloseEditor)?;
+        self.reply("close_editor", |m| matches!(m, Message::EditorClosed))?;
+        self.editor_open = false;
+        Ok(())
+    }
+
+    /// Whether the editor is open: the user may have closed its window since it was opened.
+    pub fn editor_open(&mut self) -> bool {
+        while let Ok(message) = self.replies.try_recv() {
+            self.note(&message);
+        }
+        self.editor_open
+    }
+
+    /// Takes in what a message the host sent unasked says.
+    fn note(&mut self, message: &Message) {
+        if matches!(message, Message::EditorClosed) {
+            self.editor_open = false;
+        }
     }
 
     /// Ends the current host process, whatever its state, and starts a new one with the same
@@ -233,6 +335,9 @@ impl Plugin {
         let (mut fresh, audio) = Self::start(self.launch.clone())?;
         if let Some(state) = self.last_state.take() {
             fresh.load_state(state)?;
+        }
+        for (id, value) in std::mem::take(&mut self.params_since) {
+            fresh.set_param(id, value)?;
         }
         *self = fresh;
         Ok(audio)
@@ -254,7 +359,7 @@ impl Plugin {
             match self.replies.recv_timeout(left) {
                 Ok(Message::Error { message }) => return Err(PluginError::Host(message)),
                 Ok(message) if wanted(&message) => return Ok(message),
-                Ok(_) => {}
+                Ok(other) => self.note(&other),
                 Err(RecvTimeoutError::Timeout) => return Err(PluginError::Timeout(what)),
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(PluginError::Protocol("the host closed the control connection".into()));

@@ -18,7 +18,11 @@ use std::thread;
 use std::time::Duration;
 
 use loopwerk_ipc::Served;
+use loopwerk_plugins::ParamInfo;
 use loopwerk_plugins::scan::PluginInfo;
+
+use crate::vst3_events::{BlockEvents, MidiMapping};
+use crate::vst3_params::{BlockChanges, Pending};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComWrapper, Interface};
@@ -27,6 +31,10 @@ use vst3::{Class, ComPtr, ComWrapper, Interface};
 const POLL: Duration = Duration::from_millis(100);
 /// The category of the classes that process audio.
 const AUDIO_CLASS: &str = "Audio Module Class";
+/// The category of the class that lists which older plug-ins the module replaces.
+const COMPATIBILITY_CLASS: &str = "Plugin Compatibility Class";
+/// Bytes of compatibility list read, at most.
+const MAX_COMPATIBILITY: usize = 1024 * 1024;
 
 /// The byte order of a class id's canonical text form. On Windows the SDK lays ids out as COM
 /// GUIDs, whose first three fields (4, 2 and 2 bytes) are stored little-endian, and its text
@@ -54,6 +62,17 @@ fn cid_from_hex(hex: &str) -> Option<TUID> {
         *cid.get_mut(index)? = u8::from_str_radix(text, 16).ok()? as _;
     }
     Some(cid)
+}
+
+/// `value`, or `otherwise` when it is NaN or infinite (a plug-in's numbers are not trusted).
+pub(crate) fn finite(value: f64, otherwise: f64) -> f64 {
+    if value.is_finite() { value } else { otherwise }
+}
+
+/// Text from a fixed-size UTF-16 field (`String128`), up to its first zero.
+fn utf16(field: &[TChar]) -> String {
+    let units: Vec<u16> = field.iter().take_while(|c| **c != 0).copied().collect();
+    String::from_utf16_lossy(&units)
 }
 
 /// Text from a fixed-size C string field.
@@ -161,6 +180,7 @@ impl Module {
                 vendor: text(&factory_info.vendor),
                 version: String::new(),
                 features: Vec::new(),
+                replaces: Vec::new(),
             };
             if let Some(factory2) = &factory2 {
                 let mut info2: PClassInfo2 = blank();
@@ -177,6 +197,30 @@ impl Module {
             classes.push((info.cid, plugin));
         }
         Ok(classes)
+    }
+
+    /// The module's compatibility list, from its `Plugin Compatibility Class`
+    /// (`IPluginCompatibility`), as the JSON text it writes; `None` when it has none.
+    fn compatibility(&self) -> Option<String> {
+        let factory = self.factory().ok()?;
+        // SAFETY: the factory is a live COM object.
+        let count = unsafe { factory.countClasses() };
+        let cid = (0..count.clamp(0, 4096)).find_map(|index| {
+            let mut info: PClassInfo = blank();
+            // SAFETY: as above; the index is below the count the factory gave.
+            let found = ok(unsafe { factory.getClassInfo(index, &mut info) });
+            (found && text(&info.category) == COMPATIBILITY_CLASS).then_some(info.cid)
+        })?;
+        let compatibility = self.create::<IPluginCompatibility>(&cid)?;
+        let stream = ComWrapper::new(MemoryStream::new(Vec::new()));
+        let raw = stream.to_com_ptr::<IBStream>()?;
+        // SAFETY: a live object writing to a live stream.
+        if !ok(unsafe { compatibility.getCompatibilityJSON(raw.as_ptr()) }) {
+            return None;
+        }
+        let mut bytes = stream.bytes();
+        bytes.truncate(MAX_COMPATIBILITY);
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Creates an object of class `cid` and asks it for interface `I`.
@@ -244,7 +288,11 @@ fn open(spec: &str) -> Result<(Module, Option<TUID>), String> {
 /// The plug-ins the file `spec` names holds, without making any (for scanning).
 pub(crate) fn describe(spec: &str) -> Result<Vec<PluginInfo>, String> {
     let (module, _) = open(spec)?;
-    Ok(module.audio_classes()?.into_iter().map(|(_, info)| info).collect())
+    let mut plugins: Vec<PluginInfo> = module.audio_classes()?.into_iter().map(|(_, info)| info).collect();
+    if let Some(list) = module.compatibility() {
+        loopwerk_plugins::scan::apply_compatibility_text(&mut plugins, &list);
+    }
+    Ok(plugins)
 }
 
 // ---- What the host gives the plug-in -------------------------------------------------------
@@ -275,7 +323,11 @@ impl IHostApplicationTrait for HostApplication {
     }
 }
 
-struct ComponentHandler;
+/// What the controller tells the host: the user moving a control in the editor. Each edit goes
+/// to the processor with its next block, as the SDK asks the host to do.
+struct ComponentHandler {
+    pending: Pending,
+}
 
 impl Class for ComponentHandler {
     type Interfaces = (IComponentHandler,);
@@ -286,7 +338,14 @@ impl IComponentHandlerTrait for ComponentHandler {
         kResultOk
     }
 
-    unsafe fn performEdit(&self, _id: ParamID, _value: ParamValue) -> tresult {
+    unsafe fn performEdit(&self, id: ParamID, value: ParamValue) -> tresult {
+        if !value.is_finite() {
+            return kInvalidArgument;
+        }
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.retain(|(other, _)| *other != id);
+            pending.push((id, value.clamp(0.0, 1.0)));
+        }
         kResultOk
     }
 
@@ -414,6 +473,11 @@ pub(crate) struct Vst3Plugin {
     connections: Option<(ComPtr<IConnectionPoint>, ComPtr<IConnectionPoint>)>,
     controller: Option<ComPtr<IEditController>>,
     separate_controller: bool,
+    /// Parameter values for the processor's next block.
+    pending: Pending,
+    /// The plug-in's name, for its editor's window.
+    name: String,
+    editor: Option<crate::vst3_editor::Editor>,
     component: ComPtr<IComponent>,
     _handler: ComWrapper<ComponentHandler>,
     _host: ComWrapper<HostApplication>,
@@ -431,15 +495,17 @@ impl Vst3Plugin {
     pub(crate) fn load(spec: &str, served: Served, sample_rate: f64) -> Result<Self, String> {
         let (module, wanted) = open(spec)?;
         let classes = module.audio_classes()?;
-        let cid = match wanted {
-            Some(wanted) => classes.iter().find(|(cid, _)| *cid == wanted).map(|(cid, _)| *cid),
-            None => classes.first().map(|(cid, _)| *cid),
+        let (cid, name) = match wanted {
+            Some(wanted) => classes.iter().find(|(cid, _)| *cid == wanted),
+            None => classes.first(),
         }
+        .map(|(cid, info)| (*cid, info.name.clone()))
         .ok_or_else(|| format!("no audio plug-in in {spec:?}"))?;
 
         let component = module.create::<IComponent>(&cid).ok_or("could not make the plug-in's component")?;
         let host = ComWrapper::new(HostApplication);
-        let handler = ComWrapper::new(ComponentHandler);
+        let pending = Pending::default();
+        let handler = ComWrapper::new(ComponentHandler { pending: pending.clone() });
         let context = host.to_com_ptr::<FUnknown>().ok_or("host object")?;
         // SAFETY: a live component, given the host's context object for the call.
         if !ok(unsafe { component.initialize(context.as_ptr()) }) {
@@ -466,6 +532,9 @@ impl Vst3Plugin {
             connections: None,
             controller,
             separate_controller,
+            pending,
+            name,
+            editor: None,
             component,
             _handler: handler,
             _host: host,
@@ -473,6 +542,13 @@ impl Vst3Plugin {
         };
         plugin.connect();
         plugin.sync_controller();
+        if let (Some(controller), Some(handler)) =
+            (&plugin.controller, plugin._handler.to_com_ptr::<IComponentHandler>())
+        {
+            // SAFETY: a live controller and a handler that outlives it (it is let go of in
+            // `drop` before the controller is terminated).
+            let _ = unsafe { controller.setComponentHandler(handler.as_ptr()) };
+        }
 
         let processor = plugin.component.cast::<IAudioProcessor>().ok_or("the plug-in does not process audio")?;
         let max_frames = served.max_frames();
@@ -495,10 +571,12 @@ impl Vst3Plugin {
         plugin.latency = unsafe { processor.getLatencySamples() };
 
         let stop = plugin.stop.clone();
+        let pending = plugin.pending.clone();
+        let mapping = MidiMapping::of(plugin.controller.as_ref());
         let audio = AudioSide(processor);
         let thread = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(audio, served, buses, sample_rate, &stop))
+            .spawn(move || serve(audio, served, buses, sample_rate, (pending, mapping), &stop))
             .map_err(|e| e.to_string())?;
         plugin.audio = Some(thread);
         Ok(plugin)
@@ -569,6 +647,14 @@ impl Vst3Plugin {
                 let _ = unsafe { self.component.activateBus(audio, direction as BusDirection, 0, 1) };
             }
         }
+        // An instrument takes notes on its first event input.
+        let event = MediaTypes_::kEvent as MediaType;
+        let input = BusDirections_::kInput as BusDirection;
+        // SAFETY: a live component.
+        if unsafe { self.component.getBusCount(event, input) } > 0 {
+            // SAFETY: as above; event bus 0 exists.
+            let _ = unsafe { self.component.activateBus(event, input, 0, 1) };
+        }
         (in_channels, out_channels)
     }
 
@@ -586,24 +672,176 @@ impl Vst3Plugin {
         Ok(stream.bytes())
     }
 
-    pub(crate) fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
+    /// The controller's own state, when it is a separate object that gives one.
+    pub(crate) fn controller_state(&mut self) -> Option<Vec<u8>> {
+        let controller = self.controller.as_ref()?;
+        let stream = ComWrapper::new(MemoryStream::new(Vec::new()));
+        let raw = stream.to_com_ptr::<IBStream>()?;
+        // SAFETY: a live controller writing to a live stream.
+        ok(unsafe { controller.getState(raw.as_ptr()) }).then(|| stream.bytes())
+    }
+
+    /// Hands `data` to the component and mirrors it to the controller, then gives the
+    /// controller its own `controller` state, as a project saved it. A VST3 plug-in that stands
+    /// in for a VST2 one reads the VST2 bank here (ADR 0006, decision 8); a bank of programs
+    /// is also set as parameters, since not every plug-in reads one.
+    pub(crate) fn set_state(&mut self, data: &[u8], controller_state: Option<&[u8]>) -> Result<(), String> {
         let stream = ComWrapper::new(MemoryStream::new(data.to_vec()));
         let raw = stream.to_com_ptr::<IBStream>().ok_or("stream")?;
         // SAFETY: a live component reading from a live stream.
-        if !ok(unsafe { self.component.setState(raw.as_ptr()) }) {
+        let taken = ok(unsafe { self.component.setState(raw.as_ptr()) });
+        let parameters = loopwerk_plugins::vst2::program_values(data).map_or(0, |values| self.set_parameters(&values));
+        if !taken && parameters == 0 {
             return Err("the plug-in did not take the state".into());
         }
         if let Some(controller) = &self.controller {
-            stream.rewind();
-            // SAFETY: a live controller reading the same stream.
-            let _ = unsafe { controller.setComponentState(raw.as_ptr()) };
+            if taken {
+                stream.rewind();
+                // SAFETY: a live controller reading the same stream.
+                let _ = unsafe { controller.setComponentState(raw.as_ptr()) };
+            }
+            if let Some(own) = controller_state.filter(|s| !s.is_empty()) {
+                let own = ComWrapper::new(MemoryStream::new(own.to_vec()));
+                let own_raw = own.to_com_ptr::<IBStream>().ok_or("stream")?;
+                // SAFETY: a live controller reading a live stream. A controller that refuses
+                // its own state still has the component's, so this is not an error.
+                let _ = unsafe { controller.setState(own_raw.as_ptr()) };
+            }
         }
         Ok(())
+    }
+
+    /// Opens the plug-in's editor (or returns the size of the one open).
+    pub(crate) fn open_editor(&mut self) -> Result<crate::window::Size, String> {
+        if let Some(editor) = &self.editor {
+            return Ok(editor.size());
+        }
+        let controller = self.controller.as_ref().ok_or("the plug-in has no editor")?;
+        let editor = crate::vst3_editor::Editor::open(controller, &self.name)?;
+        let size = editor.size();
+        self.editor = Some(editor);
+        Ok(size)
+    }
+
+    pub(crate) fn close_editor(&mut self) {
+        if let Some(editor) = self.editor.take() {
+            editor.close();
+        }
+    }
+
+    /// Keeps the editor in step with its window; returns whether the user closed it.
+    pub(crate) fn editor_tick(&mut self) -> bool {
+        let closed = self.editor.as_mut().is_some_and(crate::vst3_editor::Editor::tick);
+        if closed {
+            self.close_editor();
+        }
+        closed
+    }
+
+    /// The controller's parameters, values normalized (0 to 1).
+    pub(crate) fn params(&self) -> Vec<ParamInfo> {
+        let Some(controller) = &self.controller else { return Vec::new() };
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        (0..count)
+            .filter_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                ok(unsafe { controller.getParameterInfo(index, &mut info) }).then(|| self.param(controller, &info))
+            })
+            .collect()
+    }
+
+    /// Parameter `info` with its current value and text.
+    fn param(&self, controller: &ComPtr<IEditController>, info: &ParameterInfo) -> ParamInfo {
+        use ParameterInfo_::ParameterFlags_ as Flags;
+        // SAFETY: a live controller, for a parameter it listed.
+        let value = unsafe { controller.getParamNormalized(info.id) };
+        let mut shown: String128 = [0; 128];
+        // SAFETY: as above, writing at most 128 UTF-16 units.
+        let text = if ok(unsafe { controller.getParamStringByValue(info.id, value, &mut shown) }) {
+            utf16(&shown)
+        } else {
+            String::new()
+        };
+        let flag = |f: ParameterInfo_::ParameterFlags| info.flags & f as int32 != 0;
+        ParamInfo {
+            id: info.id,
+            name: utf16(&info.title),
+            group: String::new(),
+            min: 0.0,
+            max: 1.0,
+            default: finite(info.defaultNormalizedValue, 0.0),
+            value: finite(value, 0.0),
+            text,
+            steps: u32::try_from(info.stepCount).unwrap_or(0),
+            automatable: flag(Flags::kCanAutomate),
+            read_only: flag(Flags::kIsReadOnly),
+            hidden: flag(Flags::kIsHidden),
+        }
+    }
+
+    /// Sets parameter `id` to `value` (normalized; kept within 0 to 1): on the controller now,
+    /// on the processor with its next block.
+    pub(crate) fn set_param(&mut self, id: u32, value: f64) -> Result<ParamInfo, String> {
+        let controller = self.controller.as_ref().ok_or("the plug-in has no parameters")?;
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        let info = (0..count)
+            .find_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                (ok(unsafe { controller.getParameterInfo(index, &mut info) }) && info.id == id).then_some(info)
+            })
+            .ok_or_else(|| format!("no parameter {id}"))?;
+        let value = value.clamp(0.0, 1.0);
+        // SAFETY: a live controller, for a parameter it listed.
+        let _ = unsafe { controller.setParamNormalized(id, value) };
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.push((id, value));
+        }
+        Ok(self.param(controller, &info))
+    }
+
+    /// Sets parameter `i` to `values[i]` (normalized), the numbering a VST3 version keeps from
+    /// its VST2 one: on the controller now, on the processor with its next block. Only when the
+    /// controller has every id from 0 to the last value's, so a plug-in that numbers its
+    /// parameters another way is left alone. Returns how many were set.
+    fn set_parameters(&mut self, values: &[f32]) -> usize {
+        let Some(controller) = &self.controller else { return 0 };
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        let ids: std::collections::HashSet<ParamID> = (0..count)
+            .filter_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                ok(unsafe { controller.getParameterInfo(index, &mut info) }).then_some(info.id)
+            })
+            .collect();
+        let changes: Option<Vec<(ParamID, ParamValue)>> = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let id = ParamID::try_from(index).ok().filter(|id| ids.contains(id))?;
+                Some((id, f64::from(*value).clamp(0.0, 1.0)))
+            })
+            .collect();
+        let Some(changes) = changes else { return 0 };
+        for (id, value) in &changes {
+            // SAFETY: as above, for a parameter it listed.
+            let _ = unsafe { controller.setParamNormalized(*id, *value) };
+        }
+        let set = changes.len();
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.extend(changes);
+        }
+        set
     }
 }
 
 impl Drop for Vst3Plugin {
     fn drop(&mut self) {
+        self.close_editor();
         self.stop.store(true, Ordering::Release);
         if let Some(audio) = self.audio.take() {
             let _ = audio.join();
@@ -615,6 +853,10 @@ impl Drop for Vst3Plugin {
             let _ = unsafe { a.disconnect(b.as_ptr()) };
             // SAFETY: as above, the other way.
             let _ = unsafe { b.disconnect(a.as_ptr()) };
+        }
+        if let Some(controller) = &self.controller {
+            // SAFETY: a live controller letting go of the handler before it is released.
+            let _ = unsafe { controller.setComponentHandler(std::ptr::null_mut()) };
         }
         if self.separate_controller
             && let Some(controller) = self.controller.take()
@@ -631,8 +873,17 @@ impl Drop for Vst3Plugin {
 }
 
 /// The audio thread: serves blocks from the link through the processor until `stop` is set.
-fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), sample_rate: f64, stop: &AtomicBool) {
+fn serve(
+    audio: AudioSide,
+    mut served: Served,
+    buses: (Vec<usize>, Vec<usize>),
+    sample_rate: f64,
+    (pending, mapping): (Pending, MidiMapping),
+    stop: &AtomicBool,
+) {
     let processor = audio.0;
+    let mut changes = BlockChanges::new(pending);
+    let notes = BlockEvents::new();
     let max_frames = served.max_frames() as usize;
     let link_channels = served.channels() as usize;
     let (in_channels, out_channels) = buses;
@@ -665,7 +916,7 @@ fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), 
     // SAFETY: a live, active processor, on the audio thread.
     let _ = unsafe { processor.setProcessing(1) };
     while !stop.load(Ordering::Acquire) {
-        served.serve(POLL, |input, output| {
+        served.serve_with_events(POLL, |input, events, output| {
             let frames = (input.len() / link_channels.max(1)).min(max_frames);
             for bus in in_buffers.iter_mut() {
                 for channel in bus.iter_mut() {
@@ -688,15 +939,16 @@ fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), 
                 numOutputs: outputs.len() as int32,
                 inputs: inputs.as_mut_ptr(),
                 outputs: outputs.as_mut_ptr(),
-                inputParameterChanges: std::ptr::null_mut(),
+                inputParameterChanges: changes.take(events.iter().filter_map(|e| mapping.change(e))),
                 outputParameterChanges: std::ptr::null_mut(),
-                inputEvents: std::ptr::null_mut(),
+                inputEvents: notes.fill(events),
                 outputEvents: std::ptr::null_mut(),
                 processContext: &mut context,
             };
             // SAFETY: a live, processing processor on the audio thread; every bus has a buffer
             // per channel of at least `frames` samples, and all of it outlives the call.
             let result = unsafe { processor.process(&mut data) };
+            changes.done();
             context.projectTimeSamples += frames as i64;
             context.continousTimeSamples += frames as i64;
             if !ok(result) {

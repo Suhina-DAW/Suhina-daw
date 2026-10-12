@@ -139,7 +139,9 @@ pub struct Device {
     pub name: String,
     pub kind: DeviceKind,
     pub enabled: bool,
-    /// Plug-in state, handed back to the plug-in unchanged.
+    /// Plug-in state, handed back to the plug-in unchanged. For VST2 it is the standard VST2
+    /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
+    /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,
     /// Parameter values of a built-in device (`DeviceKind::Builtin`); empty for plug-ins and
     /// placeholders. Parameters that are not listed keep their defaults.
