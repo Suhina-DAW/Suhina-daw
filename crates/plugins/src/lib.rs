@@ -577,9 +577,15 @@ impl Plugin {
     /// Opens the plug-in's editor in a window of its own (in the host process) and returns the
     /// size of its inside. Opening an open editor just returns its size.
     pub fn open_editor(&mut self) -> Result<(u32, u32), PluginError> {
+        self.open_editor_owned(None)
+    }
+
+    /// [`Plugin::open_editor`] in a window that `owner` (the engine's window: a Win32 `HWND`,
+    /// an X11 window id) owns: it floats above it and goes with it.
+    pub fn open_editor_owned(&mut self, owner: Option<u64>) -> Result<(u32, u32), PluginError> {
         let instance = self.instance;
         let reply = self.request(
-            &Message::OpenEditor { instance },
+            &Message::OpenEditor { instance, owner },
             "open_editor",
             |m| matches!(m, Message::EditorOpened { instance: i, .. } if *i == instance),
         )?;

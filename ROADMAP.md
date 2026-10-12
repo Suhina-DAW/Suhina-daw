@@ -267,10 +267,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   meanwhile. A scan finds plug-ins that were missing without opening the project again.
 - Tracks are lined up for the latency of their devices and plug-ins.
 - The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
-  editor, Close editor or Restart; the same commands work from the CLI and MCP.
+  editor, Close editor or Restart; the same commands work from the CLI and MCP. Editors float
+  above Loopwerk's window, owned by it (Windows, X11), and respond at once.
 - Renders (`loopwerk-cli render`, MCP `project_render`) run the same plug-ins.
 - Still to do: plug-ins of one process in one round trip, plug-in parameters as automation,
-  editors embedded in Loopwerk's window, Wayland and macOS editors, VST2 hosting (not decided).
+  Wayland and macOS editors, VST2 hosting (not decided).
 
 ### M8 UI (started)
 - `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it

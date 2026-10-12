@@ -5,6 +5,26 @@
 //!
 //! Windows (Win32) and Linux (X11, through `x11rb`); elsewhere opening one is an error for now
 //! (ADR 0006).
+//!
+//! An editor's window is owned by the engine's window when the engine names it
+//! ([`set_owner`]): it floats above Loopwerk, has no taskbar entry of its own and is minimised
+//! with it (Win32 owner window; X11 `WM_TRANSIENT_FOR`).
+
+use std::cell::Cell;
+
+thread_local! {
+    static OWNER: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+/// The engine's window that the next editor window opened on this thread belongs to (a Win32
+/// `HWND`, an X11 window id), or `None` for a window of its own.
+pub(crate) fn set_owner(owner: Option<u64>) {
+    OWNER.with(|o| o.set(owner));
+}
+
+fn owner() -> Option<u64> {
+    OWNER.with(Cell::get)
+}
 
 /// The size of a window's inside, in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,16 +44,47 @@ mod imp {
     use std::ffi::c_void;
     use std::sync::OnceLock;
 
+    use std::time::Duration;
+
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AdjustWindowRectEx, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, IDC_ARROW,
-        LoadCursorW, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
-        SetWindowPos, ShowWindow, TranslateMessage, WM_CLOSE, WM_SIZE, WNDCLASSW, WS_CAPTION, WS_MAXIMIZEBOX,
+        IsWindow, LoadCursorW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW,
+        PostThreadMessageW, QS_ALLINPUT, RegisterClassW, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+        SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE, WM_SIZE, WNDCLASSW, WS_CAPTION, WS_MAXIMIZEBOX,
         WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
     };
 
     use super::{Size, WindowId};
+
+    /// Wakes the main thread from [`wait`] when a control message has come, from another thread.
+    #[derive(Clone, Copy)]
+    pub(crate) struct Waker(u32);
+
+    impl Waker {
+        /// A waker for the calling thread (the host's main thread).
+        pub(crate) fn current() -> Self {
+            // SAFETY: no arguments; the id of the calling thread.
+            Self(unsafe { GetCurrentThreadId() })
+        }
+
+        pub(crate) fn wake(self) {
+            // SAFETY: a message without pointers to a thread id; if that thread is gone the call
+            // fails, which is fine.
+            unsafe { PostThreadMessageW(self.0, WM_APP, 0, 0) };
+        }
+    }
+
+    /// Waits until a window message is waiting for this thread (input, painting, a plug-in's
+    /// timer), the waker wakes it, or `timeout` has passed, so an editor is served at once
+    /// rather than between ticks.
+    pub(crate) fn wait(timeout: Duration) {
+        let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+        // SAFETY: no handles to wait on, only this thread's message queue.
+        unsafe { MsgWaitForMultipleObjectsEx(0, std::ptr::null(), millis, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+    }
 
     /// What happened to one open window.
     struct State {
@@ -139,8 +190,16 @@ mod imp {
             let (class, title) = (wide(CLASS), wide(title));
             // SAFETY: as in `register`.
             let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
-            // SAFETY: a registered class and two strings that outlive the call; no parent, menu
-            // or creation data.
+            // The engine's window, if it still is one: the editor's is owned by it (not a child
+            // of it), so it floats above Loopwerk and goes with it.
+            let owner = super::owner()
+                .and_then(|o| usize::try_from(o).ok())
+                .map(|o| o as HWND)
+                // SAFETY: only asks whether the handle names a window; any value is allowed.
+                .filter(|&o| unsafe { IsWindow(o) } != 0)
+                .unwrap_or(std::ptr::null_mut());
+            // SAFETY: a registered class and two strings that outlive the call; an owner window
+            // just checked (or none); no menu or creation data.
             let hwnd = unsafe {
                 CreateWindowExW(
                     0,
@@ -151,7 +210,7 @@ mod imp {
                     CW_USEDEFAULT,
                     width,
                     height,
-                    std::ptr::null_mut(),
+                    owner,
                     std::ptr::null_mut(),
                     instance,
                     std::ptr::null(),
@@ -358,6 +417,18 @@ mod imp {
                         b"loopwerk-plugin-editor\0Loopwerk\0",
                     )
                     .map_err(error)?;
+                if let Some(owner) = super::owner().and_then(|o| u32::try_from(o).ok()) {
+                    // Floats above the engine's window and goes with it.
+                    connection
+                        .change_property32(
+                            PropMode::REPLACE,
+                            window,
+                            AtomEnum::WM_TRANSIENT_FOR,
+                            AtomEnum::WINDOW,
+                            &[owner],
+                        )
+                        .map_err(error)?;
+                }
                 if !resizable {
                     // WM_NORMAL_HINTS: program-specified minimum and maximum size, both this one.
                     let (w, h) = (u32::from(width), u32::from(height));
@@ -437,6 +508,11 @@ mod imp {
         with_open(id, |open| open.size).unwrap_or(Size { width: 0, height: 0 })
     }
 
+    /// Whether an editor's window is open, so the main loop serves it often.
+    pub(crate) fn any_open() -> bool {
+        OPEN.with(|open| open.try_borrow().map_or(true, |open| !open.is_empty()))
+    }
+
     /// Takes in the events waiting for every open window: a close request, a new size. (The
     /// plug-ins' own windows are on their own connections and served through their run loops.)
     pub(crate) fn pump() {
@@ -501,6 +577,14 @@ mod imp {
     }
 
     pub(crate) fn pump() {}
+
+    pub(crate) fn any_open() -> bool {
+        false
+    }
 }
 
+#[cfg(not(windows))]
+pub(crate) use imp::any_open;
+#[cfg(windows)]
+pub(crate) use imp::{Waker, wait};
 pub(crate) use imp::{Window, client_size, pump, resize, take_close_request};

@@ -40,6 +40,10 @@ use processors::Processor;
 const POLL: Duration = Duration::from_millis(100);
 /// How often the main thread looks for plug-in callbacks while no message comes.
 const TICK: Duration = Duration::from_millis(10);
+/// The same while an editor is open where the main thread cannot wait for its window's events
+/// (X11): often enough for input and drawing to feel immediate.
+#[cfg(not(windows))]
+const EDITOR_TICK: Duration = Duration::from_millis(1);
 /// How long unloading waits for an instance's audio thread to stop; one still running then is
 /// stuck in the plug-in, and the instance is left behind rather than taking the process with it.
 const UNLOAD_WAIT: Duration = Duration::from_secs(1);
@@ -272,13 +276,60 @@ fn send(writer: &mut impl Write, message: &Message) -> std::io::Result<()> {
     writer.flush()
 }
 
+/// The engine's messages, on Windows passed through a thread that wakes the main thread when
+/// one comes, so the main thread can wait for its windows' messages instead of polling them.
+#[cfg(windows)]
+fn wakeful(messages: std::sync::mpsc::Receiver<Message>) -> std::sync::mpsc::Receiver<Message> {
+    let waker = window::Waker::current();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let _forwarder = thread::Builder::new().name("control messages".into()).spawn(move || {
+        for message in messages {
+            if sender.send(message).is_err() {
+                return;
+            }
+            waker.wake();
+        }
+        // The engine is gone: wake the main thread to notice.
+        waker.wake();
+    });
+    receiver
+}
+
+#[cfg(not(windows))]
+fn wakeful(messages: std::sync::mpsc::Receiver<Message>) -> std::sync::mpsc::Receiver<Message> {
+    messages
+}
+
+/// The next message from the engine, or a timeout after the main thread has had something
+/// else to do: on Windows a window message (an editor's input, painting, a plug-in's timer),
+/// which is then served at once; elsewhere a tick.
+#[cfg(windows)]
+fn next_message(messages: &std::sync::mpsc::Receiver<Message>) -> Result<Message, RecvTimeoutError> {
+    match messages.try_recv() {
+        Ok(message) => Ok(message),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            window::wait(TICK);
+            messages.try_recv().map_err(|e| match e {
+                std::sync::mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout,
+                std::sync::mpsc::TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+            })
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn next_message(messages: &std::sync::mpsc::Receiver<Message>) -> Result<Message, RecvTimeoutError> {
+    messages.recv_timeout(if window::any_open() { EDITOR_TICK } else { TICK })
+}
+
 /// The instances loaded, by the number the engine gave each.
 type Instances = BTreeMap<u32, Loaded>;
 
 fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = loopwerk_plugins::connect(address)?;
     let mut writer = stream.try_clone()?;
-    let messages = loopwerk_plugins::read_lines(stream);
+    let messages = wakeful(loopwerk_plugins::read_lines(stream));
     let mut instances = Instances::new();
     loop {
         // Between messages: the plug-ins' main-thread callbacks and their editors' windows.
@@ -289,7 +340,7 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
                 send(&mut writer, &Message::EditorClosed { instance: *instance })?;
             }
         }
-        let message = match messages.recv_timeout(TICK) {
+        let message = match next_message(&messages) {
             Ok(message) => message,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
@@ -332,7 +383,10 @@ fn answer(instances: &mut Instances, message: Message) -> Message {
             }
             Message::Unloaded { instance }
         }
-        Message::OpenEditor { instance } => match instances.get_mut(&instance).map(Loaded::open_editor) {
+        Message::OpenEditor { instance, owner } => match instances.get_mut(&instance).map(|loaded| {
+            window::set_owner(owner);
+            loaded.open_editor()
+        }) {
             Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
             Some(Err(message)) => failed(instance, message),
             None => missing(instance),

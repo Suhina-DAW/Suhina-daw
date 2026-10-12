@@ -34,6 +34,8 @@ pub struct Projects {
     /// What sessions start plug-ins with, made from the library when first needed and again
     /// after a scan or a change of how plug-ins are hosted.
     plugin_env: Option<std::sync::Arc<crate::PluginEnv>>,
+    /// The window plug-in editors open over, for the active project's session.
+    editor_owner: Option<u64>,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -201,6 +203,12 @@ impl Projects {
         env
     }
 
+    /// The window plug-in editors open over (a Win32 `HWND`, an X11 window id): the desktop
+    /// app's main window, so editors float above it. `None` gives them windows of their own.
+    pub fn set_editor_owner(&mut self, owner: Option<u64>) {
+        self.editor_owner = owner;
+    }
+
     /// Keeps the active project's plug-ins in line with it (ADR 0006): starts new ones in the
     /// background, takes in the ones that have started, notices crashes. Call it often from the
     /// thread that owns the projects (the window calls it every frame); commands call it too.
@@ -211,8 +219,10 @@ impl Projects {
             return Vec::new();
         }
         let env = self.plugin_env();
+        let owner = self.editor_owner;
         let Some(session) = self.get_mut(active) else { return Vec::new() };
         session.set_plugin_env(env);
+        session.set_editor_owner(owner);
         session.sync_plugins()
     }
 

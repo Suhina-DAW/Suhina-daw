@@ -324,3 +324,73 @@ fn a_plug_in_devices_editor_opens_and_closes_by_command() {
     let error = session.execute("device.openEditor", &json!({ "track": 1, "device": 1 })).unwrap_err();
     assert!(error.0.contains("not a plug-in"), "{error}");
 }
+
+/// On Windows an editor opened by command floats above the window the session was given: that
+/// window owns it. The owner lives on a thread that serves its messages, as the app's window
+/// does (an owner that does not would hold up the host making the editor's window).
+#[cfg(windows)]
+#[test]
+fn an_editor_is_owned_by_the_engines_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowExW, GW_OWNER, GetMessageW, GetWindow, MSG,
+        PostThreadMessageW, WM_QUIT, WS_OVERLAPPEDWINDOW,
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let owner_thread = std::thread::spawn(move || {
+        let class: Vec<u16> = "STATIC".encode_utf16().chain([0]).collect();
+        // SAFETY: a system window class and no title, parent, menu or creation data.
+        let owner = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                100,
+                100,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        // SAFETY: no arguments.
+        let thread = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+        sender.send((owner as usize, thread)).unwrap();
+        // SAFETY: a zeroed message is a valid value to be filled.
+        let mut message: MSG = unsafe { std::mem::zeroed() };
+        // SAFETY: any message of this thread, until WM_QUIT.
+        while unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) } > 0 {
+            // SAFETY: a message just taken from the queue.
+            unsafe { DispatchMessageW(&message) };
+        }
+        // SAFETY: the window made above, on this thread.
+        unsafe { DestroyWindow(owner as _) };
+    });
+    let (owner, thread) = receiver.recv().unwrap();
+    assert_ne!(owner, 0);
+    let p = project(8.0, false, vec![plugin_device("vst3")]);
+    let (mut session, mut renderer) = session(p, false);
+    session.set_editor_owner(Some(owner as u64));
+    until(&mut session, &mut renderer, "starting", |s| s["status"] == "running");
+    session.execute("device.openEditor", &json!({ "track": 1, "device": 0 })).unwrap();
+    let editor_class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
+    let mut found = false;
+    let mut after = std::ptr::null_mut();
+    loop {
+        // SAFETY: a class name that outlives the call; the previous window found, or none.
+        let window = unsafe { FindWindowExW(std::ptr::null_mut(), after, editor_class.as_ptr(), std::ptr::null()) };
+        if window.is_null() {
+            break;
+        }
+        // SAFETY: a window just found.
+        found |= unsafe { GetWindow(window, GW_OWNER) } as usize == owner;
+        after = window;
+    }
+    assert!(found, "no editor window owned by the engine's window");
+    session.execute("device.closeEditor", &json!({ "track": 1, "device": 0 })).unwrap();
+    // SAFETY: a message without pointers to the owner's thread.
+    unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
+    owner_thread.join().unwrap();
+}

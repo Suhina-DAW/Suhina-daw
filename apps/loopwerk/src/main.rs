@@ -109,6 +109,7 @@ fn main() -> ExitCode {
         options,
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
+            window.app.set_editor_owner(native_window(cc));
             window.app.set_settings(&cc.egui_ctx, settings);
             let folder = window.themes.folder_text();
             window.app.set_themes(&cc.egui_ctx, theme_list, folder);
@@ -323,6 +324,22 @@ fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>,
             (session, Vec::new(), Some(device))
         }
         Err(e) => (session, vec![format!("no audio output: {e}")], None),
+    }
+}
+
+/// The main window's native handle, for plug-in editors to float above it (ADR 0006): a Win32
+/// `HWND` or an X11 window id; `None` elsewhere (Wayland, macOS: their editors float on their
+/// own).
+// An X11 window id is a `c_ulong`: 32 bits on Windows, 64 on Linux, where `u64::from` changes
+// nothing.
+#[allow(clippy::useless_conversion)]
+fn native_window(cc: &eframe::CreationContext<'_>) -> Option<u64> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match cc.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => u64::try_from(handle.hwnd.get()).ok(),
+        RawWindowHandle::Xlib(handle) => Some(u64::from(handle.window)),
+        RawWindowHandle::Xcb(handle) => Some(u64::from(handle.window.get())),
+        _ => None,
     }
 }
 

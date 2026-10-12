@@ -75,7 +75,7 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `track.devices`) says where one stands (`loading`, `running`, `missing`, `crashed`, `failed`,
   or `stopped` while the project does not play) with the plug-in found, its latency and whether
   its editor is open. `device.openEditor` and `device.closeEditor` open its editor in a window
-  of its own on the user's screen, and `device.restart` starts a crashed one again with its
+  on the user's screen (above Loopwerk's window when the desktop app runs it), and `device.restart` starts a crashed one again with its
   last settings. Renders run the installed plug-ins with their saved settings; their result's
   `plugins` lists those that are missing or did not start.
 

@@ -256,6 +256,8 @@ pub struct Rack {
     next_generation: u64,
     checked: Instant,
     saved: Instant,
+    /// The window editors open over (owned by it), when the session runs in one.
+    owner: Option<u64>,
 }
 
 impl Default for Rack {
@@ -271,6 +273,7 @@ impl Default for Rack {
             next_generation: 0,
             checked: Instant::now(),
             saved: Instant::now(),
+            owner: None,
         }
     }
 }
@@ -534,9 +537,16 @@ impl Rack {
         spawned.map(|_| ()).map_err(|e| CommandError(format!("could not restart the plug-in: {e}")))
     }
 
-    /// Opens the editor of the plug-in device `key`; returns the size of its inside.
+    /// The window editors open over from now on: a Win32 `HWND` or an X11 window id.
+    pub fn set_owner(&mut self, owner: Option<u64>) {
+        self.owner = owner;
+    }
+
+    /// Opens the editor of the plug-in device `key`, over the owner window when there is one;
+    /// returns the size of its inside.
     pub fn open_editor(&mut self, key: u64) -> Result<(u32, u32), CommandError> {
-        self.running(key)?.open_editor().map_err(|e| CommandError(e.to_string()))
+        let owner = self.owner;
+        self.running(key)?.open_editor_owned(owner).map_err(|e| CommandError(e.to_string()))
     }
 
     pub fn close_editor(&mut self, key: u64) -> Result<(), CommandError> {

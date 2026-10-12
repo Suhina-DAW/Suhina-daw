@@ -2161,6 +2161,7 @@ dependencies = [
  "loopwerk-output",
  "loopwerk-session",
  "loopwerk-ui",
+ "raw-window-handle",
  "zip",
 ]
 
