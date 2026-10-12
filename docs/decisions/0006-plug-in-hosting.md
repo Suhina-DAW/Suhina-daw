@@ -165,11 +165,12 @@ workspace forbids.
    `Plugin Compatibility Class`, which the scanner asks through `IPluginCompatibility`); a VST3
    whose class id is derived from the VST2 id by the SDK's convention (`VST`, the 4-byte id, the
    first nine bytes of the name in lower case; the name part is not compared, as a project keeps
-   the name its host showed); the same name once build words (`x64`, `64bit`) and a leading
-   vendor name are set aside, or the name without its number when the installed plug-in's
-   version starts with that number (`Nexus 5` is reFX's VST3 `Nexus` 5.2.17, whose class id
-   follows no convention); and last the nearest newer version of the same name (`Serum` →
-   `Serum 2`, `Pro-Q 2` → `Pro-Q 3`). Only the first three promise that the state carries over;
+   the name its host showed); the same name once build words (`x64`, `64bit`, `.64`) and a
+   leading vendor name are set aside, or the name without its number when the installed
+   plug-in's version starts with that number (`Nexus 5` finds a VST3 named `Nexus` whose
+   version is 5.x and whose class id follows no convention); and last the nearest newer version
+   of the same name (`Serum` → `Serum 2`, `Pro-Q 2` → `Pro-Q 3`, and with the number inside
+   the name, `Ozone 8 Imager` → `Ozone 11 Imager`). Only the first three promise that the state carries over;
    for the last two the state is handed over and the plug-in decides, and the result says
    which (`keeps_state`). Vendors declare their own older builds rather than older products:
    the Pro-Q 3 module declares the VST2 builds of Pro-Q 3, not Pro-Q 2, which is why the name
