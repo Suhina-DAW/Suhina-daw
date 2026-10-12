@@ -4,7 +4,8 @@
 //! the host's whole VST3 path except opening a file. A compatibility class says it replaces
 //! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"), and the component reads that plug-in's
 //! saved state as a standard VST2 bank too: a chunk bank whose chunk is the gain. The controller
-//! keeps whatever state it is given. Modelled on the `vst3` crate's gain
+//! keeps whatever state it is given, and has one parameter, the gain (id 0), which the
+//! processor follows when a block brings a change. Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -20,6 +21,8 @@ pub(crate) const LATENCY: u32 = 32;
 
 const PROCESSOR_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x47616931);
 const CONTROLLER_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x43746C31);
+/// The id of its one parameter, the gain.
+const GAIN_PARAMETER: u32 = 0;
 const COMPATIBILITY_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x436D7031);
 /// The class id of the VST2 plug-in the test plug-in says it replaces: `Gain` named "Gain".
 pub(crate) const REPLACES: &str = "5653544761696E6761696E0000000000";
@@ -161,6 +164,24 @@ impl IAudioProcessorTrait for Processor {
         if data.numInputs < 1 || data.numOutputs < 1 {
             return kResultOk;
         }
+        // SAFETY: the host's parameter changes, or null, for the call.
+        if let Some(changes) = unsafe { ComRef::from_raw(data.inputParameterChanges) } {
+            // SAFETY: a live list for the call.
+            for index in 0..unsafe { changes.getParameterCount() } {
+                // SAFETY: as above; the index is below its count.
+                let raw = unsafe { changes.getParameterData(index) };
+                // SAFETY: a queue the list holds for the call, or null.
+                let Some(queue) = (unsafe { ComRef::from_raw(raw) }) else { continue };
+                // SAFETY: a live queue.
+                let (id, points) = (unsafe { queue.getParameterId() }, unsafe { queue.getPointCount() });
+                let (mut offset, mut value) = (0, 0.0);
+                // SAFETY: a live queue and two values to fill.
+                let read = unsafe { queue.getPoint(points - 1, &mut offset, &mut value) };
+                if id == GAIN_PARAMETER && read == kResultOk {
+                    self.gain.store((value as f32).to_bits(), Ordering::Relaxed);
+                }
+            }
+        }
         let gain = f32::from_bits(self.gain.load(Ordering::Relaxed));
         let frames = usize::try_from(data.numSamples).unwrap_or(0);
         // SAFETY: the host gives at least one input bus.
@@ -205,6 +226,8 @@ fn read_all(stream: &ComRef<'_, IBStream>) -> Vec<u8> {
 #[derive(Default)]
 struct Controller {
     state: std::sync::Mutex<Vec<u8>>,
+    /// What it shows for the gain parameter, as `f64` bits.
+    gain: std::sync::atomic::AtomicU64,
 }
 
 impl Class for Controller {
@@ -245,11 +268,22 @@ impl IEditControllerTrait for Controller {
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
-        0
+        1
     }
 
-    unsafe fn getParameterInfo(&self, _index: i32, _info: *mut ParameterInfo) -> tresult {
-        kInvalidArgument
+    unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
+        // SAFETY: the host passes a struct to fill.
+        let Some(info) = (unsafe { info.as_mut() }) else { return kInvalidArgument };
+        if index != 0 {
+            return kInvalidArgument;
+        }
+        info.id = GAIN_PARAMETER;
+        info.defaultNormalizedValue = 0.5;
+        info.flags = ParameterInfo_::ParameterFlags_::kCanAutomate as int32;
+        for (slot, unit) in info.title.iter_mut().zip("Gain".encode_utf16().chain(std::iter::once(0))) {
+            *slot = unit as TChar;
+        }
+        kResultOk
     }
 
     unsafe fn getParamStringByValue(&self, _id: u32, _value: f64, _string: *mut String128) -> tresult {
@@ -268,11 +302,15 @@ impl IEditControllerTrait for Controller {
         value
     }
 
-    unsafe fn getParamNormalized(&self, _id: u32) -> f64 {
-        0.0
+    unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if id == GAIN_PARAMETER { f64::from_bits(self.gain.load(Ordering::Relaxed)) } else { 0.0 }
     }
 
-    unsafe fn setParamNormalized(&self, _id: u32, _value: f64) -> tresult {
+    unsafe fn setParamNormalized(&self, id: u32, value: f64) -> tresult {
+        if id != GAIN_PARAMETER {
+            return kInvalidArgument;
+        }
+        self.gain.store(value.to_bits(), Ordering::Relaxed);
         kResultOk
     }
 

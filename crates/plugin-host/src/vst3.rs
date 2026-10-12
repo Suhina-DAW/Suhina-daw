@@ -19,6 +19,8 @@ use std::time::Duration;
 
 use loopwerk_ipc::Served;
 use loopwerk_plugins::scan::PluginInfo;
+
+use crate::vst3_params::{BlockChanges, Pending};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComWrapper, Interface};
@@ -447,6 +449,8 @@ pub(crate) struct Vst3Plugin {
     connections: Option<(ComPtr<IConnectionPoint>, ComPtr<IConnectionPoint>)>,
     controller: Option<ComPtr<IEditController>>,
     separate_controller: bool,
+    /// Parameter values for the processor's next block.
+    pending: Pending,
     component: ComPtr<IComponent>,
     _handler: ComWrapper<ComponentHandler>,
     _host: ComWrapper<HostApplication>,
@@ -499,6 +503,7 @@ impl Vst3Plugin {
             connections: None,
             controller,
             separate_controller,
+            pending: Pending::default(),
             component,
             _handler: handler,
             _host: host,
@@ -528,10 +533,11 @@ impl Vst3Plugin {
         plugin.latency = unsafe { processor.getLatencySamples() };
 
         let stop = plugin.stop.clone();
+        let pending = plugin.pending.clone();
         let audio = AudioSide(processor);
         let thread = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(audio, served, buses, sample_rate, &stop))
+            .spawn(move || serve(audio, served, buses, sample_rate, pending, &stop))
             .map_err(|e| e.to_string())?;
         plugin.audio = Some(thread);
         Ok(plugin)
@@ -630,18 +636,23 @@ impl Vst3Plugin {
 
     /// Hands `data` to the component and mirrors it to the controller, then gives the
     /// controller its own `controller` state, as a project saved it. A VST3 plug-in that stands
-    /// in for a VST2 one reads the VST2 bank here (ADR 0006, decision 8).
+    /// in for a VST2 one reads the VST2 bank here (ADR 0006, decision 8); a bank of programs
+    /// is also set as parameters, since not every plug-in reads one.
     pub(crate) fn set_state(&mut self, data: &[u8], controller_state: Option<&[u8]>) -> Result<(), String> {
         let stream = ComWrapper::new(MemoryStream::new(data.to_vec()));
         let raw = stream.to_com_ptr::<IBStream>().ok_or("stream")?;
         // SAFETY: a live component reading from a live stream.
-        if !ok(unsafe { self.component.setState(raw.as_ptr()) }) {
+        let taken = ok(unsafe { self.component.setState(raw.as_ptr()) });
+        let parameters = loopwerk_plugins::vst2::program_values(data).map_or(0, |values| self.set_parameters(&values));
+        if !taken && parameters == 0 {
             return Err("the plug-in did not take the state".into());
         }
         if let Some(controller) = &self.controller {
-            stream.rewind();
-            // SAFETY: a live controller reading the same stream.
-            let _ = unsafe { controller.setComponentState(raw.as_ptr()) };
+            if taken {
+                stream.rewind();
+                // SAFETY: a live controller reading the same stream.
+                let _ = unsafe { controller.setComponentState(raw.as_ptr()) };
+            }
             if let Some(own) = controller_state.filter(|s| !s.is_empty()) {
                 let own = ComWrapper::new(MemoryStream::new(own.to_vec()));
                 let own_raw = own.to_com_ptr::<IBStream>().ok_or("stream")?;
@@ -651,6 +662,41 @@ impl Vst3Plugin {
             }
         }
         Ok(())
+    }
+
+    /// Sets parameter `i` to `values[i]` (normalized), the numbering a VST3 version keeps from
+    /// its VST2 one: on the controller now, on the processor with its next block. Only when the
+    /// controller has every id from 0 to the last value's, so a plug-in that numbers its
+    /// parameters another way is left alone. Returns how many were set.
+    fn set_parameters(&mut self, values: &[f32]) -> usize {
+        let Some(controller) = &self.controller else { return 0 };
+        // SAFETY: a live controller.
+        let count = unsafe { controller.getParameterCount() }.clamp(0, 1 << 16);
+        let ids: std::collections::HashSet<ParamID> = (0..count)
+            .filter_map(|index| {
+                let mut info: ParameterInfo = blank();
+                // SAFETY: as above; the index is below the count it gave.
+                ok(unsafe { controller.getParameterInfo(index, &mut info) }).then_some(info.id)
+            })
+            .collect();
+        let changes: Option<Vec<(ParamID, ParamValue)>> = values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let id = ParamID::try_from(index).ok().filter(|id| ids.contains(id))?;
+                Some((id, f64::from(*value).clamp(0.0, 1.0)))
+            })
+            .collect();
+        let Some(changes) = changes else { return 0 };
+        for (id, value) in &changes {
+            // SAFETY: as above, for a parameter it listed.
+            let _ = unsafe { controller.setParamNormalized(*id, *value) };
+        }
+        let set = changes.len();
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.extend(changes);
+        }
+        set
     }
 }
 
@@ -683,8 +729,16 @@ impl Drop for Vst3Plugin {
 }
 
 /// The audio thread: serves blocks from the link through the processor until `stop` is set.
-fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), sample_rate: f64, stop: &AtomicBool) {
+fn serve(
+    audio: AudioSide,
+    mut served: Served,
+    buses: (Vec<usize>, Vec<usize>),
+    sample_rate: f64,
+    pending: Pending,
+    stop: &AtomicBool,
+) {
     let processor = audio.0;
+    let mut changes = BlockChanges::new(pending);
     let max_frames = served.max_frames() as usize;
     let link_channels = served.channels() as usize;
     let (in_channels, out_channels) = buses;
@@ -740,7 +794,7 @@ fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), 
                 numOutputs: outputs.len() as int32,
                 inputs: inputs.as_mut_ptr(),
                 outputs: outputs.as_mut_ptr(),
-                inputParameterChanges: std::ptr::null_mut(),
+                inputParameterChanges: changes.take(),
                 outputParameterChanges: std::ptr::null_mut(),
                 inputEvents: std::ptr::null_mut(),
                 outputEvents: std::ptr::null_mut(),
@@ -749,6 +803,7 @@ fn serve(audio: AudioSide, mut served: Served, buses: (Vec<usize>, Vec<usize>), 
             // SAFETY: a live, processing processor on the audio thread; every bus has a buffer
             // per channel of at least `frames` samples, and all of it outlives the call.
             let result = unsafe { processor.process(&mut data) };
+            changes.done();
             context.projectTimeSamples += frames as i64;
             context.continousTimeSamples += frames as i64;
             if !ok(result) {

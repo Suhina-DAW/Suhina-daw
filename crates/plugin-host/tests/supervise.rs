@@ -234,6 +234,38 @@ fn a_vst3_plugin_reads_the_vst2_bank_of_the_plugin_it_replaces() {
 }
 
 #[test]
+fn a_bank_of_programs_is_set_as_parameters() {
+    let (mut plugin, mut audio) = start("test:vst3");
+    // A bank of one program whose first parameter (the gain, id 0) is 0.125; the component
+    // does not read such a bank itself, so the value reaches it as a parameter change.
+    let mut bank = b"CcnK".to_vec();
+    bank.extend_from_slice(&[0; 4]);
+    bank.extend_from_slice(b"FxBk");
+    for word in [2u32, 7, 1, 1, 0] {
+        bank.extend_from_slice(&word.to_be_bytes());
+    }
+    bank.resize(156, 0);
+    bank.extend_from_slice(b"CcnK");
+    bank.extend_from_slice(&(4u32 * 5 + 28 + 4).to_be_bytes());
+    bank.extend_from_slice(b"FxCk");
+    for word in [1u32, 7, 1, 1] {
+        bank.extend_from_slice(&word.to_be_bytes());
+    }
+    bank.extend_from_slice(&[0; 28]);
+    bank.extend_from_slice(&0.125f32.to_be_bytes());
+    plugin.load_state(bank.clone()).unwrap();
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+    // A bank with more parameters than the plug-in has ids for is not set by number.
+    let mut wider = bank.clone();
+    wider.extend_from_slice(&0.5f32.to_be_bytes());
+    let size = 4u32 * 5 + 28 + 8;
+    wider[156 + 4..156 + 8].copy_from_slice(&size.to_be_bytes());
+    wider[156 + 24..156 + 28].copy_from_slice(&2u32.to_be_bytes());
+    assert!(matches!(plugin.load_state(wider), Err(PluginError::Host(_))));
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+}
+
+#[test]
 fn vst3_files_that_are_missing_or_not_plugins_are_errors() {
     let missing = std::env::temp_dir().join("loopwerk-no-such-plugin.vst3");
     let error = Plugin::start(launch(&format!("vst3:{}", missing.display()))).err();

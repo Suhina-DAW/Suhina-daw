@@ -130,9 +130,13 @@ workspace forbids.
    restored after a restart. A plug-in that refuses the state runs with its defaults and the
    caller is told (`offline::render_with_state`, `loopwerk-cli plugin run-device`). Measured on
    a real project: Valhalla VintageVerb and PSP VintageWarmer read their VST2 chunk banks
-   (the output changes with the saved settings); OTT takes a parameter bank (`FxBk`) without
-   applying it, so parameter banks need their values set through the parameters as well; Pro-Q
-   3 refuses Pro-Q 2's state.
+   (the output changes with the saved settings); OTT takes a parameter bank (`FxBk`) in
+   `setState` without applying it. So the host also sets a parameter bank's current program as
+   parameters, value `i` to parameter id `i`, the numbering a VST3 version keeps from its VST2
+   one, but only when the plug-in has every id from 0 to the last value's: on the controller
+   (`setParamNormalized`) and on the processor through the next block's parameter changes
+   (`crates/plugin-host/src/vst3_params.rs`). With that OTT plays with the project's settings.
+   Pro-Q 3 refuses Pro-Q 2's state and runs with its defaults.
 
    In a real project with 14 different VST2 plug-ins, 4 were found by the id
    convention, 1 by name and 3 as newer versions; the other 5 exist on that machine only as
