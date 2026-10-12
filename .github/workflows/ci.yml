@@ -142,10 +142,33 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # Pull requests from forks: every commit must carry a Signed-off-by line (Developer
+  # Certificate of Origin, CONTRIBUTING.md). Branches of this repository are the maintainers'.
+  dco:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=0
+          for commit in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            author=$(git log -1 --format='%an <%ae>' "$commit")
+            if ! git log -1 --format='%B' "$commit" | grep -qiF "Signed-off-by: $author"; then
+              echo "::error::Commit $commit has no 'Signed-off-by: $author' line (git commit -s)."
+              missing=1
+            fi
+          done
+          exit $missing
+
   # The one check main requires. Fails if any job it depends on failed or was cancelled.
   ci:
     if: always()
-    needs: [changes, docs, fmt, check]
+    needs: [changes, docs, fmt, check, dco]
     runs-on: ubuntu-latest
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

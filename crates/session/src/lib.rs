@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 mod commands;
+mod devices;
 mod plugins;
 mod projects;
 
@@ -69,6 +70,24 @@ impl Player {
     pub fn update(&mut self, project: &Project) -> Result<(), CommandError> {
         self.controller.update(project).map_err(CommandError)
     }
+
+    /// Sets one parameter of a device on a track from the next audio block, without building a
+    /// new graph (ADR 0005, amendment).
+    pub fn set_device_param(&mut self, change: ParamEdit) -> Result<(), CommandError> {
+        self.controller.set_device_param(change.track, change.device, change.param, change.value).map_err(CommandError)
+    }
+}
+
+/// An edit that is only a device parameter's new value, which a playing engine can take
+/// without a new graph.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamEdit {
+    pub track: loopwerk_model::TrackId,
+    /// The device's index among the track channel's devices.
+    pub device: usize,
+    /// The parameter's index in the device's info.
+    pub param: usize,
+    pub value: f64,
 }
 
 pub struct Session {
@@ -77,11 +96,13 @@ pub struct Session {
     undo: Vec<Project>,
     redo: Vec<Project>,
     player: Option<Player>,
+    /// Set by an edit command whose only change is one device parameter.
+    pub(crate) param_edit: Option<ParamEdit>,
 }
 
 impl Session {
     pub fn new(project: Project) -> Self {
-        Self { project, source: None, undo: Vec::new(), redo: Vec::new(), player: None }
+        Self { project, source: None, undo: Vec::new(), redo: Vec::new(), player: None, param_edit: None }
     }
 
     /// Connects an audio engine playing this session's project; transport and launcher commands
@@ -155,6 +176,7 @@ impl Session {
                 Ok(value)
             }
             CommandKind::Edit => {
+                self.param_edit = None;
                 let before = self.project.clone();
                 let result = (spec.run)(self, params).and_then(|value| match self.project.validate() {
                     Ok(()) => Ok(value),
@@ -164,7 +186,15 @@ impl Session {
                     Ok(value) => {
                         if self.project != before {
                             self.push_undo(before);
-                            self.update_player()?;
+                            // A parameter change goes to the engine as a message; anything else,
+                            // or a message that cannot be sent, as a new graph.
+                            let sent = match (self.param_edit.take(), self.player.as_mut()) {
+                                (Some(change), Some(player)) => player.set_device_param(change).is_ok(),
+                                _ => false,
+                            };
+                            if !sent {
+                                self.update_player()?;
+                            }
                         }
                         Ok(value)
                     }

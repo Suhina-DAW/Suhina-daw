@@ -7,7 +7,9 @@
 //! does the same. Gains, kills and crossover frequencies are all smoothed, so they can be
 //! turned and automated while playing. The high frequency never goes below the low one.
 
-use loopwerk_device_api::{Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Scale, Unit, check_sample_rate};
+use loopwerk_device_api::{
+    Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
+};
 use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
 use loopwerk_dsp::{LinkwitzRiley, Slope, Smoother};
 
@@ -53,7 +55,7 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::choice("slope", "Slope", &["24 dB/oct", "48 dB/oct"], 0),
 ];
 
-pub const INFO: DeviceInfo = DeviceInfo { id: "dj-eq", name: "DJ EQ", params: &PARAMS };
+pub const INFO: DeviceInfo = DeviceInfo { id: "dj-eq", name: "DJ EQ", role: Role::Effect, params: &PARAMS };
 
 const DEFAULT_SAMPLE_RATE: f64 = 48_000.0;
 

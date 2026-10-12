@@ -10,7 +10,9 @@
 //! inversion). The gain goes through a 2 ms one-pole filter, so square and random shapes and
 //! jumps in phase do not click.
 
-use loopwerk_device_api::{Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Scale, Unit, check_sample_rate};
+use loopwerk_device_api::{
+    Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
+};
 use loopwerk_dsp::lfo::{Shape, wave};
 use loopwerk_dsp::{OnePole, Smoother};
 
@@ -79,7 +81,7 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::toggle("invert", "Invert", false),
 ];
 
-pub const INFO: DeviceInfo = DeviceInfo { id: "auto-pan", name: "Auto Pan", params: &PARAMS };
+pub const INFO: DeviceInfo = DeviceInfo { id: "auto-pan", name: "Auto Pan", role: Role::Effect, params: &PARAMS };
 
 const DEFAULT_SAMPLE_RATE: f64 = 48_000.0;
 /// Tempo used when the host gives none that makes sense.

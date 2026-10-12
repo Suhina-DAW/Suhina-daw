@@ -8,7 +8,9 @@
 //! dry signal is delayed to line up with the oversampled path: the device always reports
 //! [`LATENCY`] frames, and with the mix at 0 the output is the input delayed exactly.
 
-use loopwerk_device_api::{Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Scale, Unit, check_sample_rate};
+use loopwerk_device_api::{
+    Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
+};
 use loopwerk_dsp::biquad::BUTTERWORTH_Q;
 use loopwerk_dsp::gain::db_to_gain;
 use loopwerk_dsp::shape::Curve;
@@ -59,7 +61,7 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::continuous("output", "Output", (-24.0, 12.0), 0.0, Unit::Decibels, Scale::Linear),
 ];
 
-pub const INFO: DeviceInfo = DeviceInfo { id: "overdrive", name: "Overdrive", params: &PARAMS };
+pub const INFO: DeviceInfo = DeviceInfo { id: "overdrive", name: "Overdrive", role: Role::Effect, params: &PARAMS };
 
 const DEFAULT_SAMPLE_RATE: f64 = 48_000.0;
 const DELAY: usize = LATENCY as usize;

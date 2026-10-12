@@ -211,6 +211,11 @@ impl AheadReader {
         Self { readers, shared, inline: Some(worker) }
     }
 
+    /// Whether there are no stretched clips to read.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.readers.is_empty()
+    }
+
     /// Hands the worker to a thread of its own, with every ring already full. `None` once taken.
     pub(crate) fn take_worker(&mut self) -> Option<StretchWorker> {
         let mut worker = self.inline.take()?;

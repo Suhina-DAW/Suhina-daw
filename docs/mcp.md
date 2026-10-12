@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands
+read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands
 type: system
 status: current
 last_verified: 2026-10-12
@@ -32,11 +32,19 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
   `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
-  `project_render` work either way. Edits and undo/redo are heard by the playing engine about
-  0.15 s after the command returns, with launched clips playing on
+  `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
+  next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
+  launched clips playing on
   ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
+
+- **Devices.** `devices.list` lists the built-in devices with every parameter (id, range,
+  default, unit, options); `track.devices` lists a track's devices with their values;
+  `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
+  `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
+  An instrument (`fm-synth`) goes first and plays the track's notes; effects follow. Renders and
+  the playing engine run the chains.
 
 - **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)
   find and list installed plug-ins; a scan loads each new or changed plug-in file in a process

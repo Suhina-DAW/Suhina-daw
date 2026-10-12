@@ -288,3 +288,37 @@ fn the_metronome_is_a_transport_command() {
     assert!(peaks.iter().all(|p| (0.2..0.26).contains(p)), "{peaks:?}");
     assert!(run(&mut session, "transport.setMetronome", json!({ "on": true, "db": 7 })).is_err());
 }
+
+#[test]
+fn devices_added_while_playing_are_heard() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "clip.launch", json!({ "track": "Drums", "scene": 1 })).unwrap();
+    let sine = beat_peaks(&mut renderer, 2)[1];
+    assert!(sine > 0.05);
+
+    // The FM synth plays the track's notes instead of the sine voices; its own volume proves
+    // it is the synth that sounds.
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "fm-synth" })).unwrap();
+    let full = beat_peaks(&mut renderer, 2)[1];
+    assert!(full > 0.05, "{full}");
+    run(&mut session, "device.setParam", json!({ "track": "Drums", "device": 0, "param": "volume", "value": -6.0206 }))
+        .unwrap();
+    let synth = beat_peaks(&mut renderer, 2)[1];
+    assert!((synth / full - 0.5).abs() < 0.02, "{full} -> {synth}");
+
+    // An effect after it, then its gain: a quarter of the level. The renderer takes one new
+    // graph per block (ADR 0005) and these blocks are a beat long, so the second edit is heard
+    // a beat after the first.
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "utility" })).unwrap();
+    run(&mut session, "device.setParam", json!({ "track": "Drums", "device": 1, "param": "gain", "value": -12 }))
+        .unwrap();
+    let quieter = beat_peaks(&mut renderer, 3)[2];
+    assert!((quieter / synth - 0.25).abs() < 0.02, "{synth} -> {quieter}");
+
+    // Undo four times: the sine voices again, once the four graphs have been taken.
+    for _ in 0..4 {
+        run(&mut session, "edit.undo", json!({})).unwrap();
+    }
+    let back = beat_peaks(&mut renderer, 5)[4];
+    assert!((back / sine - 1.0).abs() < 0.01, "{sine} -> {back}");
+}
