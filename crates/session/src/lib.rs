@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 mod commands;
+mod plugins;
 mod projects;
 
 use std::fmt;
@@ -13,6 +14,7 @@ use loopwerk_model::Project;
 use serde_json::Value;
 
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
+pub use plugins::plugin_commands;
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 
 /// Undo steps kept per session; the oldest are dropped first.
@@ -144,7 +146,9 @@ impl Session {
             return Err(format!("{id}: unknown parameter {unknown:?}; expected {known:?}").into());
         }
         match spec.kind {
-            CommandKind::Read | CommandKind::Transport | CommandKind::Projects => (spec.run)(self, params),
+            CommandKind::Read | CommandKind::Transport | CommandKind::Projects | CommandKind::Plugins => {
+                (spec.run)(self, params)
+            }
             CommandKind::History => {
                 let value = (spec.run)(self, params)?;
                 self.update_player()?;

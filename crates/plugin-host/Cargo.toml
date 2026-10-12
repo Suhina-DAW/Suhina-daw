@@ -1,0 +1,39 @@
+[package]
+name = "loopwerk-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loopwerk-plugin-host"
+path = "src/main.rs"
+
+[dependencies]
+loopwerk-ipc.workspace = true
+loopwerk-plugins.workspace = true
+interprocess = "2.4"  # 0BSD OR Apache-2.0
+clack-host = { version = "0.2", features = ["clack-plugin"] }  # MIT OR Apache-2.0
+# The test plug-in built into the host (`test:clap`).
+clack-plugin = "0.2"  # MIT OR Apache-2.0
+clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "latency", "log", "state"] }  # MIT OR Apache-2.0
+vst3 = "0.3"  # MIT OR Apache-2.0; bindings generated from the VST 3 SDK (MIT)
+libloading = "0.8"  # ISC
+
+# The workspace lints, except that this crate may use `unsafe` to load plug-ins (ADR 0006). It
+# cannot inherit them with `workspace = true` and change one, so they are repeated here; keep
+# them in step.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"

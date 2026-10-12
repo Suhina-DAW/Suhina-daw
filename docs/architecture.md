@@ -66,6 +66,9 @@ The engine does not run them yet (see *Planned parts*).
 | `loopwerk` | The desktop app: opens a project (argument or a dropped `.als`), decodes its audio, plays it stopped through `output` and runs `ui` in an eframe window. | session, media, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
+| `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region, one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Not used by the engine yet. | nothing |
+| `plugins` | The engine's side of plug-in hosting: `Plugin::start` launches a `loopwerk-plugin-host` process and returns a control half (health, ping, state, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. `scan` and `scan_pool` find installed CLAP and VST3 plug-ins (standard folders, `CLAP_PATH`, folders the user adds), read VST3 bundles' `moduleinfo.json` without loading them and load the rest in a few long-lived `--scan-worker` processes with per-file timeouts, into a catalog that can be saved. `offline::render` runs audio through a plug-in without a deadline (`loopwerk-cli plugin run`). Not used by the engine yet. | ipc |
+| `plugin-host` | The `loopwerk-plugin-host` executable: answers control messages and serves plug-ins' main-thread callbacks on its main thread, and audio blocks on a thread of its own. Loads CLAP plug-ins (`clap:<file>[#<id>]`, through `clack-host`) and VST3 plug-ins (`vst3:<bundle>[#<class id>]`, through the `vst3` bindings), stereo in and out, with state and latency, and test plug-ins (`test:clap`, `test:vst3`, `test:gain`, `test:crash-after:<n>`, `test:hang-after:<n>`). `--scan <file>` and `--scan-worker` describe plug-in files for the scanner. The second crate allowed `unsafe`: opening plug-in files and the VST3 COM calls, each block documented. | ipc, plugins, clack |
 | `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono (with listening to the low band alone), phase inversion, channel selection, DC filter, mute. | dsp, device-api |
 | `devices/auto-pan` | The auto-pan device: an LFO (six shapes, shaping, inversion) that pans or, with no stereo phase, does tremolo; free in hertz or synced to the song position. | dsp, device-api |
 | `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
@@ -108,6 +111,7 @@ The engine does not run them yet (see *Planned parts*).
 | Stretch worker | One thread, owned by the `Controller`, running a `StretchWorker` per graph: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). A new graph's worker joins it, an old one leaves once its graph is freed. | only when a graph's worker joins; never locks |
 | Audio owner | In the desktop app and over MCP, one thread per open project holds the output stream (`output::open_player`) and closes it when the session drops its `Player`. | yes, but does nothing while playing |
 | Decode workers | Scoped threads in `media` while a project loads. | yes |
+| Plug-in host processes | Not threads of Loopwerk's process: one `loopwerk-plugin-host` process per plug-in (ADR 0006), with a control thread and an audio thread of its own. Started by `plugins`; not used by the engine yet. | the host's own business; a crash or hang there costs Loopwerk missed blocks only |
 
 The main thread and the audio thread share nothing mutable. They talk in two directions:
 
@@ -135,6 +139,7 @@ project directly.
 | History | Undo and redo. | moves between snapshots |
 | Transport | Sends a `LaunchCommand` to the attached `Player`; fails if no engine is playing. | none |
 | Projects | Lists, switches and closes open projects (`Projects`); only the active one keeps its `Player`. | none |
+| Plugins | Scans for installed plug-ins, lists them, and chooses the folders scans look in (`plugins.*`, on the `Library` that `Projects` holds; ADR 0006). | none |
 
 **Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
 History command changes the project, the session calls `Player::update`. The controller builds a
@@ -171,9 +176,11 @@ queued clips.
   commands and automation ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
   The devices themselves (`dsp`, `device-api`, `devices/*`) exist and are tested on their own.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
-  (AGENTS.md rule 5). The engine talks to them over shared-memory audio buffers with a per-block
-  deadline; plug-in state and parameters go over messages. A crashing plug-in is reported and
-  restarted without losing the project. An ADR comes first (M6).
+  (AGENTS.md rule 5), as [ADR 0006](decisions/0006-plug-in-hosting.md) decides: a
+  `loopwerk-plugin-host` executable per plug-in binary, shared-memory audio and events with a
+  per-block deadline through the `ipc` crate (which exists: blocks, deadline, crash and hang
+  tests), state and control over messages, crashed or hung plug-ins restarted from their last
+  state. `ipc` and `plugin-host` are the only crates allowed `unsafe` (M6).
 - **UI:** the browser, the detail area (device chain, clip editor), the
   menu bar and settings, meters, and the commands they need (solo, arm, sends); the monospace
   font the design brief asks for (M8).

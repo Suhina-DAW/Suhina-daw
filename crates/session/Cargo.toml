@@ -10,6 +10,7 @@ rust-version.workspace = true
 loopwerk-model.workspace = true
 loopwerk-engine.workspace = true
 loopwerk-als.workspace = true
+loopwerk-plugins.workspace = true
 serde_json.workspace = true
 
 [lints]

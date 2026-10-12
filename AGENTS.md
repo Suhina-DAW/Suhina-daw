@@ -19,7 +19,10 @@ that describe them (*Code and its documents*). Read only the documents that matc
 2. **Never crash.** Non-test code never panics: no `unwrap()`, `expect()`, `panic!`,
    `unreachable!`, `todo!` or `unimplemented!`. Return the crate's error type. Input-derived
    numbers are hostile: use `get()` and `checked_*`, cap allocations sized by input. No `unsafe`
-   (`unsafe_code = "forbid"` workspace-wide).
+   (`unsafe_code = "forbid"` workspace-wide), except in the two crates plug-in hosting needs,
+   `crates/ipc` and `crates/plugin-host` ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)):
+   there every `unsafe` block is small, tested and explained in a `// SAFETY:` comment, and the
+   crate offers a safe API.
 3. **Real-time safety.** Code reachable from the audio callback never allocates, frees, locks,
    blocks, logs or does I/O. Hand data to it through lock-free queues (`rtrb`) and swap whole
    graphs atomically.
@@ -31,7 +34,7 @@ that describe them (*Code and its documents*). Read only the documents that matc
    intact, and can restart it. Design the plug-in host boundary as IPC from the first line of
    plug-in code (shared-memory audio buffers, per-block sync with a deadline, plug-in state and
    parameters over messages); never add an in-process shortcut that the rest of the engine
-   comes to depend on.
+   comes to depend on. The design is [ADR 0006](docs/decisions/0006-plug-in-hosting.md).
 6. **Everything is a command.** User-visible behaviour is a command in the engine with an id,
    params and tests. The UI, CLI and MCP all dispatch the same commands.
 7. **Tests are the gate.** Every change comes with tests: round-trip and malformed-input tests for
@@ -63,6 +66,9 @@ crates/
   ui       L3 the main window and views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
+  ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)
+  plugins  L1 the engine's side of plug-in hosting: start a host process, control protocol, health, state, restart; scanning; offline runs
+  plugin-host  the loopwerk-plugin-host executable plug-ins run in (ADR 0006; may use unsafe): CLAP, VST3, test plug-ins
 devices/
   utility  gain, balance, width, mono, bass mono, phase, channels, DC filter; depends on dsp, device-api
   auto-pan LFO panning and tremolo, free in Hz or synced to the song position

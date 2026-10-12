@@ -63,6 +63,14 @@ With several projects open ([ADR 0007](0007-several-open-projects.md)), a fifth 
 is generic over what a command runs on, so both kinds share one shape, one parameter schema and
 one `commands.list`.
 
+## Amendment: plug-in commands (2026-10-12)
+
+A sixth kind, **plugins**, scans for installed plug-ins and chooses the folders scans look in
+(`plugins.*`, [ADR 0006](0006-plug-in-hosting.md)). The plug-in library belongs to Loopwerk,
+not to a project, so these also run on `Projects`, never change a project and record no undo
+step. Agents over MCP may scan and list but not add or remove folders: a folder decides whose
+code a scan runs.
+
 ## Consequences
 
 - New behaviour starts as a command with tests, then gets a UI. The UI never edits the model
