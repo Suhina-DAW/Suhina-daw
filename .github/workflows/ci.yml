@@ -105,9 +105,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install ALSA headers (cpal)
+      - name: Install ALSA headers (cpal) and an X server for plug-in editors (Xvfb)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev xvfb
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -115,7 +115,11 @@ jobs:
       # The corpus tests need Live Sets that are not in the repository, so the `corpus` feature
       # stays off here.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # On Linux under a virtual X server, so the plug-in editor tests open real windows.
       - run: cargo test --workspace
+        if: runner.os != 'Linux'
+      - run: xvfb-run -a cargo test --workspace
+        if: runner.os == 'Linux'
 
   # Not part of `ci`: a macOS failure is reported but does not block merging. Only when started by
   # hand with "all platforms".

@@ -188,8 +188,14 @@ workspace forbids.
     its messages in the main loop between control messages, and tells the engine unasked when
     the user closes it (`editor_closed`, protocol version 4). Until Loopwerk has a window of its
     own, the editor's window is a top-level one rather than embedded in Loopwerk's. Checked with
-    Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand. X11 and
-    the floating cases come later.
+    Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand.
+    *Built on Linux (X11):* the host's window comes from `x11rb`, the plug-in's view is embedded
+    by window id (VST3 `X11EmbedWindowID`, CLAP `x11`), and the host serves the plug-in's own
+    event loop from its main loop (`crates/plugin-host/src/run_loop.rs`): VST3's `IRunLoop` on
+    the editor's frame and CLAP's `posix-fd-support` give it the descriptors it waits on (polled
+    without waiting each turn) and timers; CLAP's `timer-support` serves timers on every system.
+    Tested in CI under Xvfb with the VST3 test plug-in; no real Linux plug-in has been tried yet.
+    Wayland and macOS (floating) come later.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple
     silicon, Windows plug-ins on Linux through Wine.
 12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which
@@ -225,7 +231,7 @@ workspace forbids.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
-  engine's track chain together with built-in devices (LOOP-35); editors (Windows done).
+  engine's track chain together with built-in devices (LOOP-35); editors (Windows and X11 done).
 
 ## Sources
 

@@ -5,7 +5,9 @@
 //! audio thread, which serves blocks from the link. Audio is one output port with as many
 //! channels as the link carries, and one input port like it unless the plug-in has no audio
 //! input (an instrument). Notes go to note port 0 as note events; controllers and pitch bend as
-//! MIDI events. Parameters are read on the main thread; a value set goes to the audio thread
+//! MIDI events. The host serves the plug-in's timers on every system and, on Unix, the
+//! descriptors it waits on (`timer-support`, `posix-fd-support`; [`crate::run_loop`]), from its
+//! main loop. Parameters are read on the main thread; a value set goes to the audio thread
 //! and reaches the plug-in as a parameter event at the start of the next block.
 //!
 //! A plug-in is named `clap:<file>` (the first plug-in in the file) or `clap:<file>#<id>`, or
@@ -23,7 +25,10 @@ use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, Host
 use clack_extensions::latency::{HostLatency, HostLatencyImpl, PluginLatency};
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
+#[cfg(unix)]
+use clack_extensions::posix_fd::{FdFlags, HostPosixFd, HostPosixFdImpl, PluginPosixFd};
 use clack_extensions::state::{HostState, HostStateImpl, PluginState};
+use clack_extensions::timer::{HostTimer, HostTimerImpl, PluginTimer, TimerId};
 use clack_host::events::Match;
 use clack_host::events::event_types::{MidiEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
 use clack_host::prelude::*;
@@ -42,6 +47,9 @@ pub(crate) struct Shared {
     state: OnceLock<Option<PluginState>>,
     latency: OnceLock<Option<PluginLatency>>,
     audio_ports: OnceLock<Option<PluginAudioPorts>>,
+    timer: OnceLock<Option<PluginTimer>>,
+    #[cfg(unix)]
+    posix_fd: OnceLock<Option<PluginPosixFd>>,
     params: OnceLock<Option<PluginParams>>,
     gui: OnceLock<Option<PluginGui>>,
     /// A size the plug-in asked its editor's window to have (from any thread).
@@ -97,6 +105,9 @@ impl<'a> SharedHandler<'a> for Shared {
         let _ = self.state.set(instance.get_extension());
         let _ = self.latency.set(instance.get_extension());
         let _ = self.audio_ports.set(instance.get_extension());
+        let _ = self.timer.set(instance.get_extension());
+        #[cfg(unix)]
+        let _ = self.posix_fd.set(instance.get_extension());
         let _ = self.params.set(instance.get_extension());
         let _ = self.gui.set(instance.get_extension());
     }
@@ -116,7 +127,68 @@ impl HostLogImpl for Shared {
     }
 }
 
-pub(crate) struct MainThread;
+/// The plug-in's timers and (on Unix) the descriptors it waits on, served from the main loop.
+pub(crate) struct MainThread {
+    timers: std::cell::RefCell<crate::run_loop::Timers<u32>>,
+    next_timer: std::cell::Cell<u32>,
+    #[cfg(unix)]
+    fds: std::cell::RefCell<Vec<(i32, FdFlags)>>,
+}
+
+impl MainThread {
+    fn new() -> Self {
+        Self {
+            timers: std::cell::RefCell::new(crate::run_loop::Timers::new()),
+            next_timer: std::cell::Cell::new(0),
+            #[cfg(unix)]
+            fds: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl HostTimerImpl for MainThread {
+    fn register_timer(&self, period_ms: u32) -> Result<TimerId, HostError> {
+        let id = self.next_timer.get();
+        self.next_timer.set(id.wrapping_add(1));
+        let added = self
+            .timers
+            .try_borrow_mut()
+            .is_ok_and(|mut t| t.add(id, std::time::Duration::from_millis(u64::from(period_ms))));
+        if added { Ok(TimerId(id)) } else { Err(HostError::Message("too many timers")) }
+    }
+
+    fn unregister_timer(&self, timer_id: TimerId) -> Result<(), HostError> {
+        let mut timers = self.timers.try_borrow_mut().map_err(|_| HostError::Message("busy"))?;
+        timers.remove(|id| *id == timer_id.0);
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl HostPosixFdImpl for MainThread {
+    fn register_fd(&self, fd: i32, flags: FdFlags) -> Result<(), HostError> {
+        let mut fds = self.fds.try_borrow_mut().map_err(|_| HostError::Message("busy"))?;
+        if fds.len() >= 64 {
+            return Err(HostError::Message("too many descriptors"));
+        }
+        fds.retain(|(kept, _)| *kept != fd);
+        fds.push((fd, flags));
+        Ok(())
+    }
+
+    fn modify_fd(&self, fd: i32, flags: FdFlags) -> Result<(), HostError> {
+        let mut fds = self.fds.try_borrow_mut().map_err(|_| HostError::Message("busy"))?;
+        let slot = fds.iter_mut().find(|(kept, _)| *kept == fd).ok_or(HostError::Message("not registered"))?;
+        slot.1 = flags;
+        Ok(())
+    }
+
+    fn unregister_fd(&self, fd: i32) -> Result<(), HostError> {
+        let mut fds = self.fds.try_borrow_mut().map_err(|_| HostError::Message("busy"))?;
+        fds.retain(|(kept, _)| *kept != fd);
+        Ok(())
+    }
+}
 
 impl MainThreadHandler<'_> for MainThread {}
 
@@ -134,7 +206,14 @@ impl HostHandlers for Host {
     type AudioProcessor<'a> = ();
 
     fn declare_extensions(builder: &mut HostExtensions<Self>, _shared: &Self::Shared<'_>) {
-        builder.register::<HostLog>().register::<HostState>().register::<HostLatency>().register::<HostGui>();
+        builder
+            .register::<HostLog>()
+            .register::<HostState>()
+            .register::<HostLatency>()
+            .register::<HostGui>()
+            .register::<HostTimer>();
+        #[cfg(unix)]
+        builder.register::<HostPosixFd>();
     }
 }
 
@@ -210,14 +289,17 @@ impl ClapPlugin {
             state: OnceLock::new(),
             latency: OnceLock::new(),
             audio_ports: OnceLock::new(),
+            timer: OnceLock::new(),
+            #[cfg(unix)]
+            posix_fd: OnceLock::new(),
             params: OnceLock::new(),
             gui: OnceLock::new(),
             gui_resize: Mutex::new(None),
             gui_closed: AtomicBool::new(false),
             gui_destroyed: AtomicBool::new(false),
         };
-        let mut instance =
-            PluginInstance::<Host>::new(shared, |_| MainThread, &entry, &id, &info).map_err(|e| e.to_string())?;
+        let mut instance = PluginInstance::<Host>::new(shared, |_| MainThread::new(), &entry, &id, &info)
+            .map_err(|e| e.to_string())?;
 
         let max_frames = served.max_frames();
         let configuration = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: max_frames };
@@ -253,6 +335,32 @@ impl ClapPlugin {
     pub(crate) fn tick(&mut self) {
         if self.instance.access_shared_handler(|s| s.callback_requested.swap(false, Ordering::AcqRel)) {
             self.instance.call_on_main_thread_callback();
+        }
+        self.run_loop();
+    }
+
+    /// Calls the plug-in back for the timers that are due and (on Unix) the descriptors that
+    /// are ready. The lists are copied first: a callback may register or unregister.
+    fn run_loop(&mut self) {
+        let due = self.instance.access_handler(|m| {
+            m.timers.try_borrow_mut().map(|mut t| t.due(std::time::Instant::now())).unwrap_or_default()
+        });
+        if let Some(timer) = self.instance.access_shared_handler(|s| s.timer.get().copied().flatten()) {
+            let handle = self.instance.plugin_handle();
+            for id in due {
+                timer.on_timer(&handle, TimerId(id));
+            }
+        }
+        #[cfg(unix)]
+        {
+            let fds = self.instance.access_handler(|m| m.fds.try_borrow().map(|f| f.clone()).unwrap_or_default());
+            let wanted: Vec<i32> = fds.iter().map(|(fd, _)| *fd).collect();
+            if let Some(posix_fd) = self.instance.access_shared_handler(|s| s.posix_fd.get().copied().flatten()) {
+                let handle = self.instance.plugin_handle();
+                for fd in crate::run_loop::ready(&wanted) {
+                    posix_fd.on_fd(&handle, fd, FdFlags::READ);
+                }
+            }
         }
     }
 
@@ -299,8 +407,7 @@ impl ClapPlugin {
                 return Err(e);
             }
         };
-        // SAFETY: the window stays open until the editor is destroyed in `close_editor`.
-        let parent = unsafe { clack_extensions::gui::Window::from_win32_hwnd(window.handle()) };
+        let parent = parent_window(&window);
         // SAFETY: as above.
         if unsafe { gui.set_parent(&handle, parent) }.is_err() {
             gui.destroy(&handle);
@@ -497,6 +604,19 @@ fn serve(
         });
     }
     processor.stop_processing()
+}
+
+/// The host's window as the parent CLAP's `gui` extension takes on this system.
+#[cfg(windows)]
+fn parent_window(window: &crate::window::Window) -> clack_extensions::gui::Window<'static, 'static> {
+    // SAFETY: the window stays open until the editor is destroyed in `close_editor`.
+    unsafe { clack_extensions::gui::Window::from_win32_hwnd(window.handle()) }
+}
+
+/// The host's window as the parent CLAP's `gui` extension takes on this system: the X11 id.
+#[cfg(not(windows))]
+fn parent_window(window: &crate::window::Window) -> clack_extensions::gui::Window<'static, 'static> {
+    clack_extensions::gui::Window::from_x11_handle(window.handle() as usize as std::ffi::c_ulong)
 }
 
 /// A parameter as the protocol describes it, at `value`.

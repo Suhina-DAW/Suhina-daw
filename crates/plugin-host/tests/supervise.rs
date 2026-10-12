@@ -322,14 +322,42 @@ fn close_editor_window() {
     unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
 }
 
-#[cfg(not(windows))]
+/// Asks the editor's window to close, as the user does with its close button: the window
+/// manager's WM_DELETE_WINDOW message, sent to the window whose class is the editor's.
+#[cfg(target_os = "linux")]
+fn close_editor_window() {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ClientMessageEvent, ConnectionExt, EventMask};
+    let (connection, screen) = x11rb::connect(None).unwrap();
+    let root = connection.setup().roots[screen].root;
+    let atom = |name: &[u8]| connection.intern_atom(false, name).unwrap().reply().unwrap().atom;
+    let (protocols, delete) = (atom(b"WM_PROTOCOLS"), atom(b"WM_DELETE_WINDOW"));
+    let children = connection.query_tree(root).unwrap().reply().unwrap().children;
+    let window = children
+        .into_iter()
+        .find(|w| {
+            let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
+            class.ok().and_then(|c| c.reply().ok()).is_some_and(|c| c.value.starts_with(b"loopwerk-plugin-editor"))
+        })
+        .unwrap_or_else(|| panic!("no editor window"));
+    let message = ClientMessageEvent::new(32, window, protocols, [delete, 0, 0, 0, 0]);
+    connection.send_event(false, window, EventMask::NO_EVENT, message).unwrap();
+    connection.flush().unwrap();
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn close_editor_window() {}
+
+/// Whether editors can open here: on Windows, and on Linux with an X server.
+fn editors_open_here() -> bool {
+    cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
+}
 
 #[test]
 fn an_editor_opens_in_a_window_and_closes() {
     let (mut plugin, mut audio) = start("test:vst3");
     let opened = plugin.open_editor();
-    if cfg!(windows) {
+    if editors_open_here() {
         assert_eq!(opened.unwrap(), (300, 200));
         assert!(plugin.editor_open());
         // Opening it again gives the same editor; audio keeps flowing, with the gain the
@@ -352,7 +380,7 @@ fn an_editor_opens_in_a_window_and_closes() {
     }
     // An edit made in the editor (the test plug-in's turns the gain to 0.125 when it opens)
     // reaches the processor and the saved state.
-    if cfg!(windows) {
+    if editors_open_here() {
         let (mut edited, mut audio) = start("test:vst3");
         edited.open_editor().unwrap();
         assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));

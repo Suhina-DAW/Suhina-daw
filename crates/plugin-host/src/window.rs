@@ -2,8 +2,8 @@
 //! which the plug-in's own view is attached to. One editor is open per host process at most,
 //! so the window's state (asked to close, its size) is kept in statics.
 //!
-//! Windows only for now; elsewhere opening one is an error (X11 embedding comes with Linux
-//! support, ADR 0006).
+//! Windows (Win32) and Linux (X11, through `x11rb`); elsewhere opening one is an error for now
+//! (ADR 0006).
 
 /// The size of a window's inside, in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,7 +202,200 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::cell::RefCell;
+    use std::ffi::c_void;
+
+    use x11rb::connection::Connection;
+    use x11rb::protocol::Event;
+    use x11rb::protocol::xproto::{
+        AtomEnum, ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, WindowClass,
+    };
+    use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
+
+    use super::Size;
+
+    x11rb::atom_manager! {
+        Atoms: AtomsCookie {
+            WM_PROTOCOLS,
+            WM_DELETE_WINDOW,
+            _NET_WM_NAME,
+            UTF8_STRING,
+        }
+    }
+
+    /// The open window: the connection to the X server, the window and what happened to it.
+    struct Open {
+        connection: RustConnection,
+        window: u32,
+        atoms: Atoms,
+        close_requested: bool,
+        size: Size,
+    }
+
+    thread_local! {
+        // The editor's window lives on the host's main thread, like the plug-in's view.
+        static OPEN: RefCell<Option<Open>> = const { RefCell::new(None) };
+    }
+
+    fn failed(what: &str) -> impl Fn(String) -> String + '_ {
+        move |e| format!("could not {what} the editor's window: {e}")
+    }
+
+    pub(crate) struct Window {
+        window: u32,
+    }
+
+    impl Window {
+        /// Opens a window `title` with an inside of `size` on the X server `DISPLAY` names; the
+        /// user may resize it when `resizable` (otherwise its smallest and largest size are
+        /// that size).
+        pub(crate) fn open(title: &str, size: Size, resizable: bool) -> Result<Self, String> {
+            if OPEN.with_borrow(Option::is_some) {
+                return Err("an editor is already open".into());
+            }
+            let connect = failed("open");
+            let (connection, screen) = x11rb::connect(None).map_err(|e| connect(e.to_string()))?;
+            let root = connection.setup().roots.get(screen).ok_or("no X screen")?;
+            let (root_window, depth, background) = (root.root, root.root_depth, root.black_pixel);
+            let atoms = Atoms::new(&connection).map_err(|e| connect(e.to_string()))?;
+            let atoms = atoms.reply().map_err(|e| connect(e.to_string()))?;
+            let window = connection.generate_id().map_err(|e| connect(e.to_string()))?;
+            let width = u16::try_from(size.width).unwrap_or(u16::MAX);
+            let height = u16::try_from(size.height).unwrap_or(u16::MAX);
+            let aux = CreateWindowAux::new().event_mask(EventMask::STRUCTURE_NOTIFY).background_pixel(background);
+            let make = || -> Result<(), String> {
+                let error = |e: x11rb::errors::ConnectionError| connect(e.to_string());
+                connection
+                    .create_window(
+                        depth,
+                        window,
+                        root_window,
+                        0,
+                        0,
+                        width,
+                        height,
+                        0,
+                        WindowClass::INPUT_OUTPUT,
+                        0,
+                        &aux,
+                    )
+                    .map_err(error)?;
+                connection
+                    .change_property8(PropMode::REPLACE, window, AtomEnum::WM_NAME, AtomEnum::STRING, title.as_bytes())
+                    .map_err(error)?;
+                connection
+                    .change_property8(
+                        PropMode::REPLACE,
+                        window,
+                        atoms._NET_WM_NAME,
+                        atoms.UTF8_STRING,
+                        title.as_bytes(),
+                    )
+                    .map_err(error)?;
+                connection
+                    .change_property32(
+                        PropMode::REPLACE,
+                        window,
+                        atoms.WM_PROTOCOLS,
+                        AtomEnum::ATOM,
+                        &[atoms.WM_DELETE_WINDOW],
+                    )
+                    .map_err(error)?;
+                connection
+                    .change_property8(
+                        PropMode::REPLACE,
+                        window,
+                        AtomEnum::WM_CLASS,
+                        AtomEnum::STRING,
+                        b"loopwerk-plugin-editor\0Loopwerk\0",
+                    )
+                    .map_err(error)?;
+                if !resizable {
+                    // WM_NORMAL_HINTS: program-specified minimum and maximum size, both this one.
+                    let (w, h) = (u32::from(width), u32::from(height));
+                    let hints = [0x10 | 0x20, 0, 0, 0, 0, w, h, w, h, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                    connection
+                        .change_property32(
+                            PropMode::REPLACE,
+                            window,
+                            AtomEnum::WM_NORMAL_HINTS,
+                            AtomEnum::WM_SIZE_HINTS,
+                            &hints,
+                        )
+                        .map_err(error)?;
+                }
+                connection.map_window(window).map_err(error)?;
+                connection.flush().map_err(error)?;
+                Ok(())
+            };
+            make()?;
+            OPEN.set(Some(Open { connection, window, atoms, close_requested: false, size }));
+            Ok(Self { window })
+        }
+
+        /// The window's id, as the pointer-sized handle plug-ins take on X11.
+        pub(crate) fn handle(&self) -> *mut c_void {
+            self.window as usize as *mut c_void
+        }
+    }
+
+    impl Drop for Window {
+        fn drop(&mut self) {
+            if let Some(open) = OPEN.take() {
+                let _ = open.connection.destroy_window(open.window);
+                let _ = open.connection.flush();
+            }
+        }
+    }
+
+    /// Resizes the open window so its inside is `size` (a plug-in asked for it).
+    pub(crate) fn resize(size: Size) {
+        OPEN.with_borrow_mut(|open| {
+            let Some(open) = open else { return };
+            let aux = ConfigureWindowAux::new().width(size.width).height(size.height);
+            let _ = open.connection.configure_window(open.window, &aux);
+            let _ = open.connection.flush();
+            open.size = size;
+        });
+    }
+
+    /// Whether the user asked the window to close since the last call.
+    pub(crate) fn take_close_request() -> bool {
+        OPEN.with_borrow_mut(|open| open.as_mut().is_some_and(|o| std::mem::take(&mut o.close_requested)))
+    }
+
+    /// The window's inside size as the X server last reported it.
+    pub(crate) fn client_size() -> Size {
+        OPEN.with_borrow(|open| open.as_ref().map_or(Size { width: 0, height: 0 }, |o| o.size))
+    }
+
+    /// Takes in the events waiting for the window: a close request, a new size. (The plug-in's
+    /// own window is on its own connection and served through its run loop.)
+    pub(crate) fn pump() {
+        OPEN.with_borrow_mut(|open| {
+            let Some(open) = open else { return };
+            while let Ok(Some(event)) = open.connection.poll_for_event() {
+                match event {
+                    Event::ClientMessage(message) => {
+                        let [first, ..] = message.data.as_data32();
+                        if message.window == open.window && first == open.atoms.WM_DELETE_WINDOW {
+                            open.close_requested = true;
+                        }
+                    }
+                    Event::ConfigureNotify(configured) if configured.window == open.window => {
+                        open.size = Size { width: u32::from(configured.width), height: u32::from(configured.height) };
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod imp {
     use std::ffi::c_void;
 

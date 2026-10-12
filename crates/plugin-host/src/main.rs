@@ -11,6 +11,7 @@
 
 mod clap;
 mod processors;
+mod run_loop;
 mod test_clap;
 mod test_vst3;
 mod vst3;
