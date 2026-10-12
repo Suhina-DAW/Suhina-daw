@@ -2,7 +2,9 @@
 //! state (the gain as 4 bytes, little-endian `f32`), a reported latency of [`LATENCY`] frames
 //! and a controller of its own. Its factory is handed to the host directly, so the tests run
 //! the host's whole VST3 path except opening a file. A compatibility class says it replaces
-//! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"). Modelled on the `vst3` crate's gain
+//! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"), and the component reads that plug-in's
+//! saved state as a standard VST2 bank too: a chunk bank whose chunk is the gain. The controller
+//! keeps whatever state it is given. Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -87,12 +89,17 @@ impl IComponentTrait for Processor {
     unsafe fn setState(&self, state: *mut IBStream) -> tresult {
         // SAFETY: the host passes a live stream (or null).
         let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
-        let mut bytes = [0u8; 4];
-        let mut read = 0;
-        // SAFETY: a live stream and a 4-byte buffer.
-        let result = unsafe { stream.read(bytes.as_mut_ptr().cast(), 4, &mut read) };
-        let gain = f32::from_le_bytes(bytes);
-        if result != kResultOk || read != 4 || !gain.is_finite() {
+        let bytes = read_all(&stream);
+        // Its own state is the gain; a VST2 bank holds it as the chunk (after a 160-byte header).
+        let gain = match bytes.as_slice() {
+            [a, b, c, d] => f32::from_le_bytes([*a, *b, *c, *d]),
+            bank if bank.starts_with(b"CcnK") && bank.get(8..12) == Some(b"FBCh") => match bank.get(160..) {
+                Some([a, b, c, d]) => f32::from_le_bytes([*a, *b, *c, *d]),
+                _ => return kResultFalse,
+            },
+            _ => return kResultFalse,
+        };
+        if !gain.is_finite() {
             return kResultFalse;
         }
         self.gain.store(gain.to_bits(), Ordering::Relaxed);
@@ -185,7 +192,20 @@ impl IAudioProcessorTrait for Processor {
     }
 }
 
-struct Controller;
+/// Everything left in `stream`, up to 64 KiB.
+fn read_all(stream: &ComRef<'_, IBStream>) -> Vec<u8> {
+    let mut bytes = vec![0u8; 64 * 1024];
+    let mut read = 0;
+    // SAFETY: a live stream and a buffer of the length given.
+    let result = unsafe { stream.read(bytes.as_mut_ptr().cast(), bytes.len() as i32, &mut read) };
+    bytes.truncate(if result == kResultOk { usize::try_from(read).unwrap_or(0) } else { 0 });
+    bytes
+}
+
+#[derive(Default)]
+struct Controller {
+    state: std::sync::Mutex<Vec<u8>>,
+}
 
 impl Class for Controller {
     type Interfaces = (IEditController,);
@@ -206,12 +226,22 @@ impl IEditControllerTrait for Controller {
         kResultOk
     }
 
-    unsafe fn setState(&self, _state: *mut IBStream) -> tresult {
+    unsafe fn setState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        if let Ok(mut own) = self.state.lock() {
+            *own = read_all(&stream);
+        }
         kResultOk
     }
 
-    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
-        kResultOk
+    unsafe fn getState(&self, state: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream (or null).
+        let Some(stream) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
+        let Ok(own) = self.state.lock() else { return kResultFalse };
+        let mut written = 0;
+        // SAFETY: a live stream and the bytes, which outlive the call.
+        unsafe { stream.write(own.as_ptr() as *mut c_void, own.len() as i32, &mut written) }
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
@@ -316,7 +346,7 @@ impl IPluginFactoryTrait for Factory {
             PROCESSOR_CID => {
                 ComWrapper::new(Processor { gain: Arc::new(AtomicU32::new(0.5f32.to_bits())) }).to_com_ptr::<FUnknown>()
             }
-            CONTROLLER_CID => ComWrapper::new(Controller).to_com_ptr::<FUnknown>(),
+            CONTROLLER_CID => ComWrapper::new(Controller::default()).to_com_ptr::<FUnknown>(),
             COMPATIBILITY_CID => ComWrapper::new(Compatibility).to_com_ptr::<FUnknown>(),
             _ => None,
         };

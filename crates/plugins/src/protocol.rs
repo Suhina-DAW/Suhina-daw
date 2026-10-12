@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -32,11 +32,15 @@ pub enum Message {
         id: u64,
     },
     GetState,
+    /// `controller` is a VST3 plug-in's controller state, when it has one apart from the
+    /// component's (`data`).
     SetState {
         data: Vec<u8>,
+        controller: Option<Vec<u8>>,
     },
     State {
         data: Vec<u8>,
+        controller: Option<Vec<u8>>,
     },
     Error {
         message: String,
@@ -56,8 +60,12 @@ impl Message {
             Self::Ping { id } => json!({ "op": "ping", "id": id }),
             Self::Pong { id } => json!({ "op": "pong", "id": id }),
             Self::GetState => json!({ "op": "get_state" }),
-            Self::SetState { data } => json!({ "op": "set_state", "data": hex(data) }),
-            Self::State { data } => json!({ "op": "state", "data": hex(data) }),
+            Self::SetState { data, controller } => {
+                json!({ "op": "set_state", "data": hex(data), "controller": controller.as_deref().map(hex) })
+            }
+            Self::State { data, controller } => {
+                json!({ "op": "state", "data": hex(data), "controller": controller.as_deref().map(hex) })
+            }
             Self::Error { message } => json!({ "op": "error", "message": message }),
             Self::Quit => json!({ "op": "quit" }),
         };
@@ -73,6 +81,11 @@ impl Message {
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
         let number = |key: &str| value.get(key).and_then(Value::as_u64);
         let bytes = |key: &str| value.get(key).and_then(Value::as_str).and_then(unhex);
+        // Absent or null is `None`; anything else must be hex.
+        let optional_bytes = |key: &str| match value.get(key) {
+            None | Some(Value::Null) => Some(None),
+            Some(v) => v.as_str().and_then(unhex).map(Some),
+        };
         Some(match value.get("op")?.as_str()? {
             "hello" => Self::Hello { version: number("version")? },
             "load" => Self::Load {
@@ -84,8 +97,8 @@ impl Message {
             "ping" => Self::Ping { id: number("id")? },
             "pong" => Self::Pong { id: number("id")? },
             "get_state" => Self::GetState,
-            "set_state" => Self::SetState { data: bytes("data")? },
-            "state" => Self::State { data: bytes("data")? },
+            "set_state" => Self::SetState { data: bytes("data")?, controller: optional_bytes("controller")? },
+            "state" => Self::State { data: bytes("data")?, controller: optional_bytes("controller")? },
             "error" => Self::Error { message: text("message")? },
             "quit" => Self::Quit,
             _ => return None,
@@ -119,8 +132,10 @@ mod tests {
             Message::Ping { id: u64::MAX },
             Message::Pong { id: 7 },
             Message::GetState,
-            Message::SetState { data: vec![0, 1, 0xab, 0xff] },
-            Message::State { data: Vec::new() },
+            Message::SetState { data: vec![0, 1, 0xab, 0xff], controller: None },
+            Message::SetState { data: vec![1], controller: Some(vec![2, 3]) },
+            Message::State { data: Vec::new(), controller: None },
+            Message::State { data: vec![4], controller: Some(Vec::new()) },
             Message::Error { message: "no such plug-in: \"x\"\n".into() },
             Message::Quit,
         ];
@@ -143,6 +158,8 @@ mod tests {
             r#"{"op":"loaded","latency":5000000000}"#,
             r#"{"op":"state","data":"abc"}"#,
             r#"{"op":"state","data":"zz"}"#,
+            r#"{"op":"state","data":"","controller":5}"#,
+            r#"{"op":"set_state","data":"","controller":"z"}"#,
             r#"{"op":"load","plugin":"x","link":"y","sample_rate":0}"#,
             r#"{"op":"load","plugin":"x","link":"y"}"#,
             r#"{"op":42}"#,

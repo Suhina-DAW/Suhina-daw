@@ -119,18 +119,19 @@ impl Loaded {
         }
     }
 
-    fn state(&mut self) -> Result<Vec<u8>, String> {
+    /// The component's state and, for VST3, the controller's.
+    fn state(&mut self) -> Result<(Vec<u8>, Option<Vec<u8>>), String> {
         match self {
-            Self::Clap(plugin) => plugin.state(),
-            Self::Vst3(plugin) => plugin.state(),
-            Self::Test { processor, .. } => Ok(processor.state()),
+            Self::Clap(plugin) => Ok((plugin.state()?, None)),
+            Self::Vst3(plugin) => Ok((plugin.state()?, plugin.controller_state())),
+            Self::Test { processor, .. } => Ok((processor.state(), None)),
         }
     }
 
-    fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
+    fn set_state(&mut self, data: &[u8], controller: Option<&[u8]>) -> Result<(), String> {
         match self {
             Self::Clap(plugin) => plugin.set_state(data),
-            Self::Vst3(plugin) => plugin.set_state(data),
+            Self::Vst3(plugin) => plugin.set_state(data, controller),
             Self::Test { processor, .. } => processor.set_state(data),
         }
     }
@@ -209,13 +210,13 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
             Message::Load { .. } => Message::Error { message: "a plug-in is already loaded".into() },
             Message::Ping { id } => Message::Pong { id },
             Message::GetState => match loaded.as_mut().map(Loaded::state) {
-                Some(Ok(data)) => Message::State { data },
+                Some(Ok((data, controller))) => Message::State { data, controller },
                 Some(Err(message)) => Message::Error { message },
                 None => Message::Error { message: "no plug-in loaded".into() },
             },
-            Message::SetState { data } => match loaded.as_mut() {
-                Some(plugin) => match plugin.set_state(&data).and_then(|()| plugin.state()) {
-                    Ok(data) => Message::State { data },
+            Message::SetState { data, controller } => match loaded.as_mut() {
+                Some(plugin) => match plugin.set_state(&data, controller.as_deref()).and_then(|()| plugin.state()) {
+                    Ok((data, controller)) => Message::State { data, controller },
                     Err(message) => Message::Error { message },
                 },
                 None => Message::Error { message: "no plug-in loaded".into() },

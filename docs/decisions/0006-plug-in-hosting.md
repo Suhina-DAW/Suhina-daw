@@ -121,7 +121,20 @@ workspace forbids.
    for the last two the state is handed over and the plug-in decides, and the result says
    which (`keeps_state`). Vendors declare their own older builds rather than older products:
    the Pro-Q 3 module declares the VST2 builds of Pro-Q 3, not Pro-Q 2, which is why the name
-   steps exist. In a real project with 14 different VST2 plug-ins, 4 were found by the id
+   steps exist.
+
+   *Handing over the state.* The importer keeps a VST2 plug-in's state as the standard VST2
+   bank (`CcnK`, the format the SDK's `vst2persistence` reads), and the host hands it to the
+   VST3 component's `setState` and mirrors it to the controller. A VST3 project's controller
+   state goes with the component's (`set_state` carries both, protocol version 2) and is
+   restored after a restart. A plug-in that refuses the state runs with its defaults and the
+   caller is told (`offline::render_with_state`, `loopwerk-cli plugin run-device`). Measured on
+   a real project: Valhalla VintageVerb and PSP VintageWarmer read their VST2 chunk banks
+   (the output changes with the saved settings); OTT takes a parameter bank (`FxBk`) without
+   applying it, so parameter banks need their values set through the parameters as well; Pro-Q
+   3 refuses Pro-Q 2's state.
+
+   In a real project with 14 different VST2 plug-ins, 4 were found by the id
    convention, 1 by name and 3 as newer versions; the other 5 exist on that machine only as
    VST2.
 9. **Scanning** runs in its own short-lived process with a timeout per plug-in, a cache keyed by

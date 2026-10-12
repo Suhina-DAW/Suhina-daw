@@ -619,7 +619,19 @@ impl Vst3Plugin {
         Ok(stream.bytes())
     }
 
-    pub(crate) fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
+    /// The controller's own state, when it is a separate object that gives one.
+    pub(crate) fn controller_state(&mut self) -> Option<Vec<u8>> {
+        let controller = self.controller.as_ref()?;
+        let stream = ComWrapper::new(MemoryStream::new(Vec::new()));
+        let raw = stream.to_com_ptr::<IBStream>()?;
+        // SAFETY: a live controller writing to a live stream.
+        ok(unsafe { controller.getState(raw.as_ptr()) }).then(|| stream.bytes())
+    }
+
+    /// Hands `data` to the component and mirrors it to the controller, then gives the
+    /// controller its own `controller` state, as a project saved it. A VST3 plug-in that stands
+    /// in for a VST2 one reads the VST2 bank here (ADR 0006, decision 8).
+    pub(crate) fn set_state(&mut self, data: &[u8], controller_state: Option<&[u8]>) -> Result<(), String> {
         let stream = ComWrapper::new(MemoryStream::new(data.to_vec()));
         let raw = stream.to_com_ptr::<IBStream>().ok_or("stream")?;
         // SAFETY: a live component reading from a live stream.
@@ -630,6 +642,13 @@ impl Vst3Plugin {
             stream.rewind();
             // SAFETY: a live controller reading the same stream.
             let _ = unsafe { controller.setComponentState(raw.as_ptr()) };
+            if let Some(own) = controller_state.filter(|s| !s.is_empty()) {
+                let own = ComWrapper::new(MemoryStream::new(own.to_vec()));
+                let own_raw = own.to_com_ptr::<IBStream>().ok_or("stream")?;
+                // SAFETY: a live controller reading a live stream. A controller that refuses
+                // its own state still has the component's, so this is not an error.
+                let _ = unsafe { controller.setState(own_raw.as_ptr()) };
+            }
         }
         Ok(())
     }

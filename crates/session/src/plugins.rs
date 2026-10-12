@@ -4,7 +4,8 @@
 
 use std::path::Path;
 
-use loopwerk_model::DeviceKind;
+use loopwerk_model::{Device, DeviceKind};
+use loopwerk_plugins::SavedState;
 use loopwerk_plugins::matching::Match;
 use loopwerk_plugins::scan::{Catalog, Report, Scanned};
 use serde_json::{Value, json};
@@ -147,6 +148,16 @@ fn found<'a>(catalog: &'a Catalog, kind: &DeviceKind, name: &str) -> Option<Opti
         DeviceKind::Clap { id } => Some(catalog.match_clap(id, name)),
         DeviceKind::Builtin(_) | DeviceKind::Foreign { .. } => None,
     }
+}
+
+/// The installed plug-in for a project's plug-in `device` and the state to give it (the saved
+/// state, with a VST3 controller's own state when the project kept one); `None` when the device
+/// is not a plug-in or nothing installed stands for it.
+pub fn device_plugin<'a>(catalog: &'a Catalog, device: &Device) -> Option<(Match<'a>, Option<SavedState>)> {
+    let found = found(catalog, &device.kind, &device.name)??;
+    let controller = device.extensions.0.iter().find(|e| e.key == "Vst3ControllerState").map(|e| e.data.clone());
+    let state = device.state.clone().map(|data| SavedState { data, controller });
+    Some((found, state))
 }
 
 fn device_format(kind: &DeviceKind) -> (&'static str, String) {

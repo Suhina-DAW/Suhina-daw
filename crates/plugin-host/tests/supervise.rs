@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use loopwerk_ipc::Outcome;
-use loopwerk_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio, PluginError};
+use loopwerk_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio, PluginError, SavedState};
 
 const FRAMES: usize = 64;
 const DEADLINE: Duration = Duration::from_millis(2);
@@ -48,7 +48,7 @@ fn loads_processes_and_keeps_state() {
     assert_eq!(plugin.latency(), 0);
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
     assert!(plugin.ping());
-    assert_eq!(plugin.save_state().unwrap(), 0.5f32.to_le_bytes());
+    assert_eq!(plugin.save_state().unwrap().data, 0.5f32.to_le_bytes());
     plugin.load_state(0.25f32.to_le_bytes().to_vec()).unwrap();
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
     assert!(matches!(plugin.load_state(vec![1, 2, 3]), Err(PluginError::Host(_))));
@@ -115,7 +115,7 @@ fn a_clap_plugin_processes_reports_latency_and_keeps_state() {
     let (mut plugin, mut audio) = start("test:clap");
     assert_eq!(plugin.latency(), 16);
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
-    assert_eq!(plugin.save_state().unwrap(), 0.5f32.to_le_bytes());
+    assert_eq!(plugin.save_state().unwrap().data, 0.5f32.to_le_bytes());
     plugin.load_state(0.25f32.to_le_bytes().to_vec()).unwrap();
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
     assert!(matches!(plugin.load_state(vec![1, 2]), Err(PluginError::Host(_))));
@@ -155,7 +155,7 @@ fn a_real_clap_file_when_one_is_given() {
     }
     assert_eq!(done, 100);
     let state = plugin.save_state();
-    eprintln!("{spec}: latency {}, state {:?} bytes", plugin.latency(), state.as_ref().map(Vec::len));
+    eprintln!("{spec}: latency {}, state {:?} bytes", plugin.latency(), state.as_ref().map(|s| s.data.len()));
     if let Ok(state) = state {
         plugin.load_state(state).unwrap();
     }
@@ -177,6 +177,20 @@ fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     assert_eq!(rendered.samples[2 * 1_000], 1_016.0 * 0.5);
     assert!(rendered.samples[2 * 1_484..].iter().all(|&s| s == 0.0));
 
+    // With a state first: one the plug-in takes, and one it refuses (it runs with its default).
+    use loopwerk_plugins::offline::render_with_state;
+    let quieter =
+        render_with_state(launch("test:vst3"), Some(0.25f32.to_le_bytes().to_vec().into()), &input, 0).unwrap();
+    assert_eq!(quieter.state_refused, None);
+    assert!(quieter.samples.iter().any(|s| *s != 0.0));
+    let default = render(launch("test:vst3"), &input, 0).unwrap();
+    for (q, d) in quieter.samples.iter().zip(&default.samples) {
+        assert!((q * 2.0 - d).abs() < 1e-6, "{q} {d}");
+    }
+    let refused = render_with_state(launch("test:vst3"), Some(vec![1].into()), &input, 0).unwrap();
+    assert!(refused.state_refused.is_some());
+    assert_eq!(refused.samples, default.samples);
+
     let crashing = render(launch("test:crash-after:2"), &input, 0);
     assert!(matches!(crashing, Err(PluginError::Timeout(_))), "{crashing:?}");
 }
@@ -186,13 +200,37 @@ fn a_vst3_plugin_processes_reports_latency_and_keeps_state() {
     let (mut plugin, mut audio) = start("test:vst3");
     assert_eq!(plugin.latency(), 32);
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
-    assert_eq!(plugin.save_state().unwrap(), 0.5f32.to_le_bytes());
+    assert_eq!(plugin.save_state().unwrap().data, 0.5f32.to_le_bytes());
     plugin.load_state(0.25f32.to_le_bytes().to_vec()).unwrap();
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
     assert!(matches!(plugin.load_state(vec![1, 2]), Err(PluginError::Host(_))));
 
     let mut audio = plugin.restart().unwrap();
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.25));
+
+    // The controller's own state goes with the component's, and survives a restart.
+    let saved = SavedState { data: 0.75f32.to_le_bytes().to_vec(), controller: Some(vec![9, 8, 7]) };
+    plugin.load_state(saved.clone()).unwrap();
+    assert_eq!(plugin.save_state().unwrap(), saved);
+    let mut audio = plugin.restart().unwrap();
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.75));
+    assert_eq!(plugin.save_state().unwrap(), saved);
+}
+
+#[test]
+fn a_vst3_plugin_reads_the_vst2_bank_of_the_plugin_it_replaces() {
+    let (mut plugin, mut audio) = start("test:vst3");
+    // A chunk bank as a project's VST2 state becomes: the header, then the chunk (the gain).
+    let mut bank = b"CcnK".to_vec();
+    bank.extend_from_slice(&(160 - 8 + 4u32).to_be_bytes());
+    bank.extend_from_slice(b"FBCh");
+    bank.resize(156, 0);
+    bank.extend_from_slice(&4u32.to_be_bytes());
+    bank.extend_from_slice(&0.125f32.to_le_bytes());
+    plugin.load_state(bank).unwrap();
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+    // From then on it saves its own state.
+    assert_eq!(plugin.save_state().unwrap().data, 0.125f32.to_le_bytes());
 }
 
 #[test]

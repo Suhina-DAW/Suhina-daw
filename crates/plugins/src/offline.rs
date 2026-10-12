@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use loopwerk_ipc::Outcome;
 
-use crate::{Launch, Plugin, PluginError};
+use crate::{Launch, Plugin, PluginError, SavedState};
 
 /// Frames per block offline.
 pub const BLOCK_FRAMES: u32 = 512;
@@ -20,14 +20,36 @@ pub struct Rendered {
     pub samples: Vec<f32>,
     /// The latency the plug-in reported, in frames.
     pub latency: u32,
+    /// Why the plug-in did not take the state it was given, if it did not; it ran with its own
+    /// default settings then.
+    pub state_refused: Option<String>,
 }
 
 /// Runs interleaved stereo `input` through the plug-in `launch` names, then `tail_frames` of
 /// silence so effects ring out. `launch.channels` and `launch.max_frames` are set here.
-pub fn render(mut launch: Launch, input: &[f32], tail_frames: usize) -> Result<Rendered, PluginError> {
+pub fn render(launch: Launch, input: &[f32], tail_frames: usize) -> Result<Rendered, PluginError> {
+    render_with_state(launch, None, input, tail_frames)
+}
+
+/// [`render`] with the plug-in set to `state` first, as a project saved it. A plug-in that
+/// refuses the state still runs, with its defaults, and [`Rendered::state_refused`] says why.
+pub fn render_with_state(
+    mut launch: Launch,
+    state: Option<SavedState>,
+    input: &[f32],
+    tail_frames: usize,
+) -> Result<Rendered, PluginError> {
     launch.channels = 2;
     launch.max_frames = BLOCK_FRAMES;
-    let (plugin, mut audio) = Plugin::start(launch)?;
+    let (mut plugin, mut audio) = Plugin::start(launch)?;
+    let mut state_refused = None;
+    if let Some(state) = state {
+        match plugin.load_state(state) {
+            Ok(()) => {}
+            Err(PluginError::Host(why)) => state_refused = Some(why),
+            Err(other) => return Err(other),
+        }
+    }
     let latency = plugin.latency();
     let input_frames = input.len() / 2;
     let wanted = input_frames + tail_frames;
@@ -63,5 +85,5 @@ pub fn render(mut launch: Launch, input: &[f32], tail_frames: usize) -> Result<R
     let mut samples = output.split_off(skip);
     samples.truncate(wanted * 2);
     samples.resize(wanted * 2, 0.0);
-    Ok(Rendered { samples, latency })
+    Ok(Rendered { samples, latency, state_refused })
 }

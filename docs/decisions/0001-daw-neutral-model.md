@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/model/src/lib.rs
 ---
@@ -99,6 +99,9 @@ neither. Importers fill `params` when they map another DAW's device onto a Loopw
 - Shared content means editing a clip content can change several clips at once. Commands must
   offer "make unique" (copy-on-edit) for DAWs that expect independent copies.
 - The engine plays the core model only; it never sees format-specific data.
+- Plug-in state stays opaque, but in each plug-in format's standard container where a source
+  format keeps its own: a VST2 plug-in's state is the standard VST2 bank (`.fxb`), which other
+  hosts and a VST3 version of the plug-in read (ADR 0006, decision 8).
 - The core will grow (automation, tempo maps, markers, groups, comping). Each addition is checked
   against at least two formats before it lands, so it does not bake in one DAW's assumptions.
 - Positions are `f64` beats in the core. If rounding errors appear against tick-based formats

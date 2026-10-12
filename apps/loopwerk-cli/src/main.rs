@@ -16,6 +16,7 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
                              | check <project.als>)
        loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
+       loopwerk-cli plugin run-device <project.als> <device> <in-audio> <out.wav> [--tail <seconds>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -30,7 +31,9 @@ commands:
             lists a project's plug-ins and the installed plug-in found for each, or none
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
-            that many seconds of silence for reverbs and delays to ring out (default 2)
+            that many seconds of silence for reverbs and delays to ring out (default 2);
+            plugin run-device does the same with a project's plug-in device (by its name) and
+            the settings the project saved, through the installed plug-in plugins check finds
 
 options:
   <project.als>      a Live Set to import
@@ -211,14 +214,59 @@ fn render(args: &Args) -> Result<(), String> {
 /// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
 /// `plugin run <plug-in> <in> <out> [--tail <seconds>]`.
 fn plugin(args: &[String]) -> Result<(), String> {
-    let mut words = args.iter().map(String::as_str);
-    let (Some("run"), Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next(), words.next())
-    else {
-        return Err(format!(
+    let usage = || {
+        format!(
             "usage: loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
+       loopwerk-cli plugin run-device <project.als> <device> <in-audio> <out.wav> [--tail <seconds>]
 
 {USAGE}"
-        ));
+        )
+    };
+    let mut words = args.iter().map(String::as_str);
+    let mut library = loopwerk_plugins::library::Library::default();
+    let (spec, state, input, output) = match words.next() {
+        Some("run") => {
+            let (Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next()) else {
+                return Err(usage());
+            };
+            let spec = if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
+                name.to_string()
+            } else {
+                let found = library.catalog().find(name).ok_or_else(|| {
+                    format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
+                })?;
+                eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
+                found.spec()
+            };
+            (spec, None, input, output)
+        }
+        Some("run-device") => {
+            let (Some(project), Some(device), Some(input), Some(output)) =
+                (words.next(), words.next(), words.next(), words.next())
+            else {
+                return Err(usage());
+            };
+            let (session, _) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+            let (channel, saved) = session
+                .project()
+                .channels
+                .iter()
+                .find_map(|c| c.devices.iter().find(|d| d.name == device).map(|d| (c.name.clone(), d.clone())))
+                .ok_or_else(|| format!("no device {device:?} in {project}; `loopwerk-cli plugins check` lists them"))?;
+            let (found, state) = loopwerk_session::device_plugin(library.catalog(), &saved).ok_or_else(|| {
+                format!("no installed plug-in stands for {device:?}; `loopwerk-cli plugins check` says why")
+            })?;
+            eprintln!(
+                "{device} on {channel}: {} by {} ({}), found by {}{}",
+                found.plugin.name,
+                found.plugin.vendor,
+                found.plugin.path.display(),
+                found.how.name(),
+                if found.how.keeps_state() { "" } else { "; it may not read the saved settings" }
+            );
+            (found.plugin.spec(), state, input, output)
+        }
+        _ => return Err(usage()),
     };
     let mut tail = 2.0f64;
     while let Some(word) = words.next() {
@@ -233,17 +281,6 @@ fn plugin(args: &[String]) -> Result<(), String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-
-    let mut library = loopwerk_plugins::library::Library::default();
-    let spec = if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
-        name.to_string()
-    } else {
-        let found = library.catalog().find(name).ok_or_else(|| {
-            format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
-        })?;
-        eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
-        found.spec()
-    };
 
     let audio = loopwerk_media::decode_file(std::path::Path::new(input))?;
     let channels = usize::from(audio.channels.max(1));
@@ -265,7 +302,11 @@ fn plugin(args: &[String]) -> Result<(), String> {
         timeout: std::time::Duration::from_secs(30),
     };
     let started = std::time::Instant::now();
-    let rendered = loopwerk_plugins::offline::render(launch, &stereo, tail_frames).map_err(|e| e.to_string())?;
+    let rendered =
+        loopwerk_plugins::offline::render_with_state(launch, state, &stereo, tail_frames).map_err(|e| e.to_string())?;
+    if let Some(why) = &rendered.state_refused {
+        eprintln!("warning: the plug-in did not take the saved settings ({why}); it ran with its defaults");
+    }
 
     let spec = hound::WavSpec {
         channels: 2,

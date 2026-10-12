@@ -116,6 +116,20 @@ impl PluginAudio {
     }
 }
 
+/// A plug-in's saved state: the component's (CLAP and VST2 have only this), and a VST3
+/// plug-in's controller state when it keeps one apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedState {
+    pub data: Vec<u8>,
+    pub controller: Option<Vec<u8>>,
+}
+
+impl From<Vec<u8>> for SavedState {
+    fn from(data: Vec<u8>) -> Self {
+        Self { data, controller: None }
+    }
+}
+
 /// The control half: one host process running one plug-in.
 pub struct Plugin {
     launch: Launch,
@@ -126,7 +140,7 @@ pub struct Plugin {
     latency: u32,
     next_ping: u64,
     /// The state last read from the plug-in; loaded again after a restart.
-    last_state: Option<Vec<u8>>,
+    last_state: Option<SavedState>,
 }
 
 impl Plugin {
@@ -209,20 +223,23 @@ impl Plugin {
     }
 
     /// Reads the plug-in's state and keeps it for a restart.
-    pub fn save_state(&mut self) -> Result<Vec<u8>, PluginError> {
+    pub fn save_state(&mut self) -> Result<SavedState, PluginError> {
         self.send(&Message::GetState)?;
-        let Message::State { data } = self.reply("state", |m| matches!(m, Message::State { .. }))? else {
+        let Message::State { data, controller } = self.reply("state", |m| matches!(m, Message::State { .. }))? else {
             return Err(PluginError::Protocol("expected state".into()));
         };
-        self.last_state = Some(data.clone());
-        Ok(data)
+        let state = SavedState { data, controller };
+        self.last_state = Some(state.clone());
+        Ok(state)
     }
 
-    /// Hands `data` to the plug-in (and keeps it for a restart).
-    pub fn load_state(&mut self, data: Vec<u8>) -> Result<(), PluginError> {
-        self.send(&Message::SetState { data: data.clone() })?;
+    /// Hands `state` to the plug-in (and keeps it for a restart). A plug-in that does not take
+    /// it answers with an error and keeps the state it had.
+    pub fn load_state(&mut self, state: impl Into<SavedState>) -> Result<(), PluginError> {
+        let state = state.into();
+        self.send(&Message::SetState { data: state.data.clone(), controller: state.controller.clone() })?;
         self.reply("set_state", |m| matches!(m, Message::State { .. }))?;
-        self.last_state = Some(data);
+        self.last_state = Some(state);
         Ok(())
     }
 
