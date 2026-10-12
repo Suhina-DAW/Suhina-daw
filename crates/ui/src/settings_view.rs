@@ -5,7 +5,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
-use crate::settings::{Graphics, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, Graphics, OnOpen, Settings, Side};
 use crate::theme::{self, PAD};
 use crate::widgets;
 
@@ -219,6 +219,17 @@ pub fn show(
         segmented(ui, &painter, control_rect(r, 2), "Allow MIDI stacking", &options, settings.midi_stacking)
     {
         settings.midi_stacking = on;
+        outcome.changed = true;
+    }
+    y += SECTION_GAP;
+
+    section(&mut y, "Devices");
+    let r = row(&mut y);
+    label(&painter, r, "Device chain", "In a row under the view, or stacked in a column beside it");
+    let options = [("Row", DeviceLayout::Row), ("Stack", DeviceLayout::Stack)];
+    if let Some(layout) = segmented(ui, &painter, control_rect(r, 2), "Device chain", &options, settings.device_layout)
+    {
+        settings.device_layout = layout;
         outcome.changed = true;
     }
     y += SECTION_GAP;

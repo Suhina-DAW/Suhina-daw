@@ -52,6 +52,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 |---|---|
 | Play or stop (`transport.toggle`) | Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
+| Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
 | Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |

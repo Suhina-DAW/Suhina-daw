@@ -21,6 +21,16 @@ pub enum OnOpen {
     Replace,
 }
 
+/// How the detail area lays out a device chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeviceLayout {
+    /// Devices side by side in a row under the view.
+    #[default]
+    Row,
+    /// Devices one under another in a column beside the view.
+    Stack,
+}
+
 /// How the window is drawn. Takes effect the next time the app starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Graphics {
@@ -41,6 +51,7 @@ pub struct Settings {
     /// MIDI clips moved over others stack instead of replacing them.
     pub midi_stacking: bool,
     pub on_open: OnOpen,
+    pub device_layout: DeviceLayout,
 }
 
 impl Default for Settings {
@@ -52,6 +63,7 @@ impl Default for Settings {
             sample_stacking: false,
             midi_stacking: false,
             on_open: OnOpen::Ask,
+            device_layout: DeviceLayout::Row,
         }
     }
 }
@@ -68,13 +80,17 @@ impl Settings {
             Graphics::OpenGl => "glow",
         };
         let on = |b: bool| if b { "on" } else { "off" };
+        let devices = match self.device_layout {
+            DeviceLayout::Row => "row",
+            DeviceLayout::Stack => "stack",
+        };
         let on_open = match self.on_open {
             OnOpen::Ask => "ask",
             OnOpen::NewTab => "tab",
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\ndevice_chain = {devices}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -102,6 +118,8 @@ impl Settings {
                 ("midi_stacking", "on" | "off") => settings.midi_stacking = value == "on",
                 ("track_headers", "left") => settings.track_headers = Side::Left,
                 ("track_headers", "right") => settings.track_headers = Side::Right,
+                ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
+                ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
                 ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
@@ -129,6 +147,7 @@ mod tests {
             sample_stacking: true,
             midi_stacking: false,
             on_open: OnOpen::Replace,
+            device_layout: DeviceLayout::Stack,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());

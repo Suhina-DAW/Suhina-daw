@@ -12,11 +12,12 @@ use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
+use crate::detail_view;
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView};
 use crate::theme::{self, PAD};
 use crate::timeline::Timeline;
@@ -31,6 +32,10 @@ const DEFAULT_QUANTIZATION: &str = "1 bar";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
+/// The detail area's height in a row, by default, and the splitter between it and the view.
+const DETAIL_HEIGHT: f32 = 200.0;
+const SPLITTER: f32 = 6.0;
+
 /// How dark the window gets while a project file is dragged over it.
 const DROP_DIM: f32 = 0.45;
 
@@ -111,6 +116,10 @@ pub struct App {
     /// Which keys run which action, and whether that changed and should be saved.
     keymap: Keymap,
     keymap_changed: bool,
+    /// The detail area is showing, and its height (in a row) or width (stacked).
+    detail_open: bool,
+    detail_height: f32,
+    detail_width: f32,
     page: PageState,
     settings: Settings,
     /// The settings changed and should be saved.
@@ -152,6 +161,9 @@ impl App {
             scan: None,
             keymap: Keymap::default(),
             keymap_changed: false,
+            detail_open: true,
+            detail_height: DETAIL_HEIGHT,
+            detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
             settings_changed: false,
@@ -461,6 +473,8 @@ impl App {
             if self.open_prompt.is_some() {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
             }
+            let view_area = inner;
+            let inner = if grid.is_some() && self.detail_open { self.detail_area(ui, inner) } else { inner };
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
@@ -493,7 +507,7 @@ impl App {
                 }
                 (None, _) => empty(ui),
             });
-            drop_overlay(ui, inner);
+            drop_overlay(ui, view_area);
         });
 
         for action in &actions {
@@ -504,6 +518,57 @@ impl App {
         }) {
             ui.ctx().request_repaint();
         }
+    }
+
+    /// Lays out the detail area beside or under the view in `area`, draws it with its splitter,
+    /// and returns what is left for the view.
+    fn detail_area(&mut self, ui: &mut Ui, area: Rect) -> Rect {
+        let stacked = self.settings.device_layout == DeviceLayout::Stack;
+        let (view, splitter, detail) = if stacked {
+            self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
+            let x = area.right() - self.detail_width;
+            (
+                Rect::from_min_max(area.min, Pos2::new(x - SPLITTER, area.bottom())),
+                Rect::from_min_max(Pos2::new(x - SPLITTER, area.top()), Pos2::new(x, area.bottom())),
+                Rect::from_min_max(Pos2::new(x, area.top()), area.max),
+            )
+        } else {
+            self.detail_height = self.detail_height.clamp(80.0, (area.height() - 160.0).max(80.0));
+            let y = area.bottom() - self.detail_height;
+            (
+                Rect::from_min_max(area.min, Pos2::new(area.right(), y - SPLITTER)),
+                Rect::from_min_max(Pos2::new(area.left(), y - SPLITTER), Pos2::new(area.right(), y)),
+                Rect::from_min_max(Pos2::new(area.left(), y), area.max),
+            )
+        };
+
+        // The splitter: dragged to make the detail area bigger or smaller.
+        let cursor = if stacked { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical };
+        let response = ui.interact(splitter, Id::new("detail-splitter"), Sense::drag()).on_hover_cursor(cursor);
+        if response.dragged() {
+            let delta = response.drag_delta();
+            if stacked {
+                self.detail_width -= delta.x;
+            } else {
+                self.detail_height -= delta.y;
+            }
+        }
+        let painter = ui.painter_at(splitter);
+        painter.rect_filled(splitter, 0.0, theme::SURFACE_2);
+        let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
+        painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::TEXT_TERTIARY);
+
+        // What it shows: the selected clip, or the selected track's devices.
+        let (track, clip) = match self.shown {
+            View::Session => (self.view.selected, None),
+            View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
+        };
+        let shown =
+            self.session().map_or(detail_view::Detail::Nothing, |s| detail_view::build(s.project(), track, clip));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+            if stacked { detail_view::show_stack(ui, &shown) } else { detail_view::show_row(ui, &shown) }
+        });
+        view
     }
 
     /// The tab row: one tab per open project, the active one lit; a tab's × closes it.
@@ -750,6 +815,10 @@ impl App {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
+                let label = if self.detail_open { "Hide detail area" } else { "Show detail area" };
+                if ui.add_enabled(has_project, egui::Button::new(label).shortcut_text(keys("view.detail"))).clicked() {
+                    self.detail_open = !self.detail_open;
+                }
             });
             ui.menu_button("Projects", |ui| {
                 if ui
@@ -820,6 +889,7 @@ impl App {
                 };
             }
             "view.session" => self.shown = View::Session,
+            "view.detail" => self.detail_open = !self.detail_open,
             "view.arrangement" => self.shown = View::Arrangement,
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());

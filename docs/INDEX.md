@@ -78,6 +78,7 @@ Change this code, and check these documents.
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/detail_view.rs` | [Components](design/components.md) |
 | `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |

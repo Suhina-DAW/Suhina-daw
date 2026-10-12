@@ -635,6 +635,45 @@ fn keys_copy_paste_and_delete_the_selected_clip() {
     assert!(!spans(&harness).contains(&(0.0, 64.0)));
 }
 
+/// The demo project with a utility device on Drums.
+fn project_with_a_device() -> loopwerk_engine::model::Project {
+    use loopwerk_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
+    let mut project = demo_project();
+    project.channels[0].devices.push(Device {
+        name: "Utility".into(),
+        kind: DeviceKind::Builtin("utility".into()),
+        enabled: true,
+        state: None,
+        params: vec![DeviceParam::new("gain", -3.5), DeviceParam::new("width", 1.2)],
+        extensions: Extensions::default(),
+    });
+    project
+}
+
+#[test]
+fn the_detail_area_shows_the_selected_tracks_devices_in_a_row_or_stacked() {
+    let mut app = App::new();
+    app.set_session(Session::new(project_with_a_device()), &[]);
+    let mut harness = window(app);
+    assert!(harness.query_by_label("Device Utility").is_none());
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_some());
+
+    let ctx = harness.ctx.clone();
+    let settings = loopwerk_ui::settings::Settings {
+        device_layout: loopwerk_ui::settings::DeviceLayout::Stack,
+        ..Default::default()
+    };
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_some());
+
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_none(), "Shift+Tab hides the detail area");
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.
@@ -686,6 +725,33 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("arrangement-audio.png")).unwrap_or_else(|e| panic!("{e}"));
+
+    // The detail area with a track's devices, in a row and stacked.
+    let mut harness = Harness::builder().with_size(SIZE).with_pixels_per_point(2.0).wgpu().build_ui_state(
+        |ui, app: &mut App| app.ui(ui),
+        {
+            let mut app = App::new();
+            app.set_session(Session::new(project_with_a_device()), &[]);
+            app
+        },
+    );
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("detail-row.png")).unwrap_or_else(|e| panic!("{e}"));
+    let ctx = harness.ctx.clone();
+    let settings = loopwerk_ui::settings::Settings {
+        device_layout: loopwerk_ui::settings::DeviceLayout::Stack,
+        ..Default::default()
+    };
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("detail-stack.png")).unwrap_or_else(|e| panic!("{e}"));
 
     // A Live Set dragged over the window darkens it.
     harness.input_mut().hovered_files.push(egui::HoveredFile { path: Some("set.als".into()), ..Default::default() });

@@ -80,12 +80,13 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 11] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 12] = [
     ("transport.toggle", "Play or stop", "Transport"),
     ("view.toggle", "Switch between Session and Arrangement", "View"),
     ("view.session", "Show the Session view", "View"),
     ("view.arrangement", "Show the Arrangement view", "View"),
     ("settings.open", "Open or close Settings", "View"),
+    ("view.detail", "Show or hide the detail area", "View"),
     ("selection.copy", "Copy the selected clip", "Edit"),
     ("selection.cut", "Cut the selected clip", "Edit"),
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
@@ -118,9 +119,10 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 13] = [
+const DEFAULTS: [(&str, &[&str]); 14] = [
     ("transport.toggle", &["Space"]),
     ("view.toggle", &["Tab"]),
+    ("view.detail", &["Shift+Tab"]),
     ("settings.open", &["Ctrl+Comma"]),
     ("edit.undo", &["Ctrl+Z"]),
     ("edit.redo", &["Ctrl+Shift+Z", "Ctrl+Y"]),

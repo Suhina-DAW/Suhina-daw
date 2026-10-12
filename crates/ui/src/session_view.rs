@@ -26,6 +26,8 @@ const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
 #[derive(Debug, Default)]
 pub struct SessionViewState {
     pub scroll: Vec2,
+    /// The track whose header was clicked; the detail area shows its devices.
+    pub selected: Option<TrackId>,
     drag: Option<(TrackId, Control, f64)>,
 }
 
@@ -164,7 +166,8 @@ fn draw_column(
     actions: &mut Vec<Action>,
 ) {
     let id = Id::new(("session-column", column.track.0));
-    column_header(ui, painter, Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip), column, actions);
+    let header = Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip);
+    column_header(ui, painter, header, column, &mut state.selected, actions);
     let body_clip = bands.body.intersect(clip);
     column_body(
         ui,
@@ -186,7 +189,14 @@ fn draw_column(
     painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::LINE_STRONG));
 }
 
-fn column_header(ui: &Ui, painter: &egui::Painter, rect: Rect, column: &Column, actions: &mut Vec<Action>) {
+fn column_header(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    column: &Column,
+    selected: &mut Option<TrackId>,
+    actions: &mut Vec<Action>,
+) {
     if rect.width() <= 0.0 {
         return;
     }
@@ -203,7 +213,11 @@ fn column_header(ui: &Ui, painter: &egui::Painter, rect: Rect, column: &Column, 
         };
         menus::track_menu(ui, &menu, actions);
     });
-    painter.rect_filled(rect, 0.0, theme::SURFACE_2);
+    if response.clicked() {
+        *selected = Some(column.track);
+    }
+    let fill = if *selected == Some(column.track) { theme::SURFACE_3 } else { theme::SURFACE_2 };
+    painter.rect_filled(rect, 0.0, fill);
     let strip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
     painter.rect_filled(strip, 0.0, lane(rgb(column.color), column.mute));
     let color = if column.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };

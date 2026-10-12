@@ -280,5 +280,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
-- Still to do: clip fades, input routing and sends, arm, meters, the browser, the detail area
-  (devices, clip editor), installers.
+- A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
+  clip's properties or the selected track's devices with their parameters; Shift+Tab hides it.
+  Changing devices from it follows the device commands (#73).
+- Still to do: clip fades, input routing and sends, arm, meters, the browser, device editing
+  and the clip editor in the detail area, installers.

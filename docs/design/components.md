@@ -13,6 +13,7 @@ covers:
   - crates/ui/src/motion.rs
   - crates/ui/src/settings_view.rs
   - crates/ui/src/waveform.rs
+  - crates/ui/src/detail_view.rs
 ---
 
 # Components
@@ -69,7 +70,7 @@ Animations are short and only show a change of state; with animations off (a set
 | View switch | Text only; current view `text.primary` with a 1 px underline |
 | Browser | 300 px wide (resizable) |
 | Detail splitter | 6 px, `surface.2`, 1 px `line.strong` above and below, 32 × 2 grip in `text.tertiary`; cursor `ns-resize` |
-| Detail area | 150–300 px by default, resizable to nearly full height |
+| Detail area | 200 px by default, resizable from 80 px to nearly full height; Shift+Tab hides and shows it. Shows the selected clip's properties (it wins), or the selected track's device chain: in a row under the view (220 px per device), or stacked in a column beside it (260 px, resizable) — Settings › Devices |
 | Status bar | 20 px, hint text left, selection right |
 
 ## Browser
@@ -183,6 +184,7 @@ restart (the renderer) says so in its note.
 | Interface | Animations | On (default), Off |
 | Projects | When opening a project | Ask (default), New tab, Replace |
 | Arrangement | Track headers | Left, Right (default) |
+| Devices | Device chain | Row (default), Stack |
 | Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
@@ -196,7 +198,7 @@ are skipped with a warning in the status bar.
 | Part | Spec |
 |---|---|
 | Panel | `surface.1`, panels 1 px apart, end of chain is empty `surface.0` |
-| Header | 20 px, `surface.2`, 6 px padding: on switch, name |
+| Header | 20 px, `surface.2`, 6 px padding: on switch, name, and what it is on the right in 9 px `text.tertiary` (Loopwerk, CLAP, VST3, VST2, or "Not supported" for a device of another DAW) |
 | On switch | 9 × 9 square, 1 px border; on: filled `text.primary`; off: outline `text.tertiary`, name `text.tertiary` |
 | Parameter | 44 px column: 26 px knob (r 11, pointer to r 10), value 10 px mono, label 10 px `text.secondary`; 14 px between columns; pointer `accent` when the device is on |
 

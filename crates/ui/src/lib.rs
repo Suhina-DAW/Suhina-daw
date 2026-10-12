@@ -5,6 +5,7 @@
 mod app;
 pub mod arrangement_view;
 pub mod demo;
+pub mod detail_view;
 pub mod grid;
 pub mod keymap;
 pub mod menus;
