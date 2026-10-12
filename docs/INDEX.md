@@ -18,7 +18,7 @@ are changing (*Code and its documents*).
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
@@ -71,6 +71,7 @@ Change this code, and check these documents.
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
+| `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |

@@ -32,8 +32,8 @@ the first device.
   overdrive and the FM synth (the first instrument: the DX7-style engine ported from MSFA, with
   DX7 voice files) exist and are tested on their own. The engine runs them in chains on tracks:
   a track's sound goes through its devices before its fader, and an instrument first in the
-  chain plays the track's notes (LOOP-35). Commands to add devices and set their parameters,
-  chains on group and master channels, and automation come next.
+  chain plays the track's notes (LOOP-35); `device.*` commands add, remove, switch and set them.
+  Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
   most used ones. After import, the user sees which devices came in exactly, approximately or as
@@ -200,7 +200,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
-  `loopwerk-cli plugins …`).
+  `loopwerk-cli plugins …`); for devices `devices.list`, `track.devices`, `device.add`,
+  `device.remove`, `device.setEnabled`, `device.setParam`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access

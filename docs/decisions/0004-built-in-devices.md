@@ -10,6 +10,7 @@ covers:
   - devices/**
   - crates/device-registry/**
   - crates/engine/src/chain.rs
+  - crates/session/src/devices.rs
 ---
 
 # 0004: Built-in devices
@@ -104,8 +105,9 @@ the device code should not have to change when it lands.
 
 ## Not decided yet
 
-- **Parameter commands and automation lanes:** `device.*` commands in `session` and
-  automation of device parameters (LOOP-39).
+- **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
+  `track.devices`, `device.add` (an instrument always first, one per track), `device.remove`,
+  `device.setEnabled` and `device.setParam` (values stored limited to the parameter's range).
 - **Chains on group, return and master channels**, and latency compensation for devices that
   report latency (the overdrive and vinyl distortion, 31 frames).
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.

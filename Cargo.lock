@@ -772,6 +772,8 @@ name = "loopwerk-session"
 version = "0.0.1"
 dependencies = [
  "loopwerk-als",
+ "loopwerk-device-api",
+ "loopwerk-device-registry",
  "loopwerk-engine",
  "loopwerk-model",
  "loopwerk-plugins",

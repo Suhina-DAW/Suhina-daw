@@ -5,7 +5,7 @@ use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
 use loopwerk_model::{Channel, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
-use crate::{CommandError, Session};
+use crate::{CommandError, Session, devices};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -71,6 +71,7 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 }
 
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
+const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
 pub struct CommandSpec<T: 'static = Session> {
@@ -271,6 +272,65 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[],
         kind: CommandKind::Transport,
         run: back_to_arrangement,
+    },
+    CommandSpec {
+        id: "devices.list",
+        label: "List the built-in devices (id, name, effect or instrument) with their parameters (id, range, default, unit, options)",
+        params: &[],
+        kind: CommandKind::Read,
+        run: devices::list,
+    },
+    CommandSpec {
+        id: "track.devices",
+        label: "List the devices on a track in order, with every built-in device's parameter values",
+        params: &[TRACK],
+        kind: CommandKind::Read,
+        run: devices::track_devices,
+    },
+    CommandSpec {
+        id: "device.add",
+        label: "Add a built-in device to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given",
+        params: &[
+            TRACK,
+            param("id", ParamType::Text, "built-in device id, from devices.list"),
+            optional(
+                "position",
+                ParamType::Integer,
+                "where in the chain, from 0 (default: last; an instrument is always first)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::add,
+    },
+    CommandSpec {
+        id: "device.remove",
+        label: "Remove a device from a track",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Edit,
+        run: devices::remove,
+    },
+    CommandSpec {
+        id: "device.setEnabled",
+        label: "Switch a device on or off; a device that is off passes the sound through",
+        params: &[TRACK, DEVICE, param("enabled", ParamType::Bool, "false switches the device off")],
+        kind: CommandKind::Edit,
+        run: devices::set_enabled,
+    },
+    CommandSpec {
+        id: "device.setParam",
+        label: "Set a parameter of a built-in device on a track; the value is limited to the parameter's range",
+        params: &[
+            TRACK,
+            DEVICE,
+            param("param", ParamType::Text, "parameter id, from devices.list"),
+            param(
+                "value",
+                ParamType::Number,
+                "value in the parameter's unit (dB, Hz, 0..1 for percentages, option index for choices)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::set_param,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
@@ -687,7 +747,7 @@ fn track_id(p: &Project, params: &Value) -> Result<TrackId, CommandError> {
     }
 }
 
-fn channel_param<'a>(session: &'a mut Session, params: &Value) -> Result<&'a mut Channel, CommandError> {
+pub(crate) fn channel_param<'a>(session: &'a mut Session, params: &Value) -> Result<&'a mut Channel, CommandError> {
     let track = track_id(&session.project, params)?;
     let channel = session
         .project
@@ -704,7 +764,7 @@ fn channel_of<'a>(p: &'a Project, track: &Track) -> Option<&'a Channel> {
     p.channels.iter().find(|c| c.id == id)
 }
 
-fn number(params: &Value, name: &str) -> Result<f64, CommandError> {
+pub(crate) fn number(params: &Value, name: &str) -> Result<f64, CommandError> {
     params
         .get(name)
         .and_then(Value::as_f64)

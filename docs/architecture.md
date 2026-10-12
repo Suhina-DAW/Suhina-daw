@@ -166,9 +166,10 @@ queued clips.
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;
   launched clips' stretch voices still run on the audio thread.
 - **Native project format:** so edits can be saved; written and read by its own crate.
-- **Device commands and automation:** commands that add, remove and set devices, automation
-  of their parameters, chains on group, return and master channels, and latency compensation
-  ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet). Chains on tracks run.
+- **Device automation and more chains:** automation of device parameters, chains on group,
+  return and master channels, and latency compensation
+  ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet). Chains on tracks run and
+  `device.*` commands edit them.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
   (AGENTS.md rule 5), as [ADR 0006](decisions/0006-plug-in-hosting.md) decides: a
   `loopwerk-plugin-host` executable per plug-in binary, shared-memory audio and events with a
