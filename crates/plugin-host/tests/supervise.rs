@@ -2,6 +2,8 @@
 //! loading, state, and surviving a host that crashes or hangs, then restarting it.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
+mod common;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -391,6 +393,37 @@ fn an_editor_opens_in_a_window_and_closes() {
     let (mut plain, _audio) = start("test:clap");
     assert!(matches!(plain.open_editor(), Err(PluginError::Host(_))));
     plain.close_editor().unwrap();
+}
+
+/// An editor asked for embedded opens as a child inside the window the engine names, hidden
+/// until placed; the engine learns its size, and closing it takes the child away.
+#[test]
+fn an_editor_embeds_in_the_window_the_engine_names() {
+    use common::{ParentWindow, soon};
+    use loopwerk_plugins::Placement;
+    if !common::editors_open_here() {
+        eprintln!("no display for editors; skipped");
+        return;
+    }
+    let parent = ParentWindow::open();
+    let (mut plugin, mut audio) = start("test:vst3");
+    assert_eq!(plugin.open_editor_embedded(parent.id()).unwrap(), (300, 200));
+    assert!(plugin.editor_open());
+    assert_eq!(plugin.editor_size(), Some((300, 200)));
+    assert!(soon(PATIENT, || parent.editor_children() == 1), "no editor child in the engine's window");
+    // Placing it is never waited for; the host takes it between messages.
+    let shown = Placement { x: 8, y: 40, clip_x: 0, clip_y: 40, clip_width: 400, clip_height: 260 };
+    assert!(plugin.place_editor(shown).unwrap());
+    assert!(plugin.place_editor(Placement::HIDDEN).unwrap());
+    // Audio keeps flowing, with the gain the editor set when it opened.
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+    plugin.close_editor().unwrap();
+    assert!(!plugin.editor_open());
+    assert_eq!(plugin.editor_size(), None);
+    assert!(soon(PATIENT, || parent.editor_children() == 0), "the editor's child window stayed");
+    // A window that is not one to embed in is an error, not a crash.
+    assert!(matches!(plugin.open_editor_embedded(0), Err(PluginError::Host(_))));
+    assert!(!plugin.editor_open());
 }
 
 #[test]

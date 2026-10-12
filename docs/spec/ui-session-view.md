@@ -121,7 +121,10 @@ options) and its controls. Instruments come first on MIDI tracks; effects follow
 area at the end accepts dropped devices. Plug-ins show their name and an option to open their
 own window. Loopwerk shows where the plug-in stands (loading, running, missing, crashed) and a
 button that opens or closes its editor, or restarts it after a crash
-([components](../design/components.md) › Device panel).
+([components](../design/components.md) › Device panel). With the setting Plug-ins › Editors ›
+Device view, the editor opens inside the panel under that line: the device grows as wide as
+the editor and the panel as tall as the tallest open editor; what does not fit is cut off at
+the panel's edge, and the editor goes with its track (shown only while the track is).
 
 ## Shortcuts (to observe and list)
 

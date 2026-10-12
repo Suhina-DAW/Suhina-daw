@@ -104,7 +104,10 @@ workspace forbids.
      as a parameter event at its frame.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* protocol
-     version 6 (`open_editor` names the window that owns the editor's, decision 10); since
+     version 7 (`open_editor` says whether the editor is `embedded` in the engine's window,
+     `place_editor` puts it there and is not answered, and `editor_resized` comes unasked when
+     a plug-in gives its editor a new size, decision 10); version 6: `open_editor` names the
+     window that owns the editor's (`owner`); since
      version 5: `load` names the instance (a number the engine chooses), and every message about
      one instance and its reply carry that number: `unload` (answered `unloaded`), state,
      parameters and editors, and `editor_closed` when it comes unasked; an `error` carries the
@@ -217,37 +220,65 @@ workspace forbids.
    - A file that failed keeps its reason and is not tried again until it changes.
    The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
    folders and the catalog are kept as JSON in Loopwerk's settings folder.
-10. **Editors** open from the host process, floating above Loopwerk's window and owned by it,
-    as most hosts do: the window stays above Loopwerk, has no taskbar entry of its own and is
-    minimised with it. *Amended 2026-10-12* (was: embedded in a Loopwerk window on X11 and
-    Windows): owning works on every system and keeps the editor apart from Loopwerk's own
-    layout; embedding another process's window works only on X11 and Windows. The engine names
-    its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11 window id);
-    the host makes the editor's window owned by it (Win32 owner window, X11 `WM_TRANSIENT_FOR`).
-    An owned window shares its input queue with the owner's thread on Windows, so the host
-    making one waits for Loopwerk's window thread; the session therefore opens and closes an
-    editor on a thread of its own and the command answers at once (`editor_open: "opening"`),
-    or both would wait for each other. More generally the window thread never waits for a host
-    process: `Plugin::health` and `editor_open` answer from what they last knew while the
-    process is busy (a sibling loading in a shared process takes seconds), and reading a
-    plug-in's state now and then, and stopping it, run on threads of their own. A host whose
-    window thread hangs can be ended like any other (decision 4). The host's main loop waits for its windows' messages
+10. **Editors** open from the host process, by default floating above Loopwerk's window and
+    owned by it, as most hosts do: the window stays above Loopwerk, has no taskbar entry of its
+    own and is minimised with it. *Amended 2026-10-12* (was: embedded in a Loopwerk window on
+    X11 and Windows): owning works on every system and keeps the editor apart from Loopwerk's
+    own layout; embedding another process's window works only on X11 and Windows. The engine
+    names its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11
+    window id); the host makes the editor's window owned by it (Win32 owner window, X11
+    `WM_TRANSIENT_FOR`). *Amended again the same day:* embedding is offered as a choice on top
+    of that, Options › Settings › Plug-ins › Editors: *Window* (the default) or *Device view*,
+    where the editor shows inside the device panel as part of the chain, as the wrapper
+    devices some users buy do by hand for one plug-in at a time. With *Device view* the engine
+    asks for the editor `embedded` (protocol version 7), the host opens it as a child inside
+    Loopwerk's window (Win32 `WS_CHILD` under the `HWND`, X11 a child of the window id; both
+    allowed across processes) and hidden, answers its size, and the window lays the panel out
+    around it (the device as wide as the editor, the panel as tall) and says each frame where
+    it goes (`place_editor`: the editor's origin and the panel's visible area in the window's
+    pixels; the host keeps the editor inside a *clip* window of that area, so a scrolled or
+    cut-off editor never paints over the rest of Loopwerk, and an empty area hides it, as when
+    another track is shown or the settings page is open). The plug-in may still resize its
+    editor (`editor_resized`, unasked); the user cannot drag an embedded one. A floating
+    editor is never resized by the panel. Changing the setting closes the open editors and
+    opens them again the other way; their state is in the plug-in, so nothing is lost. The
+    choice is shown but does nothing where the window is not a Win32 or X11 one (macOS,
+    Wayland without an X server): editors open in windows there.
+    An owned or child window shares its input queue with the owner's thread on Windows, so
+    the host making one waits for Loopwerk's window thread; the session therefore opens and
+    closes an editor on a thread of its own and the command answers at once (`editor_open:
+    "opening"`), or both would wait for each other. More generally the window thread never
+    waits for a host process: `Plugin::health`, `editor_open` and `editor_size` answer from
+    what they last knew while the process is busy (a sibling loading in a shared process takes
+    seconds), `place_editor` is sent only when the process is free (and again at the next sync
+    when it was not) and is never answered, and reading a plug-in's state now and then, and
+    stopping it, run on threads of their own. A host whose window thread hangs can be ended
+    like any other (decision 4). The host's main loop waits for its windows' messages
     (`MsgWaitForMultipleObjectsEx`, woken by the control messages' thread) rather than looking
     every 10 ms, which made editors such as Pro-Q 4 lag; on X11 it looks every millisecond while
     an editor is open.
+    *Linux:* the desktop app opens its window as an X11 one whenever an X server is there
+    (`DISPLAY` is set: the desktop's own X11, or XWayland, which every distribution's Wayland
+    desktop ships), through winit's `with_x11`, as other DAWs do: the hosts open editors as X11
+    windows, and only an X11 window of Loopwerk's can own or embed them. Without `DISPLAY` the
+    window is a Wayland one and editors open in windows of their own, unowned.
     *Built on Windows:* the host opens a top-level window of its own on its main thread
-    (`crates/plugin-host/src/window.rs`, Win32) and attaches the plug-in's view to it (VST3
-    `IPlugView` with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps
-    its messages in the main loop between control messages, and tells the engine unasked when
-    the user closes it (`editor_closed`, protocol version 4). Checked with
-    Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand.
-    *Built on Linux (X11):* the host's window comes from `x11rb`, the plug-in's view is embedded
-    by window id (VST3 `X11EmbedWindowID`, CLAP `x11`), and the host serves the plug-in's own
-    event loop from its main loop (`crates/plugin-host/src/run_loop.rs`): VST3's `IRunLoop` on
-    the editor's frame and CLAP's `posix-fd-support` give it the descriptors it waits on (polled
+    (`crates/plugin-host/src/window.rs`, Win32), or for an embedded editor a clip and a view
+    window as children of Loopwerk's, and attaches the plug-in's view to it (VST3 `IPlugView`
+    with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps its
+    messages in the main loop between control messages, and tells the engine unasked when the
+    user closes it (`editor_closed`, protocol version 4) or the plug-in resizes it
+    (`editor_resized`, version 7). Checked with Valhalla VintageVerb and Pro-Q 3 (VST3); no
+    CLAP plug-in with an editor was at hand.
+    *Built on Linux (X11):* the host's window comes from `x11rb` (an embedded editor's clip and
+    view are children of Loopwerk's window id), the plug-in's view is embedded by window id
+    (VST3 `X11EmbedWindowID`, CLAP `x11`), and the host serves the plug-in's own event loop
+    from its main loop (`crates/plugin-host/src/run_loop.rs`): VST3's `IRunLoop` on the
+    editor's frame and CLAP's `posix-fd-support` give it the descriptors it waits on (polled
     without waiting each turn) and timers; CLAP's `timer-support` serves timers on every system.
-    Tested in CI under Xvfb with the VST3 test plug-in; no real Linux plug-in has been tried yet.
-    Wayland and macOS (floating) come later.
+    Tested in CI under Xvfb with the VST3 test plug-in, floating and embedded in a window the
+    test makes; no real Linux plug-in has been tried yet. Wayland and macOS (floating) come
+    later.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple
     silicon, Windows plug-ins on Linux through Wine.
 12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which
@@ -287,7 +318,7 @@ workspace forbids.
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
   engine's track chain together with built-in devices (LOOP-35, done, #100); editors (Windows
-  and X11 done).
+  and X11 done, floating and embedded in the device panel).
 - **In the engine (#100).** The engine never sees `plugins`: a plug-in device's slot in a
   track's chain holds a `PluginProcessor` (`crates/engine/src/plugin.rs`), which the session
   implements over `PluginAudio` (`Hosted`, `crates/session/src/rack.rs`). A slot runs once per

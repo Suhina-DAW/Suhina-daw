@@ -21,5 +21,9 @@ loopwerk-ui.workspace = true
 zip.workspace = true
 eframe = { version = "0.36", features = ["glow", "persistence"] }  # MIT OR Apache-2.0
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Opening the window as an X11 one when an X server is there (eframe's own winit).
+winit = { version = "0.30", default-features = false, features = ["x11"] }  # Apache-2.0
+
 [lints]
 workspace = true

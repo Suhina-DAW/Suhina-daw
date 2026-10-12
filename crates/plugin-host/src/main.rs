@@ -153,11 +153,29 @@ impl Loaded {
         }
     }
 
-    fn open_editor(&mut self) -> Result<window::Size, String> {
+    fn open_editor(&mut self, mode: window::Mode) -> Result<window::Size, String> {
         match self {
-            Self::Clap(plugin) => plugin.open_editor(),
-            Self::Vst3(plugin) => plugin.open_editor(),
+            Self::Clap(plugin) => plugin.open_editor(mode),
+            Self::Vst3(plugin) => plugin.open_editor(mode),
             Self::Test { .. } => Err("the plug-in has no editor".into()),
+        }
+    }
+
+    /// Puts an embedded editor where the engine says.
+    fn place_editor(&self, placement: window::Placement) {
+        match self {
+            Self::Clap(plugin) => plugin.place_editor(placement),
+            Self::Vst3(plugin) => plugin.place_editor(placement),
+            Self::Test { .. } => {}
+        }
+    }
+
+    /// A size the open editor got since this was last asked, to tell the engine.
+    fn editor_resized(&mut self) -> Option<window::Size> {
+        match self {
+            Self::Clap(plugin) => plugin.editor_resized(),
+            Self::Vst3(plugin) => plugin.editor_resized(),
+            Self::Test { .. } => None,
         }
     }
 
@@ -339,6 +357,11 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
             loaded.tick();
             if loaded.editor_tick() {
                 send(&mut writer, &Message::EditorClosed { instance: *instance })?;
+            } else if let Some(size) = loaded.editor_resized() {
+                send(
+                    &mut writer,
+                    &Message::EditorResized { instance: *instance, width: size.width, height: size.height },
+                )?;
             }
         }
         let message = match next_message(&messages) {
@@ -349,7 +372,9 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
         if message == Message::Quit {
             break;
         }
-        send(&mut writer, &answer(&mut instances, message))?;
+        if let Some(reply) = answer(&mut instances, message) {
+            send(&mut writer, &reply)?;
+        }
     }
     for (_, loaded) in std::mem::take(&mut instances) {
         loaded.unload();
@@ -357,11 +382,12 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The reply to one message from the engine (anything but `quit`).
-fn answer(instances: &mut Instances, message: Message) -> Message {
+/// The reply to one message from the engine (anything but `quit`); `None` for a message that
+/// takes no reply (`place_editor`).
+fn answer(instances: &mut Instances, message: Message) -> Option<Message> {
     let failed = |instance: u32, message: String| Message::Error { instance: Some(instance), message };
     let missing = |instance: u32| Message::Error { instance: Some(instance), message: "no such instance".into() };
-    match message {
+    Some(match message {
         Message::Hello { .. } => Message::Hello { version: VERSION },
         Message::Ping { id } => Message::Pong { id },
         Message::Load { instance, .. } if instances.contains_key(&instance) => {
@@ -384,14 +410,27 @@ fn answer(instances: &mut Instances, message: Message) -> Message {
             }
             Message::Unloaded { instance }
         }
-        Message::OpenEditor { instance, owner } => match instances.get_mut(&instance).map(|loaded| {
-            window::set_owner(owner);
-            loaded.open_editor()
-        }) {
-            Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
-            Some(Err(message)) => failed(instance, message),
-            None => missing(instance),
-        },
+        Message::OpenEditor { instance, owner, embedded } => {
+            let mode = match (embedded, owner) {
+                (true, Some(parent)) => window::Mode::Embedded { parent },
+                (true, None) => return Some(failed(instance, "no window to embed the editor in".into())),
+                (false, owner) => {
+                    window::set_owner(owner);
+                    window::Mode::Floating
+                }
+            };
+            match instances.get_mut(&instance).map(|loaded| loaded.open_editor(mode)) {
+                Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
+                Some(Err(message)) => failed(instance, message),
+                None => missing(instance),
+            }
+        }
+        Message::PlaceEditor { instance, placement } => {
+            if let Some(loaded) = instances.get(&instance) {
+                loaded.place_editor(placement);
+            }
+            return None;
+        }
         Message::CloseEditor { instance } => {
             if let Some(loaded) = instances.get_mut(&instance) {
                 loaded.close_editor();
@@ -423,5 +462,5 @@ fn answer(instances: &mut Instances, message: Message) -> Message {
             None => missing(instance),
         },
         other => Message::Error { instance: other.instance(), message: format!("unexpected message {other:?}") },
-    }
+    })
 }

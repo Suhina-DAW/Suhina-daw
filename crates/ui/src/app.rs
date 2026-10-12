@@ -19,7 +19,7 @@ use crate::loading_dialog;
 use crate::motion;
 use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt};
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
@@ -652,6 +652,7 @@ impl App {
     /// should hear about in the status bar. While the project has plug-ins, the window looks
     /// again a few times a second, so one that starts or crashes is noticed without input.
     fn poll_plugins(&mut self, ctx: &egui::Context) {
+        self.projects.set_editor_embedding(self.settings.plugin_editors == EditorPlacement::DeviceView);
         let notices = self.projects.poll_plugins();
         if let Some(last) = notices.last() {
             self.status = Status::Hint(last.clone());
@@ -719,6 +720,8 @@ impl App {
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
             if self.settings_open {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.settings_page(ui));
+                // The device panel is not shown: embedded editors hide with it.
+                self.place_editors(&[]);
                 return;
             }
             let prompt_height = if self.open_prompt.is_some() { theme::ROW + 12.0 } else { 0.0 };
@@ -730,8 +733,12 @@ impl App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
             }
             let view_area = inner;
-            let inner =
-                if grid.is_some() && self.detail_open { self.detail_area(ui, inner, &mut actions) } else { inner };
+            let inner = if grid.is_some() && self.detail_open {
+                self.detail_area(ui, inner, &mut actions)
+            } else {
+                self.place_editors(&[]);
+                inner
+            };
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
@@ -784,6 +791,41 @@ impl App {
     /// and returns what is left for the view.
     fn detail_area(&mut self, ui: &mut Ui, area: Rect, actions: &mut Vec<Action>) -> Rect {
         let stacked = self.settings.device_layout == DeviceLayout::Stack;
+        // What it shows: the selected clip, or the selected track's devices.
+        let (track, clip) = match self.shown {
+            View::Session => (self.view.selected, None),
+            View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
+        };
+        // Where each plug-in on the shown track stands, read first: reading it needs the session
+        // itself, building the detail only the project; and an editor embedded in the panel
+        // decides how tall the panel is.
+        let mut reports = std::collections::HashMap::new();
+        if let Some(shown_track) = clip.map(|(t, _)| t).or(track)
+            && let Ok(session) = self.projects.session_mut(None)
+        {
+            let devices = session
+                .project()
+                .tracks
+                .iter()
+                .find(|t| t.id == shown_track)
+                .and_then(|t| t.channel)
+                .and_then(|c| session.project().channels.iter().find(|ch| ch.id == c))
+                .map_or(0, |c| c.devices.len());
+            for index in 0..devices {
+                if let Some(report) = session.plugin_report(shown_track, index) {
+                    reports.insert((shown_track, index), report);
+                }
+            }
+        }
+        if !stacked {
+            let scale = ui.ctx().pixels_per_point();
+            let needed = reports
+                .values()
+                .filter_map(|r| r.editor_embedded)
+                .map(|(_, height)| detail_view::row_height_with_editor(height, scale))
+                .fold(0.0, f32::max);
+            self.detail_height = self.detail_height.max(needed);
+        }
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
             let x = area.right() - self.detail_width;
@@ -818,42 +860,27 @@ impl App {
         let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
         painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_hint());
 
-        // What it shows: the selected clip, or the selected track's devices.
-        let (track, clip) = match self.shown {
-            View::Session => (self.view.selected, None),
-            View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
-        };
-        // Where each plug-in on the shown track stands, read first: reading it needs the session
-        // itself, building the detail only the project.
-        let mut reports = std::collections::HashMap::new();
-        if let Some(shown_track) = clip.map(|(t, _)| t).or(track)
-            && let Ok(session) = self.projects.session_mut(None)
-        {
-            let devices = session
-                .project()
-                .tracks
-                .iter()
-                .find(|t| t.id == shown_track)
-                .and_then(|t| t.channel)
-                .and_then(|c| session.project().channels.iter().find(|ch| ch.id == c))
-                .map_or(0, |c| c.devices.len());
-            for index in 0..devices {
-                if let Some(report) = session.plugin_report(shown_track, index) {
-                    reports.insert((shown_track, index), report);
-                }
-            }
-        }
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        let mut places = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if stacked {
-                detail_view::show_stack(ui, &shown, actions)
+                detail_view::show_stack(ui, &shown, actions, &mut places);
             } else {
-                detail_view::show_row(ui, &shown, actions)
+                detail_view::show_row(ui, &shown, actions, &mut places);
             }
         });
+        self.place_editors(&places);
         view
+    }
+
+    /// Tells the active project where the panel shows its embedded plug-in editors this frame
+    /// (none: they are hidden).
+    fn place_editors(&mut self, places: &[detail_view::EditorPlace]) {
+        let Ok(session) = self.projects.session_mut(None) else { return };
+        let shown: Vec<_> = places.iter().map(|p| (p.track, p.device, p.placement)).collect();
+        session.place_editors(&shown);
     }
 
     /// The tab row: one tab per open project, the active one lit; a tab's × closes it.

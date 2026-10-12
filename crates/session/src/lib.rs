@@ -18,6 +18,7 @@ use serde_json::Value;
 
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
+pub use loopwerk_plugins::Placement;
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 pub use rack::{
@@ -185,6 +186,24 @@ impl Session {
     /// they float above it, have no taskbar entry of their own and go with it.
     pub fn set_editor_owner(&mut self, owner: Option<u64>) {
         self.plugins.set_owner(owner);
+    }
+
+    /// Whether plug-in editors open embedded in the owner window's device panel rather than
+    /// in windows of their own (the window's setting; nothing without an owner window).
+    pub fn set_editor_embedding(&mut self, embed: bool) {
+        self.plugins.set_embedding(embed);
+    }
+
+    /// Where the window shows the embedded plug-in editors this frame, each by its device
+    /// (`track`, index among the track's channel's devices) and in the owner window's own
+    /// pixels; every other embedded editor is hidden. Never waits for a host; the window says
+    /// it every frame.
+    pub fn place_editors(&mut self, shown: &[(loopwerk_model::TrackId, usize, loopwerk_plugins::Placement)]) {
+        let keyed: Vec<(u64, loopwerk_plugins::Placement)> = shown
+            .iter()
+            .filter_map(|(track, device, placement)| Some((plugin_key_at(&self.project, *track, *device)?, *placement)))
+            .collect();
+        self.plugins.place_editors(&keyed);
     }
 
     /// How far the project's plug-ins have got with starting (all zero while it does not play).

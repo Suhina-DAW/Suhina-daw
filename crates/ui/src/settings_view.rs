@@ -6,7 +6,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
-use crate::settings::{DeviceLayout, Graphics, OnOpen, Settings, Side, StopReturn};
+use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
 
@@ -32,6 +32,9 @@ pub struct About {
     pub audio_output: Option<String>,
     /// How the window is drawn right now.
     pub graphics_now: Option<Graphics>,
+    /// Plug-in editors can open inside the device panel here (the window is a Win32 or X11
+    /// one); elsewhere the setting for it is shown but does nothing.
+    pub editors_embeddable: bool,
     /// The folders projects are saved in and templates kept in when the settings leave them
     /// empty.
     pub projects_default: String,
@@ -393,6 +396,21 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         }
         Page::Plugins => {
             section(&mut y, "Plug-ins");
+            let r = row(&mut y);
+            let note = if about.editors_embeddable {
+                "In a window above Loopwerk, or inside the device panel as part of the chain"
+            } else {
+                "Inside the device panel is not available on this system; editors open in a window"
+            };
+            label(&painter, r, "Editors", note);
+            let options = [("Window", EditorPlacement::Window), ("Device view", EditorPlacement::DeviceView)];
+            if let Some(placement) =
+                segmented(ui, &painter, control_rect(r, 2), "Editors", &options, settings.plugin_editors)
+            {
+                settings.plugin_editors = placement;
+                outcome.changed = true;
+            }
+            y += PAD;
             outcome.plugins = plugin_section(ui, &painter, page, &mut y, bottom, plugins);
         }
     }

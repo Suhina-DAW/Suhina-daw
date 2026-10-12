@@ -4,6 +4,8 @@
 //! restarts and opens the editor of its project's plug-ins through commands.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
+mod common;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -400,6 +402,48 @@ fn an_editor_is_owned_by_the_engines_window() {
     // SAFETY: a message without pointers to the owner's thread.
     unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
     owner_thread.join().unwrap();
+}
+
+/// With embedding on (the window's setting), an editor opened by command is a child inside
+/// the window the session was given, the report carries its size for the panel to lay out
+/// around, the window says where it goes, and turning embedding off moves it to a window of
+/// its own.
+#[test]
+fn an_editor_embeds_in_the_engines_window_when_the_setting_says_so() {
+    use common::{ParentWindow, soon};
+    use loopwerk_session::Placement;
+    if !common::editors_open_here() {
+        eprintln!("no display for editors; skipped");
+        return;
+    }
+    let parent = ParentWindow::open();
+    let p = project(8.0, false, vec![plugin_device("vst3")]);
+    let (mut session, mut renderer) = session(p, false);
+    session.set_editor_owner(Some(parent.id()));
+    session.set_editor_embedding(true);
+    until(&mut session, &mut renderer, "starting", |s| s["status"] == "running");
+    let device = json!({ "track": 1, "device": 0 });
+    assert_eq!(session.execute("device.openEditor", &device).unwrap()["editor_open"], "opening");
+    until(&mut session, &mut renderer, "opening the editor", |s| s["editor_open"] == true);
+    let report = session.plugin_report(TrackId(1), 0).unwrap();
+    assert_eq!(report.editor_embedded, Some((300, 200)));
+    assert!(soon(PATIENT, || parent.editor_children() == 1), "no editor child in the engine's window");
+    // The window says where the panel shows it, every frame; a placement is sent once.
+    let shown = Placement { x: 8, y: 40, clip_x: 0, clip_y: 40, clip_width: 400, clip_height: 260 };
+    session.place_editors(&[(TrackId(1), 0, shown)]);
+    session.sync_plugins();
+    // Embedding off: the editor closes and opens again in a window of its own.
+    session.set_editor_embedding(false);
+    assert!(
+        soon(PATIENT, || {
+            session.sync_plugins();
+            session.plugin_report(TrackId(1), 0).is_some_and(|r| r.editor_open && r.editor_embedded.is_none())
+                && parent.editor_children() == 0
+        }),
+        "the editor did not move to a window of its own"
+    );
+    session.execute("device.closeEditor", &device).unwrap();
+    until(&mut session, &mut renderer, "closing the editor", |s| s["editor_open"] == false);
 }
 
 #[test]

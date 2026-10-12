@@ -754,16 +754,23 @@ impl Vst3Plugin {
         Ok(())
     }
 
-    /// Opens the plug-in's editor (or returns the size of the one open).
-    pub(crate) fn open_editor(&mut self) -> Result<crate::window::Size, String> {
+    /// Opens the plug-in's editor as `mode` says (or returns the size of the one open).
+    pub(crate) fn open_editor(&mut self, mode: crate::window::Mode) -> Result<crate::window::Size, String> {
         if let Some(editor) = &self.editor {
             return Ok(editor.size());
         }
         let controller = self.controller.as_ref().ok_or("the plug-in has no editor")?;
-        let editor = crate::vst3_editor::Editor::open(controller, &self.name)?;
+        let editor = crate::vst3_editor::Editor::open(controller, mode, &self.name)?;
         let size = editor.size();
         self.editor = Some(editor);
         Ok(size)
+    }
+
+    /// Puts an embedded editor where the engine says.
+    pub(crate) fn place_editor(&self, placement: crate::window::Placement) {
+        if let Some(editor) = &self.editor {
+            editor.place(placement);
+        }
     }
 
     pub(crate) fn close_editor(&mut self) {
@@ -779,6 +786,11 @@ impl Vst3Plugin {
             self.close_editor();
         }
         closed
+    }
+
+    /// A size the editor got since this was last asked.
+    pub(crate) fn editor_resized(&mut self) -> Option<crate::window::Size> {
+        self.editor.as_mut().and_then(crate::vst3_editor::Editor::take_resized)
     }
 
     /// The controller's parameters, values normalized (0 to 1).

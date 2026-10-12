@@ -114,15 +114,18 @@ pub(crate) struct Editor {
     frame: ComWrapper<Frame>,
     window: Window,
     size: Size,
+    /// The user may resize the window (a floating one the plug-in allows it for).
     resizable: bool,
+    /// A size the editor got since the engine was last told, by the plug-in or the user.
+    resized: Option<Size>,
 }
 
 /// The platform type a view is attached as on this system.
 const PLATFORM: FIDString = if cfg!(windows) { kPlatformTypeHWND } else { kPlatformTypeX11EmbedWindowID };
 
 impl Editor {
-    /// Opens `controller`'s editor in a window titled `title`.
-    pub(crate) fn open(controller: &ComPtr<IEditController>, title: &str) -> Result<Self, String> {
+    /// Opens `controller`'s editor in a window of `mode`, titled `title` when it has a title.
+    pub(crate) fn open(controller: &ComPtr<IEditController>, mode: window::Mode, title: &str) -> Result<Self, String> {
         // SAFETY: a live controller; the name is a static C string.
         let raw = unsafe { controller.createView(c"editor".as_ptr()) };
         // SAFETY: an owned reference to the view, or null when there is no editor.
@@ -136,8 +139,8 @@ impl Editor {
         let _ = unsafe { view.getSize(&mut rect) };
         let size = size_of(&rect);
         // SAFETY: a live view.
-        let resizable = unsafe { view.canResize() } == kResultTrue;
-        let window = Window::open(title, size, resizable)?;
+        let resizable = unsafe { view.canResize() } == kResultTrue && mode == window::Mode::Floating;
+        let window = Window::open_as(mode, title, size, resizable)?;
         let frame = ComWrapper::new(Frame {
             window: window.id(),
             handlers: RefCell::new(Vec::new()),
@@ -152,29 +155,41 @@ impl Editor {
             let _ = unsafe { view.setFrame(std::ptr::null_mut()) };
             return Err("the plug-in's editor did not open".into());
         }
-        Ok(Self { view, frame, window, size, resizable })
+        Ok(Self { view, frame, window, size, resizable, resized: None })
     }
 
     pub(crate) fn size(&self) -> Size {
         self.size
     }
 
-    /// Tells the view about a size the user gave the window. Returns whether the user asked
-    /// the window to close.
+    /// Puts an embedded editor where the engine says.
+    pub(crate) fn place(&self, placement: window::Placement) {
+        window::place(self.window.id(), placement);
+    }
+
+    /// Keeps the editor in step with its window: tells the view about a size the user gave
+    /// the window, and notes a size the plug-in gave the view (through the frame). Returns
+    /// whether the user asked the window to close.
     pub(crate) fn tick(&mut self) -> bool {
         self.frame.run();
-        if self.resizable {
-            let now = window::client_size(self.window.id());
-            if now != self.size && now.width > 0 && now.height > 0 {
+        let now = window::client_size(self.window.id());
+        if now != self.size && now.width > 0 && now.height > 0 {
+            if self.resizable {
                 let mut rect = ViewRect { left: 0, top: 0, right: now.width as i32, bottom: now.height as i32 };
                 // SAFETY: a live view, asked whether it takes the size and then given it.
                 let _ = unsafe { self.view.checkSizeConstraint(&mut rect) };
                 // SAFETY: as above.
                 let _ = unsafe { self.view.onSize(&mut rect) };
-                self.size = now;
             }
+            self.size = now;
+            self.resized = Some(now);
         }
         window::take_close_request(self.window.id())
+    }
+
+    /// A size the editor got since this was last asked, to tell the engine.
+    pub(crate) fn take_resized(&mut self) -> Option<Size> {
+        self.resized.take()
     }
 
     /// Closes the editor: the view lets go of the window, then the window closes.

@@ -41,8 +41,8 @@ use interprocess::local_socket::{
 pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Outcome};
 use loopwerk_ipc::{IpcError, Link};
 
-pub use protocol::ParamInfo;
 use protocol::{MAX_LINE, Message, VERSION};
+pub use protocol::{ParamInfo, Placement};
 
 /// Blocks in a row without an answer after which a running host counts as hung.
 pub const HUNG_AFTER: u32 = 32;
@@ -257,12 +257,14 @@ struct Group {
     generation: u64,
     /// Instances whose editor the host said was closed, not yet taken in by them.
     closed_editors: Vec<u32>,
+    /// Instances whose editor the host said got a new size (the latest), not yet taken in.
+    resized_editors: Vec<(u32, (u32, u32))>,
     next_ping: u64,
 }
 
 impl Group {
     fn new() -> Self {
-        Self { process: None, generation: 0, closed_editors: Vec::new(), next_ping: 0 }
+        Self { process: None, generation: 0, closed_editors: Vec::new(), resized_editors: Vec::new(), next_ping: 0 }
     }
 
     fn alive(&mut self) -> bool {
@@ -275,6 +277,7 @@ impl Group {
             process.kill();
         }
         self.closed_editors.clear();
+        self.resized_editors.clear();
     }
 
     /// Ends the current process and starts a new one for the group.
@@ -300,11 +303,19 @@ impl Group {
 
     /// Takes in what a message the host sent unasked says.
     fn note(&mut self, message: &Message) {
-        if let Message::EditorClosed { instance } = message
-            && !self.closed_editors.contains(instance)
-            && self.closed_editors.len() < MAX_CLOSED_EDITORS
-        {
-            self.closed_editors.push(*instance);
+        match message {
+            Message::EditorClosed { instance } => {
+                if !self.closed_editors.contains(instance) && self.closed_editors.len() < MAX_CLOSED_EDITORS {
+                    self.closed_editors.push(*instance);
+                }
+            }
+            Message::EditorResized { instance, width, height } => {
+                self.resized_editors.retain(|(i, _)| i != instance);
+                if self.resized_editors.len() < MAX_CLOSED_EDITORS {
+                    self.resized_editors.push((*instance, (*width, *height)));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -326,6 +337,12 @@ impl Group {
         let before = self.closed_editors.len();
         self.closed_editors.retain(|i| *i != instance);
         self.closed_editors.len() != before
+    }
+
+    /// The size the host said `instance`'s editor got, if any (and forgets it).
+    fn take_resized(&mut self, instance: u32) -> Option<(u32, u32)> {
+        let at = self.resized_editors.iter().position(|(i, _)| *i == instance)?;
+        Some(self.resized_editors.swap_remove(at).1)
     }
 
     /// Sends `message` (about `instance`, or the process) and waits for the reply `wanted`
@@ -450,6 +467,8 @@ pub struct Plugin {
     params_since: Vec<(u32, f64)>,
     /// Whether the plug-in's editor window is open.
     editor_open: bool,
+    /// The size of the open editor's inside, as the host last said.
+    editor_size: Option<(u32, u32)>,
     /// What [`Plugin::health`] last found, for when the process is busy with a sibling.
     last_health: Health,
 }
@@ -473,6 +492,7 @@ impl Plugin {
             last_state: None,
             params_since: Vec::new(),
             editor_open: false,
+            editor_size: None,
             last_health: Health::Running,
         };
         Ok((plugin, PluginAudio { link, unanswered }))
@@ -526,8 +546,12 @@ impl Plugin {
             return Err(PluginError::Protocol("the host process was replaced; restart the plug-in".into()));
         }
         let reply = group.request(Some(self.instance), message, what, self.launch.timeout, wanted);
+        if let Some(size) = group.take_resized(self.instance) {
+            self.editor_size = Some(size);
+        }
         if group.take_closed(self.instance) {
             self.editor_open = false;
+            self.editor_size = None;
         }
         reply
     }
@@ -609,19 +633,43 @@ impl Plugin {
     /// [`Plugin::open_editor`] in a window that `owner` (the engine's window: a Win32 `HWND`,
     /// an X11 window id) owns: it floats above it and goes with it.
     pub fn open_editor_owned(&mut self, owner: Option<u64>) -> Result<(u32, u32), PluginError> {
+        self.open_editor_in(owner, false)
+    }
+
+    /// [`Plugin::open_editor`] as a child inside the engine's window `owner` (a Win32 `HWND`,
+    /// an X11 window id), hidden until [`Plugin::place_editor`] puts it somewhere in it.
+    pub fn open_editor_embedded(&mut self, owner: u64) -> Result<(u32, u32), PluginError> {
+        self.open_editor_in(Some(owner), true)
+    }
+
+    fn open_editor_in(&mut self, owner: Option<u64>, embedded: bool) -> Result<(u32, u32), PluginError> {
         let instance = self.instance;
         let reply = self.request(
-            &Message::OpenEditor { instance, owner },
+            &Message::OpenEditor { instance, owner, embedded },
             "open_editor",
             |m| matches!(m, Message::EditorOpened { instance: i, .. } if *i == instance),
         )?;
         match reply {
             Message::EditorOpened { width, height, .. } => {
                 self.editor_open = true;
+                self.editor_size = Some((width, height));
                 Ok((width, height))
             }
             _ => Err(PluginError::Protocol("expected the editor".into())),
         }
+    }
+
+    /// Puts an embedded editor at `placement` in the engine's window. Never waits for the
+    /// host, and not for the process either: while it is busy with another request the
+    /// placement is not sent, and this returns `false` so the caller sends it again later.
+    pub fn place_editor(&mut self, placement: Placement) -> Result<bool, PluginError> {
+        let Some(mut group) = try_lock(&self.group) else { return Ok(false) };
+        if group.generation != self.generation {
+            return Err(PluginError::Protocol("the host process was replaced; restart the plug-in".into()));
+        }
+        let process = group.process.as_mut().ok_or_else(|| PluginError::Protocol("the host is not running".into()))?;
+        process.send(&Message::PlaceEditor { instance: self.instance, placement })?;
+        Ok(true)
     }
 
     /// Closes the plug-in's editor, if it is open.
@@ -633,6 +681,7 @@ impl Plugin {
             |m| matches!(m, Message::EditorClosed { instance: i } if *i == instance),
         )?;
         self.editor_open = false;
+        self.editor_size = None;
         Ok(())
     }
 
@@ -640,16 +689,34 @@ impl Plugin {
     /// Never waits: while the process is busy with another request, the answer is the last
     /// one known.
     pub fn editor_open(&mut self) -> bool {
-        let Some(mut group) = try_lock(&self.group) else { return self.editor_open };
+        self.take_editor_news();
+        self.editor_open
+    }
+
+    /// The size of the open editor's inside, as the host last said (the plug-in may have
+    /// changed it since it opened); `None` while it is closed. Never waits, like
+    /// [`Plugin::editor_open`].
+    pub fn editor_size(&mut self) -> Option<(u32, u32)> {
+        self.take_editor_news();
+        self.editor_size
+    }
+
+    /// Takes in what the host said unasked about the editor, if the process is not busy.
+    fn take_editor_news(&mut self) {
+        let Some(mut group) = try_lock(&self.group) else { return };
         if group.generation != self.generation {
             self.editor_open = false;
-        } else {
-            group.drain();
-            if group.take_closed(self.instance) {
-                self.editor_open = false;
-            }
+            self.editor_size = None;
+            return;
         }
-        self.editor_open
+        group.drain();
+        if let Some(size) = group.take_resized(self.instance) {
+            self.editor_size = Some(size);
+        }
+        if group.take_closed(self.instance) {
+            self.editor_open = false;
+            self.editor_size = None;
+        }
     }
 
     /// Brings the plug-in back with its last saved state and the parameters set since, and
@@ -689,6 +756,7 @@ impl Plugin {
         self.generation = generation;
         self.latency = latency;
         self.editor_open = false;
+        self.editor_size = None;
         self.unanswered = Arc::new(AtomicU32::new(0));
         let audio = PluginAudio { link, unanswered: self.unanswered.clone() };
         let params = std::mem::take(&mut self.params_since);

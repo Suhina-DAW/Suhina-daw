@@ -19,7 +19,9 @@ use loopwerk_engine::{
 use loopwerk_model::{Device, Project};
 use loopwerk_plugins::library::{Hosting, group_for};
 use loopwerk_plugins::scan::{Catalog, PluginInfo};
-use loopwerk_plugins::{Event, EventKind, Health, Launch, MAX_EVENTS, Plugin, PluginAudio, PluginError, SavedState};
+use loopwerk_plugins::{
+    Event, EventKind, Health, Launch, MAX_EVENTS, Placement, Plugin, PluginAudio, PluginError, SavedState,
+};
 
 use crate::{CommandError, Player};
 
@@ -122,6 +124,9 @@ pub struct PluginReport {
     /// Frames of delay it reported.
     pub latency: u32,
     pub editor_open: bool,
+    /// The open editor is embedded in the device panel of the session's window (rather than
+    /// in a window of its own), and the size of its inside in pixels, as the host last said.
+    pub editor_embedded: Option<(u32, u32)>,
     /// Why it runs with its own defaults, when it did not take the saved state.
     pub state_refused: Option<String>,
 }
@@ -297,6 +302,43 @@ struct Instance {
     state_refused: Option<String>,
     /// Whether its editor is open, as last known.
     editor_open: bool,
+    /// How the editor was opened: embedded in the session's window, or in a window of its
+    /// own. Set when it is asked to open, so a placement that comes while it opens is kept.
+    editor_embedded: bool,
+    /// The size of the open editor's inside in pixels, as last known.
+    editor_size: Option<(u32, u32)>,
+    /// Where the window wants the embedded editor, and what the host was last told.
+    placement_wanted: Option<Placement>,
+    placement_sent: Option<Placement>,
+    /// The editor is being closed to open again the other way (the embedding setting changed).
+    reopen_editor: bool,
+}
+
+impl Instance {
+    fn new(status: PluginStatus, plugin: Option<(String, String, &'static str)>, generation: u64) -> Self {
+        Self {
+            status,
+            plugin,
+            info: PluginSlotInfo::default(),
+            control: None,
+            generation,
+            state_refused: None,
+            editor_open: false,
+            editor_embedded: false,
+            editor_size: None,
+            placement_wanted: None,
+            placement_sent: None,
+            reopen_editor: false,
+        }
+    }
+
+    /// The editor is closed (or gone with its process).
+    fn editor_gone(&mut self) {
+        self.editor_open = false;
+        self.editor_size = None;
+        self.placement_wanted = None;
+        self.placement_sent = None;
+    }
 }
 
 /// The plug-ins one project runs, while it plays.
@@ -314,6 +356,8 @@ pub struct Rack {
     saved: Instant,
     /// The window editors open over (owned by it), when the session runs in one.
     owner: Option<u64>,
+    /// Editors open embedded in that window's device panel rather than in windows of their own.
+    embed: bool,
     returned_sender: Sender<Returned>,
     returned: Receiver<Returned>,
     /// What happened while the project was saved, for the next [`Rack::sync`] to tell.
@@ -338,6 +382,7 @@ impl Default for Rack {
             checked: Instant::now(),
             saved: Instant::now(),
             owner: None,
+            embed: false,
         }
     }
 }
@@ -440,14 +485,19 @@ impl Rack {
                 continue;
             }
             let Some(control) = control else { continue };
+            let mut reopen = false;
             match self.instances.get_mut(&key).filter(|i| i.generation == generation && i.control.is_none()) {
                 Some(instance) => {
                     let name = instance.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
                     match done {
-                        Done::Opened(Ok(_)) => instance.editor_open = true,
+                        Done::Opened(Ok(size)) => {
+                            instance.editor_open = true;
+                            instance.editor_size = Some(size);
+                        }
                         Done::Opened(Err(why)) => notices.push(format!("{name}: its editor did not open ({why})")),
                         Done::Closed(result) => {
-                            instance.editor_open = false;
+                            instance.editor_gone();
+                            reopen = std::mem::take(&mut instance.reopen_editor);
                             if let Err(why) = result {
                                 notices.push(format!("{name}: its editor did not close ({why})"));
                             }
@@ -459,6 +509,25 @@ impl Rack {
                 // The device went while its plug-in was out: stop it like the others.
                 None => self.stop(key, control),
             }
+            if reopen && let Err(e) = self.open_editor(key) {
+                notices.push(format!("the editor did not open again: {}", e.0));
+            }
+        }
+    }
+
+    /// Tells the hosts where the window wants their embedded editors, where that has not been
+    /// told yet (the control half was out when the window said).
+    fn send_placements(&mut self) {
+        for instance in self.instances.values_mut() {
+            let (Some(wanted), Some(control)) = (instance.placement_wanted, instance.control.as_mut()) else {
+                continue;
+            };
+            if instance.placement_sent == Some(wanted) {
+                continue;
+            }
+            if control.place_editor(wanted).unwrap_or(false) {
+                instance.placement_sent = Some(wanted);
+            }
         }
     }
 
@@ -466,15 +535,20 @@ impl Rack {
     pub fn report(&mut self, key: u64) -> Option<PluginReport> {
         let instance = self.instances.get_mut(&key)?;
         if let Some(control) = instance.control.as_mut() {
-            instance.editor_open = control.editor_open();
+            if control.editor_open() {
+                instance.editor_open = true;
+                instance.editor_size = control.editor_size();
+            } else {
+                instance.editor_gone();
+            }
         }
-        let editor_open = instance.editor_open;
         Some(PluginReport {
             status: instance.status.clone(),
             plugin: instance.plugin.clone(),
             instrument: instance.info.instrument,
             latency: instance.info.latency,
-            editor_open,
+            editor_open: instance.editor_open,
+            editor_embedded: instance.editor_size.filter(|_| instance.editor_embedded && instance.editor_open),
             state_refused: instance.state_refused.clone(),
         })
     }
@@ -547,18 +621,7 @@ impl Rack {
             changed = true;
             let Some((matched, instrument)) = find(&env.catalog, device) else {
                 missing.push(device.name.clone());
-                self.instances.insert(
-                    found.key,
-                    Instance {
-                        status: PluginStatus::Missing,
-                        plugin: None,
-                        info: PluginSlotInfo::default(),
-                        control: None,
-                        generation: 0,
-                        state_refused: None,
-                        editor_open: false,
-                    },
-                );
+                self.instances.insert(found.key, Instance::new(PluginStatus::Missing, None, 0));
                 continue;
             };
             let state = self.kept.remove(&found.key).or_else(|| saved_state(device));
@@ -573,18 +636,10 @@ impl Rack {
             };
             self.next_generation += 1;
             let generation = self.next_generation;
-            self.instances.insert(
-                found.key,
-                Instance {
-                    status: PluginStatus::Loading,
-                    plugin: Some((matched.plugin.name.clone(), matched.plugin.vendor.clone(), matched.how.name())),
-                    info: PluginSlotInfo { instrument, latency: 0 },
-                    control: None,
-                    generation,
-                    state_refused: None,
-                    editor_open: false,
-                },
-            );
+            let plugin = Some((matched.plugin.name.clone(), matched.plugin.vendor.clone(), matched.how.name()));
+            let mut instance = Instance::new(PluginStatus::Loading, plugin, generation);
+            instance.info = PluginSlotInfo { instrument, latency: 0 };
+            self.instances.insert(found.key, instance);
             spawn_start(self.sender.clone(), found.key, generation, launch, state);
         }
         if !missing.is_empty() {
@@ -592,6 +647,7 @@ impl Rack {
         }
         changed |= self.receive(player, &mut notices);
         self.take_returned(&mut notices);
+        self.send_placements();
         self.watch(&mut notices);
         if changed {
             player.set_plugin_info(self.slot_info());
@@ -718,20 +774,77 @@ impl Rack {
         self.owner = owner;
     }
 
+    /// Whether editors open embedded in the owner window's device panel from now on, rather
+    /// than in windows of their own (nothing without an owner window). An editor open the
+    /// other way is closed and opened again the new way.
+    pub fn set_embedding(&mut self, embed: bool) {
+        let embed = embed && self.owner.is_some();
+        if self.embed == embed {
+            return;
+        }
+        self.embed = embed;
+        let to_move: Vec<u64> = self
+            .instances
+            .iter()
+            .filter(|(_, i)| i.editor_open && i.editor_embedded != embed)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in to_move {
+            if self.close_editor(key).is_ok()
+                && let Some(instance) = self.instances.get_mut(&key)
+            {
+                instance.reopen_editor = true;
+            }
+        }
+    }
+
     /// Opens the editor of the plug-in device `key`; returns the size of its inside. Over an
     /// owner window (the desktop app's) it opens on a thread of its own and `None` comes back
     /// at once: the host making a window that the app's window owns waits for the app's window
-    /// thread, which must not be waiting for the host meanwhile.
+    /// thread, which must not be waiting for the host meanwhile. Embedded (the setting), it
+    /// opens hidden inside that window until [`Rack::place_editor`] puts it somewhere.
     pub fn open_editor(&mut self, key: u64) -> Result<Option<(u32, u32)>, CommandError> {
         self.running(key)?;
         match self.owner {
             Some(owner) => {
+                let embed = self.embed;
                 self.lend(key, move |control| {
-                    Done::Opened(control.open_editor_owned(Some(owner)).map_err(|e| e.to_string()))
+                    let opened = if embed {
+                        control.open_editor_embedded(owner)
+                    } else {
+                        control.open_editor_owned(Some(owner))
+                    };
+                    Done::Opened(opened.map_err(|e| e.to_string()))
                 })?;
+                if let Some(instance) = self.instances.get_mut(&key) {
+                    instance.editor_embedded = embed;
+                    instance.placement_sent = None;
+                }
                 Ok(None)
             }
             None => self.running(key)?.open_editor().map(Some).map_err(|e| CommandError(e.to_string())),
+        }
+    }
+
+    /// Where the window shows the embedded editors this frame, by plug-in device key; every
+    /// other embedded editor is hidden (its device is not in the panel). Told to the hosts now
+    /// where it can be (and the place changed), otherwise at the next [`Rack::sync`]. Never
+    /// waits for a host. Nothing for editors in windows of their own.
+    pub fn place_editors(&mut self, shown: &[(u64, Placement)]) {
+        for (key, instance) in &mut self.instances {
+            if !instance.editor_embedded || !instance.editor_open {
+                continue;
+            }
+            let placement = shown.iter().find(|(k, _)| k == key).map_or(Placement::HIDDEN, |(_, p)| *p);
+            instance.placement_wanted = Some(placement);
+            if instance.placement_sent == Some(placement) {
+                continue;
+            }
+            if let Some(control) = instance.control.as_mut()
+                && control.place_editor(placement).unwrap_or(false)
+            {
+                instance.placement_sent = Some(placement);
+            }
         }
     }
 
@@ -904,15 +1017,8 @@ mod tests {
     #[test]
     fn progress_counts_each_state() {
         let mut rack = Rack::default();
-        let instance = |status: PluginStatus, name: &str| Instance {
-            status,
-            plugin: Some((name.to_string(), "V".into(), "same")),
-            info: PluginSlotInfo::default(),
-            control: None,
-            generation: 0,
-            state_refused: None,
-            editor_open: false,
-        };
+        let instance =
+            |status: PluginStatus, name: &str| Instance::new(status, Some((name.to_string(), "V".into(), "same")), 0);
         rack.instances.insert(1, instance(PluginStatus::Running, "A"));
         rack.instances.insert(2, instance(PluginStatus::Loading, "C"));
         rack.instances.insert(3, instance(PluginStatus::Loading, "B"));

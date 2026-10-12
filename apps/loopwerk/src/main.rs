@@ -81,8 +81,15 @@ fn main() -> ExitCode {
     let (theme_list, theme_warnings) = themes.read_all();
     settings_warnings.extend(theme_warnings);
     let recent = recent::Recent::load(eframe::storage_dir(APP_ID).map(|d| d.join(RECENT_FILE)));
-    let mut window =
-        Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new(), themes, recent };
+    let mut window = Window {
+        app: App::new(),
+        graphics_now,
+        editors_embeddable: false,
+        audio_output: None,
+        pools: HashMap::new(),
+        themes,
+        recent,
+    };
     let (projects, templates) = default_folders();
     window.app.set_default_folders(projects, templates);
     match args.source {
@@ -108,6 +115,7 @@ fn main() -> ExitCode {
             .with_min_inner_size([640.0, 400.0])
             .with_drag_and_drop(true),
         renderer,
+        event_loop_builder: x11_first(),
         ..Default::default()
     };
     let animations = args.animations;
@@ -116,7 +124,9 @@ fn main() -> ExitCode {
         options,
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
-            window.app.set_editor_owner(native_window(cc));
+            let owner = native_window(cc);
+            window.editors_embeddable = owner.is_some();
+            window.app.set_editor_owner(owner);
             window.app.set_settings(&cc.egui_ctx, settings);
             let folder = window.themes.folder_text();
             window.app.set_themes(&cc.egui_ctx, theme_list, folder);
@@ -171,6 +181,8 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
 struct Window {
     app: App,
     graphics_now: Graphics,
+    /// The main window is a Win32 or X11 one, which plug-in editors can be embedded in.
+    editors_embeddable: bool,
     audio_output: Option<String>,
     /// Each open project's decoded audio, kept so a project made active again can play.
     pools: HashMap<ProjectId, AudioPool>,
@@ -351,6 +363,7 @@ impl Window {
         self.app.set_about(About {
             audio_output: self.audio_output.clone(),
             graphics_now: Some(self.graphics_now),
+            editors_embeddable: self.editors_embeddable,
             ..Default::default()
         });
     }
@@ -386,6 +399,27 @@ fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>,
 /// The main window's native handle, for plug-in editors to float above it (ADR 0006): a Win32
 /// `HWND` or an X11 window id; `None` elsewhere (Wayland, macOS: their editors float on their
 /// own).
+/// On Linux the window opens as an X11 one whenever an X server is there (`DISPLAY`): the
+/// desktop's own, or XWayland on a Wayland desktop, which every distribution ships. Plug-in
+/// editors are X11 windows (the hosts open them with `DISPLAY` too), and only an X11 window
+/// can own them or embed them (ADR 0006); a Wayland window could do neither. Without
+/// `DISPLAY` winit chooses as usual (Wayland), and editors open in windows of their own.
+#[cfg(target_os = "linux")]
+fn x11_first() -> Option<eframe::EventLoopBuilderHook> {
+    use winit::platform::x11::EventLoopBuilderExtX11;
+    let display = std::env::var("DISPLAY").is_ok_and(|d| !d.is_empty());
+    display.then(|| {
+        Box::new(|builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>| {
+            builder.with_x11();
+        }) as eframe::EventLoopBuilderHook
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn x11_first() -> Option<eframe::EventLoopBuilderHook> {
+    None
+}
+
 // An X11 window id is a `c_ulong`: 32 bits on Windows, 64 on Linux, where `u64::from` changes
 // nothing.
 #[allow(clippy::useless_conversion)]

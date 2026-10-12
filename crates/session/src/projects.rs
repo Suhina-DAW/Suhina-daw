@@ -36,6 +36,8 @@ pub struct Projects {
     plugin_env: Option<std::sync::Arc<crate::PluginEnv>>,
     /// The window plug-in editors open over, for the active project's session.
     editor_owner: Option<u64>,
+    /// Editors open embedded in that window's device panel (the window's setting).
+    editor_embed: bool,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -209,6 +211,12 @@ impl Projects {
         self.editor_owner = owner;
     }
 
+    /// Whether plug-in editors open embedded in the owner window's device panel rather than
+    /// in windows of their own (nothing without an owner window).
+    pub fn set_editor_embedding(&mut self, embed: bool) {
+        self.editor_embed = embed;
+    }
+
     /// Keeps the active project's plug-ins in line with it (ADR 0006): starts new ones in the
     /// background, takes in the ones that have started, notices crashes. Call it often from the
     /// thread that owns the projects (the window calls it every frame); commands call it too.
@@ -219,10 +227,11 @@ impl Projects {
             return Vec::new();
         }
         let env = self.plugin_env();
-        let owner = self.editor_owner;
+        let (owner, embed) = (self.editor_owner, self.editor_embed);
         let Some(session) = self.get_mut(active) else { return Vec::new() };
         session.set_plugin_env(env);
         session.set_editor_owner(owner);
+        session.set_editor_embedding(embed);
         session.sync_plugins()
     }
 
