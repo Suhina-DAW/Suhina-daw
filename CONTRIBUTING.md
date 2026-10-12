@@ -16,7 +16,10 @@
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
   *Before you finish a task* lists which document covers what.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
-- **Commits:** small, focused, with a clear subject line.
+- **Commits:** small, focused, with a clear subject line, and signed off (see
+  [Developer Certificate of Origin](#developer-certificate-of-origin)).
+- **Issues:** small and scoped, with acceptance criteria (the issue template asks for them);
+  architecture belongs in an ADR under `docs/decisions/`, not in an issue thread.
 
 ## Clean-room
 
@@ -40,9 +43,21 @@ force a rewrite of everything built on it, so it is not something we clean up la
   DAW or plug-in, by hand or with tools (Ghidra, IDA, Hopper, REA, ida-pro-mcp, …). If you have
   done this for a product, do not contribute code for that product's features.
 - Reading or using leaked source code.
-- Copying samples, presets, Packs, Core Library content, impulse responses, wavetables, demo
-  projects, icons, artwork or UI layouts from proprietary products, or committing them as test
-  data.
+- Notes, patches, write-ups or tools that come from someone else's debugging, disassembly or
+  decompilation of a proprietary program, for example the notes and binary patches of projects
+  that make a commercial DAW run on another operating system. Such a project may still be used
+  as a test platform to run the program and observe it; its findings about the program's
+  internals may not be read or used.
+- Copying samples, presets, Packs, Core Library content, impulse responses, wavetables or demo
+  projects from proprietary products, or committing them as test data.
+- Copying the visual design of a proprietary product: icons, artwork, interface text, colours,
+  typefaces or the look of its controls. Familiar workflow and the structure of the window (which
+  region is where, what a view shows, how it reacts, its shortcuts and menu structure) are
+  allowed; [`docs/design/brief.md`](docs/design/brief.md) lists what stays familiar and what
+  must be Loopwerk's own. Screenshots of a proprietary product may be used as a reference for
+  structure and behaviour, by people and by design tools, but the look drawn from them must follow
+  the brief, not the screenshot; they are never traced or committed, and nothing in them (icons,
+  artwork, text) is reused ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md)).
 - Using the Ableton or Live names, logos or trade dress for Loopwerk itself.
 
 **How we work:** findings go into prose specs under `docs/spec/` (your own words, no code from
@@ -50,6 +65,27 @@ the product). Implementation is written from those specs. AI agents follow the s
 agent that writes Loopwerk code must never be given decompiled or leaked material.
 
 If you are unsure whether a source is allowed, ask in an issue before using it.
+
+## Developer Certificate of Origin
+
+Every commit in a pull request from outside the project ends with a sign-off line:
+
+```text
+Signed-off-by: Your Name <you@example.com>
+```
+
+`git commit -s` adds it. By signing off you certify the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the
+change or have the right to submit it under the project's licence. For Loopwerk this includes
+the clean-room rules above: the change does not come from disassembled, decompiled or leaked
+material, from notes based on such material, or from content of a proprietary product, and no
+agent that wrote it was given such material. CI checks the sign-off on pull requests from forks.
+
+## Reporting a rights problem
+
+If you believe Loopwerk contains code, content or design that infringes your rights, or that a
+contribution broke the clean-room rules, see [`IP.md`](IP.md). Such reports are handled before
+any other work.
 
 ## AI-assisted contributions
 
