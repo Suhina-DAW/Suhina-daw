@@ -134,7 +134,7 @@ every merge.
 ```sh
 python scripts/docs.py impact   # documents that cover code you changed but you have not updated
 python scripts/docs.py check    # what CI runs: front matter, covered paths
-python scripts/docs.py index    # to look at the index locally; do not commit it
+python scripts/docs.py index    # prints the index with your documents in it; writes nothing
 ```
 
 Every file under `docs/` starts with front matter (format in `scripts/docs.py`): `description`,

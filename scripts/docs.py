@@ -2,7 +2,8 @@
 """The documentation index: front matter in every file under docs/, docs/INDEX.md built from it,
 and checks on the front matter.
 
-  python scripts/docs.py index            rewrite docs/INDEX.md
+  python scripts/docs.py index            print the index docs/INDEX.md would have
+  python scripts/docs.py index --write    rewrite docs/INDEX.md (the workflow on main does this)
   python scripts/docs.py check            front matter and covered paths
   python scripts/docs.py impact [BASE]    documents that describe code changed since BASE
                                           (default origin/main) but were not changed themselves
@@ -21,7 +22,7 @@ Front matter, at the top of each document:
 
 docs/INDEX.md and docs/commands.md are generated on main after every merge
 (.github/workflows/docs-generated.yml), so pull requests leave them alone and never conflict on
-them. `index` is for looking at the result locally.
+them. `index` without `--write` only prints, so a local look never ends up in a commit.
 
 Standard library only, so CI needs nothing but Python.
 """
@@ -224,7 +225,11 @@ def impact(base: str) -> int:
 def main(argv: list[str]) -> int:
     command = argv[1] if len(argv) > 1 else ""
     if command == "index":
-        INDEX.write_text(render_index(documents()), encoding="utf-8", newline="\n")
+        text = render_index(documents())
+        if "--write" not in argv[2:]:
+            sys.stdout.write(text)
+            return 0
+        INDEX.write_text(text, encoding="utf-8", newline="\n")
         print(f"wrote {INDEX.relative_to(ROOT).as_posix()}")
         return 0
     if command == "check":
