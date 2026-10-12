@@ -3,7 +3,7 @@ description: How versions are numbered and release builds for Linux, Windows and
 read_when: release, version, release candidate, tag, binaries, release workflow
 type: howto
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - .github/workflows/release.yml
 ---
@@ -49,11 +49,14 @@ workflow artifacts without creating a release, to test the pipeline.
 
 | Package | Built on | Contents |
 |---|---|---|
-| `loopwerk-<version>-linux-x86_64.tar.gz` | Ubuntu 22.04 (glibc 2.35) | `loopwerk-cli`; needs `libasound2` |
-| `loopwerk-<version>-windows-x86_64.zip` | Windows, MSVC, static C runtime | `loopwerk-cli.exe`; no Visual C++ redistributable needed |
-| `loopwerk-<version>-macos-universal.tar.gz` | macOS, arm64 + x86_64 joined with `lipo` | `loopwerk-cli`; macOS 11 or later |
+| `loopwerk-<version>-linux-x86_64.tar.gz` | Ubuntu 22.04 (glibc 2.35) | `loopwerk-cli`, `loopwerk-plugin-host`; needs `libasound2` |
+| `loopwerk-<version>-windows-x86_64.zip` | Windows, MSVC, static C runtime | `loopwerk-cli.exe`, `loopwerk-plugin-host.exe`; no Visual C++ redistributable needed |
+| `loopwerk-<version>-macos-universal.tar.gz` | macOS, arm64 + x86_64 joined with `lipo` | `loopwerk-cli`, `loopwerk-plugin-host`; macOS 11 or later |
 
-Each archive also holds `LICENSE`, `NOTICE`, `README.md` and `ATTRIBUTION.md`.
+`loopwerk-plugin-host` is the process plug-ins run in ([ADR 0006](decisions/0006-plug-in-hosting.md));
+`loopwerk-cli` looks for it in its own folder, so the two stay side by side. The smoke test runs
+the VST3 test plug-in built into the host through the packaged CLI. Each archive also holds
+`LICENSE`, `NOTICE`, `README.md` and `ATTRIBUTION.md`.
 
 ## Not yet
 

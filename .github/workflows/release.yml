@@ -21,6 +21,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   BIN: loopwerk-cli
+  # The process plug-ins run in (ADR 0006); loopwerk-cli looks for it next to itself.
+  HOST: loopwerk-plugin-host
 
 jobs:
   version:
@@ -100,7 +102,7 @@ jobs:
           TARGETS: ${{ matrix.targets }}
         run: |
           for target in ${TARGETS//,/ }; do
-            cargo build --release --locked -p loopwerk-cli --target "$target"
+            cargo build --release --locked -p loopwerk-cli -p loopwerk-plugin-host --target "$target"
           done
       - name: Collect the package
         shell: bash
@@ -108,14 +110,20 @@ jobs:
           mkdir -p "dist/$PACKAGE"
           case "$RUNNER_OS" in
             Windows)
-              cp "target/x86_64-pc-windows-msvc/release/$BIN.exe" "dist/$PACKAGE/" ;;
+              for bin in "$BIN" "$HOST"; do
+                cp "target/x86_64-pc-windows-msvc/release/$bin.exe" "dist/$PACKAGE/"
+              done ;;
             macOS)
-              lipo -create -output "dist/$PACKAGE/$BIN" \
-                "target/aarch64-apple-darwin/release/$BIN" \
-                "target/x86_64-apple-darwin/release/$BIN"
-              lipo -info "dist/$PACKAGE/$BIN" ;;
+              for bin in "$BIN" "$HOST"; do
+                lipo -create -output "dist/$PACKAGE/$bin" \
+                  "target/aarch64-apple-darwin/release/$bin" \
+                  "target/x86_64-apple-darwin/release/$bin"
+                lipo -info "dist/$PACKAGE/$bin"
+              done ;;
             *)
-              cp "target/x86_64-unknown-linux-gnu/release/$BIN" "dist/$PACKAGE/" ;;
+              for bin in "$BIN" "$HOST"; do
+                cp "target/x86_64-unknown-linux-gnu/release/$bin" "dist/$PACKAGE/"
+              done ;;
           esac
           cp LICENSE NOTICE README.md ATTRIBUTION.md "dist/$PACKAGE/"
 
@@ -123,28 +131,36 @@ jobs:
         shell: bash
         run: |
           exe="dist/$PACKAGE/$BIN"
-          [ "$RUNNER_OS" = "Windows" ] && exe="$exe.exe"
+          host="dist/$PACKAGE/$HOST"
+          if [ "$RUNNER_OS" = "Windows" ]; then exe="$exe.exe"; host="$host.exe"; fi
           output=$("$exe" --version)
           echo "$output"
           if [ "$output" != "$BIN $VERSION" ]; then
             echo "::error::expected '$BIN $VERSION', got '$output'"
             exit 1
           fi
-          case "$RUNNER_OS" in
-            Linux)
-              # Only system libraries: libasound is the one a user may have to install.
-              ldd "$exe"
-              if ldd "$exe" | grep -q "not found"; then exit 1; fi ;;
-            macOS)
-              otool -L "$exe"
-              lipo "$exe" -verify_arch arm64 x86_64 ;;
-            Windows)
-              # No dependency on the Visual C++ runtime: its DLL names would be in the import table.
-              if grep -qaiE "vcruntime140|msvcp140" "$exe"; then
-                echo "::error::the binary needs the Visual C++ runtime"
-                exit 1
-              fi ;;
-          esac
+          # A plug-in through the plug-in host found next to the CLI: the VST3 gain built into
+          # the host, on a tenth of a second of silence.
+          "$exe" plugin run test:vst3 - smoke.wav --seconds 0.1 --tail 0
+          test -s smoke.wav
+          for binary in "$exe" "$host"; do
+            case "$RUNNER_OS" in
+              Linux)
+                # Only system libraries: libasound is the one a user may have to install.
+                ldd "$binary"
+                if ldd "$binary" | grep -q "not found"; then exit 1; fi ;;
+              macOS)
+                otool -L "$binary"
+                lipo "$binary" -verify_arch arm64 x86_64 ;;
+              Windows)
+                # No dependency on the Visual C++ runtime: its DLL names would be in the import
+                # table.
+                if grep -qaiE "vcruntime140|msvcp140" "$binary"; then
+                  echo "::error::$binary needs the Visual C++ runtime"
+                  exit 1
+                fi ;;
+            esac
+          done
 
       - name: Archive
         shell: bash
