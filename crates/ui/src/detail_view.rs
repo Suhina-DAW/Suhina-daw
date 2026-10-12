@@ -334,9 +334,9 @@ fn plugin_button(
         format!("{label} {}", device.name),
     );
     let hover = widgets::hover(ui, &response);
-    let fill = crate::motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
+    let fill = crate::motion::mix(theme::control_background(), theme::control_hover(), hover);
     painter.rect_filled(button, 0.0, fill);
-    painter.rect_stroke(button, 0.0, theme::hairline(theme::line_strong()), egui::StrokeKind::Inside);
+    painter.rect_stroke(button, 0.0, theme::hairline(theme::border_strong()), egui::StrokeKind::Inside);
     widgets::text_in(
         painter,
         button,
@@ -398,7 +398,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         let color = match plugin.state {
             PluginState::Crashed => theme::recording(),
             PluginState::Running => theme::text_secondary(),
-            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::text_tertiary(),
+            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::text_hint(),
         };
         widgets::text_in(
             painter,

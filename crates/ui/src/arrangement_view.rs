@@ -852,7 +852,7 @@ fn clip_box<'a>(
         let handle = fade_handle(rect, edge, length as f32 * state.beat_width);
         let fill = motion::mix(theme::text_secondary(), theme::text_primary(), hover);
         handle_painter.rect_filled(handle, 0.0, fill);
-        handle_painter.rect_stroke(handle, 0.0, theme::hairline(theme::surface_0()), StrokeKind::Outside);
+        handle_painter.rect_stroke(handle, 0.0, theme::hairline(theme::window_background()), StrokeKind::Outside);
     }
     result
 }
