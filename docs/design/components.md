@@ -82,23 +82,27 @@ the view with the detail area, status bar.
 | View switch | Text only, 11 px, right-aligned, 12 px apart: "Session", "Arrangement"; the current one `text.primary` with a 1 px underline, the other `text.secondary` |
 | Open prompt | When a project is dropped while another is open and the setting says Ask: a 32 px row on `panel.background` above the view: "Open x:" In a new tab, In place of y, Cancel, Remember (which sets the setting) |
 | Drop overlay | While a project file is dragged over the window: `window.background` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
-| Browser | (planned) 300 px wide, resizable, left of the view |
+| Browser | 300 px wide by default, dragged from 200 to 600 px by a 4 px handle at its inner edge (`border`, `border.strong` under the pointer); left of the view, or right (Settings › Interface › Browser); Ctrl+B and View › Show browser hide and show it. See Browser below |
 | Detail splitter | 6 px, `control.background`, a 32 × 2 grip in `text.hint` in the middle; the cursor shows which way it moves |
 | Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` |
 | Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`). There is no separate info view |
 
-## Browser (planned)
+## Browser
+
+Behaviour in the [browser spec](../spec/browser.md). The panel is `panel.background`; its parts
+from top to bottom:
 
 | Part | Spec |
 |---|---|
-| Search | 26 px, `window.background`, 11 px search icon, placeholder "Search", shortcut hint right in 9 px mono |
-| Category filters | Wrapping row of buttons, 16 px high, 7 px side padding, 2 px gaps; selected `#C9C4BB` with `window.background` text |
-| Sidebar | 104 px; section titles 10 px `text.hint` with 8 px top padding; items 17 px; selected item `#3A3936` |
-| Tree row | 17 px; indent 12 px per level; 8 px chevron, 12 px type icon, name, meta right in 9 px mono |
-| Type icons | Folder `text.secondary`; MIDI note `track` ochre; audio wave `track` steel blue; stroke 1.1 |
-| Colour tag | 6 px dot after the name |
-| Preview strip | 54 px: 22 px play button, file name, duration, BPM, key; waveform of 1 px bars, played part `text.secondary`, rest `#55524C`, playhead 1 px `accent` |
-| Footer | 20 px: tags, selection count |
+| Search | 26 px, `window.background`, 11 px search icon (a ring and a handle in `text.hint`), placeholder "Search", shortcut hint right in 9 px mono `text.hint` |
+| Category filters | Wrapping row of buttons, 16 px high, 7 px side padding, 2 px gaps, 10 px text; selected `text.value` with `window.background` text, others `control.background` (hover `control.hoverBackground`) with `text.secondary` |
+| Sidebar | 104 px, a 1 px `border` on its right; section titles (Pinned, Recent, Folders) 10 px `text.hint` with 8 px top padding; items 17 px, 10 px `text.secondary` (`text.primary` when selected); selected item `control.activeBackground`, hover `panel.hoverBackground`; a folder's state at its right in 9 px mono `text.hint` ("…" scanning, "poll", "gone"); "+ Add folder" in `text.hint` opens a path field in its place |
+| Tree row | 17 px; indent 12 px per level; 10 px lead (a chevron in `text.hint` for what opens, a play triangle for a selected or hovered sample or MIDI file), 12 px type icon, 5 px, name 10 px `text.value` (`text.primary` selected), tag dots, meta right in 9 px mono `text.hint` (length, "plug-in", the folder a search found it in); selected row `control.activeBackground`, hover `panel.hoverBackground`; a 2 px `border.strong` bar at the right edge shows the scroll position |
+| Type icons | Our own strokes, 1.1 px, 12 px: folder and heading `text.secondary`; MIDI note `track.2` (ochre); audio wave `track.3` (steel blue); instrument and preset `track.4`; effect `track.1`; project page `text.secondary` |
+| Colour tag | 6 px dot after the name, 2 px apart, in the tag's colour |
+| Preview strip | 54 px, `window.background`, a 1 px `border` on top: 22 px play button (`control.background`, its glyph `accent` while playing), file name 10 px, length, BPM ("~" when detected) and key right in 9 px mono `text.secondary`; under them a waveform of 1 px bars (a MIDI file: 2 px note bars), played part `text.secondary`, rest `text.hint`, playhead 1 px `accent` |
+| Footer | 20 px, `panel.background`, a 1 px `border` on top: the tags as 6 px dots (a filter ring in `text.primary` when on), the count right in 9 px mono `text.hint` ("12 items", "3 selected") |
+| Drag label | Beside the pointer while dragging from the browser: 10 px text on `control.activeBackground` with a 1 px `accent` outline when it can land (`border.strong` when not); the target is outlined 1.5 px `accent` (a 2 px `accent` mark at the beat on an Arrangement lane) |
 
 ## Session view
 
@@ -117,7 +121,7 @@ space, the mixer at the bottom.
 | Main header | 20 px, `control.background`, "Main" in `text.primary`, no colour strip |
 | Scene button | 20 px, `control.background` (hover `#34332F`), name left in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground` |
 | Stop row | 20 px under the last scene, `panel.background`: per track a 7 × 7 square outline in `text.secondary` (`accent` while the stop is queued), centred; in the scene column the square and "Stop all" |
-| Drop area | (planned) the empty space under the stop row takes dropped clips and devices |
+| Empty space | Right of the last track: "+ MIDI track" and "+ Audio track" buttons (20 px, `control.background`, 10 px `text.secondary`, 2 px apart, 6 px from its top left) and, below them, "Drop files or devices to add a track" in 10 px `text.hint`. Drops from the browser there make new tracks; the Arrangement has the same under its last lane |
 
 Track colours: the track's own colour if it has one, else `track.1`–`track.4` in track order.
 
@@ -223,6 +227,7 @@ The list of pages: 20 px rows, 11 px names 6 px in, `text.secondary`; the page s
   - Theme
   - Arrangement
   - Detail area
+  - Browser
 - Graphics
 - Audio
 - Shortcuts
@@ -237,11 +242,17 @@ read-only setting (Output) shows its value as the note.
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
 | General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Loopwerk/Projects` and `…/Templates`, shown as the hint |
+| General › Dropping files | Several files | One track (default), One each; Ctrl while dropping does the other ([browser spec](../spec/browser.md) › Files) |
+| General › Dropping files | Warp mode | Beats (default), Tonal, Texture, Smooth, Pro, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | Interface | Animations | On (default), Off |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Interface › Detail area | Device chain | Row (default), Stack |
+| Interface › Browser | Side | Left (default), Right |
+| Interface › Browser | Auto-play | On (default), Off: selecting a sample or MIDI file previews it |
+| Interface › Browser | Preview volume | −18, −12, −6 (default), 0 dB |
+| Interface › Browser | Tag limit | 64 (default), 128, 256, 1024 colour tags (`library.setTag`'s `limit`) |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
 

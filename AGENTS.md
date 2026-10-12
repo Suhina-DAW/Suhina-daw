@@ -59,12 +59,15 @@ crates/
            and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
   locr     L1 Loopwerk's own project file (.locr, versioned JSON): reads and writes the model (ADR 0010)
-  media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool
-  session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002) and the
-           attached player
+  media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool;
+           reads MIDI files, file metadata (tempo, key) and detects tempo
+  library  L2 the browser's library: added folders, an index kept on disk and watched, search, pins,
+           recent items, colour tags (ADR 0012)
+  session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002), the
+           attached player, each project's decoded audio and previews (ADR 0011)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
   output   L3 the audio device (cpal): plays an engine, opens a Player for a session
-  ui       L3 the main window and views (egui, ADR 0009); every change is a command
+  ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
   ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)

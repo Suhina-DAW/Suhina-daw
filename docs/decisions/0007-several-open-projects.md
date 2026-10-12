@@ -59,8 +59,10 @@ the layer that owns sessions.
   and a project that stops playing (another tab made active) stops them, each keeping its last
   state for when the project plays again ([ADR 0006](0006-plug-in-hosting.md)).
 - `Projects` is where Loopwerk-wide state lives too: it also holds the plug-in library that the
-  `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)), shared by every open
-  project.
+  `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)) and the browser's library that
+  the `library.*` commands run on ([ADR 0012](0012-file-library.md)), shared by every open
+  project. Each session keeps its own decoded audio ([ADR 0011](0011-preview-and-added-audio.md)),
+  so a project made active again plays without decoding anything.
 
 ## Not decided yet
 

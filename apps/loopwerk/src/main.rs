@@ -7,12 +7,10 @@
 mod recent;
 mod theme_files;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use loopwerk_engine::AudioPool;
-use loopwerk_session::{ProjectId, Session};
+use loopwerk_session::Session;
 use loopwerk_ui::keymap::Keymap;
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
@@ -81,26 +79,24 @@ fn main() -> ExitCode {
     let (theme_list, theme_warnings) = themes.read_all();
     settings_warnings.extend(theme_warnings);
     let recent = recent::Recent::load(eframe::storage_dir(APP_ID).map(|d| d.join(RECENT_FILE)));
-    let mut window = Window {
-        app: App::new(),
-        graphics_now,
-        editors_embeddable: false,
-        audio_output: None,
-        pools: HashMap::new(),
-        themes,
-        recent,
-    };
+    let mut window =
+        Window { app: App::new(), graphics_now, editors_embeddable: false, audio_output: None, themes, recent };
+    // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
+    let mut library = loopwerk_library::Library::new(eframe::storage_dir(APP_ID));
+    settings_warnings.extend(library.take_warnings());
+    if let Err(e) = library.start() {
+        settings_warnings.push(e);
+    }
+    window.app.set_file_library(library);
     let (projects, templates) = default_folders();
     window.app.set_default_folders(projects, templates);
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
             let session = Session::new(loopwerk_ui::demo::demo_project());
-            let (session, warnings, output) = with_audio(session, &AudioPool::new());
+            let (session, warnings, output) = with_audio(session);
             window.audio_output = output;
-            if let Some(id) = window.app.open_project(session, &warnings, OpenAs::NewTab) {
-                window.pools.insert(id, AudioPool::new());
-            }
+            window.app.open_project(session, &warnings, OpenAs::NewTab);
         }
         Source::Als(path) => window.open(&path, OpenAs::NewTab),
     }
@@ -184,8 +180,6 @@ struct Window {
     /// The main window is a Win32 or X11 one, which plug-in editors can be embedded in.
     editors_embeddable: bool,
     audio_output: Option<String>,
-    /// Each open project's decoded audio, kept so a project made active again can play.
-    pools: HashMap<ProjectId, AudioPool>,
     themes: theme_files::ThemeFiles,
     /// The projects opened and saved lately, for the project dialog.
     recent: recent::Recent,
@@ -206,15 +200,15 @@ impl eframe::App for Window {
         if let Some(folder) = self.app.take_lists_wanted() {
             self.app.set_project_lists(self.recent.existing(), recent::templates(&folder));
         }
-        for closed in self.app.take_closed() {
-            self.pools.remove(&closed);
-        }
+        // Each project keeps its decoded audio in its session (ADR 0011).
+        let _closed = self.app.take_closed();
         // Only the active project plays; one made active again gets an output.
         if let Some(id) = self.app.take_player_request() {
-            let opened = match (self.app.projects().get(id), self.pools.get(&id)) {
-                (Some(session), Some(audio)) => Some(loopwerk_output::open_player(session.project(), audio)),
-                _ => None,
-            };
+            let opened = self
+                .app
+                .projects()
+                .get(id)
+                .map(|session| loopwerk_output::open_player(session.project(), session.audio()));
             match opened {
                 Some(Ok((player, device))) => {
                     self.app.attach_player(id, player);
@@ -265,20 +259,19 @@ impl Window {
     }
 
     /// Decodes a session's audio, starts it playing (stopped) and shows it.
-    fn show_session(&mut self, session: Session, mut warnings: Vec<String>, how: OpenAs) {
+    fn show_session(&mut self, mut session: Session, mut warnings: Vec<String>, how: OpenAs) {
         let folder = session.audio_folder().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), &folder);
         warnings.extend(audio_warnings);
-        let (session, output_warnings, output) = with_audio(session, &audio);
+        let waveforms = loopwerk_ui::waveform::from_pool(&audio);
+        session.set_audio(audio);
+        let (session, output_warnings, output) = with_audio(session);
         warnings.extend(output_warnings);
         self.audio_output = output;
-        if let Some(id) = self.app.open_project(session, &warnings, how) {
-            self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
-            self.pools.insert(id, audio);
+        if self.app.open_project(session, &warnings, how).is_some() {
+            self.app.set_waveforms(waveforms);
         }
-        for closed in self.app.take_closed() {
-            self.pools.remove(&closed);
-        }
+        let _closed = self.app.take_closed();
         self.share_about();
     }
 
@@ -287,6 +280,7 @@ impl Window {
         if let Err(e) = self.recent.add(path) {
             self.app.set_status(Status::Error(e));
         }
+        self.app.record_project(path);
     }
 
     /// Does what Settings asked of the theme files (write, rename, read again, back up, export
@@ -384,10 +378,10 @@ fn default_folders() -> (PathBuf, PathBuf) {
     (base.join("Projects"), base.join("Templates"))
 }
 
-/// Connects the default audio output to `session`; without one the project still opens.
-/// Returns the session, warnings and a description of the output.
-fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>, Option<String>) {
-    match loopwerk_output::open_player(session.project(), audio) {
+/// Connects the default audio output to `session`, playing its audio; without one the project
+/// still opens. Returns the session, warnings and a description of the output.
+fn with_audio(mut session: Session) -> (Session, Vec<String>, Option<String>) {
+    match loopwerk_output::open_player(session.project(), session.audio()) {
         Ok((player, device)) => {
             session.attach_player(player);
             (session, Vec::new(), Some(device))

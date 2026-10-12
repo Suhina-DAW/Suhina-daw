@@ -38,6 +38,9 @@ pub struct Projects {
     editor_owner: Option<u64>,
     /// Editors open embedded in that window's device panel (the window's setting).
     editor_embed: bool,
+    /// The browser's library (ADR 0012); kept nowhere until one is given with
+    /// [`Projects::set_file_library`].
+    files: loopwerk_library::Library,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -205,6 +208,17 @@ impl Projects {
         env
     }
 
+    /// Uses `library` for the browser and the `library.*` commands: the desktop app and the
+    /// MCP server give it Loopwerk's settings folder.
+    pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
+        self.files = library;
+    }
+
+    /// The browser's library.
+    pub fn file_library_mut(&mut self) -> &mut loopwerk_library::Library {
+        &mut self.files
+    }
+
     /// The window plug-in editors open over (a Win32 `HWND`, an X11 window id): the desktop
     /// app's main window, so editors float above it. `None` gives them windows of their own.
     pub fn set_editor_owner(&mut self, owner: Option<u64>) {
@@ -248,7 +262,9 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) = PROJECT_COMMANDS.iter().chain(plugin_commands()).find(|c| c.id == id) {
+        if let Some(spec) =
+            PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).find(|c| c.id == id)
+        {
             if project.is_some() {
                 return Err(format!("{id} does not run on one project; it takes no target project").into());
             }
@@ -260,6 +276,9 @@ impl Projects {
         let target = project.or(self.active);
         let result = self.session_mut(project)?.execute(id, params);
         self.poll_plugins();
+        if let Ok(value) = &result {
+            crate::library::record_use(&mut self.files, id, params, value);
+        }
         // A project saved under a new name is shown by it.
         if id == "project.save"
             && let Ok(saved) = &result
@@ -285,7 +304,8 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects = PROJECT_COMMANDS.iter().chain(plugin_commands()).map(CommandSpec::describe);
+    let projects =
+        PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 

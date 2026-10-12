@@ -10,6 +10,7 @@ rust-version.workspace = true
 loopwerk-engine.workspace = true
 loopwerk-session.workspace = true
 loopwerk-media.workspace = true
+loopwerk-library.workspace = true
 hound.workspace = true
 serde_json.workspace = true
 serde = { version = "1", features = ["derive"] }  # MIT OR Apache-2.0

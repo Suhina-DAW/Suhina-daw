@@ -34,6 +34,21 @@ impl Workspace {
         Ok(real)
     }
 
+    /// An existing folder below the read root, resolved as [`Workspace::readable`] resolves
+    /// files.
+    pub fn readable_folder(&self, path: &str) -> Result<PathBuf, String> {
+        let root = self.read_root.as_ref().ok_or("no read root was granted (start the server with --read-root)")?;
+        let candidate = join(root, path)?;
+        let real = candidate.canonicalize().map_err(|e| format!("{path}: {e}"))?;
+        if !real.starts_with(root) {
+            return Err(format!("{path} is outside the read root"));
+        }
+        if !real.is_dir() {
+            return Err(format!("{path} is not a folder"));
+        }
+        Ok(real)
+    }
+
     /// A file to create below the write root. Its folder must exist inside the root; an existing
     /// file is replaced only when `overwrite` is set, and never through a symlink.
     pub fn writable(&self, path: &str, overwrite: bool) -> Result<PathBuf, String> {

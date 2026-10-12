@@ -113,8 +113,11 @@ fn window_with_step(app: App, step: f32) -> Harness<'static, App> {
     harness
 }
 
+/// The demo project in the window, with the browser hidden so the views have the whole width
+/// (the browser has tests of its own, in `browser.rs`).
 fn demo_app() -> App {
     let mut app = App::new();
+    app.set_browser_open(false);
     app.set_session(Session::new(demo_project()), &[]);
     app
 }

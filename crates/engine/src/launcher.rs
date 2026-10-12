@@ -196,6 +196,8 @@ pub struct Controller {
     producer: rtrb::Producer<LaunchCommand>,
     pub(crate) monitor: Arc<LauncherMonitor>,
     pub(crate) updater: crate::swap::Updater,
+    pub(crate) preview: crate::preview::PreviewSender,
+    pub(crate) preview_monitor: Arc<crate::preview::PreviewMonitor>,
 }
 
 impl Controller {
@@ -599,7 +601,13 @@ impl Renderer {
     pub fn controller(&mut self) -> Controller {
         let (producer, consumer) = rtrb::RingBuffer::new(QUEUE_CAPACITY);
         self.graph.launcher.control = Some(consumer);
-        Controller { producer, monitor: Arc::clone(&self.graph.launcher.monitor), updater: self.updater() }
+        Controller {
+            producer,
+            monitor: Arc::clone(&self.graph.launcher.monitor),
+            updater: self.updater(),
+            preview: self.preview.sender(),
+            preview_monitor: Arc::clone(&self.preview.monitor),
+        }
     }
 
     /// The launcher state, as other threads see it.

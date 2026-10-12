@@ -8,6 +8,7 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
+use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
 use crate::motion;
@@ -140,6 +141,9 @@ pub struct ArrangementViewState {
     track_drop: Option<(TrackId, f32)>,
     /// The middle button is held after being pressed over the timeline: the view follows it.
     panning: bool,
+    /// A drag from the browser over the window: the view says which target is under the
+    /// pointer (`docs/spec/browser.md` › Dragging into the project).
+    pub drop: Option<DropProbe>,
 }
 
 impl Default for ArrangementViewState {
@@ -161,6 +165,7 @@ impl Default for ArrangementViewState {
             track_drag: None,
             track_drop: None,
             panning: false,
+            drop: None,
         }
     }
 }
@@ -598,6 +603,59 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             &timeline.waveforms,
             true,
         );
+    }
+
+    // The empty space under the last lane: buttons that add a track, and new tracks for what
+    // the browser drops there, at the beat under the pointer.
+    let empty =
+        Rect::from_min_max(Pos2::new(area.left(), tracks_bottom + 1.0), Pos2::new(area.right(), lanes_area.bottom()));
+    if empty.height() > theme::ROW + 4.0 {
+        let buttons = Rect::from_x_y_ranges(time.x_range(), empty.y_range());
+        crate::session_view::empty_space(ui, &painter, buttons, actions);
+    }
+    let beat_at = |x: f32, free: bool| {
+        let raw = f64::from((x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
+        if free {
+            raw
+        } else {
+            let grid = snap(state.beat_width, bar_beats);
+            ((raw / grid).round() * grid).max(0.0)
+        }
+    };
+    let free = ui.input(|i| i.modifiers.alt);
+    if let Some(probe) = state.drop.as_mut() {
+        for row in rows.iter() {
+            let Some(lane) = timeline.lanes.iter().find(|l| l.track == row.track) else { continue };
+            if lane.kind != ColumnKind::Track {
+                continue;
+            }
+            probe.offer(Rect::from_x_y_ranges(headers, row.clip.y_range()), DropTarget::Track(row.track));
+            if probe.files {
+                let beat = beat_at(probe.pointer.x, free);
+                let x = x_of(beat);
+                let mark =
+                    Rect::from_x_y_ranges(egui::Rangef::new(x, (x + 2.0).min(row.clip.right())), row.clip.y_range());
+                if row.clip.contains(probe.pointer) && probe.target.is_none() {
+                    probe.target = Some(DropTarget::Lane { track: row.track, beat });
+                    probe.area = Some(row.clip);
+                    painter.rect_filled(mark, 0.0, theme::accent());
+                }
+            } else {
+                probe.offer(row.clip, DropTarget::Track(row.track));
+            }
+        }
+        if empty.height() > 0.0 && empty.contains(probe.pointer) {
+            let beat = beat_at(probe.pointer.x.max(time.left()), free);
+            probe.offer(empty, DropTarget::NewTracks { beat: Some(beat), scene: None });
+        }
+        if let Some(target_area) = probe.area {
+            painter.rect_stroke(
+                target_area.shrink(0.5),
+                0.0,
+                egui::Stroke::new(1.5, theme::accent()),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
 
     // The header column's inner edge resizes it.

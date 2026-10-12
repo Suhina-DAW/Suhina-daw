@@ -16,6 +16,7 @@ raw-window-handle = "0.6"  # MIT OR Apache-2.0 OR Zlib
 loopwerk-engine.workspace = true
 loopwerk-session.workspace = true
 loopwerk-media.workspace = true
+loopwerk-library.workspace = true
 loopwerk-output.workspace = true
 loopwerk-ui.workspace = true
 zip.workspace = true

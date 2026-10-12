@@ -79,8 +79,17 @@ With `--launcher` the set starts stopped and Loopwerk reads one command per line
 
 ## Building
 
-On Linux, install the ALSA headers first (`libasound2-dev` on Debian/Ubuntu based derivatives,
-`alsa-lib-devel` on Fedora based derivatives, `alsa-lib` / `sudo pacman -S lib32-alsa-lib` on Arch based derivatives).
+Linux builds talk to the sound card through ALSA, so its development files and `pkg-config`
+must be installed before building:
+
+| Distribution family | Packages |
+|---|---|
+| Debian, Ubuntu, Mint | `libasound2-dev pkg-config` |
+| Fedora, RHEL | `alsa-lib-devel pkgconf-pkg-config` |
+| Arch, Manjaro, EndeavourOS | `alsa-lib pkgconf` |
+
+Building the whole workspace also builds `loopwerk-plugin-host`, the program the desktop app
+runs plug-ins in; it has to sit next to `loopwerk`:
 
 ```sh
 cargo build --release

@@ -25,8 +25,13 @@ impl AudioData {
 
     /// The stereo sample at `seconds` into the file, linearly interpolated; silence outside it.
     fn stereo_at(&self, seconds: f64) -> (f32, f32) {
+        self.frame_at(seconds * f64::from(self.sample_rate))
+    }
+
+    /// The stereo sample at frame `position` of the file (fractional frames interpolate
+    /// linearly); silence outside it. Mono plays on both sides.
+    pub(crate) fn frame_at(&self, position: f64) -> (f32, f32) {
         let channels = usize::from(self.channels.max(1));
-        let position = seconds * f64::from(self.sample_rate);
         if position.is_nan() || position < 0.0 {
             return (0.0, 0.0);
         }

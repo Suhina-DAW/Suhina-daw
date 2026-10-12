@@ -442,9 +442,57 @@ impl Controller {
             .map_err(|_| "the audio engine has not taken the previous plug-ins yet".to_string())
     }
 
-    /// Drops processors the audio thread has given back (replaced, or of removed devices).
+    /// Drops processors the audio thread has given back (replaced, or of removed devices), and
+    /// what the preview voice let go of.
     pub fn collect(&mut self) {
         self.updater.collect();
+        self.preview.collect();
+    }
+
+    /// Builds the graphs from now on with `audio` (ADR 0011): the session's pool after files
+    /// were added. Takes effect with the next [`Controller::update`].
+    pub fn set_audio(&mut self, audio: Arc<AudioPool>) {
+        self.updater.audio = audio;
+    }
+
+    /// The audio the graphs are built with.
+    pub fn audio(&self) -> &Arc<AudioPool> {
+        &self.updater.audio
+    }
+
+    /// Previews `data` from `from` seconds at `gain` (linear), replacing any preview (ADR 0011).
+    /// Fails if the queue is full.
+    pub fn preview_sample(&mut self, data: Arc<crate::AudioData>, from: f64, gain: f32) -> Result<(), String> {
+        let from = if from.is_finite() { from.max(0.0) } else { 0.0 };
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Sample { data, from, gain })
+    }
+
+    /// Previews notes ([`crate::preview_notes`] makes them) through their track's instrument,
+    /// or through their fallback instrument when the track has none; the fallback plays at
+    /// `gain` (linear). Replaces any preview. Fails if the queue is full.
+    pub fn preview_notes(&mut self, notes: crate::PreviewNotes, gain: f32) -> Result<(), String> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Notes { notes: Box::new(notes), gain })
+    }
+
+    /// A fallback instrument for [`crate::preview_notes`]: the FM synth with its first voice,
+    /// prepared at the renderer's rate.
+    pub fn preview_instrument(&self) -> Option<Box<dyn loopwerk_device_api::Device>> {
+        let mut device = loopwerk_device_registry::create("fm-synth")?;
+        device.prepare(f64::from(self.updater.sample_rate)).ok()?;
+        device.reset();
+        Some(device)
+    }
+
+    /// Stops the preview. Fails if the queue is full.
+    pub fn preview_stop(&mut self) -> Result<(), String> {
+        self.preview.send(crate::preview::PreviewCommand::Stop)
+    }
+
+    /// Whether a preview plays, and where.
+    pub fn preview_monitor(&self) -> &crate::PreviewMonitor {
+        &self.preview_monitor
     }
 
     /// The renderer's sample rate.

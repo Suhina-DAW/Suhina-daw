@@ -206,7 +206,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `plugins.check`, `plugins.setHosting` (also as `loopwerk-cli plugins …`); for devices
   `devices.list`, `track.devices`, `device.add`, `device.remove`, `device.setEnabled`,
   `device.setParam`, `device.addPlugin`, `device.plugin`, `device.openEditor`,
-  `device.closeEditor`, `device.restart`.
+  `device.closeEditor`, `device.restart`; for tracks and files `track.add`, `clip.addFiles`
+  (samples and MIDI files as clips); for previews `preview.play`, `preview.stop`; for the
+  browser's library `library.folders`, `library.addFolder`, `library.removeFolder`,
+  `library.refresh`, `library.list`, `library.search`, `library.info`, `library.pinned`,
+  `library.pin`, `library.unpin`, `library.recent`, `library.tags`, `library.setTag`,
+  `library.removeTag`, `library.tag`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
@@ -219,7 +224,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   audio referred to by path): `project.save { path?, copy? }`; `.locr` files open in the app,
   `loopwerk-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/locr-format.md)).
-- Still to do: more commands (notes, clips, sends, tracks), MCP resources, asking before closing
+- Still to do: more commands (notes, clips, sends), MCP resources, asking before closing
   a project with unsaved changes.
 
 ### M4 Clip launching (in progress)
@@ -301,8 +306,21 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   as `.locr` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
   Save as template writes a copy to the templates folder. The tab and window title mark unsaved
   changes with a dot.
+- The **browser** (Ctrl+B shows and hides it, left or right of the view): search (Ctrl+F),
+  category filters (All, Samples, MIDI, Instruments, Effects, Presets, Plug-ins), a sidebar of
+  Pinned, Recent (by kind) and the folders the user added (a path, or a folder dropped on the
+  window), a tree with type icons, lengths and colour tags, a preview strip with the waveform,
+  length, tempo and key, and a footer with the tags as filters. Samples and MIDI files preview
+  through the engine (auto-play, or the play button; MIDI through the selected track's
+  instrument), whether the project plays or not. Dragging samples and MIDI files onto a lane,
+  a slot or the empty space after the tracks places them (`clip.addFiles`; one track, or one
+  each with Ctrl; a sample with a known tempo is warped), devices, DX7 presets and plug-ins onto
+  a track or the empty space add them (`device.add`, `track.add`); Enter or a double-click adds
+  to the selected track. The folders are indexed on disk and watched for changes
+  ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
+  [ADR 0012](docs/decisions/0012-file-library.md)).
 - A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
-  left: General, Interface (with Theme, Arrangement and Detail area under it), Graphics, Audio,
+  left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
@@ -345,5 +363,5 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
-- Still to do: fades read from Live Sets, input routing and sends, arm, meters, the browser, device editing
+- Still to do: fades read from Live Sets, input routing and sends, arm, meters, device editing
   and the clip editor in the detail area, installers.

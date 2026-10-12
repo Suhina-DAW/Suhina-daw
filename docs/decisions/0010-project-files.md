@@ -54,8 +54,8 @@ projects saved today keep working after the rename.
    the project with its own file. The session counts its changes, and `project.info` reports
    `unsaved_changes`.
 8. **New projects.** A blank project is two note tracks, two audio tracks, two returns, the main
-   channel and eight scenes (`loopwerk_session::blank_project`), until tracks can be added by
-   command. A project from a template is any project file opened untitled; its audio is still
+   channel and eight scenes (`loopwerk_session::blank_project`); `track.add` adds more. A
+   project from a template is any project file opened untitled; its audio is still
    found next to the template.
 9. **The window** offers New or open (Ctrl+T): a new blank project, one from a template in the
    templates folder, or a project to open from a typed path or the recent list (kept in

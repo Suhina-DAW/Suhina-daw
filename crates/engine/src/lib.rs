@@ -14,6 +14,9 @@ mod metronome;
 mod plugin;
 #[cfg(test)]
 mod plugin_tests;
+mod preview;
+#[cfg(test)]
+mod preview_tests;
 mod stretch;
 mod swap;
 
@@ -35,6 +38,7 @@ pub use loopwerk_model as model;
 use loopwerk_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, plugin_devices, plugin_key};
+pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 
 /// The most frames a plug-in is asked to process at once: the size of a device chain's block.
@@ -211,6 +215,8 @@ pub struct Renderer {
     offline: bool,
     /// What is known about the project's plug-in devices, for the graphs built after edits.
     plugin_info: HashMap<u64, PluginSlotInfo>,
+    /// The browser's preview voice (ADR 0011).
+    preview: preview::Preview,
 }
 
 impl Renderer {
@@ -260,6 +266,7 @@ impl Renderer {
             block_frame: 0,
             offline: false,
             plugin_info: plugins.info,
+            preview: preview::Preview::new(sample_rate),
         })
     }
 
@@ -331,6 +338,7 @@ impl Renderer {
     pub fn process(&mut self, out: &mut [f32]) {
         self.receive_swap();
         self.receive_plugins();
+        self.preview.receive(&mut self.graph.chains);
         let mut rest = out;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
@@ -380,6 +388,7 @@ impl Renderer {
             chain.begin(frames, deadline);
         }
         self.block_frame = 0;
+        self.preview.begin(&self.graph.chains);
         self.drain_commands();
         self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
@@ -400,6 +409,7 @@ impl Renderer {
             for chain in self.graph.chains.iter_mut().filter(|c| c.instrument) {
                 chain.release_due(frame, self.position);
             }
+            self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
             let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
             let click = self.metronome.frame(self.running, beat, bar_beats);
@@ -467,6 +477,8 @@ impl Renderer {
         for chain in &mut self.graph.chains {
             chain.finish(out, frames, &context);
         }
+        // The preview comes after every track and the main channel's mix (ADR 0011).
+        self.preview.finish(out, frames, &mut self.graph.chains);
         self.block_frame = 0;
     }
 

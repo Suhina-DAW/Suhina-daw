@@ -87,7 +87,9 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `launcher.state`), sent to the
   audio thread through a
-  lock-free queue and applied at the start of the next audio block.
+  lock-free queue and applied at the start of the next audio block. **Loopwerk:**
+  `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
+  beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)).
 
 ## To observe
 

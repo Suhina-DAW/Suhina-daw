@@ -72,6 +72,59 @@ pub enum Graphics {
     OpenGl,
 }
 
+/// How samples with a known tempo are stretched when dropped (`clip.addFiles`' `warp`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WarpMode {
+    /// Beats: keeps transients on the grid.
+    #[default]
+    Beats,
+    Tonal,
+    Texture,
+    Smooth,
+    HighQuality,
+    /// Speed and pitch change together.
+    Repitch,
+}
+
+impl WarpMode {
+    pub const ALL: [WarpMode; 6] =
+        [Self::Beats, Self::Tonal, Self::Texture, Self::Smooth, Self::HighQuality, Self::Repitch];
+
+    /// The value `clip.addFiles` takes, and the settings file keeps.
+    pub fn param(self) -> &'static str {
+        match self {
+            Self::Beats => "rhythmic",
+            Self::Tonal => "tonal",
+            Self::Texture => "texture",
+            Self::Smooth => "smooth",
+            Self::HighQuality => "high-quality",
+            Self::Repitch => "repitch",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Beats => "Beats",
+            Self::Tonal => "Tonal",
+            Self::Texture => "Texture",
+            Self::Smooth => "Smooth",
+            Self::HighQuality => "Pro",
+            Self::Repitch => "Re-pitch",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.param() == text)
+    }
+}
+
+/// The browser panel's narrowest and widest, and its width at first.
+pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
+pub const BROWSER_WIDTH: u32 = 300;
+/// The preview's level, in dB: its range and its default.
+pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
+pub const PREVIEW_VOLUME: i32 = -6;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub animations: bool,
@@ -94,6 +147,17 @@ pub struct Settings {
     /// (`App::set_default_folders`).
     pub projects_folder: String,
     pub templates_folder: String,
+    /// The browser panel shows, on which side, and how wide (`docs/spec/browser.md`).
+    pub browser_open: bool,
+    pub browser_side: Side,
+    pub browser_width: u32,
+    /// Selecting a sample or MIDI file previews it.
+    pub preview_autoplay: bool,
+    /// The preview's level, in dB.
+    pub preview_volume: i32,
+    /// Several dropped files go one track each without Ctrl (and onto one track with it).
+    pub drop_separate: bool,
+    pub warp_mode: WarpMode,
 }
 
 impl Default for Settings {
@@ -111,6 +175,13 @@ impl Default for Settings {
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
             templates_folder: String::new(),
+            browser_open: true,
+            browser_side: Side::Left,
+            browser_width: BROWSER_WIDTH,
+            preview_autoplay: true,
+            preview_volume: PREVIEW_VOLUME,
+            drop_separate: false,
+            warp_mode: WarpMode::Beats,
         }
     }
 }
@@ -141,14 +212,24 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
             self.theme,
             self.projects_folder,
             self.templates_folder,
+            on(self.browser_open),
+            self.browser_width,
+            on(self.preview_autoplay),
+            self.preview_volume,
+            self.warp_mode.param(),
             stop = self.stop.param(),
+            browser_side = match self.browser_side {
+                Side::Left => "left",
+                Side::Right => "right",
+            },
+            drop = if self.drop_separate { "separate" } else { "one_track" },
         )
     }
 
@@ -187,6 +268,23 @@ impl Settings {
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
                 ("theme", id) if is_theme_id(id) => settings.theme = id.to_string(),
+                ("browser", "on" | "off") => settings.browser_open = value == "on",
+                ("browser_side", "left") => settings.browser_side = Side::Left,
+                ("browser_side", "right") => settings.browser_side = Side::Right,
+                ("browser_width", width) if width.parse::<u32>().is_ok() => {
+                    settings.browser_width =
+                        width.parse::<u32>().unwrap_or(BROWSER_WIDTH).clamp(BROWSER_WIDTHS.0, BROWSER_WIDTHS.1);
+                }
+                ("preview_autoplay", "on" | "off") => settings.preview_autoplay = value == "on",
+                ("preview_volume", db) if db.parse::<i32>().is_ok() => {
+                    settings.preview_volume =
+                        db.parse::<i32>().unwrap_or(PREVIEW_VOLUME).clamp(PREVIEW_VOLUMES.0, PREVIEW_VOLUMES.1);
+                }
+                ("drop_files", "one_track") => settings.drop_separate = false,
+                ("drop_files", "separate") => settings.drop_separate = true,
+                ("warp_mode", mode) if WarpMode::parse(mode).is_some() => {
+                    settings.warp_mode = WarpMode::parse(mode).unwrap_or_default();
+                }
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -220,9 +318,25 @@ mod tests {
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),
             templates_folder: "/home/me/templates".into(),
+            browser_open: false,
+            browser_side: Side::Right,
+            browser_width: 420,
+            preview_autoplay: false,
+            preview_volume: -12,
+            drop_separate: true,
+            warp_mode: WarpMode::Tonal,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
+    }
+
+    #[test]
+    fn browser_values_out_of_range_are_limited() {
+        let (settings, warnings) =
+            Settings::from_text("browser_width = 5000\npreview_volume = -900\nwarp_mode = elastic\n");
+        assert_eq!((settings.browser_width, settings.preview_volume), (BROWSER_WIDTHS.1, PREVIEW_VOLUMES.0));
+        assert_eq!(settings.warp_mode, WarpMode::Beats);
+        assert_eq!(warnings.len(), 1);
     }
 
     #[test]
