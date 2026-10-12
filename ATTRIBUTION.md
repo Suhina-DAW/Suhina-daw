@@ -35,6 +35,7 @@ changed. The full list with copyright lines is in [`NOTICE`](NOTICE).
 |---|---|---|---|---|
 | `devices/fm-synth/tests/golden/scenarios.txt` | FM synth test voices and notes | Loopwerk contributors | Original work | GPL-3.0-or-later |
 | `devices/fm-synth/tests/golden/*.f32` | Reference renders of those scenarios | Loopwerk contributors | Rendered with the MSFA engine by `tests/reference/harness.cpp` | GPL-3.0-or-later |
+| `crates/engine/tests/golden/*.f32` | Reference renders of clip fades | Loopwerk contributors | Rendered by Loopwerk's engine (`src/fade_tests.rs`) | GPL-3.0-or-later |
 
 ## Test data (not committed, not shipped)
 

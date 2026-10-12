@@ -32,6 +32,8 @@ fn project() -> Project {
         offset: 0.0,
         loop_range: None,
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
     Project {
@@ -370,8 +372,8 @@ fn clips_delete_and_duplicate() {
     assert!(run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 5 })).is_err());
 }
 
-#[test]
-fn an_audio_clip_takes_a_gain_and_a_midi_clip_does_not() {
+/// The test project with its second Bass clip playing an audio content.
+fn audio_project() -> Project {
     let mut p = project();
     p.contents.push(ClipContent {
         id: ContentId(9),
@@ -395,12 +397,90 @@ fn an_audio_clip_takes_a_gain_and_a_midi_clip_does_not() {
         extensions: Extensions::default(),
     });
     p.arrangement.lanes[0].clips[1].content = ContentId(9);
-    let mut session = Session::new(p);
+    p
+}
+
+#[test]
+fn an_audio_clip_takes_a_gain_and_a_midi_clip_does_not() {
+    let mut session = Session::new(audio_project());
     run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 1, "db": -6 })).unwrap();
     let LaneData::Audio(region) = &session.project().content(ContentId(9)).unwrap().lanes[0].data else { panic!() };
     assert!((region.gain - 0.501).abs() < 1e-3);
     assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 0, "db": 0 })).is_err());
     assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 1, "db": 30 })).is_err());
+}
+
+#[test]
+fn an_audio_clip_takes_fades_that_undo() {
+    let mut session = Session::new(audio_project());
+    let set = |session: &mut Session, params: Value| run(session, "clip.setFades", params);
+    let fades = |session: &Session| {
+        let clip = &session.project().arrangement.lanes[0].clips[1];
+        (clip.fade_in, clip.fade_out)
+    };
+    let done = set(&mut session, json!({ "track": "Bass", "index": 1, "in": 1.5 })).unwrap();
+    assert_eq!(done, json!({ "fade_in": 1.5, "fade_out": 0.0 }));
+    set(&mut session, json!({ "track": "Bass", "index": 1, "out": 0.25 })).unwrap();
+    assert_eq!(fades(&session), (1.5, 0.25), "out alone keeps the fade-in");
+    set(&mut session, json!({ "track": "Bass", "index": 1, "in": 2, "out": 2 })).unwrap();
+    assert_eq!(fades(&session), (2.0, 2.0), "together exactly the clip's 4 beats");
+    let listed = run(&mut session, "project.clips", json!({ "track": "Bass" })).unwrap();
+    assert_eq!((listed[1]["fade_in"].clone(), listed[1]["fade_out"].clone()), (json!(2.0), json!(2.0)));
+
+    // Each is one undo step.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(fades(&session), (1.5, 0.25));
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &audio_project());
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    assert_eq!(fades(&session), (1.5, 0.0));
+}
+
+#[test]
+fn bad_fades_are_errors_that_change_nothing() {
+    let mut session = Session::new(audio_project());
+    let before = session.project().clone();
+    for params in [
+        json!({ "track": "Bass", "index": 1 }),
+        json!({ "track": "Bass", "index": 1, "in": -0.5 }),
+        json!({ "track": "Bass", "index": 1, "out": "long" }),
+        json!({ "track": "Bass", "index": 1, "in": 3, "out": 1.5 }),
+        json!({ "track": "Bass", "index": 1, "in": 5 }),
+        json!({ "track": "Bass", "index": 7, "in": 1 }),
+        json!({ "track": "Bass", "index": 0, "in": 1 }),
+    ] {
+        assert!(run(&mut session, "clip.setFades", params.clone()).is_err(), "{params}");
+    }
+    assert_eq!(session.project(), &before);
+    assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");
+}
+
+#[test]
+fn clips_shortened_or_split_by_a_move_keep_fades_that_fit() {
+    let mut p = lane_project();
+    for clip in &mut p.arrangement.lanes[0].clips {
+        (clip.fade_in, clip.fade_out) = (1.0, 1.0);
+    }
+    p.arrangement.lanes[0].clips[3].fade_in = 3.0;
+    let mut session = Session::new(p);
+    // The clip at 4 moves to 9 and covers 9..13: the clip at 8 is shortened to one beat, so its
+    // 1 + 1 beats of fades become 0.5 + 0.5.
+    run(&mut session, "clip.move", json!({ "track": "Bass", "index": 1, "start": 9 })).unwrap();
+    let clips = &session.project().arrangement.lanes[0].clips;
+    let fades: Vec<(f64, f64, f64, f64)> = clips.iter().map(|c| (c.start, c.length, c.fade_in, c.fade_out)).collect();
+    assert!(fades.contains(&(8.0, 1.0, 0.5, 0.5)), "{fades:?}");
+    assert_eq!(session.project().validate(), Ok(()));
+
+    // Into the middle of the looping clip (12..20): the first part keeps the fade-in, the
+    // second the fade-out.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 14 })).unwrap();
+    let clips = &session.project().arrangement.lanes[0].clips;
+    let fades: Vec<(f64, f64, f64, f64)> = clips.iter().map(|c| (c.start, c.length, c.fade_in, c.fade_out)).collect();
+    assert!(fades.contains(&(12.0, 2.0, 2.0, 0.0)), "{fades:?}");
+    assert!(fades.contains(&(18.0, 2.0, 0.0, 1.0)), "{fades:?}");
+    assert_eq!(session.project().validate(), Ok(()));
 }
 
 #[test]

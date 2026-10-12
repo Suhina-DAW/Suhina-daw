@@ -45,6 +45,13 @@ const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 400.0);
 const TAIL_BARS: f64 = 16.0;
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
 const CLIP_GAIN_RANGE: (f64, f64) = (-70.0, 24.0);
+/// A fade handle: the square drawn at a clip's top corner, and the area that takes the pointer.
+const FADE_HANDLE: f32 = 7.0;
+const FADE_HANDLE_HIT: f32 = 11.0;
+/// The gain field at an audio clip's top right, and how far it stays from the clip's right edge
+/// so the fade-out handle has room.
+const GAIN_FIELD: Vec2 = Vec2::new(44.0, 12.0);
+const GAIN_FIELD_INSET: f32 = 12.0;
 
 const PAN_BACKGROUND: Color32 = Color32::from_rgb(0x23, 0x22, 0x20);
 const PAN_CENTRE: Color32 = Color32::from_rgb(0x55, 0x52, 0x4C);
@@ -63,6 +70,41 @@ struct ClipDrag {
     index: usize,
     start: f64,
     target: TrackId,
+}
+
+/// Which end of a clip a fade belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FadeEdge {
+    In,
+    Out,
+}
+
+/// A fade handle being dragged: the clip, which fade, and its length so far in beats before
+/// snapping.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FadeDrag {
+    key: (TrackId, usize),
+    edge: FadeEdge,
+    raw: f64,
+}
+
+/// What a clip shows that a drag in progress changes before the project does: its gain and its
+/// fades.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Shown {
+    gain_db: f64,
+    fade_in: f64,
+    fade_out: f64,
+}
+
+impl Shown {
+    fn of(clip: &ClipBox) -> Self {
+        Self {
+            gain_db: clip.audio_view.as_ref().map_or(0.0, |v| v.gain_db),
+            fade_in: clip.fade_in,
+            fade_out: clip.fade_out,
+        }
+    }
 }
 
 /// A lane on screen this frame: its track, where it is, and whether it can take notes or audio.
@@ -92,6 +134,7 @@ pub struct ArrangementViewState {
     value_drag: Option<(TrackId, Control, f64)>,
     /// A clip gain being dragged, and its value so far.
     gain_drag: Option<((TrackId, usize), f64)>,
+    fade_drag: Option<FadeDrag>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
@@ -115,6 +158,7 @@ impl Default for ArrangementViewState {
             clip_drag: None,
             value_drag: None,
             gain_drag: None,
+            fade_drag: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
@@ -163,6 +207,24 @@ impl ArrangementViewState {
         self.scroll.y = ((self.scroll.y + anchor) * ratio - anchor).max(0.0);
     }
 
+    /// What the clip at `key` shows: the project's gain and fades, or the value of a drag in
+    /// progress on it (fades on `grid`, or free when it is `None`).
+    fn shown(&self, key: (TrackId, usize), clip: &ClipBox, grid: Option<f64>) -> Shown {
+        let mut shown = Shown::of(clip);
+        if let Some((k, v)) = self.gain_drag
+            && k == key
+        {
+            shown.gain_db = v;
+        }
+        if let Some(drag) = self.fade_drag.filter(|d| d.key == key) {
+            match drag.edge {
+                FadeEdge::In => shown.fade_in = fade_length(drag.raw, FadeEdge::In, clip, shown.fade_out, grid),
+                FadeEdge::Out => shown.fade_out = fade_length(drag.raw, FadeEdge::Out, clip, shown.fade_in, grid),
+            }
+        }
+        shown
+    }
+
     fn height(&self, lane: &Lane) -> f32 {
         self.heights.get(&lane.track).copied().unwrap_or(DEFAULT_LANE)
     }
@@ -178,6 +240,29 @@ fn snap(beat_width: f32, bar_beats: f64) -> f64 {
     } else {
         bar_beats
     }
+}
+
+/// A fade's length after a drag of `raw` beats: its end on the grid (unless `grid` is `None`,
+/// Alt held), and no longer than the clip leaves beside the other fade.
+fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<f64>) -> f64 {
+    let end = clip.start + clip.length;
+    let snapped = match grid.filter(|g| *g > 0.0) {
+        Some(g) => match edge {
+            FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
+            FadeEdge::Out => end - ((end - raw) / g).round() * g,
+        },
+        None => raw,
+    };
+    let room = (clip.length - other).max(0.0);
+    if snapped.is_finite() { snapped.clamp(0.0, room) } else { 0.0 }
+}
+
+/// The gain a clip's fades give `beats` into a clip `length` beats long: linear, 0 … 1
+/// (`docs/spec/arrangement-editing.md` › Fades).
+fn fade_gain(beats: f64, length: f64, fade_in: f64, fade_out: f64) -> f32 {
+    let fade_in = if fade_in > 0.0 { beats / fade_in } else { 1.0 };
+    let fade_out = if fade_out > 0.0 { (length - beats) / fade_out } else { 1.0 };
+    (fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
 }
 
 /// Where a volume sits on a field, 0 … 1, with 0 dB at 85 % (components › Value field).
@@ -473,6 +558,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             rect,
             &lane_look,
             clip,
+            Shown::of(clip),
             start,
             &x_of,
             state.beat_width,
@@ -588,9 +674,26 @@ fn clip_box<'a>(
         }
         // Drawn where it was dropped until the project has moved it.
         let rect = clip_rect(space, start, clip.length, x_of);
-        paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, waveforms, true);
+        let shown = Shown::of(clip);
+        paint_clip(
+            &painter.with_clip_rect(row.clip),
+            rect,
+            lane,
+            clip,
+            shown,
+            start,
+            x_of,
+            state.beat_width,
+            waveforms,
+            true,
+        );
         return None;
     }
+
+    // What the clip shows: the project's values, or those of a drag in progress, so the
+    // waveform follows the gain and the fades while they are dragged.
+    let fade_grid = (!ui.input(|i| i.modifiers.alt)).then_some(grid);
+    let mut shown = state.shown(key, clip, fade_grid);
 
     // An audio clip big enough shows its gain, which a vertical drag changes.
     let mut gain_paint = None;
@@ -598,19 +701,18 @@ fn clip_box<'a>(
         && state.clip_drag.is_none_or(|d| !mine(&d))
     {
         let rect = clip_rect(space, clip.start, clip.length, x_of);
-        let field = Rect::from_min_size(Pos2::new(rect.right() - 48.0, rect.top() + 3.0), Vec2::new(44.0, 12.0));
+        let field = Rect::from_min_size(
+            Pos2::new(rect.right() - GAIN_FIELD_INSET - GAIN_FIELD.x, rect.top() + 3.0),
+            GAIN_FIELD,
+        );
         if rect.width() >= 80.0 && rect.height() >= 30.0 && field.intersects(row.clip) {
-            let shown = match state.gain_drag {
-                Some((k, v)) if k == key => v,
-                _ => view.gain_db,
-            };
             let label = format!("Gain of {name} on {}", lane.name);
             let response = widgets::value_area(
                 ui,
                 field.intersect(row.clip),
                 Id::new(("clip-gain", lane.track.0, clip.index)),
                 &label,
-                widgets::format_db(shown),
+                widgets::format_db(shown.gain_db),
             );
             let mut preview = match state.gain_drag {
                 Some((k, v)) if k == key => Some(v),
@@ -630,11 +732,84 @@ fn clip_box<'a>(
                 }
                 Drag::None => {}
             }
-            let shown = match state.gain_drag {
+            shown.gain_db = match state.gain_drag {
                 Some((k, v)) if k == key => v,
                 _ => committed.unwrap_or(view.gain_db),
             };
-            gain_paint = Some((field, shown, widgets::hover(ui, &response)));
+            gain_paint = Some((field, shown.gain_db, widgets::hover(ui, &response)));
+        }
+    }
+
+    // Fade handles at the top corners of an audio clip, while it is hovered or selected: a
+    // horizontal drag sets the fade (its end on the grid, free with Alt), a double-click
+    // removes it.
+    let mut handles = Vec::new();
+    let rect = clip_rect(space, clip.start, clip.length, x_of);
+    let selected = state.selected == Some(key);
+    let fading = state.fade_drag.is_some_and(|d| d.key == key);
+    let pointer_in = ui.ctx().pointer_hover_pos().is_some_and(|p| visible.contains(p));
+    let fits = rect.width() >= 3.0 * FADE_HANDLE && rect.height() >= 2.0 * FADE_HANDLE;
+    if clip.audio && fits && state.clip_drag.is_none_or(|d| !mine(&d)) && (pointer_in || selected || fading) {
+        let grid = fade_grid;
+        for edge in [FadeEdge::In, FadeEdge::Out] {
+            let (current, now, other) = match edge {
+                FadeEdge::In => (clip.fade_in, shown.fade_in, shown.fade_out),
+                FadeEdge::Out => (clip.fade_out, shown.fade_out, shown.fade_in),
+            };
+            let handle = fade_handle(rect, edge, now as f32 * state.beat_width);
+            let hit = handle.expand((FADE_HANDLE_HIT - FADE_HANDLE) / 2.0).intersect(row.clip);
+            if hit.width() <= 0.0 || hit.height() <= 0.0 {
+                continue;
+            }
+            let which = if edge == FadeEdge::In { "Fade-in" } else { "Fade-out" };
+            let label = format!("{which} of {name} on {}", lane.name);
+            let id = Id::new(("clip-fade", lane.track.0, clip.index, edge == FadeEdge::In));
+            let response =
+                ui.interact(hit, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            response.widget_info(|| {
+                let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, &label);
+                info.value = Some(now);
+                info
+            });
+            let mine_fade = |d: &FadeDrag| d.key == key && d.edge == edge;
+            let mut done = None;
+            if response.double_clicked() {
+                state.fade_drag = None;
+                done = Some(0.0);
+            } else {
+                if response.drag_started() {
+                    state.fade_drag = Some(FadeDrag { key, edge, raw: current });
+                }
+                if response.dragged()
+                    && let Some(drag) = state.fade_drag.as_mut().filter(|d| mine_fade(d))
+                {
+                    let dx = f64::from(response.drag_delta().x / state.beat_width);
+                    drag.raw += if edge == FadeEdge::In { dx } else { -dx };
+                }
+                if response.drag_stopped()
+                    && let Some(drag) = state.fade_drag.take_if(|d| mine_fade(d))
+                {
+                    done = Some(fade_length(drag.raw, edge, clip, other, grid));
+                }
+            }
+            let length = match (done, state.fade_drag) {
+                (Some(v), _) => v,
+                (None, Some(d)) if mine_fade(&d) => fade_length(d.raw, edge, clip, other, grid),
+                _ => now,
+            };
+            if let Some(v) = done
+                && (v - current).abs() > 1e-9
+            {
+                let param = if edge == FadeEdge::In { "in" } else { "out" };
+                let mut params = json!({ "track": lane.track.0, "index": clip.index });
+                params[param] = json!((v * 1e6).round() / 1e6);
+                actions.push(Action::new("clip.setFades", params));
+            }
+            match edge {
+                FadeEdge::In => shown.fade_in = length,
+                FadeEdge::Out => shown.fade_out = length,
+            }
+            handles.push((edge, widgets::hover(ui, &response)));
         }
     }
 
@@ -643,12 +818,12 @@ fn clip_box<'a>(
         drag => {
             let start = drag.filter(mine).map_or(clip.start, |d| snapped(d.start));
             let rect = clip_rect(space, start, clip.length, x_of);
-            let selected = state.selected == Some(key);
             paint_clip(
                 &painter.with_clip_rect(row.clip),
                 rect,
                 lane,
                 clip,
+                shown,
                 start,
                 x_of,
                 state.beat_width,
@@ -674,7 +849,27 @@ fn clip_box<'a>(
             theme::TEXT_VALUE,
         );
     }
+    // The handles sit on top of everything on the clip, where the fades now end.
+    let handle_painter = painter.with_clip_rect(row.clip);
+    for (edge, hover) in handles {
+        let length = if edge == FadeEdge::In { shown.fade_in } else { shown.fade_out };
+        let handle = fade_handle(rect, edge, length as f32 * state.beat_width);
+        let fill = motion::mix(theme::TEXT_SECONDARY, theme::TEXT_PRIMARY, hover);
+        handle_painter.rect_filled(handle, 0.0, fill);
+        handle_painter.rect_stroke(handle, 0.0, theme::hairline(theme::SURFACE_0), StrokeKind::Outside);
+    }
     result
+}
+
+/// The square of a fade handle: at the clip's top corner with no fade, at the fade's end along
+/// the top edge with one, `fade` points from the clip's edge; always inside the clip.
+fn fade_handle(clip: Rect, edge: FadeEdge, fade: f32) -> Rect {
+    let fade = if fade.is_finite() { fade.max(0.0) } else { 0.0 };
+    let left = match edge {
+        FadeEdge::In => (clip.left() + fade).min(clip.right() - FADE_HANDLE),
+        FadeEdge::Out => (clip.right() - fade - FADE_HANDLE).max(clip.left()),
+    };
+    Rect::from_min_size(Pos2::new(left.round(), clip.top()), Vec2::splat(FADE_HANDLE))
 }
 
 fn view_rect(painter: &egui::Painter) -> Rect {
@@ -688,6 +883,7 @@ fn paint_clip(
     rect: Rect,
     lane: &Lane,
     clip: &ClipBox,
+    shown: Shown,
     start: f64,
     x_of: &dyn Fn(f64) -> f32,
     beat_width: f32,
@@ -726,8 +922,8 @@ fn paint_clip(
         && let Some(peaks) = waveforms.get(&view.file)
     {
         // One line per pixel column in view: the range of the samples it covers, scaled by
-        // the clip's gain and kept inside the clip.
-        let gain = if view.gain_db.is_finite() { 10f32.powf(view.gain_db as f32 / 20.0) } else { 0.0 };
+        // the clip's gain and its fades and kept inside the clip.
+        let gain = if shown.gain_db.is_finite() { 10f32.powf(shown.gain_db as f32 / 20.0) } else { 0.0 };
         let (middle, half) = (marks.center().y, marks.height() / 2.0);
         let from = rect.left().max(view_rect(painter).left()).floor();
         let to = rect.right().min(view_rect(painter).right()).ceil();
@@ -737,6 +933,7 @@ fn paint_clip(
         while x < to {
             let elapsed = f64::from(x - rect.left()) * per_point;
             let (low, high) = peaks.range(view.seconds(elapsed), view.seconds(elapsed + per_point));
+            let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, shown.fade_in, shown.fade_out);
             let top = middle - (high * gain).clamp(-1.0, 1.0) * half;
             let bottom = (middle - (low * gain).clamp(-1.0, 1.0) * half).max(top + 1.0);
             painter.vline(x + 0.5, egui::Rangef::new(top, bottom), stroke);
@@ -757,6 +954,20 @@ fn paint_clip(
             let row = f32::from(note.key - low);
             let y = marks.bottom() - (row + 0.5) / rows * marks.height();
             painter.rect_filled(Rect::from_min_size(Pos2::new(x, y - 1.0), Vec2::new(width, 2.0)), 0.0, dim(color));
+        }
+    }
+    // A fade is a line over the waveform, from the clip's bottom corner to where it ends at
+    // the top.
+    if clip.audio {
+        let fade_stroke = theme::hairline(dim(theme::TEXT_SECONDARY));
+        let (top, bottom) = (rect.top() + 2.0, rect.bottom());
+        if shown.fade_in > 0.0 {
+            let end = (rect.left() + shown.fade_in as f32 * beat_width).min(rect.right());
+            painter.line_segment([Pos2::new(rect.left(), bottom), Pos2::new(end, top)], fade_stroke);
+        }
+        if shown.fade_out > 0.0 {
+            let from = (rect.right() - shown.fade_out as f32 * beat_width).max(rect.left());
+            painter.line_segment([Pos2::new(from, top), Pos2::new(rect.right(), bottom)], fade_stroke);
         }
     }
     if selected {
@@ -1095,6 +1306,56 @@ mod tests {
         assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
         state.zoom_lanes(&timeline.lanes, f32::NAN, 0.0);
         assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
+    }
+
+    fn audio_clip() -> ClipBox {
+        let timeline = Timeline::build(&crate::demo::demo_project(), None);
+        let clip = timeline.lanes.iter().flat_map(|l| &l.clips).next().cloned().unwrap();
+        ClipBox { start: 2.0, length: 8.0, fade_in: 1.0, fade_out: 0.0, audio: true, ..clip }
+    }
+
+    #[test]
+    fn a_dragged_gain_or_fade_is_what_the_clip_shows() {
+        let clip = audio_clip();
+        let key = (TrackId(1), 0);
+        let mut state = ArrangementViewState::default();
+        assert_eq!(state.shown(key, &clip, Some(1.0)), Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0 });
+        // The waveform is drawn with the gain being dragged, not the one in the project.
+        state.gain_drag = Some((key, -12.0));
+        assert_eq!(state.shown(key, &clip, Some(1.0)).gain_db, -12.0);
+        assert_eq!(state.shown((TrackId(1), 1), &clip, Some(1.0)).gain_db, 0.0, "only on the dragged clip");
+        // A fade being dragged: on the grid, or free with Alt.
+        state.fade_drag = Some(FadeDrag { key, edge: FadeEdge::Out, raw: 2.6 });
+        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out, 3.0);
+        assert!((state.shown(key, &clip, None).fade_out - 2.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_fade_ends_on_the_grid_and_leaves_room_for_the_other() {
+        let clip = audio_clip();
+        // The fade-in's end snaps to the grid in project beats: the clip starts at beat 2.
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, Some(4.0)), 2.0);
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, None), 1.3);
+        // The fade-out's start snaps: the clip ends at beat 10.
+        assert_eq!(fade_length(1.3, FadeEdge::Out, &clip, 0.0, Some(4.0)), 2.0);
+        // Never below 0, never past the other fade.
+        assert_eq!(fade_length(-5.0, FadeEdge::In, &clip, 0.0, None), 0.0);
+        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 3.0, None), 5.0);
+        assert_eq!(fade_length(f64::NAN, FadeEdge::In, &clip, 0.0, None), 0.0);
+    }
+
+    #[test]
+    fn fade_handles_follow_the_fade_and_stay_inside_the_clip() {
+        let clip = Rect::from_min_size(Pos2::new(100.0, 10.0), Vec2::new(80.0, 40.0));
+        assert_eq!(fade_handle(clip, FadeEdge::In, 0.0).min, Pos2::new(100.0, 10.0));
+        assert_eq!(fade_handle(clip, FadeEdge::Out, 0.0).max.x, 180.0);
+        assert_eq!(fade_handle(clip, FadeEdge::In, 20.0).min.x, 120.0);
+        assert_eq!(fade_handle(clip, FadeEdge::Out, 500.0).min.x, 100.0);
+        assert_eq!(fade_handle(clip, FadeEdge::In, f32::NAN).min.x, 100.0);
+        // Linear: half-way into the fade-in, half the level; full in between the fades.
+        assert_eq!(fade_gain(0.5, 8.0, 1.0, 2.0), 0.5);
+        assert_eq!(fade_gain(4.0, 8.0, 1.0, 2.0), 1.0);
+        assert_eq!(fade_gain(7.0, 8.0, 1.0, 2.0), 0.5);
     }
 
     #[test]

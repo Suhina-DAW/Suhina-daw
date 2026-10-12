@@ -39,6 +39,8 @@ pub struct ClipInfo {
     pub looping: bool,
     pub audio: bool,
     pub gain_db: Option<f64>,
+    /// Fade-in and fade-out in beats (`clip.setFades`).
+    pub fades: (f64, f64),
     pub notes: usize,
 }
 
@@ -100,6 +102,7 @@ pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, u
                 looping: placed.loop_range.is_some(),
                 audio: audio.is_some(),
                 gain_db: audio.map(gain_to_db),
+                fades: (placed.fade_in, placed.fade_out),
                 notes,
             },
             chain(project, id),
@@ -321,6 +324,9 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
     ];
     if info.audio {
         rows.push(("Gain", info.gain_db.map_or_else(|| "-".into(), |db| format!("{} dB", widgets::format_db(db)))));
+        let beats = |b: f64| if b > 0.0 { format!("{} beats", (b * 100.0).round() / 100.0) } else { "-".into() };
+        rows.push(("Fade in", beats(info.fades.0)));
+        rows.push(("Fade out", beats(info.fades.1)));
     } else {
         rows.push(("Notes", info.notes.to_string()));
     }

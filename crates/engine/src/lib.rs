@@ -7,6 +7,8 @@ mod audio;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod fade_tests;
 mod launcher;
 mod metronome;
 mod stretch;
@@ -17,8 +19,8 @@ use std::sync::Arc;
 
 use ahead::AheadReader;
 pub use ahead::StretchWorker;
-use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
+use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
@@ -83,6 +85,8 @@ struct StretchEvent {
     end: u64,
     gain_left: f32,
     gain_right: f32,
+    /// The click guard and the clip's fades, as the direct reader has them.
+    fades: Fades,
     /// The launcher column of the clip's track, or `NO_COLUMN`.
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
@@ -169,7 +173,6 @@ pub struct Renderer {
     /// The stretch voices are at their first frame and nothing has played them since.
     stretch_fresh: bool,
     stretch_scratch: Vec<f32>,
-    fade_frames: f64,
     /// Frames rendered since the renderer was built.
     position: u64,
     /// The frame at which the transport last started or the tempo last changed, and the
@@ -212,7 +215,6 @@ impl Renderer {
             active_audio_count: 0,
             stretch_fresh: true,
             stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
-            fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
             position: 0,
             origin: 0,
             time_at_origin: 0,
@@ -402,7 +404,6 @@ impl Renderer {
         // Arrangement time of the block's first frame.
         let time_start = block_start - self.origin + self.time_at_origin;
         let time_end = time_start + (out.len() / 2) as u64;
-        let fade_frames = self.fade_frames;
         let scratch = &mut self.stretch_scratch;
         let launcher = &self.graph.launcher;
         let ahead = &mut self.graph.ahead;
@@ -425,7 +426,7 @@ impl Renderer {
                     }
                     let since_start = (frame - event.start) as f64;
                     let until_end = (event.end - frame) as f64;
-                    let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
+                    let fade = event.fades.gain(since_start, until_end);
                     let at = (frame - time_start) as usize;
                     let (l, r) = (left * event.gain_left * fade, right * event.gain_right * fade);
                     if let Some(chain) = bus_chain(chains, event.bus) {
@@ -626,6 +627,7 @@ impl Graph {
                                     end,
                                     gain_left: gains.0 * gain,
                                     gain_right: gains.1 * gain,
+                                    fades: Fades::new(clip, frames_per_beat, sample_rate),
                                     column,
                                     bus,
                                 });
@@ -927,6 +929,8 @@ mod tests {
             offset: 0.0,
             loop_range: None,
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }

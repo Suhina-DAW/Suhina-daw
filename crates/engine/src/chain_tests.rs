@@ -34,6 +34,8 @@ fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
         offset: 0.0,
         loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
     Project {

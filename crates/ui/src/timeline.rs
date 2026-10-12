@@ -69,6 +69,9 @@ pub struct ClipBox {
     pub name: String,
     pub enabled: bool,
     pub audio: bool,
+    /// Fade-in and fade-out, in beats (`clip.setFades`).
+    pub fade_in: f64,
+    pub fade_out: f64,
     /// For an audio clip, how to draw its waveform.
     pub audio_view: Option<AudioView>,
     pub notes: Vec<NoteMark>,
@@ -145,6 +148,8 @@ impl Timeline {
                                 length: clip.length,
                                 name: content.map(|c| c.name.clone()).unwrap_or_default(),
                                 enabled: clip.enabled,
+                                fade_in: clip.fade_in,
+                                fade_out: clip.fade_out,
                                 audio: content
                                     .is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)))),
                                 audio_view: content.and_then(|c| audio_view(c, clip, project.transport.tempo_bpm)),

@@ -542,6 +542,8 @@ impl Reader {
             offset,
             loop_range,
             enabled: boolean(node, &["Disabled"]) != Some(true),
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         })
     }

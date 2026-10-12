@@ -378,6 +378,8 @@ mod tests {
             offset,
             loop_range: loop_range.map(|(start, end)| LoopRange { start, end }),
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }

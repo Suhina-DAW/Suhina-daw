@@ -57,6 +57,8 @@ fn project() -> Project {
         offset: 0.0,
         loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
         enabled,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
     let slot = |clip: Option<Clip>, has_stop: bool| Slot { clip, has_stop };

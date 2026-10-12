@@ -82,7 +82,17 @@ fn return_tracks_have_a_mixer_but_no_slots() {
 }
 
 fn window(app: App) -> Harness<'static, App> {
-    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    window_with_step(app, 0.25)
+}
+
+/// Like [`window`], with `step` seconds a frame (a double-click needs frames closer together),
+/// and a second of frames for animations to settle.
+fn window_with_step(app: App, step: f32) -> Harness<'static, App> {
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(step)
+        .with_max_steps((1.0 / step).ceil() as u64)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
     theme::install(&harness.ctx);
     harness.run();
     harness
@@ -434,6 +444,8 @@ fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::wavefo
         offset: 0.0,
         loop_range: Some(LoopRange { start: 0.0, end: 4.0 }),
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -482,6 +494,71 @@ fn dragging_an_audio_clips_gain_sets_it() {
     });
     // 30 points up at 0.1 dB a point: +3 dB.
     assert!(gain.is_some_and(|g| (g - 1.4125).abs() < 1e-3), "{gain:?}");
+}
+
+/// The Loop clip's fade-in and fade-out in the project.
+fn loop_fades(harness: &Harness<'static, App>) -> Option<(f64, f64)> {
+    let session = harness.state().session()?;
+    let lane =
+        session.project().arrangement.lanes.iter().find(|l| l.track == Some(loopwerk_engine::model::TrackId(30)))?;
+    lane.clips.first().map(|clip| (clip.fade_in, clip.fade_out))
+}
+
+/// Drags the control labelled `label` sideways by `dx` points.
+fn drag_sideways(harness: &mut Harness<'static, App>, label: &str, dx: f32) {
+    let from = harness.get_by_label(label).rect().center();
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + egui::vec2(dx / 2.0, 0.0));
+    harness.run();
+    harness.hover_at(from + egui::vec2(dx, 0.0));
+    harness.run();
+    harness.drop_at(from + egui::vec2(dx, 0.0));
+    harness.run();
+}
+
+#[test]
+fn dragging_a_fade_handle_sets_the_fade_on_the_grid_and_a_double_click_removes_it() {
+    let mut harness = window_with_step(audio_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    // The handles show on the selected clip.
+    assert!(harness.query_by_label("Fade-in of Loop on Loop").is_none());
+    harness.get_by_label("Clip Loop on Loop at bar 1").click();
+    harness.run();
+
+    // 8 points a beat and a bar grid at this zoom: 3 beats right ends the fade on bar 2.
+    drag_sideways(&mut harness, "Fade-in of Loop on Loop", 24.0);
+    assert_eq!(loop_fades(&harness), Some((4.0, 0.0)));
+    // The fade-out, 3 beats left from the clip's end at beat 16: on bar 4, 4 beats long.
+    drag_sideways(&mut harness, "Fade-out of Loop on Loop", -24.0);
+    assert_eq!(loop_fades(&harness), Some((4.0, 4.0)));
+    // Each drag is one undo step.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(loop_fades(&harness), Some((4.0, 0.0)));
+
+    // A fade cannot reach past the other one: the fade-in stops where the clip has room.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    harness.run();
+    drag_sideways(&mut harness, "Fade-in of Loop on Loop", 200.0);
+    assert_eq!(loop_fades(&harness), Some((12.0, 4.0)));
+
+    // A double-click removes the fade.
+    let handle = harness.get_by_label("Fade-in of Loop on Loop").rect().center();
+    harness.hover_at(handle);
+    harness.run();
+    // Press and release in one frame each, a few frames apart: a double-click.
+    for _ in 0..2 {
+        harness.hover_at(handle);
+        harness.drag_at(handle);
+        harness.drop_at(handle);
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(loop_fades(&harness), Some((0.0, 4.0)));
 }
 
 fn two_projects() -> Harness<'static, App> {
