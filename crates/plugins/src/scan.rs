@@ -12,7 +12,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -178,7 +178,7 @@ fn stamp(path: &Path) -> Option<(u64, u64)> {
 /// Reads `file` in a `host --scan` process, waiting at most `timeout`. `file` may also be a
 /// `test:` name the host understands, for tests.
 pub fn scan_file(host: &Path, file: &str, timeout: Duration) -> Scanned {
-    let child = Command::new(host)
+    let child = crate::host_command(host)
         .args(["--scan", file])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

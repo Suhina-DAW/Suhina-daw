@@ -251,6 +251,9 @@ workspace forbids.
   many plug-in products this is noticeable. Grouping by product and running chains in one round
   trip keep it bounded; *in process* is not offered.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
+- Host processes and scan workers start without a window of their own (`host_command`; on
+  Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a
+  console window for each; plug-in editors still open their windows.
 - Measured with `ipc` on Windows (test `round_trips_with_another_process`, 128 frames, the peer
   at normal priority): blocks back to back take 0.7 µs per round trip, because the peer is still
   spinning; with 2.5 ms between blocks, as in playback, 19 µs on average and 0.8 ms at worst,

@@ -179,7 +179,7 @@ impl HostProcess {
     fn start(launch: &Launch) -> Result<Self, PluginError> {
         let (address, name) = control_name()?;
         let listener = ListenerOptions::new().name(name).nonblocking(ListenerNonblockingMode::Accept).create_sync()?;
-        let mut child = Command::new(&launch.host)
+        let mut child = host_command(&launch.host)
             .args(["--control", &address])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -689,6 +689,23 @@ impl Drop for Plugin {
             group.end();
         }
     }
+}
+
+/// A command that runs the plug-in host executable `host` without a window of its own: on
+/// Windows a console program started from a program without a console (the desktop app) would
+/// otherwise open a console window for every host and scan worker. Its own windows (plug-in
+/// editors) still open.
+pub fn host_command(host: &std::path::Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(host);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        /// `CREATE_NO_WINDOW` from the Windows process creation flags.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// A fresh name for the control socket: the address to pass to the host, and the name itself.
