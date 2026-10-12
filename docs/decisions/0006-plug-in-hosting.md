@@ -69,6 +69,14 @@ workspace forbids.
    - **Shared memory**, one region per host process: a block header (frame count, transport,
      a sequence number), the audio buffers sized for the largest block, and lock-free rings of
      note and parameter events with sample offsets, so automation stays sample-accurate.
+     *Built:* each block carries up to 1024 events (note on and off, MIDI controller, pitch
+     bend) as fixed 16-byte records with their frame (`crates/ipc/src/events.rs`, region
+     version 2); the host reads them into a list made beforehand, so neither side allocates.
+     A VST3 host hands notes to `process` as an `IEventList` on event bus 0, and controllers
+     and pitch bend as parameter changes at their frame through the plug-in's `IMidiMapping`
+     (asked for the first MIDI channel only: Serum 2 crashes when asked about the second); a
+     CLAP host sends note events to note port 0 and controllers and bend as MIDI messages, and
+     gives a plug-in without audio inputs (an instrument) no input port.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping.
 4. **Block sync and deadline.** The engine signals the host, the host processes and signals
@@ -136,7 +144,11 @@ workspace forbids.
    one, but only when the plug-in has every id from 0 to the last value's: on the controller
    (`setParamNormalized`) and on the processor through the next block's parameter changes
    (`crates/plugin-host/src/vst3_params.rs`). With that OTT plays with the project's settings.
-   Pro-Q 3 refuses Pro-Q 2's state and runs with its defaults.
+   Pro-Q 3 refuses Pro-Q 2's state and runs with its defaults. Sylenth1 (an instrument, VST2
+   to its VST3 by the id convention) plays a project's notes with its saved settings. Serum 2
+   refuses Serum 1's state in every form tried: the bank, a single program (`FPCh`, an `.fxp`
+   file's contents) and the bare chunk; it opens Serum 1 presets only from its own browser, so
+   a project's Serum plays with Serum 2's defaults until a way is found.
 
    In a real project with 14 different VST2 plug-ins, 4 were found by the id
    convention, 1 by name and 3 as newer versions; the other 5 exist on that machine only as

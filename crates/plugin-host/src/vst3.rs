@@ -20,6 +20,7 @@ use std::time::Duration;
 use loopwerk_ipc::Served;
 use loopwerk_plugins::scan::PluginInfo;
 
+use crate::vst3_events::{BlockEvents, MidiMapping};
 use crate::vst3_params::{BlockChanges, Pending};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
@@ -534,10 +535,11 @@ impl Vst3Plugin {
 
         let stop = plugin.stop.clone();
         let pending = plugin.pending.clone();
+        let mapping = MidiMapping::of(plugin.controller.as_ref());
         let audio = AudioSide(processor);
         let thread = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(audio, served, buses, sample_rate, pending, &stop))
+            .spawn(move || serve(audio, served, buses, sample_rate, (pending, mapping), &stop))
             .map_err(|e| e.to_string())?;
         plugin.audio = Some(thread);
         Ok(plugin)
@@ -607,6 +609,14 @@ impl Vst3Plugin {
                 // SAFETY: a live component; bus 0 exists.
                 let _ = unsafe { self.component.activateBus(audio, direction as BusDirection, 0, 1) };
             }
+        }
+        // An instrument takes notes on its first event input.
+        let event = MediaTypes_::kEvent as MediaType;
+        let input = BusDirections_::kInput as BusDirection;
+        // SAFETY: a live component.
+        if unsafe { self.component.getBusCount(event, input) } > 0 {
+            // SAFETY: as above; event bus 0 exists.
+            let _ = unsafe { self.component.activateBus(event, input, 0, 1) };
         }
         (in_channels, out_channels)
     }
@@ -734,11 +744,12 @@ fn serve(
     mut served: Served,
     buses: (Vec<usize>, Vec<usize>),
     sample_rate: f64,
-    pending: Pending,
+    (pending, mapping): (Pending, MidiMapping),
     stop: &AtomicBool,
 ) {
     let processor = audio.0;
     let mut changes = BlockChanges::new(pending);
+    let notes = BlockEvents::new();
     let max_frames = served.max_frames() as usize;
     let link_channels = served.channels() as usize;
     let (in_channels, out_channels) = buses;
@@ -771,7 +782,7 @@ fn serve(
     // SAFETY: a live, active processor, on the audio thread.
     let _ = unsafe { processor.setProcessing(1) };
     while !stop.load(Ordering::Acquire) {
-        served.serve(POLL, |input, output| {
+        served.serve_with_events(POLL, |input, events, output| {
             let frames = (input.len() / link_channels.max(1)).min(max_frames);
             for bus in in_buffers.iter_mut() {
                 for channel in bus.iter_mut() {
@@ -794,9 +805,9 @@ fn serve(
                 numOutputs: outputs.len() as int32,
                 inputs: inputs.as_mut_ptr(),
                 outputs: outputs.as_mut_ptr(),
-                inputParameterChanges: changes.take(),
+                inputParameterChanges: changes.take(events.iter().filter_map(|e| mapping.change(e))),
                 outputParameterChanges: std::ptr::null_mut(),
-                inputEvents: std::ptr::null_mut(),
+                inputEvents: notes.fill(events),
                 outputEvents: std::ptr::null_mut(),
                 processContext: &mut context,
             };

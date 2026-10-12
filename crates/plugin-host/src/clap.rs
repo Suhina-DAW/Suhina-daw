@@ -2,9 +2,10 @@
 //!
 //! The plug-in instance lives on the host's main thread, which also answers control messages
 //! and serves the plug-in's main-thread callbacks; the started audio processor lives on the
-//! audio thread, which serves blocks from the link. Audio is stereo in and out for now (one
-//! port each, as many channels as the link carries); reading the plug-in's audio-port layout
-//! comes with instruments and mono effects.
+//! audio thread, which serves blocks from the link. Audio is one output port with as many
+//! channels as the link carries, and one input port like it unless the plug-in has no audio
+//! input (an instrument). Notes go to note port 0 as note events; controllers and pitch bend as
+//! MIDI events.
 //!
 //! A plug-in is named `clap:<file>` (the first plug-in in the file) or `clap:<file>#<id>`, or
 //! `test:clap` for the gain plug-in built into the host for tests ([`crate::test_clap`]).
@@ -16,11 +17,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use clack_extensions::audio_ports::PluginAudioPorts;
 use clack_extensions::latency::{HostLatency, HostLatencyImpl, PluginLatency};
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
 use clack_extensions::state::{HostState, HostStateImpl, PluginState};
+use clack_host::events::Match;
+use clack_host::events::event_types::{MidiEvent, NoteOffEvent, NoteOnEvent};
 use clack_host::prelude::*;
-use loopwerk_ipc::Served;
+use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Served};
 
 /// How long the audio thread waits for a block before checking whether it should stop.
 const POLL: Duration = Duration::from_millis(100);
@@ -33,12 +37,14 @@ pub(crate) struct Shared {
     callback_requested: AtomicBool,
     state: OnceLock<Option<PluginState>>,
     latency: OnceLock<Option<PluginLatency>>,
+    audio_ports: OnceLock<Option<PluginAudioPorts>>,
 }
 
 impl<'a> SharedHandler<'a> for Shared {
     fn initializing(&self, instance: InitializingPluginHandle<'a>) {
         let _ = self.state.set(instance.get_extension());
         let _ = self.latency.set(instance.get_extension());
+        let _ = self.audio_ports.set(instance.get_extension());
     }
 
     fn request_restart(&self) {}
@@ -145,6 +151,7 @@ impl ClapPlugin {
             callback_requested: AtomicBool::new(false),
             state: OnceLock::new(),
             latency: OnceLock::new(),
+            audio_ports: OnceLock::new(),
         };
         let mut instance =
             PluginInstance::<Host>::new(shared, |_| MainThread, &entry, &id, &info).map_err(|e| e.to_string())?;
@@ -157,11 +164,17 @@ impl ClapPlugin {
             None => 0,
         };
 
+        // A plug-in without the audio-ports extension gets the default stereo in and out.
+        let has_input = match instance.access_shared_handler(|s| s.audio_ports.get().copied().flatten()) {
+            Some(ports) => ports.count(&instance.plugin_handle(), true) > 0,
+            None => true,
+        };
+
         let stop = Arc::new(AtomicBool::new(false));
         let audio_stop = stop.clone();
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(stopped, served, &audio_stop))
+            .spawn(move || serve(stopped, served, has_input, &audio_stop))
             .map_err(|e| e.to_string())?;
         Ok(Self { instance, audio: Some(audio), stop, latency })
     }
@@ -212,6 +225,7 @@ impl Drop for ClapPlugin {
 fn serve(
     stopped: StoppedPluginAudioProcessor<Host>,
     mut served: Served,
+    has_input: bool,
     stop: &AtomicBool,
 ) -> StoppedPluginAudioProcessor<Host> {
     let mut processor = match stopped.start_processing() {
@@ -224,24 +238,25 @@ fn serve(
     let mut outputs = vec![vec![0.0f32; max_frames]; channels];
     let mut input_ports = AudioPorts::with_capacity(channels, 1);
     let mut output_ports = AudioPorts::with_capacity(channels, 1);
-    let no_events = EventBuffer::new();
+    let mut in_events = EventBuffer::with_capacity(MAX_EVENTS);
     let mut out_events = EventBuffer::with_capacity(EVENT_CAPACITY);
     let mut steady_time = 0u64;
 
     while !stop.load(Ordering::Acquire) {
-        served.serve(POLL, |input, output| {
+        served.serve_with_events(POLL, |input, events, output| {
             let frames = input.len() / channels.max(1);
             for (channel, buffer) in inputs.iter_mut().enumerate() {
                 for (frame, sample) in buffer.iter_mut().take(frames).enumerate() {
                     *sample = input.get(frame * channels + channel).copied().unwrap_or(0.0);
                 }
             }
-            let audio_in = input_ports.with_input_buffers([AudioPortBuffer {
+            let input_port = has_input.then(|| AudioPortBuffer {
                 latency: 0,
                 channels: AudioPortBufferType::f32_input_only(
                     inputs.iter_mut().map(|b| InputChannel::variable(b.get_mut(..frames).unwrap_or_default())),
                 ),
-            }]);
+            });
+            let audio_in = input_ports.with_input_buffers(input_port);
             let mut audio_out = output_ports.with_output_buffers([AudioPortBuffer {
                 latency: 0,
                 channels: AudioPortBufferType::f32_output_only(
@@ -249,10 +264,14 @@ fn serve(
                 ),
             }]);
             out_events.clear();
+            in_events.clear();
+            for event in events {
+                push_event(&mut in_events, event);
+            }
             let processed = processor.process(
                 &audio_in,
                 &mut audio_out,
-                &InputEvents::from_buffer(&no_events),
+                &InputEvents::from_buffer(&in_events),
                 &mut OutputEvents::from_buffer(&mut out_events),
                 Some(steady_time),
                 None,
@@ -271,4 +290,29 @@ fn serve(
         });
     }
     processor.stop_processing()
+}
+
+/// One event from the link as a CLAP event: notes as note events on note port 0, controllers
+/// and pitch bend as MIDI messages.
+fn push_event(buffer: &mut EventBuffer, event: &Event) {
+    let note_id = |note: i32| u32::try_from(note).map_or(Match::All, Match::Specific);
+    match event.kind {
+        EventKind::NoteOn { channel, key, velocity } => {
+            let pckn = Pckn::new(0u16, u16::from(channel), u16::from(key), note_id(event.note));
+            buffer.push(&NoteOnEvent::new(event.frame, pckn, f64::from(velocity)));
+        }
+        EventKind::NoteOff { channel, key, velocity } => {
+            let pckn = Pckn::new(0u16, u16::from(channel), u16::from(key), note_id(event.note));
+            buffer.push(&NoteOffEvent::new(event.frame, pckn, f64::from(velocity)));
+        }
+        EventKind::Controller { channel, number, value } => {
+            let value = (value * 127.0).round().clamp(0.0, 127.0) as u8;
+            buffer.push(&MidiEvent::new(event.frame, 0, [0xB0 | (channel & 0x0F), number & 0x7F, value]));
+        }
+        EventKind::PitchBend { channel, value } => {
+            let bend = ((value + 1.0) / 2.0 * 16_383.0).round().clamp(0.0, 16_383.0) as u16;
+            let (low, high) = ((bend & 0x7F) as u8, (bend >> 7) as u8);
+            buffer.push(&MidiEvent::new(event.frame, 0, [0xE0 | (channel & 0x0F), low, high]));
+        }
+    }
 }

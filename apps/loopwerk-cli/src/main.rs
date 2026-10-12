@@ -1,6 +1,7 @@
 //! Headless Loopwerk CLI.
 
 mod play;
+mod track_notes;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,8 +16,9 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
                              | check <project.als>)
-       loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
-       loopwerk-cli plugin run-device <project.als> <device> <in-audio> <out.wav> [--tail <seconds>]
+       loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+                                     [--from <bar>] [--seconds <seconds>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -33,7 +35,10 @@ commands:
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
             that many seconds of silence for reverbs and delays to ring out (default 2);
             plugin run-device does the same with a project's plug-in device (by its name) and
-            the settings the project saved, through the installed plug-in plugins check finds
+            the settings the project saved, through the installed plug-in plugins check finds;
+            an instrument plays its track's arrangement notes from --from (a bar, default the
+            first clip) for --seconds (default 16), and `-` as input means silence; --state
+            gives the plug-in a saved state from a file first (its own, or a VST2 .fxb/.fxp)
 
 options:
   <project.als>      a Live Set to import
@@ -211,20 +216,23 @@ fn render(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
-/// `plugin run <plug-in> <in> <out> [--tail <seconds>]`.
+/// `plugin run …` and `plugin run-device …`: audio, and an instrument's notes, through one
+/// plug-in offline, written to a WAV file.
 fn plugin(args: &[String]) -> Result<(), String> {
     let usage = || {
         format!(
-            "usage: loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
-       loopwerk-cli plugin run-device <project.als> <device> <in-audio> <out.wav> [--tail <seconds>]
+            "usage: loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+                                     [--from <bar>] [--seconds <seconds>]
 
 {USAGE}"
         )
     };
     let mut words = args.iter().map(String::as_str);
     let mut library = loopwerk_plugins::library::Library::default();
-    let (spec, state, input, output) = match words.next() {
+    // For a device: the project and the device's channel, to read its track's notes.
+    let mut device_source: Option<(loopwerk_session::Session, ChannelId)> = None;
+    let (spec, mut state, input, output) = match words.next() {
         Some("run") => {
             let (Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next()) else {
                 return Err(usage());
@@ -247,11 +255,11 @@ fn plugin(args: &[String]) -> Result<(), String> {
                 return Err(usage());
             };
             let (session, _) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
-            let (channel, saved) = session
+            let (channel, channel_id, saved) = session
                 .project()
                 .channels
                 .iter()
-                .find_map(|c| c.devices.iter().find(|d| d.name == device).map(|d| (c.name.clone(), d.clone())))
+                .find_map(|c| c.devices.iter().find(|d| d.name == device).map(|d| (c.name.clone(), c.id, d.clone())))
                 .ok_or_else(|| format!("no device {device:?} in {project}; `loopwerk-cli plugins check` lists them"))?;
             let (found, state) = loopwerk_session::device_plugin(library.catalog(), &saved).ok_or_else(|| {
                 format!("no installed plug-in stands for {device:?}; `loopwerk-cli plugins check` says why")
@@ -264,13 +272,28 @@ fn plugin(args: &[String]) -> Result<(), String> {
                 found.how.name(),
                 if found.how.keeps_state() { "" } else { "; it may not read the saved settings" }
             );
+            device_source = Some((session, channel_id));
             (found.plugin.spec(), state, input, output)
         }
         _ => return Err(usage()),
     };
     let mut tail = 2.0f64;
+    let mut from_bar: Option<f64> = None;
+    let mut seconds = 16.0f64;
+    let positive = |text: Option<&str>, what: &str, max: f64| {
+        text.and_then(|t| t.parse::<f64>().ok())
+            .filter(|t| t.is_finite() && (0.0..=max).contains(t))
+            .ok_or_else(|| format!("{what} needs a number from 0 to {max}"))
+    };
     while let Some(word) = words.next() {
         match word {
+            "--state" => {
+                let file = words.next().ok_or("--state needs a file")?;
+                let bytes = std::fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+                state = Some(bytes.into());
+            }
+            "--from" => from_bar = Some(positive(words.next(), "--from", 100_000.0)?),
+            "--seconds" => seconds = positive(words.next(), "--seconds", 3_600.0)?,
             "--tail" => {
                 tail = words
                     .next()
@@ -282,7 +305,16 @@ fn plugin(args: &[String]) -> Result<(), String> {
         }
     }
 
-    let audio = loopwerk_media::decode_file(std::path::Path::new(input))?;
+    let audio = if input == "-" {
+        let rate = 48_000u32;
+        loopwerk_media::AudioData {
+            sample_rate: rate,
+            channels: 2,
+            samples: vec![0.0; (seconds * f64::from(rate)) as usize * 2],
+        }
+    } else {
+        loopwerk_media::decode_file(std::path::Path::new(input))?
+    };
     let channels = usize::from(audio.channels.max(1));
     let stereo: Vec<f32> = audio
         .samples
@@ -301,9 +333,39 @@ fn plugin(args: &[String]) -> Result<(), String> {
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
     };
+    // An instrument's notes: its track's arrangement, from the bar asked for or the first clip.
+    let events = match &device_source {
+        Some((session, channel)) => {
+            let project = session.project();
+            let beats_per_bar = f64::from(project.transport.time_signature.numerator.max(1));
+            let first_clip = || {
+                let track = project.tracks.iter().find(|t| t.channel == Some(*channel))?;
+                project
+                    .arrangement
+                    .lanes
+                    .iter()
+                    .filter(|l| l.track == Some(track.id))
+                    .flat_map(|l| l.clips.iter())
+                    .map(|c| c.start)
+                    .filter(|s| s.is_finite())
+                    .min_by(f64::total_cmp)
+            };
+            let from_beat = match from_bar {
+                Some(bar) => (bar - 1.0).max(0.0) * beats_per_bar,
+                None => first_clip().unwrap_or(0.0),
+            };
+            let frames = (stereo.len() / 2) as u64;
+            let events = track_notes::events(project, *channel, from_beat, frames, audio.sample_rate);
+            if !events.is_empty() {
+                eprintln!("{} note events from bar {:.1}", events.len(), from_beat / beats_per_bar + 1.0);
+            }
+            events
+        }
+        None => Vec::new(),
+    };
     let started = std::time::Instant::now();
-    let rendered =
-        loopwerk_plugins::offline::render_with_state(launch, state, &stereo, tail_frames).map_err(|e| e.to_string())?;
+    let rendered = loopwerk_plugins::offline::render_with_events(launch, state, &stereo, &events, tail_frames)
+        .map_err(|e| e.to_string())?;
     if let Some(why) = &rendered.state_refused {
         eprintln!("warning: the plug-in did not take the saved settings ({why}); it ran with its defaults");
     }
@@ -364,6 +426,7 @@ fn plugins(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Serves MCP on stdin/stdout. Nothing else may be printed to stdout while it runs.
 fn mcp(args: &[String]) -> Result<(), String> {
     let mut read_root = None;
     let mut write_root = None;

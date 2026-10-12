@@ -16,9 +16,10 @@ pub(crate) const MAX_CHANGES: usize = 4096;
 /// Values waiting for the next block: parameter id and normalized value.
 pub(crate) type Pending = Arc<Mutex<Vec<(ParamID, ParamValue)>>>;
 
-/// One parameter's change in a block: a single point at the block's start.
+/// One parameter's change in a block: a single point, at `offset`.
 struct Queue {
     id: Cell<ParamID>,
+    offset: Cell<int32>,
     value: Cell<ParamValue>,
 }
 
@@ -40,7 +41,7 @@ impl IParamValueQueueTrait for Queue {
             return kInvalidArgument;
         }
         // SAFETY: both pointers are non-null and point at values the plug-in passed to fill.
-        unsafe { *offset = 0 };
+        unsafe { *offset = self.offset.get() };
         // SAFETY: as above.
         unsafe { *value = self.value.get() };
         kResultOk
@@ -90,29 +91,50 @@ pub(crate) struct BlockChanges {
 impl BlockChanges {
     /// Made before processing starts; allocates the list for [`MAX_CHANGES`] parameters.
     pub(crate) fn new(pending: Pending) -> Self {
-        let queues: Vec<ComWrapper<Queue>> =
-            (0..MAX_CHANGES).map(|_| ComWrapper::new(Queue { id: Cell::new(0), value: Cell::new(0.0) })).collect();
+        let queues: Vec<ComWrapper<Queue>> = (0..MAX_CHANGES)
+            .map(|_| ComWrapper::new(Queue { id: Cell::new(0), offset: Cell::new(0), value: Cell::new(0.0) }))
+            .collect();
         let pointers = queues.iter().filter_map(|q| q.to_com_ptr::<IParamValueQueue>()).collect();
         let changes = ComWrapper::new(Changes { queues, pointers, count: Cell::new(0) });
         let pointer = changes.to_com_ptr::<IParameterChanges>();
         Self { changes, pointer, pending }
     }
 
-    /// Takes what is pending (if the control thread is not using the list right now) and
-    /// returns the list for this block, or null when nothing changed. Real-time safe: no
-    /// allocation, and it never waits for the lock.
-    pub(crate) fn take(&mut self) -> *mut IParameterChanges {
-        let Ok(mut pending) = self.pending.try_lock() else { return std::ptr::null_mut() };
-        if pending.is_empty() {
-            return std::ptr::null_mut();
+    /// Takes what is pending (if the control thread is not using the list right now) and the
+    /// block's `extra` changes (id, frame, value; a controller moving), and returns the list for
+    /// this block, or null when nothing changed. A parameter changed twice keeps the later
+    /// value. Real-time safe: no allocation, and it never waits for the lock.
+    pub(crate) fn take(&mut self, extra: impl Iterator<Item = (ParamID, int32, ParamValue)>) -> *mut IParameterChanges {
+        let mut count = 0;
+        let mut add = |id: ParamID, offset: int32, value: ParamValue| {
+            let queues = &self.changes.queues;
+            let slot = queues.iter().take(count).position(|q| q.id.get() == id).or_else(|| {
+                (count < queues.len()).then(|| {
+                    count += 1;
+                    count - 1
+                })
+            });
+            if let Some(queue) = slot.and_then(|i| queues.get(i)) {
+                queue.id.set(id);
+                queue.offset.set(offset);
+                queue.value.set(value);
+            }
+        };
+        if let Ok(mut pending) = self.pending.try_lock() {
+            let room = pending.len().min(MAX_CHANGES);
+            for (id, value) in pending.drain(..room) {
+                add(id, 0, value);
+            }
         }
-        let room = pending.len().min(self.changes.pointers.len());
-        for ((id, value), queue) in pending.drain(..room).zip(self.changes.queues.iter()) {
-            queue.id.set(id);
-            queue.value.set(value);
+        for (id, offset, value) in extra {
+            add(id, offset, value);
         }
-        self.changes.count.set(room);
-        self.pointer.as_ref().map_or(std::ptr::null_mut(), ComPtr::as_ptr)
+        self.changes.count.set(count);
+        if count == 0 {
+            std::ptr::null_mut()
+        } else {
+            self.pointer.as_ref().map_or(std::ptr::null_mut(), ComPtr::as_ptr)
+        }
     }
 
     /// Empties the list after the block.

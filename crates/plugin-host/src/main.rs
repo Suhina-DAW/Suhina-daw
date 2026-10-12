@@ -14,6 +14,7 @@ mod processors;
 mod test_clap;
 mod test_vst3;
 mod vst3;
+mod vst3_events;
 mod vst3_params;
 
 use std::io::Write;

@@ -1,0 +1,100 @@
+//! Events that go with a block: notes and controllers, each at a frame of the block. They are
+//! stored in shared memory as fixed 16-byte records, so neither side allocates to pass them:
+//! frame (u32), kind (u8), channel (u8), key or controller number (u8), a zero byte, value
+//! (f32: velocity, controller value or bend), note id (i32, -1 for none); little-endian.
+
+/// Most events one block carries; more are dropped (the latest ones).
+pub const MAX_EVENTS: usize = 1024;
+/// Bytes of one stored event.
+pub(crate) const EVENT_BYTES: usize = 16;
+
+/// What happens at an event's frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EventKind {
+    /// A note starts. `velocity` is 0 to 1.
+    NoteOn { channel: u8, key: u8, velocity: f32 },
+    /// A note ends. `velocity` is the release velocity, 0 to 1.
+    NoteOff { channel: u8, key: u8, velocity: f32 },
+    /// A MIDI controller moves to `value`, 0 to 1.
+    Controller { channel: u8, number: u8, value: f32 },
+    /// The pitch bend moves to `value`, -1 to 1.
+    PitchBend { channel: u8, value: f32 },
+}
+
+/// One event at `frame` of the block (0 is its first frame). `note` ties a note's start and end
+/// together when several notes share a key; -1 for none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Event {
+    pub frame: u32,
+    pub note: i32,
+    pub kind: EventKind,
+}
+
+impl Event {
+    pub fn note_on(frame: u32, channel: u8, key: u8, velocity: f32) -> Self {
+        Self { frame, note: -1, kind: EventKind::NoteOn { channel, key, velocity } }
+    }
+
+    pub fn note_off(frame: u32, channel: u8, key: u8, velocity: f32) -> Self {
+        Self { frame, note: -1, kind: EventKind::NoteOff { channel, key, velocity } }
+    }
+
+    pub(crate) fn encode(&self) -> [u8; EVENT_BYTES] {
+        let (kind, channel, number, value) = match self.kind {
+            EventKind::NoteOn { channel, key, velocity } => (1, channel, key, velocity),
+            EventKind::NoteOff { channel, key, velocity } => (2, channel, key, velocity),
+            EventKind::Controller { channel, number, value } => (3, channel, number, value),
+            EventKind::PitchBend { channel, value } => (4, channel, 0, value),
+        };
+        let mut out = [0; EVENT_BYTES];
+        out[..4].copy_from_slice(&self.frame.to_le_bytes());
+        out[4] = kind;
+        out[5] = channel;
+        out[6] = number;
+        out[8..12].copy_from_slice(&value.to_le_bytes());
+        out[12..].copy_from_slice(&self.note.to_le_bytes());
+        out
+    }
+
+    /// The event in `bytes`, or `None` for a kind this version does not know. Numbers are kept
+    /// in range: channel 0–15, key 0–127, values within their span (NaN becomes 0).
+    pub(crate) fn decode(bytes: &[u8; EVENT_BYTES]) -> Option<Self> {
+        let [f0, f1, f2, f3, kind, channel, number, _, v0, v1, v2, v3, n0, n1, n2, n3] = *bytes;
+        let value = f32::from_le_bytes([v0, v1, v2, v3]);
+        let value = if value.is_nan() { 0.0 } else { value };
+        let (channel, number) = (channel.min(15), number.min(127));
+        let unit = value.clamp(0.0, 1.0);
+        let kind = match kind {
+            1 => EventKind::NoteOn { channel, key: number, velocity: unit },
+            2 => EventKind::NoteOff { channel, key: number, velocity: unit },
+            3 => EventKind::Controller { channel, number, value: unit },
+            4 => EventKind::PitchBend { channel, value: value.clamp(-1.0, 1.0) },
+            _ => return None,
+        };
+        Some(Self { frame: u32::from_le_bytes([f0, f1, f2, f3]), note: i32::from_le_bytes([n0, n1, n2, n3]), kind })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_round_trip_and_stay_in_range() {
+        let events = [
+            Event::note_on(0, 0, 60, 0.75),
+            Event { frame: 511, note: 42, kind: EventKind::NoteOff { channel: 15, key: 127, velocity: 0.0 } },
+            Event { frame: 3, note: -1, kind: EventKind::Controller { channel: 2, number: 64, value: 1.0 } },
+            Event { frame: 4, note: -1, kind: EventKind::PitchBend { channel: 1, value: -0.5 } },
+        ];
+        for event in events {
+            assert_eq!(Event::decode(&event.encode()), Some(event));
+        }
+        let mut wild = Event::note_on(1, 200, 250, f32::NAN).encode();
+        assert_eq!(Event::decode(&wild), Some(Event::note_on(1, 15, 127, 0.0)));
+        wild[8..12].copy_from_slice(&9.0f32.to_le_bytes());
+        assert_eq!(Event::decode(&wild), Some(Event::note_on(1, 15, 127, 1.0)));
+        wild[4] = 9;
+        assert_eq!(Event::decode(&wild), None);
+    }
+}

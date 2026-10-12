@@ -4,7 +4,8 @@
 //! process with its [`Link::address`]; the host opens it with [`Served::open`]. Then, block by
 //! block, [`Link::process`] copies the input into shared memory, rings the host and waits for
 //! the output until a deadline; [`Served::serve`] waits for a block, lets the plug-ins fill the
-//! output and rings back.
+//! output and rings back. A block can carry [`Event`]s (notes, controllers) at its frames, for
+//! instruments: [`Link::process_with_events`] and [`Served::serve_with_events`].
 //!
 //! One block is in flight at a time. If the host misses the deadline the engine gets
 //! [`Outcome::Missed`], and until the host answers that block, [`Outcome::Busy`] at once,
@@ -16,7 +17,10 @@
 //! process and waiting on it need it. Everything it exports is safe to use.
 
 mod doorbell;
+mod events;
 mod region;
+
+pub use events::{Event, EventKind, MAX_EVENTS};
 
 use std::fmt;
 use std::path::Path;
@@ -110,6 +114,18 @@ impl Link {
     /// for its `output`. The block is the shorter of the two, cut to whole frames and to the
     /// link's block size. Real-time safe: it does not allocate, and it returns within `timeout`.
     pub fn process(&mut self, input: &[f32], output: &mut [f32], timeout: Duration) -> Outcome {
+        self.process_with_events(input, &[], output, timeout)
+    }
+
+    /// [`Link::process`] with `events` at frames of the block (the first [`MAX_EVENTS`]; frames
+    /// past the block's end count as its last frame).
+    pub fn process_with_events(
+        &mut self,
+        input: &[f32],
+        events: &[Event],
+        output: &mut [f32],
+        timeout: Duration,
+    ) -> Outcome {
         let deadline = Instant::now() + timeout;
         if self.region.response() != self.sequence {
             return Outcome::Busy;
@@ -119,6 +135,7 @@ impl Link {
         let samples = samples - samples % channels;
         self.region.write_input(input.get(..samples).unwrap_or_default());
         self.region.set_frames((samples / channels) as u32);
+        self.region.write_events(events);
         self.sequence = self.sequence.wrapping_add(1);
         self.region.set_request(self.sequence);
         self.to_host.ring(self.region.request_word());
@@ -139,6 +156,8 @@ pub struct Served {
     to_engine: Doorbell,
     /// The last block answered.
     seen: u32,
+    /// The current block's events; room for [`MAX_EVENTS`], so serving does not allocate.
+    events: Vec<Event>,
 }
 
 impl Served {
@@ -148,7 +167,7 @@ impl Served {
         let to_host = Doorbell::open(region.name(), "host")?;
         let to_engine = Doorbell::open(region.name(), "engine")?;
         let seen = region.response();
-        Ok(Self { region, to_host, to_engine, seen })
+        Ok(Self { region, to_host, to_engine, seen, events: Vec::with_capacity(MAX_EVENTS) })
     }
 
     pub fn channels(&self) -> u32 {
@@ -163,14 +182,26 @@ impl Served {
     /// (interleaved, the same length, the output zeroed) and answers. Returns whether a block
     /// was served.
     pub fn serve(&mut self, timeout: Duration, process: impl FnOnce(&[f32], &mut [f32])) -> bool {
+        self.serve_with_events(timeout, |input, _, output| process(input, output))
+    }
+
+    /// [`Served::serve`] that also hands over the block's events, in the order sent, each at a
+    /// frame within the block.
+    pub fn serve_with_events(&mut self, timeout: Duration, process: impl FnOnce(&[f32], &[Event], &mut [f32])) -> bool {
         let deadline = Instant::now() + timeout;
         let seen = self.seen;
         if !self.to_host.wait(self.region.request_word(), |v| v != seen, deadline) {
             return false;
         }
         let request = self.region.request();
-        let samples = self.region.frames() as usize * self.region.channels() as usize;
-        self.region.with_block(samples, process);
+        let frames = self.region.frames();
+        let samples = frames as usize * self.region.channels() as usize;
+        let mut events = std::mem::take(&mut self.events);
+        self.region.read_events(&mut events);
+        let last = frames.saturating_sub(1);
+        events.iter_mut().for_each(|e| e.frame = e.frame.min(last));
+        self.region.with_block(samples, |input, output| process(input, &events, output));
+        self.events = events;
         self.seen = request;
         self.region.set_response(request);
         self.to_engine.ring(self.region.response_word());

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use loopwerk_ipc::Outcome;
 
-use crate::{Launch, Plugin, PluginError, SavedState};
+use crate::{Event, Launch, Plugin, PluginError, SavedState};
 
 /// Frames per block offline.
 pub const BLOCK_FRAMES: u32 = 512;
@@ -34,9 +34,21 @@ pub fn render(launch: Launch, input: &[f32], tail_frames: usize) -> Result<Rende
 /// [`render`] with the plug-in set to `state` first, as a project saved it. A plug-in that
 /// refuses the state still runs, with its defaults, and [`Rendered::state_refused`] says why.
 pub fn render_with_state(
+    launch: Launch,
+    state: Option<SavedState>,
+    input: &[f32],
+    tail_frames: usize,
+) -> Result<Rendered, PluginError> {
+    render_with_events(launch, state, input, &[], tail_frames)
+}
+
+/// [`render_with_state`] with notes and controllers for an instrument: `events`, sorted by
+/// frame, each frame counted from the start of `input`.
+pub fn render_with_events(
     mut launch: Launch,
     state: Option<SavedState>,
     input: &[f32],
+    events: &[Event],
     tail_frames: usize,
 ) -> Result<Rendered, PluginError> {
     launch.channels = 2;
@@ -60,6 +72,8 @@ pub fn render_with_state(
     let mut chunk_in = vec![0.0f32; block * 2];
     let mut chunk_out = vec![0.0f32; block * 2];
     let mut frame = 0;
+    let mut next_event = 0;
+    let mut block_events: Vec<Event> = Vec::with_capacity(crate::MAX_EVENTS);
     while frame < total {
         let frames = block.min(total - frame);
         let samples = frames * 2;
@@ -72,7 +86,14 @@ pub fn render_with_state(
         let (Some(block_in), Some(block_out)) = (chunk_in.get(..samples), chunk_out.get_mut(..samples)) else {
             break;
         };
-        match audio.process(block_in, block_out, BLOCK_TIMEOUT) {
+        // The events in this block, their frames counted from its start.
+        block_events.clear();
+        let end = (frame + frames) as u64;
+        while let Some(event) = events.get(next_event).filter(|e| u64::from(e.frame) < end) {
+            block_events.push(Event { frame: (u64::from(event.frame).saturating_sub(frame as u64)) as u32, ..*event });
+            next_event += 1;
+        }
+        match audio.process_with_events(block_in, &block_events, block_out, BLOCK_TIMEOUT) {
             Outcome::Done => output.extend_from_slice(block_out),
             Outcome::Missed | Outcome::Busy => {
                 return Err(PluginError::Timeout("a block offline (the plug-in stopped answering)"));

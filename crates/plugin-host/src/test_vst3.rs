@@ -5,7 +5,9 @@
 //! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"), and the component reads that plug-in's
 //! saved state as a standard VST2 bank too: a chunk bank whose chunk is the gain. The controller
 //! keeps whatever state it is given, and has one parameter, the gain (id 0), which the
-//! processor follows when a block brings a change. Modelled on the `vst3` crate's gain
+//! processor follows when a block brings a change. It has an event input too: a note-on adds
+//! its velocity to the first output channel at its frame, and its controller maps MIDI
+//! controller 7 to the gain (`IMidiMapping`). Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -69,7 +71,10 @@ impl IComponentTrait for Processor {
         kResultOk
     }
 
-    unsafe fn getBusCount(&self, media: MediaType, _dir: BusDirection) -> i32 {
+    unsafe fn getBusCount(&self, media: MediaType, dir: BusDirection) -> i32 {
+        if media == MediaTypes_::kEvent as MediaType {
+            return i32::from(dir == BusDirections_::kInput as BusDirection);
+        }
         i32::from(media == MediaTypes_::kAudio as MediaType)
     }
 
@@ -204,6 +209,9 @@ impl IAudioProcessorTrait for Processor {
             for (o, i) in target.iter_mut().zip(source) {
                 *o = i * gain;
             }
+            if channel == 0 {
+                self.add_notes(data, target);
+            }
         }
         kResultOk
     }
@@ -231,7 +239,7 @@ struct Controller {
 }
 
 impl Class for Controller {
-    type Interfaces = (IEditController,);
+    type Interfaces = (IEditController, IMidiMapping);
 }
 
 impl IPluginBaseTrait for Controller {
@@ -340,6 +348,59 @@ impl IPluginCompatibilityTrait for Compatibility {
         let mut written = 0;
         // SAFETY: the bytes outlive the call; the length fits an i32.
         unsafe { stream.write(text.as_ptr() as *mut c_void, text.len() as i32, &mut written) }
+    }
+}
+
+impl Processor {
+    /// Adds each note-on's velocity at its frame.
+    fn add_notes(&self, data: &ProcessData, target: &mut [f32]) {
+        // SAFETY: the host's events, or null, for the call.
+        let Some(events) = (unsafe { ComRef::from_raw(data.inputEvents) }) else { return };
+        // SAFETY: a live list for the call.
+        for index in 0..unsafe { events.getEventCount() } {
+            let mut event: Event = blank_event();
+            // SAFETY: as above; one event to fill.
+            if unsafe { events.getEvent(index, &mut event) } != kResultOk
+                || event.r#type != Event_::EventTypes_::kNoteOnEvent as u16
+            {
+                continue;
+            }
+            // SAFETY: a note-on event, so the union holds a note-on.
+            let velocity = unsafe { event.__field0.noteOn.velocity };
+            if let Some(sample) = usize::try_from(event.sampleOffset).ok().and_then(|f| target.get_mut(f)) {
+                *sample += velocity;
+            }
+        }
+    }
+}
+
+fn blank_event() -> Event {
+    Event {
+        busIndex: 0,
+        sampleOffset: 0,
+        ppqPosition: 0.0,
+        flags: 0,
+        r#type: 0,
+        __field0: Event__type0 {
+            noteOn: NoteOnEvent { channel: 0, pitch: 0, tuning: 0.0, velocity: 0.0, length: 0, noteId: -1 },
+        },
+    }
+}
+
+impl IMidiMappingTrait for Controller {
+    unsafe fn getMidiControllerAssignment(
+        &self,
+        bus: i32,
+        channel: i16,
+        number: CtrlNumber,
+        id: *mut ParamID,
+    ) -> tresult {
+        if bus != 0 || channel != 0 || number != 7 || id.is_null() {
+            return kResultFalse;
+        }
+        // SAFETY: the host passes an id to fill.
+        unsafe { *id = GAIN_PARAMETER };
+        kResultOk
     }
 }
 

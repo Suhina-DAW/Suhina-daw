@@ -29,6 +29,7 @@ use interprocess::local_socket::{
     GenericFilePath, GenericNamespaced, ListenerNonblockingMode, ListenerOptions, Name, NameType, Stream, ToFsName,
     ToNsName,
 };
+pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS};
 use loopwerk_ipc::{IpcError, Link, Outcome};
 
 use protocol::{MAX_LINE, Message, VERSION};
@@ -107,7 +108,19 @@ impl PluginAudio {
     /// One block through the plug-in, waiting at most `timeout`; see [`Link::process`].
     /// Real-time safe.
     pub fn process(&mut self, input: &[f32], output: &mut [f32], timeout: Duration) -> Outcome {
-        let outcome = self.link.process(input, output, timeout);
+        self.process_with_events(input, &[], output, timeout)
+    }
+
+    /// [`PluginAudio::process`] with notes and controllers at frames of the block, for an
+    /// instrument; see [`Link::process_with_events`]. Real-time safe.
+    pub fn process_with_events(
+        &mut self,
+        input: &[f32],
+        events: &[Event],
+        output: &mut [f32],
+        timeout: Duration,
+    ) -> Outcome {
+        let outcome = self.link.process_with_events(input, events, output, timeout);
         if outcome == Outcome::Done {
             self.unanswered.store(0, Ordering::Relaxed);
         } else {

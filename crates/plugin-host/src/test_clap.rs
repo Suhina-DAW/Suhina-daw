@@ -1,12 +1,14 @@
 //! A CLAP plug-in built into the host for tests (`test:clap`): a gain, with its state (the gain
 //! as 4 bytes, little-endian `f32`) and a reported latency of [`LATENCY`] frames. Loading it
 //! through `clack-host` runs the host's whole CLAP path except opening a file, so the tests do
-//! not need a plug-in installed.
+//! not need a plug-in installed. For the event path it also answers notes and MIDI: a note-on
+//! adds its velocity to the first channel at its frame, and controller 7 sets the gain.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use clack_extensions::latency::{PluginLatency, PluginLatencyImpl};
 use clack_extensions::state::{PluginState, PluginStateImpl};
+use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
 use clack_plugin::stream::{InputStream, OutputStream};
 
@@ -96,7 +98,28 @@ impl<'a> PluginAudioProcessor<'a, GainShared, GainMainThread<'a>> for GainProces
         Ok(Self { shared })
     }
 
-    fn process(&mut self, _process: Process, mut audio: Audio, _events: Events) -> Result<ProcessStatus, PluginError> {
+    fn process(&mut self, _process: Process, mut audio: Audio, events: Events) -> Result<ProcessStatus, PluginError> {
+        // Controller 7 sets the gain before the block (a test needs no finer timing).
+        let mut notes = [(0u32, 0.0f32); 16];
+        let mut note_count = 0;
+        for event in events.input {
+            match event.as_core_event() {
+                Some(CoreEventSpace::Midi(midi)) => {
+                    if let [status, 7, value] = midi.data()
+                        && status & 0xF0 == 0xB0
+                    {
+                        self.shared.gain.store((f32::from(value) / 127.0).to_bits(), Ordering::Relaxed);
+                    }
+                }
+                Some(CoreEventSpace::NoteOn(note)) => {
+                    if let Some(slot) = notes.get_mut(note_count) {
+                        *slot = (note.header().time(), note.velocity() as f32);
+                        note_count += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
         let gain = f32::from_bits(self.shared.gain.load(Ordering::Relaxed));
         for mut port in &mut audio {
             let Some(pairs) = port.channels()?.into_f32() else { continue };
@@ -110,6 +133,19 @@ impl<'a> PluginAudioProcessor<'a, GainShared, GainMainThread<'a>> for GainProces
                         }
                     }
                     ChannelPair::InPlace(buffer) => buffer.iter_mut().for_each(|s| *s *= gain),
+                }
+            }
+            // Notes on the port's first channel.
+            if let Some(Some(first)) = port.channels()?.into_f32().map(|mut c| c.channel_pair(0)) {
+                let mut out = match first {
+                    ChannelPair::OutputOnly(out) | ChannelPair::InputOutput(_, out) => Some(out),
+                    ChannelPair::InPlace(buffer) => Some(buffer),
+                    ChannelPair::InputOnly(_) => None,
+                };
+                for (frame, velocity) in notes.iter().take(note_count) {
+                    if let Some(sample) = out.as_deref_mut().and_then(|o| o.get_mut(*frame as usize)) {
+                        *sample += velocity;
+                    }
                 }
             }
         }

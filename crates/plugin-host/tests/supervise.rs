@@ -273,3 +273,39 @@ fn vst3_files_that_are_missing_or_not_plugins_are_errors() {
     let error = Plugin::start(launch("vst3:x.vst3#nothex")).err();
     assert!(matches!(&error, Some(PluginError::Host(m)) if m.contains("class id")), "{error:?}");
 }
+
+#[test]
+fn notes_and_controllers_reach_clap_and_vst3_plugins() {
+    use loopwerk_plugins::{Event, EventKind};
+    for spec in ["test:clap", "test:vst3"] {
+        let (_plugin, mut audio) = start(spec);
+        // A note at frame 10 adds its velocity there, on the left channel only.
+        let mut output = [9.0f32; FRAMES * 2];
+        let notes = [Event::note_on(10, 0, 60, 0.75), Event::note_off(20, 0, 60, 0.0)];
+        assert_eq!(audio.process_with_events(&[0.0; FRAMES * 2], &notes, &mut output, PATIENT), Outcome::Done);
+        assert_eq!((output[20], output[21], output[18], output[22]), (0.75, 0.0, 0.0, 0.0), "{spec}");
+        // Controller 7 at full sets the gain to 1 (it starts at 0.5).
+        let volume = [Event { frame: 0, note: -1, kind: EventKind::Controller { channel: 0, number: 7, value: 1.0 } }];
+        assert_eq!(audio.process_with_events(&[1.0; FRAMES * 2], &volume, &mut output, PATIENT), Outcome::Done);
+        assert_eq!(output[0], 1.0, "{spec}");
+        // Blocks without events play as before.
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 1.0), "{spec}");
+    }
+}
+
+#[test]
+fn an_offline_run_plays_notes_at_their_frames() {
+    use loopwerk_plugins::Event;
+    use loopwerk_plugins::offline::render_with_events;
+    // 2000 frames of silence through the VST3 test plug-in, with notes in the first and the
+    // fourth block (blocks are 512 frames offline).
+    let input = vec![0.0f32; 2_000 * 2];
+    let notes = [Event::note_on(100, 0, 60, 0.5), Event::note_on(1_600, 0, 64, 0.25)];
+    let rendered = render_with_events(launch("test:vst3"), None, &input, &notes, 0).unwrap();
+    // The output is lined up with the input by taking out the 32 frames of latency the plug-in
+    // reports; it does not really delay, so a note at frame f lands at f - 32.
+    let at = |frame: usize| rendered.samples[(frame - 32) * 2];
+    assert_eq!((at(100), at(1_600)), (0.5, 0.25));
+    let total: f32 = rendered.samples.iter().sum();
+    assert_eq!(total, 0.75);
+}
