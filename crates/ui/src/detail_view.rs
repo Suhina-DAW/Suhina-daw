@@ -1,5 +1,5 @@
-//! The detail area: the selected track's device chain, or the selected clip's properties
-//! (`docs/spec/ui-session-view.md` › Detail area). The chain is laid out in a row under the view
+//! The detail area: the selected track's device chain, and beside it the selected clip's
+//! properties (`docs/spec/ui-session-view.md` › Detail area). The chain is laid out in a row under the view
 //! or stacked in a column beside it (a setting). It shows the project as it is; changing devices
 //! comes with the device commands.
 
@@ -14,6 +14,9 @@ use crate::widgets;
 pub const DEVICE_WIDTH: f32 = 220.0;
 pub const STACK_WIDTH: f32 = 260.0;
 const PARAM_ROW: f32 = 16.0;
+/// Width of the clip's properties beside the chain, and of a property's label.
+const CLIP_WIDTH: f32 = 196.0;
+const LABEL_WIDTH: f32 = 52.0;
 const ON_SWITCH: f32 = 9.0;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,15 +42,24 @@ pub struct ClipInfo {
     pub notes: usize,
 }
 
-/// What the detail area shows.
+/// A track's device chain.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Chain {
+    pub track: TrackId,
+    pub name: String,
+    pub devices: Vec<DeviceBox>,
+}
+
+/// What the detail area shows: a selected clip comes with its track's chain, since that chain
+/// is what the clip plays through.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Detail {
-    Devices { track: TrackId, name: String, devices: Vec<DeviceBox> },
-    Clip(ClipInfo),
+    Devices(Chain),
+    Clip(ClipInfo, Chain),
     Nothing,
 }
 
-/// The detail for a selected clip (it wins) or track.
+/// The detail for a selected clip (it wins, with its own track's chain) or track.
 pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, usize)>) -> Detail {
     let ts = project.transport.time_signature;
     let bar_beats =
@@ -79,18 +91,26 @@ pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, u
             let beat = (beats % bar_beats).floor() as u64 + from_one;
             format!("{bar}.{beat}")
         };
-        return Detail::Clip(ClipInfo {
-            name: content.map(|c| c.name.clone()).unwrap_or_default(),
-            track: track_name(id),
-            start: bars_beats(placed.start, 1),
-            length: bars_beats(placed.length, 0),
-            looping: placed.loop_range.is_some(),
-            audio: audio.is_some(),
-            gain_db: audio.map(gain_to_db),
-            notes,
-        });
+        return Detail::Clip(
+            ClipInfo {
+                name: content.map(|c| c.name.clone()).unwrap_or_default(),
+                track: track_name(id),
+                start: bars_beats(placed.start, 1),
+                length: bars_beats(placed.length, 0),
+                looping: placed.loop_range.is_some(),
+                audio: audio.is_some(),
+                gain_db: audio.map(gain_to_db),
+                notes,
+            },
+            chain(project, id),
+        );
     }
-    let Some(id) = track else { return Detail::Nothing };
+    track.map_or(Detail::Nothing, |id| Detail::Devices(chain(project, id)))
+}
+
+/// A track's devices as the detail area shows them.
+fn chain(project: &Project, id: TrackId) -> Chain {
+    let track_name = project.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_default();
     let channel = project
         .tracks
         .iter()
@@ -116,7 +136,7 @@ pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, u
                 .collect()
         })
         .unwrap_or_default();
-    Detail::Devices { track: id, name: track_name(id), devices }
+    Chain { track: id, name: track_name, devices }
 }
 
 fn format_value(value: f64) -> String {
@@ -135,22 +155,32 @@ pub fn show_row(ui: &mut Ui, detail: &Detail) {
     painter.rect_filled(area, 0.0, theme::SURFACE_0);
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
-        Detail::Clip(info) => clip_properties(&painter, area, info),
-        Detail::Devices { name, devices, .. } if devices.is_empty() => {
-            hint(&painter, area, &format!("No devices on {name} yet"));
-        }
-        Detail::Devices { devices, .. } => {
-            let mut x = area.left();
-            for device in devices {
-                let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + DEVICE_WIDTH, area.bottom()));
-                x = rect.right() + 1.0;
-                if rect.left() > area.right() {
-                    break;
-                }
-                name_for_readers(ui, rect, device);
-                device_panel(&painter, rect, device);
+        Detail::Devices(chain) => chain_row(ui, &painter, area, chain),
+        Detail::Clip(info, chain) => {
+            let column = clip_properties(&painter, area, info, false);
+            let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
+            if rest.width() > 0.0 {
+                chain_row(ui, &painter, rest, chain);
             }
         }
+    }
+}
+
+/// A chain's devices side by side in `area`.
+fn chain_row(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain) {
+    if chain.devices.is_empty() {
+        hint(painter, area, &format!("No devices on {} yet", chain.name));
+        return;
+    }
+    let mut x = area.left();
+    for device in &chain.devices {
+        let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + DEVICE_WIDTH, area.bottom()));
+        x = rect.right() + 1.0;
+        if rect.left() > area.right() {
+            break;
+        }
+        name_for_readers(ui, rect.intersect(area), device);
+        device_panel(&painter.with_clip_rect(area), rect, device);
     }
 }
 
@@ -162,23 +192,33 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail) {
     painter.rect_filled(area, 0.0, theme::SURFACE_0);
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
-        Detail::Clip(info) => clip_properties(&painter, area, info),
-        Detail::Devices { name, devices, .. } if devices.is_empty() => {
-            hint(&painter, area, &format!("No devices on {name} yet"));
-        }
-        Detail::Devices { devices, .. } => {
-            let mut y = area.top();
-            for device in devices {
-                let height = ROW + PAD * 2.0 + device.params.len().max(1) as f32 * PARAM_ROW;
-                let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
-                y = rect.bottom() + 1.0;
-                if rect.top() > area.bottom() {
-                    break;
-                }
-                name_for_readers(ui, rect.intersect(area), device);
-                device_panel(&painter, rect, device);
+        Detail::Devices(chain) => chain_stack(ui, &painter, area, chain),
+        Detail::Clip(info, chain) => {
+            let column = clip_properties(&painter, area, info, true);
+            let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
+            if rest.height() > 0.0 {
+                chain_stack(ui, &painter, rest, chain);
             }
         }
+    }
+}
+
+/// A chain's devices one under another in `area`.
+fn chain_stack(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain) {
+    if chain.devices.is_empty() {
+        hint(painter, area, &format!("No devices on {} yet", chain.name));
+        return;
+    }
+    let mut y = area.top();
+    for device in &chain.devices {
+        let height = ROW + PAD * 2.0 + device.params.len().max(1) as f32 * PARAM_ROW;
+        let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
+        y = rect.bottom() + 1.0;
+        if rect.top() > area.bottom() {
+            break;
+        }
+        name_for_readers(ui, rect.intersect(area), device);
+        device_panel(&painter.with_clip_rect(area), rect, device);
     }
 }
 
@@ -269,19 +309,10 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
     }
 }
 
-/// The selected clip: its name and where it is, how long, and what it plays.
-fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo) {
-    let column = Rect::from_min_max(area.min, Pos2::new(area.left() + 196.0, area.bottom())).intersect(area);
-    painter.rect_filled(column, 0.0, theme::SURFACE_1);
-    let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
-    widgets::text_in(
-        painter,
-        title.shrink2(Vec2::new(PAD, 0.0)),
-        Align2::LEFT_CENTER,
-        &info.name,
-        theme::ui_font(theme::TEXT),
-        theme::TEXT_PRIMARY,
-    );
+/// The selected clip: its name and where it is, how long, and what it plays. In a row it takes
+/// a column of [`CLIP_WIDTH`] at the left of `area`, stacked the rows it needs at the top;
+/// returns the space it took.
+fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked: bool) -> Rect {
     let mut rows = vec![
         ("Track", info.track.clone()),
         ("Start", info.start.clone()),
@@ -293,10 +324,29 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo) {
     } else {
         rows.push(("Notes", info.notes.to_string()));
     }
+    let column = if stacked {
+        let height = ROW + PAD * 2.0 + rows.len() as f32 * PARAM_ROW;
+        Rect::from_min_size(area.min, Vec2::new(area.width(), height))
+    } else {
+        Rect::from_min_max(area.min, Pos2::new(area.left() + CLIP_WIDTH, area.bottom()))
+    }
+    .intersect(area);
+    painter.rect_filled(column, 0.0, theme::SURFACE_1);
+    let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
+    widgets::text_in(
+        painter,
+        title.shrink2(Vec2::new(PAD, 0.0)),
+        Align2::LEFT_CENTER,
+        &info.name,
+        theme::ui_font(theme::TEXT),
+        theme::TEXT_PRIMARY,
+    );
     let mut y = title.bottom() + PAD;
     for (label, value) in rows {
         let row = Rect::from_min_max(Pos2::new(column.left() + PAD, y), Pos2::new(column.right() - PAD, y + PARAM_ROW));
         y += PARAM_ROW;
+        // The value keeps clear of the label, so a long track name is shortened, not drawn over it.
+        let value_rect = Rect::from_min_max(Pos2::new(row.left() + LABEL_WIDTH, row.top()), row.max);
         widgets::text_in(
             painter,
             row,
@@ -307,13 +357,14 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo) {
         );
         widgets::text_in(
             painter,
-            row,
+            value_rect,
             Align2::RIGHT_CENTER,
             &value,
             theme::mono_font(theme::TEXT_SMALL),
             theme::TEXT_VALUE,
         );
     }
+    column
 }
 
 #[cfg(test)]
@@ -325,7 +376,8 @@ mod tests {
     #[test]
     fn a_selected_clip_shows_its_properties() {
         let detail = build(&demo_project(), Some(TrackId(1)), Some((TrackId(1), 1)));
-        let Detail::Clip(info) = detail else { panic!("expected the clip") };
+        let Detail::Clip(info, chain) = detail else { panic!("expected the clip") };
+        assert_eq!(chain.track, TrackId(1));
         assert_eq!((info.name.as_str(), info.start.as_str(), info.length.as_str()), ("Beat B", "17.1", "12.0"));
         assert!(info.looping && !info.audio);
         assert_eq!(info.notes, 4);
@@ -342,10 +394,13 @@ mod tests {
             params: vec![DeviceParam::new("gain", -3.5)],
             extensions: Extensions::default(),
         });
-        let Detail::Devices { devices, .. } = build(&project, Some(TrackId(1)), None) else { panic!() };
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].params, [("gain".to_string(), "-3.5".to_string())]);
-        assert!(!devices[0].enabled);
+        let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
+        assert_eq!(chain.devices.len(), 1);
+        assert_eq!(chain.devices[0].params, [("gain".to_string(), "-3.5".to_string())]);
+        assert!(!chain.devices[0].enabled);
+        // A clip on the track shows the same chain beside its properties.
+        let Detail::Clip(_, with_clip) = build(&project, None, Some((TrackId(1), 0))) else { panic!() };
+        assert_eq!(with_clip, chain);
         assert_eq!(build(&project, None, None), Detail::Nothing);
     }
 }

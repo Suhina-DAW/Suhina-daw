@@ -82,7 +82,7 @@ the view with the detail area, status bar.
 | Drop overlay | While a project file is dragged over the window: `surface.0` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Browser | (planned) 300 px wide, resizable, left of the view |
 | Detail splitter | 6 px, `surface.2`, a 32 × 2 grip in `text.tertiary` in the middle; the cursor shows which way it moves |
-| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected clip's properties (a clip wins over a track), or the selected track's device chain: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Devices. With nothing selected: "Select a track or a clip to see it here" in `text.tertiary` |
+| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Devices. With nothing selected: "Select a track or a clip to see it here" in `text.tertiary` |
 | Status bar | 20 px, `surface.1`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.tertiary`). There is no separate info view |
 
 ## Browser (planned)
@@ -158,7 +158,7 @@ track along the bottom edge.
 |---|---|
 | Bar ruler | 20 px, `surface.1`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `line`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart |
 | Loop brace | (planned) a 14 px row under the ruler; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
-| Zoom | 8 px per beat by default, 1–400 px; Ctrl and the wheel zoom around the pointer, the wheel scrolls |
+| Zoom and moving | 8 px per beat by default, 1–400 px; Ctrl and the wheel zoom around the pointer, Alt and the wheel make every track lane taller or shorter (within 20–400 px) keeping the lane under the pointer in place, the wheel scrolls; holding the middle button down over the timeline moves it freely both ways (the cursor grabs) |
 | Grid lines | In the lanes and the fixed rows (not the empty space below the lanes): a 1 px `line` at each bar, and a 1 px `surface.1` line at each beat once beats are 10 px apart |
 | Lanes | Default height 48 px, the lower edge of a header resizes it (20–400 px); separated by 1 px `line.strong`; empty area `surface.0`. Overlapping (stacked) clips share the lane in equal sub-rows |
 | Clip | Fills its lane (or sub-row) from top to bottom, 1 px short of its end; `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB`, 4 px from the left and 3 px from the top (it stays in view while the clip's start is scrolled off); selected clip `surface.3` with 1 px `text.primary` inset; a drag moves it along its lane or to another |
@@ -255,7 +255,9 @@ are skipped with a warning in the status bar.
 The detail area for a selected arrangement clip: a 196 px `surface.1` column with the clip's name
 (20 px title, 11 px) and 16 px rows of label (10 px `text.secondary`) and value (10 px mono
 `#C9C4BB`): Track, Start (bar.beat), Length (bars.beats), Loop, and Gain for an audio clip or
-Notes for a MIDI clip. Editing them, and the clip editor beside them, are planned.
+Notes for a MIDI clip; a value keeps 52 px clear of its label, so a long track name is shortened
+rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
+the column is then as tall as its rows). Editing them, and the clip editor beside them, are planned.
 
 ## Clip editor (MIDI, planned)
 

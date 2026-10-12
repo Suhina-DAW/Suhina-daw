@@ -23,6 +23,8 @@ const RULER: f32 = ROW;
 const DEFAULT_LANE: f32 = 48.0;
 const MIN_LANE: f32 = 20.0;
 const MAX_LANE: f32 = 400.0;
+/// How much a point of wheel movement with Alt held grows the lanes (as a power of e).
+const LANE_ZOOM_PER_POINT: f32 = 0.004;
 /// Heights at which a header shows its next group (components › Track header levels).
 const SHOWS_MIXER: f32 = 48.0;
 const SHOWS_ROUTING: f32 = 70.0;
@@ -95,6 +97,8 @@ pub struct ArrangementViewState {
     /// A track header being dragged to a new place, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
+    /// The middle button is held after being pressed over the timeline: the view follows it.
+    panning: bool,
 }
 
 impl Default for ArrangementViewState {
@@ -114,6 +118,7 @@ impl Default for ArrangementViewState {
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
+            panning: false,
         }
     }
 }
@@ -131,6 +136,31 @@ impl ArrangementViewState {
     /// Sets a lane's height, as dragging its lower edge does.
     pub fn set_lane_height(&mut self, track: TrackId, height: f32) {
         self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
+    }
+
+    /// Scales every track lane's height by `factor`, keeping the content `anchor` points below
+    /// the top of the lanes where it is, as Alt and the wheel do.
+    fn zoom_lanes(&mut self, lanes: &[Lane], factor: f32, anchor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let lanes: Vec<&Lane> = lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+        // Every lane already at the limit it is zoomed towards: nothing moves.
+        let stuck = lanes.iter().all(|l| {
+            let h = self.height(l);
+            (factor > 1.0 && h >= MAX_LANE) || (factor < 1.0 && h <= MIN_LANE)
+        });
+        if stuck {
+            return;
+        }
+        let content = |state: &Self| lanes.iter().map(|l| state.height(l) + 1.0).sum::<f32>();
+        let before = content(self);
+        for lane in &lanes {
+            let height = self.height(lane) * factor;
+            self.heights.insert(lane.track, height.clamp(MIN_LANE, MAX_LANE));
+        }
+        let ratio = if before > 0.0 { content(self) / before } else { 1.0 };
+        self.scroll.y = ((self.scroll.y + anchor) * ratio - anchor).max(0.0);
     }
 
     fn height(&self, lane: &Lane) -> f32 {
@@ -196,7 +226,8 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         Rect::from_min_max(Pos2::new(area.left(), ruler.bottom() + 1.0), Pos2::new(area.right(), fixed_top - 1.0));
     let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
 
-    // Zoom around the pointer with Ctrl and the wheel; the wheel alone scrolls.
+    // Zoom around the pointer with Ctrl and the wheel, lane heights with Alt and the wheel; the
+    // wheel alone scrolls.
     if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0 && time.contains(pointer) {
@@ -204,7 +235,34 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             state.beat_width = (state.beat_width * zoom).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
             state.scroll.x = beat * state.beat_width - (pointer.x - time.left());
         }
-        state.scroll -= ui.input(|i| i.smooth_scroll_delta());
+        let (alt, wheel) = ui.input(|i| (i.modifiers.alt, i.smooth_scroll_delta()));
+        if alt {
+            // Some systems turn Alt and the wheel into a sideways scroll; either axis zooms.
+            let steps = if wheel.y == 0.0 { wheel.x } else { wheel.y };
+            if steps != 0.0 && pointer.y > lanes_area.top() {
+                state.zoom_lanes(&timeline.lanes, (steps * LANE_ZOOM_PER_POINT).exp(), pointer.y - lanes_area.top());
+            }
+        } else {
+            state.scroll -= wheel;
+        }
+    }
+    // Free movement with the middle button held: the timeline follows the pointer both ways.
+    let (middle_pressed, middle_down, delta) = ui.input(|i| {
+        (
+            i.pointer.button_pressed(egui::PointerButton::Middle),
+            i.pointer.button_down(egui::PointerButton::Middle),
+            i.pointer.delta(),
+        )
+    });
+    if middle_pressed {
+        state.panning = ui.ctx().pointer_interact_pos().is_some_and(|p| time.contains(p) && p.y > ruler.top());
+    }
+    if !middle_down {
+        state.panning = false;
+    }
+    if state.panning {
+        state.scroll -= delta;
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     let content_width = ((timeline.end + TAIL_BARS * bar_beats) as f32) * state.beat_width;
     let content_height: f32 =
@@ -1013,6 +1071,30 @@ mod tests {
         assert!((volume_position(0.0) - 0.85).abs() < 1e-6);
         assert!((volume_position(6.0) - 1.0).abs() < 1e-6);
         assert!(volume_position(-6.0) < volume_position(-3.0));
+    }
+
+    #[test]
+    fn alt_and_the_wheel_zoom_every_lane_within_its_limits() {
+        let timeline = Timeline::build(&crate::demo::demo_project(), None);
+        let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+        let mut state = ArrangementViewState::default();
+        state.set_lane_height(tracks[0].track, 100.0);
+        state.zoom_lanes(&timeline.lanes, 2.0, 0.0);
+        assert_eq!(state.height(tracks[0]), 200.0);
+        assert!(tracks[1..].iter().all(|l| state.height(l) == DEFAULT_LANE * 2.0));
+        // The content under the pointer stays put: what was 10 points down is now 20.
+        state.scroll.y = 0.0;
+        state.zoom_lanes(&timeline.lanes, 0.5, 10.0);
+        assert_eq!(state.scroll.y, 0.0);
+        state.scroll.y = 40.0;
+        state.zoom_lanes(&timeline.lanes, 2.0, 10.0);
+        assert!((state.scroll.y - 90.0).abs() < 1.0, "{}", state.scroll.y);
+        for _ in 0..50 {
+            state.zoom_lanes(&timeline.lanes, 0.5, 0.0);
+        }
+        assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
+        state.zoom_lanes(&timeline.lanes, f32::NAN, 0.0);
+        assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
     }
 
     #[test]
