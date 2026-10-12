@@ -86,6 +86,7 @@ fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f64) -> Audio
         ],
         gain: 1.0,
         transpose: 0.0,
+        stream: None,
     }
 }
 

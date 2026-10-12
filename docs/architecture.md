@@ -80,6 +80,8 @@ The engine does not run them yet (see *Planned parts*).
 | `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
 | `devices/vinyl-distortion` | Vinyl distortion: tracing (even harmonics in a band), pinch (odd harmonics, out of phase between the sides or mono) and crackle; shaped at twice the sample rate, 31 frames of latency. | dsp, device-api |
 | `devices/overdrive` | Pedal-style overdrive: a band into a biased, asymmetric soft curve at twice the sample rate, then tone, dynamics, dry/wet and output; 31 frames of latency. | dsp, device-api |
+| `devices/compressor` | Compressor: stereo-linked feed-forward, peak detector on a high-passed side-chain, soft knee, attack and release in decibels, input and output gain, dry/wet for parallel compression; no latency. | dsp, device-api |
+| `devices/limiter` | Brickwall peak limiter: threshold as a drive into the ceiling, release, 1.5 ms lookahead (a sliding minimum and a moving average), so no sample comes out over the ceiling; the lookahead is its latency. | dsp, device-api |
 | `devices/fm-synth` | The FM synth, an instrument: six operators, 32 algorithms, sixteen voices; the engine is a port of MSFA (the engine in Dexed, Apache-2.0) that matches it sample for sample; reads and writes DX7 voice files ([spec](spec/dx7-voice-format.md)). | device-api |
 
 ## From a file to the speakers
@@ -104,7 +106,9 @@ The engine does not run them yet (see *Planned parts*).
    warped clip placement (two stretchers each, so a fresh one takes over before every strong
    onset and transients stay on the grid; ADR 0003), the prepared launcher clips, the
    per-track gains (group and master chain included) and a device chain for each track whose
-   channel holds built-in devices, made through `device-registry` and prepared (ADR 0004), with
+   channel holds built-in devices, made through `device-registry` and prepared (ADR 0004); a
+   group with devices is a bus that sums the chains of its tracks before its own run (ADR 0004
+   › 10, `buses.rs`), with
    a slot for each plug-in device the session knows of (ADR 0006), and the delay lines of
    latency compensation. Every buffer the renderer will ever need
    is allocated here. The player takes the stretch worker (`Renderer::take_stretch_worker`) and
@@ -203,10 +207,10 @@ renderer without a deadline.
   launched clips' stretch voices still run on the audio thread.
 - **Project files:** asking before closing a project with unsaved changes, autosave, and a
   package that carries its audio ([ADR 0010](decisions/0010-project-files.md) › Not decided yet).
-- **Device automation and more chains:** automation of device parameters, and chains on group,
-  return and master channels ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided
-  yet). Chains on tracks run, with plug-ins and latency compensation, and `device.*` commands
-  edit them.
+- **Device automation and more chains:** automation of device parameters, and chains on return
+  and master channels ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
+  Chains on tracks and groups run, with plug-ins and latency compensation, and `device.*`
+  commands edit them.
 - **Plug-ins:** consecutive plug-ins of a chain that share a host process in one round trip per
   block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, clip editor), meters, and the commands they still

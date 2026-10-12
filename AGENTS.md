@@ -79,6 +79,8 @@ devices/
   dj-eq    three bands with kills, Linkwitz-Riley crossovers at 24 or 48 dB/octave
   vinyl-distortion  tracing (even), pinch (odd, out of phase) and crackle, oversampled
   overdrive  pedal-style: band, drive, tone, dynamics, dry/wet; oversampled
+  compressor stereo-linked, soft knee, side-chain high-pass, attack/release, dry/wet
+  limiter  brickwall peak limiter with 1.5 ms lookahead; never over the ceiling
 apps/
   loopwerk-cli   headless CLI: render, play, mcp
   loopwerk       the desktop app (eframe): opens a project and shows it in the ui

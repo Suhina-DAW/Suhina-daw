@@ -550,6 +550,7 @@ fn read_sources(
                 warp_markers: markers,
                 gain: 1.0,
                 transpose: 0.0,
+                stream: None,
             };
             Ok(vec![Source {
                 kind: TrackKind::Audio,

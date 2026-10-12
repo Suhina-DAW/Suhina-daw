@@ -41,6 +41,7 @@ are changing (*Code and its documents*).
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts |
+| [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Loopwerk reads and how it maps the mastering to its compressor and limiter |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
@@ -85,7 +86,9 @@ Change this code, and check these documents.
 | `crates/media/src/info.rs` | [Browser](spec/browser.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/media/src/midi.rs` | [Browser](spec/browser.md) |
+| `crates/media/src/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/media/src/tempo.rs` | [Browser](spec/browser.md) |
+| `crates/media/tests/data/**` | [Stems files](spec/stems-format.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
@@ -123,4 +126,5 @@ Change this code, and check these documents.
 | `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |
+| `scripts/stems-fixture.py` | [Stems files](spec/stems-format.md) |
 | `scripts/test-signal.py` | [Making the `.als` test corpus](spec/als-corpus.md) |

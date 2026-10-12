@@ -5,13 +5,15 @@
 use loopwerk_device_api::{Device, DeviceInfo};
 
 /// The built-in devices, in the order a device browser lists them.
-pub const DEVICES: [&DeviceInfo; 6] = [
+pub const DEVICES: [&DeviceInfo; 8] = [
     &loopwerk_device_fm_synth::INFO,
     &loopwerk_device_utility::INFO,
     &loopwerk_device_auto_pan::INFO,
     &loopwerk_device_dj_eq::INFO,
     &loopwerk_device_vinyl_distortion::INFO,
     &loopwerk_device_overdrive::INFO,
+    &loopwerk_device_compressor::INFO,
+    &loopwerk_device_limiter::INFO,
 ];
 
 /// What the device with this id is, or `None` for an unknown id.
@@ -29,6 +31,8 @@ pub fn create(id: &str) -> Option<Box<dyn Device>> {
         "dj-eq" => Box::new(loopwerk_device_dj_eq::DjEq::new()),
         "vinyl-distortion" => Box::new(loopwerk_device_vinyl_distortion::VinylDistortion::new()),
         "overdrive" => Box::new(loopwerk_device_overdrive::Overdrive::new()),
+        "compressor" => Box::new(loopwerk_device_compressor::Compressor::new()),
+        "limiter" => Box::new(loopwerk_device_limiter::Limiter::new()),
         _ => return None,
     })
 }
