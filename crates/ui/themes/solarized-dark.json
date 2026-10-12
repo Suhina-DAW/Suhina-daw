@@ -1,0 +1,28 @@
+{
+  "name": "Solarized Dark",
+  "description": "The Solarized palette (MIT, ethanschoonover.com/solarized), dark, mapped onto Loopwerk's tokens.",
+  "colors": {
+    "window.background": "#002B36",
+    "panel.background": "#073642",
+    "panel.hoverBackground": "#0A404F",
+    "control.background": "#0E4553",
+    "control.hoverBackground": "#155263",
+    "control.activeBackground": "#1B5868",
+    "control.playingBackground": "#268BD2",
+    "border": "#073642",
+    "border.strong": "#2C5A66",
+    "text.primary": "#EEE8D5",
+    "text.secondary": "#93A1A1",
+    "text.hint": "#657B83",
+    "text.value": "#EEE8D5",
+    "text.playing": "#FFFFFF",
+    "accent": "#B58900",
+    "recording": "#DC322F",
+    "meter.normal": "#859900",
+    "meter.hot": "#CB4B16",
+    "slot.empty": "#586E75",
+    "track.mutedBackground": "#04313C",
+    "pan.background": "#01303C",
+    "pan.centre": "#657B83"
+  }
+}

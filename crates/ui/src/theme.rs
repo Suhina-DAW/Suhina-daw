@@ -33,8 +33,10 @@ macro_rules! palette {
                 vec![$(($key, $use, self.$field),)*]
             }
 
-            /// The colour of the token named `key`, to change.
+            /// The colour of the token named `key` (or by its first name, see [`RENAMED`]), to
+            /// change.
             pub fn token_mut(&mut self, key: &str) -> Option<&mut Color32> {
+                let key = RENAMED.iter().find(|(old, _)| *old == key).map_or(key, |(_, new)| *new);
                 match key {
                     $($key => Some(&mut self.$field),)*
                     _ => None,
@@ -47,29 +49,69 @@ macro_rules! palette {
 }
 
 palette! {
-    surface_0, "surface.0", 0x1D1C1A, "Grid background, empty slots, lanes";
-    surface_1, "surface.1", 0x252421, "Panels, headers, beat lines";
-    surface_2, "surface.2", 0x2E2D2A, "Fields, stopped clips, buttons";
-    surface_3, "surface.3", 0x45433F, "Selected, pressed";
-    surface_3_bright, "surface.3.bright", 0x4A4843, "Playing clip, playing scene, volume fill";
-    hover_on_surface_1, "hover.surface.1", 0x2A2926, "Hover over surface.1";
-    hover_on_surface_2, "hover.surface.2", 0x34332F, "Hover over surface.2";
-    line, "line", 0x383733, "Separators between regions and rows";
-    line_strong, "line.strong", 0x45433F, "Session columns, arrangement tracks";
-    text_primary, "text.primary", 0xECE8E1, "Names and values";
-    text_secondary, "text.secondary", 0x9A958C, "Labels and notes";
-    text_tertiary, "text.tertiary", 0x66625B, "Inactive, hints, section titles";
-    text_value, "text.value", 0xC9C4BB, "Clip names, values on fields, the chosen option";
-    text_playing, "text.playing", 0xFFFFFF, "The name of a playing clip";
-    accent, "accent", 0xA6A3FF, "Playhead, queued clips, keys being set";
-    recording, "state.recording", 0xE5484D, "Recording, errors";
-    meter_ok, "meter.ok", 0x8BC48A, "Meter below the top";
-    meter_hot, "meter.hot", 0xE3C86A, "Meter near the top";
-    empty_mark, "slot.empty", 0x4A4743, "The mark of an empty slot";
-    muted_fill, "muted.fill", 0x34322F, "A muted track's fills";
-    pan_background, "pan.background", 0x232220, "Behind a track header's pan field";
-    pan_centre, "pan.centre", 0x55524C, "The centre line of a pan field";
+    window_background, "window.background", 0x1D1C1A,
+        "The window behind everything: grid, empty slots, lanes, Settings";
+    panel_background, "panel.background", 0x252421,
+        "Panels and headers: menu, control and status bars, track headers, beat lines";
+    panel_hover, "panel.hoverBackground", 0x2A2926,
+        "A panel or list row under the pointer";
+    control_background, "control.background", 0x2E2D2A,
+        "Fields, buttons and stopped clips";
+    control_hover, "control.hoverBackground", 0x34332F,
+        "A field, button or clip under the pointer";
+    control_active, "control.activeBackground", 0x45433F,
+        "Selected or pressed: a selected clip or track, a dragged field";
+    control_playing, "control.playingBackground", 0x4A4843,
+        "A playing clip or scene, the fill of a volume field";
+    border, "border", 0x383733,
+        "Hairlines between regions and rows";
+    border_strong, "border.strong", 0x45433F,
+        "Session columns and arrangement track lines";
+    text_primary, "text.primary", 0xECE8E1,
+        "Names and values";
+    text_secondary, "text.secondary", 0x9A958C,
+        "Labels and notes";
+    text_hint, "text.hint", 0x66625B,
+        "Inactive text, hints and section titles";
+    text_value, "text.value", 0xC9C4BB,
+        "Clip names, values on fields, the chosen option of a switch";
+    text_playing, "text.playing", 0xFFFFFF,
+        "The name of a playing clip";
+    accent, "accent", 0xA6A3FF,
+        "The playhead, queued clips, a key being set";
+    recording, "recording", 0xE5484D,
+        "Recording and errors";
+    meter_normal, "meter.normal", 0x8BC48A,
+        "A level meter below the top";
+    meter_hot, "meter.hot", 0xE3C86A,
+        "A level meter near the top";
+    slot_empty, "slot.empty", 0x4A4743,
+        "The mark in an empty clip slot";
+    track_muted, "track.mutedBackground", 0x34322F,
+        "The fills of a muted track";
+    pan_background, "pan.background", 0x232220,
+        "Behind a track header's pan field";
+    pan_centre, "pan.centre", 0x55524C,
+        "The centre mark of a pan field";
 }
+
+/// Tokens renamed since the first theme files, old name first; files with the old names still
+/// read.
+const RENAMED: [(&str, &str); 13] = [
+    ("surface.0", "window.background"),
+    ("surface.1", "panel.background"),
+    ("hover.surface.1", "panel.hoverBackground"),
+    ("surface.2", "control.background"),
+    ("hover.surface.2", "control.hoverBackground"),
+    ("surface.3", "control.activeBackground"),
+    ("surface.3.bright", "control.playingBackground"),
+    ("line", "border"),
+    ("line.strong", "border.strong"),
+    ("text.tertiary", "text.hint"),
+    ("state.recording", "recording"),
+    ("meter.ok", "meter.normal"),
+    ("muted.fill", "track.mutedBackground"),
+];
 
 impl Default for Palette {
     fn default() -> Self {
@@ -95,13 +137,40 @@ pub fn set_palette(ctx: &egui::Context, palette: Palette) {
     ctx.request_repaint();
 }
 
-/// The id of the built-in theme, in the settings file.
+/// The id of the default theme, Loopwerk Dark, in the settings file.
 pub const BUILT_IN: &str = "loopwerk-dark";
+
+/// The themes that come with Loopwerk besides Loopwerk Dark, as theme files: id and text.
+/// Dracula, Nord, Catppuccin and Solarized are popular open palettes (MIT, their licences in
+/// `themes/licenses/`), mapped onto Loopwerk's tokens.
+const BUILT_IN_FILES: [(&str, &str); 8] = [
+    ("editor-dark", include_str!("../themes/editor-dark.json")),
+    ("loopwerk-light", include_str!("../themes/loopwerk-light.json")),
+    ("high-contrast", include_str!("../themes/high-contrast.json")),
+    ("dracula", include_str!("../themes/dracula.json")),
+    ("nord", include_str!("../themes/nord.json")),
+    ("catppuccin-mocha", include_str!("../themes/catppuccin-mocha.json")),
+    ("catppuccin-latte", include_str!("../themes/catppuccin-latte.json")),
+    ("solarized-dark", include_str!("../themes/solarized-dark.json")),
+];
+
+/// The themes that come with Loopwerk, Loopwerk Dark first, with their ids. They do not change;
+/// editing one makes a copy.
+pub fn built_in_themes() -> Vec<(&'static str, Theme)> {
+    let mut themes = vec![(BUILT_IN, Theme::default())];
+    themes.extend(BUILT_IN_FILES.iter().map(|(id, text)| (*id, Theme::from_json(text).0)));
+    themes
+}
+
+/// Whether `id` names a theme that comes with Loopwerk.
+pub fn is_built_in(id: &str) -> bool {
+    id.eq_ignore_ascii_case(BUILT_IN) || BUILT_IN_FILES.iter().any(|(b, _)| id.eq_ignore_ascii_case(b))
+}
 
 /// A named set of colours, kept in a theme file:
 ///
 /// ```json
-/// { "name": "Night", "colors": { "surface.0": "#1D1C1A", "accent": "#A6A3FF" } }
+/// { "name": "Night", "colors": { "window.background": "#1D1C1A", "accent": "#A6A3FF" } }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Theme {
@@ -116,9 +185,9 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Reads a theme file. Tokens it leaves out keep the built-in colour, so a file only needs
+    /// Reads a theme file. Tokens it leaves out keep Loopwerk Dark's colour, so a file only needs
     /// the colours it changes; unknown tokens and values that are not `#RRGGBB` are skipped with
-    /// a warning.
+    /// a warning. A `"$schema"` or `"description"` is allowed and ignored.
     pub fn from_json(text: &str) -> (Self, Vec<String>) {
         let mut theme = Self::default();
         let mut warnings = Vec::new();
@@ -146,7 +215,8 @@ impl Theme {
             Some(_) => warnings.push("the theme's colors are not an object".into()),
             None => {}
         }
-        for key in root.keys().filter(|k| !matches!(k.as_str(), "name" | "colors")) {
+        let known = |k: &str| matches!(k, "name" | "colors" | "description" | "$schema");
+        for key in root.keys().filter(|k| !known(k)) {
             warnings.push(format!("{key} is not part of a theme"));
         }
         (theme, warnings)
@@ -165,6 +235,60 @@ impl Theme {
         root.insert("colors".into(), Value::Object(colors));
         serde_json::to_string_pretty(&Value::Object(root)).unwrap_or_default()
     }
+}
+
+/// The README that goes with the theme template: the file format and every token, written so a
+/// person or an AI agent can make a theme from it alone.
+pub fn template_readme() -> String {
+    let mut text = String::from(
+        "# Loopwerk theme template\n\
+\n\
+A Loopwerk theme is one JSON file. `template.json` beside this README is Loopwerk Dark with every\n\
+colour written out; copy it, give it a name and change the colours.\n\
+\n\
+## The file\n\
+\n\
+```json\n\
+{\n  \"name\": \"Night Blue\",\n  \"colors\": {\n    \"window.background\": \"#14161A\",\n    \"accent\": \"#7FD1B9\"\n  }\n}\n\
+```\n\
+\n\
+- `name`: what Settings shows. Any text.\n\
+- `colors`: token name to colour. Every colour is `#RRGGBB` (six hex digits, no alpha).\n\
+- A token left out keeps Loopwerk Dark's colour, so a theme may list only what it changes.\n\
+- An unknown token or a colour that is not `#RRGGBB` is skipped, and Loopwerk shows a warning.\n\
+- Nothing else belongs in the file (`description` and `$schema` are allowed and ignored).\n\
+\n\
+## Installing it\n\
+\n\
+Save it as `<id>.json` in Loopwerk's `themes` folder (Settings › Interface › Theme › Open folder\n\
+shows it), or drop the file on Loopwerk's window. The file name without `.json` is the theme's\n\
+id: letters, digits and `-`, for example `night-blue.json`. Pick it in Settings › Interface ›\n\
+Theme. While it is in use, every save of the file shows within a second.\n\
+\n\
+## Making a good theme\n\
+\n\
+- The backgrounds go in steps: `window.background` (furthest back), then `panel.background`,\n\
+  `control.background`, `control.activeBackground` and `control.playingBackground`. Keep each a\n\
+  little lighter than the one before in a dark theme, a little darker in a light one.\n\
+- Each `*.hoverBackground` is one small step from the background it hovers over.\n\
+- `text.primary` must read well on every background; `text.secondary` a little less, `text.hint`\n\
+  least (it is for hints and inactive text). Keep `text.primary` on `window.background` at a\n\
+  contrast of at least 7:1 and `text.hint` at 3:1.\n\
+- `text.value` is drawn on `control.background` and is the fill of the chosen option of a switch,\n\
+  whose label is then drawn in `window.background`: the two must contrast.\n\
+- `accent` marks the playhead, queued clips and a key being set; it should stand out from every\n\
+  background. `recording` is also used for errors.\n\
+- Track and clip colours come from the project, not the theme.\n\
+\n\
+## Tokens\n\
+\n\
+| Token | Loopwerk Dark | Used for |\n\
+|---|---|---|\n",
+    );
+    for (key, purpose, color) in Palette::DARK.tokens() {
+        text.push_str(&format!("| `{key}` | `{}` | {purpose} |\n", hex(color)));
+    }
+    text
 }
 
 /// `#RRGGBB`, as theme files write a colour.
@@ -250,31 +374,36 @@ pub fn install(ctx: &egui::Context) {
         style.spacing.item_spacing = egui::vec2(6.0, 4.0);
         style.spacing.button_padding = egui::vec2(6.0, 2.0);
         style.spacing.interact_size.y = ROW;
+        // Text is read, not selected: no text cursor over labels.
+        style.interaction.selectable_labels = false;
         visuals(&mut style.visuals, &palette);
     });
 }
 
 /// egui's visuals in the colours of `p`.
 fn visuals(visuals: &mut egui::Visuals, p: &Palette) {
-    *visuals = egui::Visuals::dark();
-    visuals.panel_fill = p.surface_1;
-    visuals.window_fill = p.surface_1;
-    visuals.extreme_bg_color = p.surface_0;
-    visuals.faint_bg_color = p.surface_1;
-    visuals.window_stroke = hairline(p.line);
+    // egui's own light or dark defaults under the tokens, by how light the window is.
+    let [r, g, b, _] = p.window_background.to_array();
+    let light = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b) > 128.0;
+    *visuals = if light { egui::Visuals::light() } else { egui::Visuals::dark() };
+    visuals.panel_fill = p.panel_background;
+    visuals.window_fill = p.panel_background;
+    visuals.extreme_bg_color = p.window_background;
+    visuals.faint_bg_color = p.panel_background;
+    visuals.window_stroke = hairline(p.border);
     visuals.window_corner_radius = egui::CornerRadius::ZERO;
     visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     visuals.window_shadow = egui::epaint::Shadow::NONE;
     visuals.popup_shadow = egui::epaint::Shadow::NONE;
-    visuals.selection.bg_fill = p.surface_3;
+    visuals.selection.bg_fill = p.control_active;
     visuals.selection.stroke = hairline(p.accent);
     visuals.override_text_color = None;
     for (widget, fill) in [
-        (&mut visuals.widgets.noninteractive, p.surface_1),
-        (&mut visuals.widgets.inactive, p.surface_2),
-        (&mut visuals.widgets.hovered, p.hover_on_surface_2),
-        (&mut visuals.widgets.active, p.surface_3),
-        (&mut visuals.widgets.open, p.surface_3),
+        (&mut visuals.widgets.noninteractive, p.panel_background),
+        (&mut visuals.widgets.inactive, p.control_background),
+        (&mut visuals.widgets.hovered, p.control_hover),
+        (&mut visuals.widgets.active, p.control_active),
+        (&mut visuals.widgets.open, p.control_active),
     ] {
         widget.bg_fill = fill;
         widget.weak_bg_fill = fill;
@@ -282,7 +411,7 @@ fn visuals(visuals: &mut egui::Visuals, p: &Palette) {
         widget.bg_stroke = Stroke::NONE;
         widget.expansion = 0.0;
     }
-    visuals.widgets.noninteractive.bg_stroke = hairline(p.line);
+    visuals.widgets.noninteractive.bg_stroke = hairline(p.border);
     visuals.widgets.noninteractive.fg_stroke = hairline(p.text_secondary);
     visuals.widgets.inactive.fg_stroke = hairline(p.text_value);
     visuals.widgets.hovered.fg_stroke = hairline(p.text_primary);
@@ -298,7 +427,7 @@ mod tests {
     fn a_theme_survives_a_round_trip() {
         let mut theme = Theme { name: "Night".into(), colors: Palette::DARK };
         theme.colors.accent = rgb(0x12AB9F);
-        theme.colors.surface_0 = rgb(0x000000);
+        theme.colors.window_background = rgb(0x000000);
         assert_eq!(Theme::from_json(&theme.to_json()), (theme, Vec::new()));
     }
 
@@ -308,13 +437,13 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(theme.name, "Blue");
         assert_eq!(theme.colors.accent, rgb(0x3366FF));
-        assert_eq!(theme.colors.surface_0, Palette::DARK.surface_0);
+        assert_eq!(theme.colors.window_background, Palette::DARK.window_background);
     }
 
     #[test]
     fn bad_values_keep_the_built_in_colours() {
         let text =
-            r##"{ "name": 3, "colors": { "accent": "blue", "surface.9": "#000000", "line": "#12345" }, "font": 1 }"##;
+            r##"{ "name": 3, "colors": { "accent": "blue", "surface.9": "#000000", "border": "#12345" }, "font": 1 }"##;
         let (theme, warnings) = Theme::from_json(text);
         assert_eq!(theme, Theme::default());
         assert_eq!(warnings.len(), 5, "{warnings:?}");
@@ -330,6 +459,45 @@ mod tests {
         assert_eq!(parse_hex("#A6A3F"), None);
         assert_eq!(parse_hex("#GGGGGG"), None);
         assert_eq!(parse_hex("#+1+2+3"), None);
+    }
+
+    #[test]
+    fn files_with_the_first_token_names_still_read() {
+        let (theme, warnings) =
+            Theme::from_json(r##"{ "colors": { "surface.0": "#010203", "line": "#040506", "accent": "#070809" } }"##);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(theme.colors.window_background, rgb(0x010203));
+        assert_eq!(theme.colors.border, rgb(0x040506));
+        assert_eq!(theme.colors.accent, rgb(0x070809));
+        let mut copy = Palette::DARK;
+        for (old, new) in RENAMED {
+            assert!(copy.token_mut(new).is_some(), "{new} is not a token");
+            assert!(Palette::DARK.tokens().iter().all(|(key, _, _)| *key != old), "{old} is still a token");
+        }
+    }
+
+    #[test]
+    fn the_themes_that_come_with_loopwerk_read_whole() {
+        let themes = built_in_themes();
+        assert_eq!(themes.first().map(|(id, _)| *id), Some(BUILT_IN));
+        for (id, text) in BUILT_IN_FILES {
+            let (theme, warnings) = Theme::from_json(text);
+            assert!(warnings.is_empty(), "{id}: {warnings:?}");
+            // Every colour is written out, so none falls back to Loopwerk Dark by mistake.
+            let listed = serde_json::from_str::<Value>(text).ok().and_then(|v| v.get("colors").cloned());
+            assert_eq!(listed.and_then(|c| c.as_object().map(Map::len)), Some(Palette::DARK.tokens().len()), "{id}");
+            assert!(is_built_in(id));
+            assert_ne!(theme.name, Theme::default().name);
+        }
+        assert!(!is_built_in("night"));
+    }
+
+    #[test]
+    fn the_readme_names_every_token() {
+        let readme = template_readme();
+        for (key, purpose, color) in Palette::DARK.tokens() {
+            assert!(readme.contains(&format!("| `{key}` | `{}` | {purpose} |", hex(color))), "{key}");
+        }
     }
 
     #[test]

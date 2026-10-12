@@ -288,9 +288,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
-  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Settings › Interface › Theme picks
-  one, changes its colours, duplicates it and reads the files again; a file saved in an editor
-  shows within a second.
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Loopwerk (Loopwerk
+  Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
+  Dark). Settings › Interface › Theme picks one, changes its colours, renames, duplicates, reads
+  the files again, backs every theme up into a zip and exports a template zip with a README an AI
+  agent can make a theme from; a theme file or backup dropped on the window is added, and a file
+  saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
 - The control bar has tempo, launch quantisation, play, stop and the position; Space plays and

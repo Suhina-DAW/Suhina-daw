@@ -20,6 +20,8 @@ const SUB_INDENT: f32 = 12.0;
 const LABEL_WIDTH: f32 = 180.0;
 const SETTING_ROW: f32 = 34.0;
 const SEGMENT: f32 = 15.0;
+/// Themes shown before their list scrolls.
+const THEME_ROWS: usize = 8;
 
 /// Facts the page shows but does not change.
 #[derive(Debug, Clone, Default)]
@@ -60,10 +62,11 @@ pub enum PluginRequest {
 /// The themes as the page shows them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemesView {
-    /// Each theme's id and name, the built-in one first.
-    pub list: Vec<(String, String)>,
-    /// The id of the theme in use, its name and its colours.
+    /// Each theme's id, name and whether it comes with Loopwerk: the user's own first.
+    pub list: Vec<(String, String, bool)>,
+    /// The id of the theme in use, whether it comes with Loopwerk, its name and its colours.
     pub current: String,
+    pub built_in: bool,
     pub name: String,
     pub colors: Palette,
     /// The folder theme files are kept in, if there is one.
@@ -75,14 +78,20 @@ pub struct ThemesView {
 pub enum ThemeRequest {
     /// Use the theme with this id.
     Use(String),
-    /// Use these colours; the built-in theme is copied first, since it does not change.
+    /// Use these colours; a built-in theme is copied first, since it does not change.
     Edit(Palette),
-    /// Give the theme in use this name.
+    /// Give the theme in use this name (and its file a name made from it).
     Rename(String),
     /// A copy of the theme in use, to change.
     Duplicate,
     /// Read the theme files again.
     Reload,
+    /// Show the themes folder in the file manager.
+    OpenFolder,
+    /// Write every theme file into one zip.
+    Backup,
+    /// Write a theme template and a README on the format into a zip.
+    ExportTemplate,
 }
 
 /// The pages of Settings, in the order the list on the left shows them.
@@ -121,6 +130,10 @@ impl Page {
 pub struct PageState {
     pub page: Page,
     pub capture: Option<String>,
+    /// The name being typed for a theme, with the theme's id.
+    pub theme_name: Option<(String, String)>,
+    /// The theme the list was last scrolled to, so it shows the one in use when that changes.
+    pub theme_shown: Option<String>,
 }
 
 /// What the user did on the page this frame.
@@ -148,7 +161,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::surface_0());
+    painter.rect_filled(area, 0.0, theme::window_background());
 
     let width = SIDEBAR + SIDEBAR_GAP + PAGE_WIDTH;
     let whole = Rect::from_min_max(
@@ -171,7 +184,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
     let close = Rect::from_min_max(Pos2::new(title.right() - 52.0, title.top()), title.max);
     let response = widgets::button_area(ui, close, Id::new("settings-close"), "Close settings");
     let hover = widgets::hover(ui, &response);
-    painter.rect_filled(close, 0.0, motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover));
+    painter.rect_filled(close, 0.0, motion::mix(theme::control_background(), theme::control_hover(), hover));
     widgets::text_in(
         &painter,
         close,
@@ -191,6 +204,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
     if let Some(picked) = page_list(ui, &painter, sidebar, state.page) {
         state.page = picked;
         state.capture = None;
+        state.theme_shown = None;
     }
     let page = Rect::from_min_max(Pos2::new(sidebar.right() + SIDEBAR_GAP, top), whole.max);
     let bottom = area.bottom();
@@ -204,9 +218,9 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             Align2::LEFT_CENTER,
             name,
             theme::ui_font(theme::TEXT_SMALL),
-            theme::text_tertiary(),
+            theme::text_hint(),
         );
-        painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::line()));
+        painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::border()));
         *y = rect.bottom() + 8.0;
     };
     let row = |y: &mut f32| {
@@ -246,7 +260,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         }
         Page::Theme => {
             section(&mut y, "Theme");
-            outcome.themes = theme_page(ui, &painter, page, y, bottom, themes);
+            outcome.themes = theme_page(ui, &painter, page, y, bottom, themes, state);
         }
         Page::Arrangement => {
             section(&mut y, "Arrangement");
@@ -345,8 +359,8 @@ fn page_list(ui: &Ui, painter: &egui::Painter, rect: Rect, shown: Page) -> Optio
             picked = Some(page);
         }
         let selected = motion::toward(ui.ctx(), response.id.with("selected"), page == shown, motion::VALUE);
-        let idle = motion::mix(theme::surface_0(), theme::hover_on_surface_1(), widgets::hover(ui, &response));
-        painter.rect_filled(row, 0.0, motion::mix(idle, theme::surface_2(), selected));
+        let idle = motion::mix(theme::window_background(), theme::panel_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(row, 0.0, motion::mix(idle, theme::control_background(), selected));
         let indent = if sub { SUB_INDENT } else { 0.0 };
         let text = Rect::from_min_max(Pos2::new(row.left() + PAD + indent, row.top()), row.max);
         let color = motion::mix(theme::text_secondary(), theme::text_primary(), selected);
@@ -355,8 +369,8 @@ fn page_list(ui: &Ui, painter: &egui::Painter, rect: Rect, shown: Page) -> Optio
     picked
 }
 
-/// Interface › Theme: the themes to pick from, and the colours of the one in use. Returns what
-/// the user asked for.
+/// Interface › Theme: the themes to pick from, what can be done with them, and the colours of the
+/// one in use. Returns what the user asked for.
 fn theme_page(
     ui: &mut Ui,
     painter: &egui::Painter,
@@ -364,86 +378,113 @@ fn theme_page(
     mut y: f32,
     bottom: f32,
     themes: &ThemesView,
+    state: &mut PageState,
 ) -> Option<ThemeRequest> {
     let mut request = None;
     let small = theme::ui_font(theme::TEXT_SMALL);
 
-    // The themes: a click uses one.
-    for (id, name) in &themes.list {
-        let r = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), theme::ROW));
-        y += theme::ROW;
-        let response = widgets::button_area(ui, r, Id::new(("theme", id)), format!("Theme: {name}"));
-        let current = *id == themes.current;
-        let selected = motion::toward(ui.ctx(), response.id.with("selected"), current, motion::VALUE);
-        let idle = motion::mix(theme::surface_0(), theme::hover_on_surface_1(), widgets::hover(ui, &response));
-        painter.rect_filled(r, 0.0, motion::mix(idle, theme::surface_2(), selected));
-        let inner = r.shrink2(Vec2::new(PAD, 0.0));
-        let color = motion::mix(theme::text_secondary(), theme::text_primary(), selected);
-        widgets::text_in(painter, inner, Align2::LEFT_CENTER, name, theme::ui_font(theme::TEXT), color);
-        let file = if id == theme::BUILT_IN { "built-in".to_string() } else { format!("{id}.json") };
-        widgets::text_in(painter, inner, Align2::RIGHT_CENTER, &file, small.clone(), theme::text_tertiary());
-        if response.clicked() && !current {
-            request = Some(ThemeRequest::Use(id.clone()));
-        }
-    }
-    y += 8.0;
+    // The themes, in a list that scrolls once it is taller than eight rows: a click uses one.
+    let rows = themes.list.len().clamp(1, THEME_ROWS) as f32;
+    let list = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), rows * theme::ROW));
+    y = list.bottom() + 8.0;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+        egui::ScrollArea::vertical().id_salt("themes").auto_shrink([false, false]).show(ui, |ui| {
+            for (id, name, built_in) in &themes.list {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), theme::ROW), Sense::hover());
+                let response = widgets::button_area(ui, r, Id::new(("theme", id)), format!("Theme: {name}"));
+                let current = *id == themes.current;
+                let selected = motion::toward(ui.ctx(), response.id.with("selected"), current, motion::VALUE);
+                let idle = motion::mix(theme::window_background(), theme::panel_hover(), widgets::hover(ui, &response));
+                let painter = ui.painter();
+                painter.rect_filled(r, 0.0, motion::mix(idle, theme::control_background(), selected));
+                let inner = r.shrink2(Vec2::new(PAD, 0.0));
+                let color = motion::mix(theme::text_secondary(), theme::text_primary(), selected);
+                widgets::text_in(painter, inner, Align2::LEFT_CENTER, name, theme::ui_font(theme::TEXT), color);
+                let file = if *built_in { "built-in".to_string() } else { format!("{id}.json") };
+                widgets::text_in(painter, inner, Align2::RIGHT_CENTER, &file, small.clone(), theme::text_hint());
+                if response.clicked() && !current {
+                    request = Some(ThemeRequest::Use(id.clone()));
+                }
+                if current && state.theme_shown.as_ref() != Some(id) {
+                    response.scroll_to_me(None);
+                    state.theme_shown = Some(id.clone());
+                }
+            }
+        });
+    });
 
-    // The theme in use: its name (the built-in one keeps its own), a copy, the files read again.
+    // The theme in use: its name, typed over and kept on Enter or leaving the field (a built-in
+    // theme's name does not change).
     let r = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), SETTING_ROW));
     y += SETTING_ROW;
     let note = match &themes.folder {
-        Some(folder) => format!("Theme files are kept in {folder}; a file saved there shows right away"),
+        Some(folder) => format!("Kept in {folder}; drop a theme file or a zip of them on the window to add it"),
         None => "There is no folder to keep theme files in".to_string(),
     };
-    let built_in = themes.current == theme::BUILT_IN;
-    if built_in {
-        label(painter, r, "Theme files", &note);
+    if themes.built_in {
+        label(painter, r, &format!("{} (built-in; changing a colour makes a copy)", themes.name), &note);
     } else {
-        let mut name = themes.name.clone();
-        let field = Rect::from_min_size(r.min, Vec2::new(r.width() - LABEL_WIDTH - PAD, 16.0));
-        let edit = ui.put(field, egui::TextEdit::singleline(&mut name).font(theme::ui_font(theme::TEXT)));
-        edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Theme name"));
-        if edit.changed() && !name.trim().is_empty() {
-            request = Some(ThemeRequest::Rename(name.trim().to_string()));
+        if state.theme_name.as_ref().is_none_or(|(id, _)| *id != themes.current) {
+            state.theme_name = Some((themes.current.clone(), themes.name.clone()));
         }
-        let line = Rect::from_min_size(Pos2::new(r.left(), r.top() + 18.0), Vec2::new(r.width() - LABEL_WIDTH, 14.0));
+        if let Some((_, name)) = state.theme_name.as_mut() {
+            let field = Rect::from_min_size(r.min, Vec2::new(r.width() / 2.0, 16.0));
+            let edit = ui.put(field, egui::TextEdit::singleline(name).font(theme::ui_font(theme::TEXT)));
+            edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Theme name"));
+            if edit.lost_focus() && name.trim() != themes.name && !name.trim().is_empty() {
+                request = Some(ThemeRequest::Rename(name.trim().to_string()));
+            }
+        }
+        let line = Rect::from_min_size(Pos2::new(r.left(), r.top() + 18.0), Vec2::new(r.width(), 14.0));
         widgets::text_in(painter, line, Align2::LEFT_CENTER, &note, small.clone(), theme::text_secondary());
     }
-    let buttons = control_rect(r, 2);
-    let half = (buttons.width() - 1.0) / 2.0;
-    let actions =
-        [("Duplicate", "Duplicate theme", ThemeRequest::Duplicate), ("Reload", "Reload themes", ThemeRequest::Reload)];
+
+    // What can be done with the themes.
+    let actions = [
+        ("Duplicate", "Duplicate theme", ThemeRequest::Duplicate),
+        ("Reload", "Reload themes", ThemeRequest::Reload),
+        ("Open folder", "Open the themes folder", ThemeRequest::OpenFolder),
+        ("Back up", "Back up themes", ThemeRequest::Backup),
+        ("Export template", "Export the theme template", ThemeRequest::ExportTemplate),
+    ];
+    let mut x = page.left();
     for (index, (text, name, asked)) in actions.into_iter().enumerate() {
-        let cell = Rect::from_min_size(
-            Pos2::new(buttons.left() + index as f32 * (half + 1.0), buttons.top()),
-            Vec2::new(half, buttons.height()),
-        );
+        let width = widgets::text_width(ui, text, small.clone()) + 2.0 * PAD + 8.0;
+        let cell = Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, SEGMENT + 2.0));
+        x = cell.right() + 1.0;
         let response = widgets::button_area(ui, cell, Id::new(("theme-action", index)), name);
-        let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
+        let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
         painter.rect_filled(cell, 0.0, fill);
         widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, small.clone(), theme::text_primary());
         if response.clicked() {
             request = Some(asked);
         }
     }
-    y += 4.0;
+    y += SEGMENT + 2.0 + 12.0;
 
     // Its colours, in the space left.
     let r = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), 16.0));
-    let note = if built_in { "Colours: changing one makes a copy of the built-in theme" } else { "Colours" };
-    widgets::text_in(painter, r, Align2::LEFT_CENTER, note, small.clone(), theme::text_tertiary());
-    y = r.bottom() + 4.0;
+    widgets::text_in(painter, r, Align2::LEFT_CENTER, "Colours", small.clone(), theme::text_hint());
+    painter.hline(page.x_range(), r.bottom() + 2.5, theme::hairline(theme::border()));
+    y = r.bottom() + 6.0;
     let list = Rect::from_min_max(Pos2::new(page.left(), y), Pos2::new(page.right(), (bottom - 12.0).max(y + 60.0)));
     let colors = themes.colors;
     let mut edited = colors;
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("colours").auto_shrink([false, false]).show(ui, |ui| {
             let left = egui::Layout::left_to_right(egui::Align::Center);
             for (key, purpose, color) in colors.tokens() {
                 ui.horizontal(|ui| {
                     let mut picked = color;
                     let swatch =
                         egui::color_picker::color_edit_button_srgba(ui, &mut picked, egui::color_picker::Alpha::Opaque);
+                    // An outline, so a swatch the colour of the page still shows where it is.
+                    ui.painter().rect_stroke(
+                        swatch.rect,
+                        0.0,
+                        theme::hairline(theme::border_strong()),
+                        egui::StrokeKind::Inside,
+                    );
                     let name = format!("Colour {key}");
                     swatch.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, true, &name));
                     if picked != color
@@ -458,11 +499,12 @@ fn theme_page(
                             .color(theme::text_value());
                         ui.label(text);
                     });
-                    ui.allocate_ui_with_layout(Vec2::new(120.0, 18.0), left, |ui| {
-                        ui.set_min_width(120.0);
-                        ui.label(egui::RichText::new(key).font(small.clone()).color(theme::text_primary()));
+                    ui.allocate_ui_with_layout(Vec2::new(170.0, 18.0), left, |ui| {
+                        ui.set_min_width(170.0);
+                        let text = egui::RichText::new(key).font(theme::mono_font(theme::TEXT_SMALL));
+                        ui.label(text.color(theme::text_primary()));
                     });
-                    let text = egui::RichText::new(purpose).font(small.clone()).color(theme::text_tertiary());
+                    let text = egui::RichText::new(purpose).font(small.clone()).color(theme::text_hint());
                     ui.add(egui::Label::new(text).truncate());
                 });
             }
@@ -526,7 +568,7 @@ fn shortcuts_page(
         Pos2::new(head.right(), head.top() + 1.0 + SEGMENT),
     );
     let response = widgets::button_area(ui, reset, Id::new("reset-keys"), "Reset all keys");
-    let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
+    let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
     painter.rect_filled(reset, 0.0, fill);
     widgets::text_in(painter, reset, Align2::CENTER_CENTER, "Reset all", small.clone(), theme::text_primary());
     if response.clicked() {
@@ -551,7 +593,7 @@ fn shortcuts_page(
                 if action.group != group {
                     group = action.group;
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new(group).font(small.clone()).color(theme::text_tertiary()));
+                    ui.label(egui::RichText::new(group).font(small.clone()).color(theme::text_hint()));
                 }
                 ui.horizontal(|ui| {
                     let keys: Vec<String> = keymap.keys(&action.id).iter().map(Shortcut::text).collect();
@@ -618,7 +660,7 @@ fn plugin_section(
     for folder in &plugins.standard {
         let r = line(y, 16.0);
         let text = format!("{folder}  (standard)");
-        widgets::text_in(painter, r, Align2::LEFT_CENTER, &text, small.clone(), theme::text_tertiary());
+        widgets::text_in(painter, r, Align2::LEFT_CENTER, &text, small.clone(), theme::text_hint());
     }
     for folder in &plugins.added {
         let r = line(y, 18.0);
@@ -626,7 +668,7 @@ fn plugin_section(
             Rect::from_min_max(Pos2::new(r.right() - 64.0, r.top() + 1.0), Pos2::new(r.right(), r.bottom() - 1.0));
         widgets::text_in(painter, r, Align2::LEFT_CENTER, folder, small.clone(), theme::text_secondary());
         let response = widgets::button_area(ui, remove, Id::new(("remove-folder", folder)), format!("Remove {folder}"));
-        let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
+        let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
         painter.rect_filled(remove, 0.0, fill);
         widgets::text_in(painter, remove, Align2::CENTER_CENTER, "Remove", small.clone(), theme::text_secondary());
         if response.clicked() {
@@ -644,7 +686,7 @@ fn plugin_section(
             .font(small.clone()),
     );
     let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add folder");
-    let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
+    let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
     painter.rect_filled(add, 0.0, fill);
     widgets::text_in(painter, add, Align2::CENTER_CENTER, "Add", small.clone(), theme::text_primary());
     let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -669,14 +711,14 @@ fn plugin_section(
             Vec2::new(half, buttons.height()),
         );
         let response = widgets::button_area(ui, cell, Id::new(("scan", index)), text);
-        let base = if plugins.scanning { theme::surface_1() } else { theme::surface_2() };
+        let base = if plugins.scanning { theme::panel_background() } else { theme::control_background() };
         let fill = motion::mix(
             base,
-            theme::hover_on_surface_2(),
+            theme::control_hover(),
             if plugins.scanning { 0.0 } else { widgets::hover(ui, &response) },
         );
         painter.rect_filled(cell, 0.0, fill);
-        let color = if plugins.scanning { theme::text_tertiary() } else { theme::text_primary() };
+        let color = if plugins.scanning { theme::text_hint() } else { theme::text_primary() };
         widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, small.clone(), color);
         if response.clicked() && !plugins.scanning {
             request = Some(PluginRequest::Scan { all });
@@ -694,7 +736,7 @@ fn plugin_section(
                     ui.label(
                         egui::RichText::new(format!("{vendor} · {format} {version}"))
                             .font(small.clone())
-                            .color(theme::text_tertiary()),
+                            .color(theme::text_hint()),
                     );
                 });
             }
@@ -749,9 +791,9 @@ fn segmented<T: Copy + PartialEq>(
         }
         let selected = motion::toward(ui.ctx(), response.id.with("selected"), *value == current, motion::VALUE);
         let hover = widgets::hover(ui, &response);
-        let idle = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), hover);
         painter.rect_filled(cell, 0.0, motion::mix(idle, theme::text_value(), selected));
-        let color = motion::mix(theme::text_secondary(), theme::surface_0(), selected);
+        let color = motion::mix(theme::text_secondary(), theme::window_background(), selected);
         widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT_SMALL), color);
     }
     picked

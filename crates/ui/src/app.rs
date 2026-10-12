@@ -21,7 +21,7 @@ use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
-use crate::themes::{ThemeEntry, Themes};
+use crate::themes::{FileAction, ThemeEntry, Themes};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
 
@@ -366,6 +366,16 @@ impl App {
         theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
     }
 
+    /// Draws with the theme `id` from now on and saves that in the settings, if there is such a
+    /// theme.
+    pub fn use_theme(&mut self, ctx: &egui::Context, id: &str) {
+        if self.themes.get(id).is_some() {
+            self.settings.theme = id.to_string();
+            self.settings_changed = true;
+            theme::set_palette(ctx, self.themes.palette(id));
+        }
+    }
+
     /// A theme file read again after it changed on disk; the window redraws in it if it is the
     /// theme in use.
     pub fn put_theme(&mut self, ctx: &egui::Context, entry: ThemeEntry) {
@@ -374,14 +384,11 @@ impl App {
         }
     }
 
-    /// Themes changed in Settings, with their ids, for the app to write to their files.
-    pub fn take_changed_themes(&mut self) -> Vec<(String, theme::Theme)> {
-        self.themes.take_unsaved()
-    }
-
-    /// Whether the user asked to read the theme files again, once.
-    pub fn take_theme_reload(&mut self) -> bool {
-        self.themes.take_reload()
+    /// What to do with the theme files, in order, once: themes changed in Settings to write, a
+    /// file to rename, the files to read again, a backup or the template to write, a dropped
+    /// file to bring in.
+    pub fn take_theme_actions(&mut self) -> Vec<FileAction> {
+        self.themes.take_actions()
     }
 
     /// The waveforms of the open project's audio files, once they are decoded.
@@ -511,23 +518,23 @@ impl App {
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
-            .frame(egui::Frame::NONE.fill(theme::surface_1()).inner_margin(egui::Margin::symmetric(4, 0)))
+            .frame(egui::Frame::NONE.fill(theme::panel_background()).inner_margin(egui::Margin::symmetric(4, 0)))
             .show(ui, |ui| self.menu_bar(ui, &mut actions));
         if self.projects.len() >= 2 {
             egui::Panel::top("tabs")
                 .exact_size(TABS)
-                .frame(egui::Frame::NONE.fill(theme::surface_0()))
+                .frame(egui::Frame::NONE.fill(theme::window_background()))
                 .show(ui, |ui| self.tab_row(ui, &mut actions));
         }
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
-            .frame(egui::Frame::NONE.fill(theme::surface_1()))
+            .frame(egui::Frame::NONE.fill(theme::panel_background()))
             .show(ui, |ui| self.control_bar(ui, grid.as_ref(), &mut actions));
         egui::Panel::bottom("status-bar")
             .exact_size(theme::STATUS_BAR)
-            .frame(egui::Frame::NONE.fill(theme::surface_1()))
+            .frame(egui::Frame::NONE.fill(theme::panel_background()))
             .show(ui, |ui| self.status_bar(ui, grid.as_ref()));
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::line())).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::border())).show(ui, |ui| {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
@@ -626,9 +633,9 @@ impl App {
             }
         }
         let painter = ui.painter_at(splitter);
-        painter.rect_filled(splitter, 0.0, theme::surface_2());
+        painter.rect_filled(splitter, 0.0, theme::control_background());
         let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
-        painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_tertiary());
+        painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_hint());
 
         // What it shows: the selected clip, or the selected track's devices.
         let (track, clip) = match self.shown {
@@ -690,16 +697,16 @@ impl App {
                 actions.push(Action::new("projects.switch", json!({ "project": id.0 })));
             }
             let lit = motion::toward(ui.ctx(), response.id.with("active"), Some(id) == active, motion::VALUE);
-            let idle = motion::mix(theme::surface_0(), theme::hover_on_surface_1(), widgets::hover(ui, &response));
-            painter.rect_filled(tab, 0.0, motion::mix(idle, theme::surface_1(), lit));
+            let idle = motion::mix(theme::window_background(), theme::panel_hover(), widgets::hover(ui, &response));
+            painter.rect_filled(tab, 0.0, motion::mix(idle, theme::panel_background(), lit));
             let text = motion::mix(theme::text_secondary(), theme::text_primary(), lit);
             painter.galley(Pos2::new(tab.left() + PAD, tab.center().y - galley.size().y / 2.0), galley, text);
-            let cross = motion::mix(theme::text_tertiary(), theme::text_primary(), widgets::hover(ui, &close_response));
+            let cross = motion::mix(theme::text_hint(), theme::text_primary(), widgets::hover(ui, &close_response));
             let c = close.center();
             for (a, b) in [(Vec2::new(-3.0, -3.0), Vec2::new(3.0, 3.0)), (Vec2::new(-3.0, 3.0), Vec2::new(3.0, -3.0))] {
                 painter.line_segment([c + a, c + b], theme::hairline(cross));
             }
-            painter.vline(tab.right() + 0.5, bar.y_range(), theme::hairline(theme::line()));
+            painter.vline(tab.right() + 0.5, bar.y_range(), theme::hairline(theme::border()));
         }
     }
 
@@ -707,7 +714,7 @@ impl App {
     fn open_prompt_bar(&mut self, ui: &mut Ui) {
         let Some(path) = self.open_prompt.clone() else { return };
         let bar = ui.max_rect();
-        ui.painter().rect_filled(bar, 0.0, theme::surface_1());
+        ui.painter().rect_filled(bar, 0.0, theme::panel_background());
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().to_string());
         let current = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
         let mut choice = None;
@@ -954,11 +961,17 @@ impl App {
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect()
         });
-        if let Some(path) = dropped.into_iter().next() {
-            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("als")) {
+        let is = |path: &PathBuf, ext: &str| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
+        let mut opened = false;
+        for path in dropped {
+            if is(&path, "json") || is(&path, "zip") {
+                self.themes.import(path);
+            } else if is(&path, "als") && !opened {
+                opened = true;
                 self.request_open(path);
             } else {
-                self.status = Status::Error(format!("{} is not a Live Set (.als)", path.display()));
+                let what = "is not a Live Set (.als), a theme (.json) or a zip of themes";
+                self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
     }
@@ -1094,7 +1107,7 @@ impl App {
         painter.rect_filled(
             tempo_rect,
             0.0,
-            motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response)),
+            motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response)),
         );
         let mono = theme::mono_font(theme::TEXT);
         widgets::text_in(
@@ -1137,8 +1150,8 @@ impl App {
             actions.push(Action::new("transport.play", json!({})));
         }
         let running = motion::toward(ui.ctx(), response.id.with("running"), grid.running, motion::VALUE);
-        let hover = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
-        painter.rect_filled(play, 0.0, motion::mix(hover, theme::surface_3(), running));
+        let hover = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(play, 0.0, motion::mix(hover, theme::control_active(), running));
         let glyph = motion::mix(theme::text_primary(), theme::accent(), running);
         let c = play.center();
         painter.add(egui::Shape::convex_polygon(
@@ -1155,12 +1168,12 @@ impl App {
         painter.rect_filled(
             stop,
             0.0,
-            motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response)),
+            motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response)),
         );
         painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::text_primary());
         x = stop.right() + PAD;
         let position = row(x, 64.0);
-        painter.rect_filled(position, 0.0, theme::surface_0());
+        painter.rect_filled(position, 0.0, theme::window_background());
         widgets::text_in(
             &painter,
             position.shrink2(Vec2::new(PAD, 0.0)),
@@ -1201,7 +1214,7 @@ impl App {
                 theme::text_primary(),
             );
         }
-        painter.hline(bar.x_range(), bar.bottom() - 0.5, theme::hairline(theme::line()));
+        painter.hline(bar.x_range(), bar.bottom() - 0.5, theme::hairline(theme::border()));
     }
 
     fn status_bar(&self, ui: &mut Ui, grid: Option<&Grid>) {
@@ -1229,7 +1242,7 @@ impl App {
                 Align2::RIGHT_CENTER,
                 &right,
                 theme::ui_font(theme::TEXT_SMALL),
-                theme::text_tertiary(),
+                theme::text_hint(),
             );
         }
     }
@@ -1238,20 +1251,23 @@ impl App {
 /// Darkens the view while a project file is dragged over the window, so it is clear the window
 /// takes the drop.
 fn drop_overlay(ui: &Ui, area: Rect) {
-    let hovering = ui.input(|i| {
-        i.raw
-            .hovered_files
-            .iter()
-            .any(|f| f.path.as_ref().is_none_or(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("als"))))
+    let is = |f: &egui::HoveredFile, ext: &str| {
+        f.path.as_ref().is_none_or(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))
+    };
+    let (project, themes) = ui.input(|i| {
+        let files = &i.raw.hovered_files;
+        (files.iter().any(|f| is(f, "als")), files.iter().any(|f| is(f, "json") || is(f, "zip")))
     });
-    let shown = motion::toward(ui.ctx(), Id::new("drop-overlay"), hovering, motion::HOVER);
+    let shown = motion::toward(ui.ctx(), Id::new("drop-overlay"), project || themes, motion::HOVER);
     if shown <= 0.0 {
         return;
     }
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::surface_0().gamma_multiply(DROP_DIM * shown));
+    painter.rect_filled(area, 0.0, theme::window_background().gamma_multiply(DROP_DIM * shown));
     let text = theme::text_primary().gamma_multiply(shown);
-    painter.text(area.center(), Align2::CENTER_CENTER, "Drop to open", theme::ui_font(theme::TEXT + 2.0), text);
+    // A file whose name is not known yet counts as both; a project is the likelier.
+    let what = if themes && !project { "Drop to add the themes" } else { "Drop to open" };
+    painter.text(area.center(), Align2::CENTER_CENTER, what, theme::ui_font(theme::TEXT + 2.0), text);
 }
 
 /// The window with no project open.
@@ -1259,13 +1275,13 @@ fn empty(ui: &mut Ui) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::surface_0());
+    painter.rect_filled(area, 0.0, theme::window_background());
     painter.text(
         area.center(),
         Align2::CENTER_CENTER,
         "Drop a Live Set (.als) here to open it",
         theme::ui_font(theme::TEXT),
-        theme::text_tertiary(),
+        theme::text_hint(),
     );
 }
 
