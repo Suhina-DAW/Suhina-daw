@@ -79,15 +79,13 @@ With `--launcher` the set starts stopped and Loopwerk reads one command per line
 
 ## Building
 
-On Linux, install the ALSA headers first (`libasound2-dev` on Debian and Ubuntu,
-`alsa-lib-devel` on Fedora).
+On Linux, install the ALSA headers first (`libasound2-dev` on Debian/Ubuntu based derivatives,
+`alsa-lib-devel` on Fedora based derivatives, `alsa-lib` / `sudo pacman -S lib32-alsa-lib` on Arch based derivatives).
 
 ```sh
 cargo build --release
 cargo test --workspace
 ```
-
-Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu).
 
 ## Documentation
 
