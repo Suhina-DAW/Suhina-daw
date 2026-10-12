@@ -46,9 +46,15 @@ What the law protects decides how close the UI may get (summary, not legal advic
 3. **Behaviour is specified in words.** Each view has a functional spec under `docs/spec/ui-*.md`
    written from using Live: regions, order, interactions, states, shortcuts. Specs contain no
    colours, sizes or images from Live.
-4. **No screenshots of Live in design work.** Screenshots are used only to write the functional
-   specs. They are never given to a design tool, traced, or committed. Mockups are made from the
-   spec and the design brief.
+4. **Screenshots are a reference for structure, never for the look** (amended 2026-10-12).
+   Screenshots of Live may be used, also with a design tool, to see where things are and how
+   they behave, as they are for the functional specs. The look is drawn from the design brief:
+   its "Make our own" table decides colours, type, control shapes and states, whatever a
+   screenshot shows. Screenshots are never traced or committed, and their icons, artwork and
+   text are never reused. (The first version of this decision banned screenshots in design
+   work altogether; the first design rounds had started from one, and the look was reworked
+   into our own afterwards. What protects the project is the look being our own, so the rule
+   now says that.)
 5. **The UI is a thin client of the engine.** Every action is an engine command (AGENTS.md rule 6).
    The UI reads playback position, meters and clip states from snapshots the engine publishes
    and never touches the audio thread. UI state (zoom, selection, open panels) is serialisable,

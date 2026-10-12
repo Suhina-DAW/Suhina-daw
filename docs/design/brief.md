@@ -10,15 +10,19 @@ last_verified: 2026-10-12
 
 How Loopwerk looks. Read with [ADR 0009](../decisions/0009-ui-toolkit-and-look.md): the workflow
 is familiar to Ableton Live users, the look is Loopwerk's own. This brief is what a designer (or a
-design tool) gets, together with the functional specs in `docs/spec/ui-*.md`. Never give a design
-tool screenshots of Live.
+design tool) gets, together with the functional specs in `docs/spec/ui-*.md`. A screenshot of Live
+may show a design tool where things are; the look always comes from this brief, never from the
+screenshot (ADR 0009, decision 4).
 
 Reference mockups (our own work, minimal v3):
 [Session](reference/session-minimal-v3.png) and [Arrangement](reference/arrangement-minimal-v3.png).
 They are the visual target; this file records the decisions behind them, and
 [`components.md`](components.md) the measurements and states of every component. Where the text and an
-image disagree, the text wins. These images may be given to design tools and agents; screenshots
-of Live may not.
+image disagree, the text wins. These images may be given to design tools and agents. Checked
+against the "Make our own" table below on 2026-10-12: every row holds. The menu bar still uses
+the same top-level names as Live (File, Edit, Create, View, Options, Help); menu structure is a
+method of operation and free to follow, but our own names (for example Insert, Preferences) are
+an option for the UI.
 
 ## Character
 
