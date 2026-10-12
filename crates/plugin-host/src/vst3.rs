@@ -350,12 +350,14 @@ impl IHostApplicationTrait for HostApplication {
         kResultOk
     }
 
-    unsafe fn createInstance(&self, _cid: *mut TUID, _iid: *mut TUID, obj: *mut *mut c_void) -> tresult {
+    /// Makes a message or an attribute list for the plug-in (`crate::vst3_message`), as the
+    /// SDK's hosts do; component and controller talk with them, and many plug-ins crash when
+    /// the host makes none.
+    unsafe fn createInstance(&self, cid: *mut TUID, iid: *mut TUID, obj: *mut *mut c_void) -> tresult {
         // SAFETY: the plug-in passes a pointer to its own pointer to fill (or null).
-        if let Some(obj) = unsafe { obj.as_mut() } {
-            *obj = std::ptr::null_mut();
-        }
-        kResultFalse
+        let Some(obj) = (unsafe { obj.as_mut() }) else { return kInvalidArgument };
+        *obj = crate::vst3_message::create(cid, iid);
+        if obj.is_null() { kResultFalse } else { kResultOk }
     }
 }
 

@@ -18,6 +18,7 @@ mod test_vst3;
 mod vst3;
 mod vst3_editor;
 mod vst3_events;
+mod vst3_message;
 mod vst3_params;
 mod window;
 

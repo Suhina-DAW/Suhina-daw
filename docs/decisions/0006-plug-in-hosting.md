@@ -144,7 +144,9 @@ workspace forbids.
    without a plug-in installed; `LOOPWERK_TEST_CLAP` runs them against a real file too.
    VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
    thread (connected through their connection points, the controller given the component's
-   state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
+   state; the host makes the messages and attribute lists they send each other,
+   `IHostApplication::createInstance` in `crates/plugin-host/src/vst3_message.rs`, without which
+   iZotope's plug-ins crash as soon as they are connected and others when given a state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
    silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
