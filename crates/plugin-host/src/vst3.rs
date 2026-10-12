@@ -27,6 +27,10 @@ use vst3::{Class, ComPtr, ComWrapper, Interface};
 const POLL: Duration = Duration::from_millis(100);
 /// The category of the classes that process audio.
 const AUDIO_CLASS: &str = "Audio Module Class";
+/// The category of the class that lists which older plug-ins the module replaces.
+const COMPATIBILITY_CLASS: &str = "Plugin Compatibility Class";
+/// Bytes of compatibility list read, at most.
+const MAX_COMPATIBILITY: usize = 1024 * 1024;
 
 /// The byte order of a class id's canonical text form. On Windows the SDK lays ids out as COM
 /// GUIDs, whose first three fields (4, 2 and 2 bytes) are stored little-endian, and its text
@@ -161,6 +165,7 @@ impl Module {
                 vendor: text(&factory_info.vendor),
                 version: String::new(),
                 features: Vec::new(),
+                replaces: Vec::new(),
             };
             if let Some(factory2) = &factory2 {
                 let mut info2: PClassInfo2 = blank();
@@ -177,6 +182,30 @@ impl Module {
             classes.push((info.cid, plugin));
         }
         Ok(classes)
+    }
+
+    /// The module's compatibility list, from its `Plugin Compatibility Class`
+    /// (`IPluginCompatibility`), as the JSON text it writes; `None` when it has none.
+    fn compatibility(&self) -> Option<String> {
+        let factory = self.factory().ok()?;
+        // SAFETY: the factory is a live COM object.
+        let count = unsafe { factory.countClasses() };
+        let cid = (0..count.clamp(0, 4096)).find_map(|index| {
+            let mut info: PClassInfo = blank();
+            // SAFETY: as above; the index is below the count the factory gave.
+            let found = ok(unsafe { factory.getClassInfo(index, &mut info) });
+            (found && text(&info.category) == COMPATIBILITY_CLASS).then_some(info.cid)
+        })?;
+        let compatibility = self.create::<IPluginCompatibility>(&cid)?;
+        let stream = ComWrapper::new(MemoryStream::new(Vec::new()));
+        let raw = stream.to_com_ptr::<IBStream>()?;
+        // SAFETY: a live object writing to a live stream.
+        if !ok(unsafe { compatibility.getCompatibilityJSON(raw.as_ptr()) }) {
+            return None;
+        }
+        let mut bytes = stream.bytes();
+        bytes.truncate(MAX_COMPATIBILITY);
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Creates an object of class `cid` and asks it for interface `I`.
@@ -244,7 +273,11 @@ fn open(spec: &str) -> Result<(Module, Option<TUID>), String> {
 /// The plug-ins the file `spec` names holds, without making any (for scanning).
 pub(crate) fn describe(spec: &str) -> Result<Vec<PluginInfo>, String> {
     let (module, _) = open(spec)?;
-    Ok(module.audio_classes()?.into_iter().map(|(_, info)| info).collect())
+    let mut plugins: Vec<PluginInfo> = module.audio_classes()?.into_iter().map(|(_, info)| info).collect();
+    if let Some(list) = module.compatibility() {
+        loopwerk_plugins::scan::apply_compatibility_text(&mut plugins, &list);
+    }
+    Ok(plugins)
 }
 
 // ---- What the host gives the plug-in -------------------------------------------------------

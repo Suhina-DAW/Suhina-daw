@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands
 type: system
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -40,7 +40,9 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)
   find and list installed plug-ins; a scan loads each new or changed plug-in file in a process
-  of its own ([ADR 0006](decisions/0006-plug-in-hosting.md)). `plugins.addFolder` and
+  of its own ([ADR 0006](decisions/0006-plug-in-hosting.md)). `plugins.check` lists an open
+  project's plug-in devices with the installed plug-in found for each (also a VST3 version
+  standing in for a VST2 one), how it was found and whether its settings carry over. `plugins.addFolder` and
   `plugins.removeFolder` are refused for agents, since a folder decides whose code a scan runs;
   the user adds folders with `loopwerk-cli plugins add-folder`.
 

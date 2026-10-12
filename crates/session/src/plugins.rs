@@ -4,10 +4,13 @@
 
 use std::path::Path;
 
-use loopwerk_plugins::scan::{Report, Scanned};
+use loopwerk_model::DeviceKind;
+use loopwerk_plugins::matching::Match;
+use loopwerk_plugins::scan::{Catalog, Report, Scanned};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandKind, CommandSpec, Param, ParamType, optional, param};
+use crate::projects::project_param;
 use crate::{CommandError, Projects};
 
 const FOLDER: Param = param("folder", ParamType::Text, "a folder that holds plug-ins");
@@ -47,6 +50,13 @@ static PLUGIN_COMMANDS: &[CommandSpec<Projects>] = &[
         params: &[FOLDER],
         kind: CommandKind::Plugins,
         run: remove_folder,
+    },
+    CommandSpec {
+        id: "plugins.check",
+        label: "List a project's plug-in devices and the installed plug-in found for each: how it was found (same, declared, vst2-id, same-name, newer-version) and whether its saved settings are promised to carry over",
+        params: &[optional("project", ParamType::Integer, "project id, from projects.list (default the active one)")],
+        kind: CommandKind::Plugins,
+        run: check,
     },
 ];
 
@@ -127,4 +137,63 @@ fn add_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandE
 fn remove_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let removed = projects.library_mut().remove_folder(folder_param(params)?)?;
     Ok(json!({ "removed": removed, "folders": paths(projects.library_mut().custom_folders()) }))
+}
+
+/// What the catalog has for one device: `None` for devices that are not plug-ins.
+fn found<'a>(catalog: &'a Catalog, kind: &DeviceKind, name: &str) -> Option<Option<Match<'a>>> {
+    match kind {
+        DeviceKind::Vst3 { id } => Some(catalog.match_vst3(id, name)),
+        DeviceKind::Vst2 { id } => Some(catalog.match_vst2(*id, name)),
+        DeviceKind::Clap { id } => Some(catalog.match_clap(id, name)),
+        DeviceKind::Builtin(_) | DeviceKind::Foreign { .. } => None,
+    }
+}
+
+fn device_format(kind: &DeviceKind) -> (&'static str, String) {
+    match kind {
+        DeviceKind::Vst3 { id } => ("vst3", id.clone()),
+        DeviceKind::Vst2 { id } => ("vst2", format!("{id:08X}")),
+        DeviceKind::Clap { id } => ("clap", id.clone()),
+        DeviceKind::Builtin(id) => ("builtin", id.clone()),
+        DeviceKind::Foreign { id, .. } => ("foreign", id.clone()),
+    }
+}
+
+fn check(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let id = params.get("project").map(|_| project_param(params)).transpose()?;
+    let devices: Vec<(String, loopwerk_model::Device)> = projects
+        .session_mut(id)?
+        .project()
+        .channels
+        .iter()
+        .flat_map(|c| c.devices.iter().map(|d| (c.name.clone(), d.clone())))
+        .collect();
+    let catalog = projects.library_mut().catalog();
+    let mut missing = 0;
+    let list: Vec<Value> = devices
+        .iter()
+        .filter_map(|(channel, device)| {
+            let result = found(catalog, &device.kind, &device.name)?;
+            let (format, id) = device_format(&device.kind);
+            let mut entry = json!({
+                "channel": channel, "device": device.name, "format": format, "id": id,
+                "has_state": device.state.is_some(),
+            });
+            match result {
+                Some(m) => {
+                    entry["found"] = json!({
+                        "how": m.how.name(),
+                        "keeps_state": m.how.keeps_state(),
+                        "name": m.plugin.name,
+                        "vendor": m.plugin.vendor,
+                        "format": m.plugin.format(),
+                        "plugin": m.plugin.spec(),
+                    });
+                }
+                None => missing += 1,
+            }
+            Some(entry)
+        })
+        .collect();
+    Ok(json!({ "plugins": list.len(), "missing": missing, "devices": list }))
 }

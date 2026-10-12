@@ -1,0 +1,282 @@
+//! Finding the installed plug-in a project's device stands for (ADR 0006, decision 8).
+//!
+//! A project names a plug-in by the id it had when it was saved, which is often not one that is
+//! installed now: the project used the VST2 build, or an older version. The catalog is searched
+//! in order of how sure the answer is:
+//!
+//! 1. [`How::Same`]: the same class id (VST3) or plug-in id (CLAP).
+//! 2. [`How::Declared`]: an installed VST3 plug-in says it replaces this one and opens its saved
+//!    state ([`PluginInfo::replaces`]).
+//! 3. [`How::Vst2Id`]: a VST3 plug-in whose class id is derived from the VST2 plug-in's id, the
+//!    VST 3 SDK's documented convention for a VST3 version that stands in for a VST2 one.
+//! 4. [`How::SameName`]: a VST3 plug-in with the same name once build words (`x64`, `64bit`)
+//!    and a leading vendor name are set aside, so `FabFilter Pro-Q 3 x64` finds `Pro-Q 3` by
+//!    FabFilter.
+//! 5. [`How::NewerVersion`]: the same name with a higher version number (`Serum` finds
+//!    `Serum 2`, `Pro-Q 2` finds `Pro-Q 3`); the nearest newer version is taken.
+//!
+//! Only the first three promise that the saved state carries over; for the last two the state
+//! is handed over and the plug-in decides whether it reads it.
+
+use crate::scan::{Catalog, PluginInfo};
+
+/// How the installed plug-in was found, most certain first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum How {
+    Same,
+    Declared,
+    Vst2Id,
+    SameName,
+    NewerVersion,
+}
+
+impl How {
+    pub fn name(self) -> &'static str {
+        match self {
+            How::Same => "same",
+            How::Declared => "declared",
+            How::Vst2Id => "vst2-id",
+            How::SameName => "same-name",
+            How::NewerVersion => "newer-version",
+        }
+    }
+
+    /// Whether the plug-in promises to read the saved state.
+    pub fn keeps_state(self) -> bool {
+        matches!(self, How::Same | How::Declared | How::Vst2Id)
+    }
+}
+
+/// An installed plug-in found for a project's device.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Match<'a> {
+    pub plugin: &'a PluginInfo,
+    pub how: How,
+}
+
+/// `VST` as the first three bytes of a class id derived from a VST2 id; controllers use `VSE`.
+const VST2_PREFIXES: [&str; 2] = ["565354", "565345"];
+
+/// The class id a VST3 version of the VST2 plug-in `id` named `name` gets by the VST 3 SDK's
+/// convention: `VST`, the VST2 id, then the first nine bytes of the name in lower case (zeros
+/// after its end), as 32 hex digits.
+pub fn vst2_class_id(id: u32, name: &str) -> String {
+    let mut text = format!("{}{id:08X}", VST2_PREFIXES[0]);
+    let mut bytes = name.bytes().map(|b| b.to_ascii_lowercase()).chain(std::iter::repeat(0));
+    for _ in 0..9 {
+        text.push_str(&format!("{:02X}", bytes.next().unwrap_or(0)));
+    }
+    text
+}
+
+/// Whether `class_id` is derived from the VST2 id `id` (the name part is not compared: a
+/// project keeps the name a host showed, which need not be the one the id was made from).
+fn derived_from(class_id: &str, id: u32) -> bool {
+    let wanted = format!("{id:08X}");
+    VST2_PREFIXES.iter().any(|prefix| {
+        class_id.get(..6).is_some_and(|p| p.eq_ignore_ascii_case(prefix))
+            && class_id.get(6..14).is_some_and(|i| i.eq_ignore_ascii_case(&wanted))
+    })
+}
+
+/// Words that say how a plug-in was built rather than what it is.
+const BUILD_WORDS: &[&str] =
+    &["x64", "x86", "x86_64", "64", "64bit", "32bit", "vst", "vst2", "vst3", "(x64)", "stereo"];
+
+/// A name's words in lower case without build words; `Kickstart-64bit` and `OTT_x64` lose the
+/// build suffix too.
+fn words(name: &str) -> Vec<String> {
+    let mut list = Vec::new();
+    for word in name.split(|c: char| c.is_whitespace() || c == '_') {
+        let mut word = word.to_lowercase();
+        for suffix in ["-64bit", "-x64", "(x64)"] {
+            if let Some(stem) = word.strip_suffix(suffix) {
+                word = stem.to_string();
+            }
+        }
+        if !word.is_empty() && !BUILD_WORDS.contains(&word.as_str()) {
+            list.push(word);
+        }
+    }
+    list
+}
+
+/// `name`'s words with `vendor`'s leading words taken off when the name starts with them.
+fn product_words(name: &str, vendor: &str) -> Vec<String> {
+    let name = words(name);
+    // Vendor names carry company words ("Valhalla DSP, LLC"); compare the first word only.
+    let vendor = words(vendor).into_iter().next().map(|w| w.trim_end_matches(',').to_string());
+    match (name.split_first(), vendor) {
+        (Some((first, rest)), Some(vendor)) if *first == vendor && !rest.is_empty() => rest.to_vec(),
+        _ => name,
+    }
+}
+
+/// A product's words split into its name and version number: `serum 2` is (`serum`, 2), a
+/// name without a number is version 1. A number joined to the last word counts (`Warmer2`).
+fn versioned(words: &[String]) -> (Vec<String>, u32) {
+    let Some((last, rest)) = words.split_last() else { return (Vec::new(), 1) };
+    if let Ok(number) = last.parse::<u32>() {
+        return (rest.to_vec(), number);
+    }
+    let stem = last.trim_end_matches(|c: char| c.is_ascii_digit());
+    let digits = last.get(stem.len()..).unwrap_or_default();
+    if (1..=2).contains(&digits.len())
+        && stem.chars().last().is_some_and(char::is_alphabetic)
+        && let Ok(number) = digits.parse::<u32>()
+    {
+        let mut base = rest.to_vec();
+        base.push(stem.to_string());
+        return (base, number);
+    }
+    (words.to_vec(), 1)
+}
+
+impl Catalog {
+    fn vst3_plugins(&self) -> impl Iterator<Item = &PluginInfo> {
+        self.plugins().filter(|p| p.format() == "vst3")
+    }
+
+    /// The installed plug-in for a VST3 device with class id `id`, saved under `name`.
+    pub fn match_vst3(&self, id: &str, name: &str) -> Option<Match<'_>> {
+        let found = |how, plugin| Some(Match { plugin, how });
+        if let Some(plugin) = self.vst3_plugins().find(|p| p.id.eq_ignore_ascii_case(id)) {
+            return found(How::Same, plugin);
+        }
+        if let Some(plugin) = self.vst3_plugins().find(|p| p.replaces.iter().any(|r| r.eq_ignore_ascii_case(id))) {
+            return found(How::Declared, plugin);
+        }
+        self.match_name(name)
+    }
+
+    /// The installed plug-in for a VST2 device with id `id`, saved under `name`.
+    pub fn match_vst2(&self, id: u32, name: &str) -> Option<Match<'_>> {
+        let found = |how, plugin| Some(Match { plugin, how });
+        if let Some(plugin) = self.vst3_plugins().find(|p| p.replaces.iter().any(|r| derived_from(r, id))) {
+            return found(How::Declared, plugin);
+        }
+        let exact = vst2_class_id(id, name);
+        let derived = || self.vst3_plugins().filter(|p| derived_from(&p.id, id));
+        if let Some(plugin) = derived().find(|p| p.id.eq_ignore_ascii_case(&exact)).or_else(|| derived().next()) {
+            return found(How::Vst2Id, plugin);
+        }
+        self.match_name(name)
+    }
+
+    /// The installed plug-in for a CLAP device with id `id`, saved under `name`.
+    pub fn match_clap(&self, id: &str, name: &str) -> Option<Match<'_>> {
+        match self.plugins().find(|p| p.format() == "clap" && p.id == id) {
+            Some(plugin) => Some(Match { plugin, how: How::Same }),
+            None => self.match_name(name),
+        }
+    }
+
+    /// A VST3 plug-in by name: the same product, or else its nearest newer version.
+    fn match_name(&self, name: &str) -> Option<Match<'_>> {
+        if words(name).is_empty() {
+            return None;
+        }
+        // The saved name may itself start with the vendor ("FabFilter Pro-Q 2"), so each
+        // installed plug-in's vendor is taken off both sides.
+        let same = |p: &PluginInfo| product_words(name, &p.vendor) == product_words(&p.name, &p.vendor);
+        if let Some(plugin) = self.vst3_plugins().find(|p| same(p)) {
+            return Some(Match { plugin, how: How::SameName });
+        }
+        self.vst3_plugins()
+            .filter_map(|p| {
+                let (base, old) = versioned(&product_words(name, &p.vendor));
+                let (installed, new) = versioned(&product_words(&p.name, &p.vendor));
+                (!base.is_empty() && base == installed && new > old).then_some((new, p))
+            })
+            .min_by_key(|(version, _)| *version)
+            .map(|(_, plugin)| Match { plugin, how: How::NewerVersion })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::*;
+
+    fn vst3(id: &str, name: &str, vendor: &str, replaces: &[&str]) -> serde_json::Value {
+        json!({ "id": id, "name": name, "vendor": vendor, "version": "1", "features": [], "replaces": replaces })
+    }
+
+    fn catalog() -> Catalog {
+        let entry = |file: &str, plugin: serde_json::Value| json!({ "path": PathBuf::from(file).display().to_string(), "modified": 1, "size": 1, "plugins": [plugin] });
+        let text = json!({ "version": 2, "entries": [
+            entry("/vst3/Room.vst3", vst3(&vst2_class_id(0x5275_756D, "ValhallaRoom"), "ValhallaRoom", "Valhalla DSP, LLC", &[])),
+            entry("/vst3/Pro-Q 3.vst3", vst3("72C4DB717A4D459AB97E51745D84B39D", "Pro-Q 3", "FabFilter",
+                &["5653544651337066616266696C746572"])),
+            entry("/vst3/Pro-Q 4.vst3", vst3("ED57BD725C60467EA64DD2F400758B6F", "Pro-Q 4", "FabFilter", &[])),
+            entry("/vst3/Serum2.vst3", vst3("56534558667350736572756D20320000", "Serum 2", "Xfer Records", &[])),
+            entry("/vst3/Warmer.vst3", vst3("32ECDB19D0894B24AF976000F5D58DD7", "PSP VintageWarmer", "PSPaudioware.com", &[])),
+            entry("/vst3/Warmer2.vst3", vst3("32ECDB21D0894B26AF976002F5D58DD9", "PSP VintageWarmer2", "PSPaudioware.com", &[])),
+            entry("/clap/thing.clap", json!({ "id": "com.example.thing", "name": "Thing", "vendor": "Example" })),
+        ]})
+        .to_string();
+        Catalog::from_json(&text)
+    }
+
+    fn found(m: Option<Match<'_>>) -> Option<(&str, How)> {
+        m.map(|m| (m.plugin.name.as_str(), m.how))
+    }
+
+    #[test]
+    fn the_vst2_class_id_follows_the_sdk_convention() {
+        // 'Test' named "VST 2 Plug-in": VST, the id, then "vst 2 plu" in lower case.
+        assert_eq!(vst2_class_id(0x5465_7374, "VST 2 Plug-in"), "56535454657374767374203220706C75");
+        // Short names are padded with zeros.
+        assert_eq!(vst2_class_id(0x4F54_5421, "OTT"), "5653544F5454216F7474000000000000");
+        assert!(derived_from("56534558667350736572756D20320000", 0x5866_7350));
+        assert!(!derived_from("56534558667350736572756D20320000", 0x5866_7358));
+    }
+
+    #[test]
+    fn devices_are_found_most_certain_first() {
+        let catalog = catalog();
+        // The same VST3 class, and one a newer plug-in says it replaces.
+        assert_eq!(found(catalog.match_vst3("ED57BD725C60467EA64DD2F400758B6F", "x")), Some(("Pro-Q 4", How::Same)));
+        assert_eq!(
+            found(catalog.match_vst3("5653544651337066616266696C746572", "x")),
+            Some(("Pro-Q 3", How::Declared))
+        );
+        // A VST2 id that a VST3 plug-in declares, and one its class id is derived from.
+        assert_eq!(found(catalog.match_vst2(0x4651_3370, "FabFilter Pro-Q 3 x64")), Some(("Pro-Q 3", How::Declared)));
+        assert_eq!(found(catalog.match_vst2(0x5275_756D, "ValhallaRoom_x64")), Some(("ValhallaRoom", How::Vst2Id)));
+        // The same name with a different id, with build words and the vendor set aside.
+        assert_eq!(
+            found(catalog.match_vst2(0x5070_5657, "PSP VintageWarmer")),
+            Some(("PSP VintageWarmer", How::SameName))
+        );
+        assert_eq!(found(catalog.match_vst2(1, "FabFilter Pro-Q 4 x64")), Some(("Pro-Q 4", How::SameName)));
+        // A newer version: the nearest one.
+        assert_eq!(
+            found(catalog.match_vst2(0x4651_3270, "FabFilter Pro-Q 2 x64")),
+            Some(("Pro-Q 3", How::NewerVersion))
+        );
+        assert_eq!(found(catalog.match_vst2(0x5866_7358, "Serum_x64")), Some(("Serum 2", How::NewerVersion)));
+        // CLAP by id; nothing for unknown plug-ins, and an older version is not offered.
+        assert_eq!(found(catalog.match_clap("com.example.thing", "x")), Some(("Thing", How::Same)));
+        assert_eq!(found(catalog.match_vst2(2, "Massive")), None);
+        assert_eq!(found(catalog.match_vst2(3, "Pro-Q 1")), Some(("Pro-Q 3", How::NewerVersion)));
+        assert_eq!(found(catalog.match_vst2(4, "")), None);
+    }
+
+    #[test]
+    fn names_lose_build_words_and_vendors() {
+        assert_eq!(words("Kickstart-64bit"), ["kickstart"]);
+        assert_eq!(words("The Glue 64"), ["the", "glue"]);
+        assert_eq!(words("OTT_x64"), ["ott"]);
+        assert_eq!(product_words("FabFilter Pro-Q 2 x64", "FabFilter"), ["pro-q", "2"]);
+        assert_eq!(product_words("ValhallaRoom", "Valhalla DSP, LLC"), ["valhallaroom"]);
+        // A name that is only the vendor keeps it.
+        assert_eq!(product_words("Sylenth1", "Sylenth1"), ["sylenth1"]);
+        assert_eq!(versioned(&words("Serum")), (vec!["serum".to_string()], 1));
+        assert_eq!(versioned(&words("PSP VintageWarmer2")), (vec!["psp".to_string(), "vintagewarmer".to_string()], 2));
+        assert_eq!(versioned(&words("CLA-2A")), (vec!["cla-2a".to_string()], 1));
+    }
+}

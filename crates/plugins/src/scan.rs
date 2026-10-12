@@ -25,6 +25,9 @@ const MAX_DEPTH: usize = 8;
 const MAX_FILES: usize = 10_000;
 /// Bytes of a scanner's output read, at most.
 const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
+/// The saved catalog's format. A catalog saved in another one is dropped and everything is read
+/// again (2: plug-ins list what they replace).
+const CATALOG_VERSION: u64 = 2;
 
 /// One plug-in a file holds.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,6 +41,11 @@ pub struct PluginInfo {
     pub version: String,
     /// What it is, in the format's words (`audio-effect`, `instrument`, `stereo`, …).
     pub features: Vec<String>,
+    /// Class ids (32 hex digits) of older plug-ins this one says it replaces and opens the
+    /// saved state of: a VST3 plug-in's compatibility list (`moduleinfo.json` or
+    /// `IPluginCompatibility`), which may name VST2 plug-ins by their derived class id
+    /// ([`crate::matching::vst2_class_id`]).
+    pub replaces: Vec<String>,
 }
 
 impl PluginInfo {
@@ -230,7 +238,49 @@ pub fn scan_error_json(message: &str) -> String {
 }
 
 fn plugin_json(p: &PluginInfo) -> Value {
-    json!({ "id": p.id, "name": p.name, "vendor": p.vendor, "version": p.version, "features": p.features })
+    json!({
+        "id": p.id, "name": p.name, "vendor": p.vendor, "version": p.version, "features": p.features,
+        "replaces": p.replaces,
+    })
+}
+
+/// Fills in [`PluginInfo::replaces`] from a VST3 compatibility list: an array of
+/// `{ "New": <class id>, "Old": [<class id>, …] }`, the form both `moduleinfo.json` and
+/// `IPluginCompatibility` use. Ids that are not 32 hex digits are skipped.
+pub fn apply_compatibility(plugins: &mut [PluginInfo], list: &Value) {
+    let class_id = |v: &Value| {
+        v.as_str().map(str::to_ascii_uppercase).filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    for entry in list.as_array().into_iter().flatten() {
+        let Some(new) = entry.get("New").and_then(class_id) else { continue };
+        let old: Vec<String> =
+            entry.get("Old").and_then(Value::as_array).into_iter().flatten().filter_map(class_id).collect();
+        for plugin in plugins.iter_mut().filter(|p| p.id.eq_ignore_ascii_case(&new)) {
+            for id in &old {
+                if !plugin.replaces.contains(id) {
+                    plugin.replaces.push(id.clone());
+                }
+            }
+        }
+    }
+}
+
+/// [`apply_compatibility`] from the list's text, as a plug-in writes it. It is read as JSON5,
+/// which also takes the trailing commas some lists have; a trailing NUL is ignored and text
+/// that cannot be read changes nothing.
+pub fn apply_compatibility_text(plugins: &mut [PluginInfo], text: &str) {
+    if let Ok(list) = json5::from_str::<Value>(text.trim_end_matches(' ')) {
+        apply_compatibility(plugins, &list);
+    }
+}
+
+/// The strings in the array `value[key]`.
+fn strings(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|f| f.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 pub(crate) fn parse_scan(value: &Value, file: &str) -> Scanned {
@@ -250,11 +300,8 @@ pub(crate) fn parse_scan(value: &Value, file: &str) -> Scanned {
             name: text(p, "name"),
             vendor: text(p, "vendor"),
             version: text(p, "version"),
-            features: p
-                .get("features")
-                .and_then(Value::as_array)
-                .map(|f| f.iter().filter_map(Value::as_str).map(str::to_string).collect())
-                .unwrap_or_default(),
+            features: strings(p, "features"),
+            replaces: strings(p, "replaces"),
         })
         .collect::<Vec<_>>();
     if plugins.is_empty() { Scanned::Failed("the file holds no plug-ins".into()) } else { Scanned::Plugins(plugins) }
@@ -354,14 +401,14 @@ impl Catalog {
                 value
             })
             .collect();
-        json!({ "version": 1, "entries": entries }).to_string()
+        json!({ "version": CATALOG_VERSION, "entries": entries }).to_string()
     }
 
     /// A catalog saved by [`Catalog::to_json`]; anything unreadable gives an empty catalog, so
     /// the next scan reads everything again.
     pub fn from_json(text: &str) -> Self {
         let Ok(value) = serde_json::from_str::<Value>(text) else { return Self::default() };
-        if value.get("version").and_then(Value::as_u64) != Some(1) {
+        if value.get("version").and_then(Value::as_u64) != Some(CATALOG_VERSION) {
             return Self::default();
         }
         let entries = value

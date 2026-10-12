@@ -240,7 +240,7 @@ fn unknown_project(id: ProjectId) -> CommandError {
     CommandError(format!("no open project has id {}; projects.list shows them", id.0))
 }
 
-fn project_param(params: &Value) -> Result<ProjectId, CommandError> {
+pub(crate) fn project_param(params: &Value) -> Result<ProjectId, CommandError> {
     params
         .get("project")
         .and_then(Value::as_u64)

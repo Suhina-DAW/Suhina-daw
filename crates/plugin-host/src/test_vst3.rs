@@ -1,7 +1,8 @@
 //! A VST3 plug-in built into the host for tests (`test:vst3`): a gain (0.5 at first) with its
 //! state (the gain as 4 bytes, little-endian `f32`), a reported latency of [`LATENCY`] frames
 //! and a controller of its own. Its factory is handed to the host directly, so the tests run
-//! the host's whole VST3 path except opening a file. Modelled on the `vst3` crate's gain
+//! the host's whole VST3 path except opening a file. A compatibility class says it replaces
+//! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"). Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -17,6 +18,9 @@ pub(crate) const LATENCY: u32 = 32;
 
 const PROCESSOR_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x47616931);
 const CONTROLLER_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x43746C31);
+const COMPATIBILITY_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x436D7031);
+/// The class id of the VST2 plug-in the test plug-in says it replaces: `Gain` named "Gain".
+pub(crate) const REPLACES: &str = "5653544761696E6761696E0000000000";
 
 fn copy_text(text: &str, field: &mut [c_char]) {
     field.fill(0);
@@ -251,6 +255,26 @@ impl IEditControllerTrait for Controller {
     }
 }
 
+struct Compatibility;
+
+impl Class for Compatibility {
+    type Interfaces = (IPluginCompatibility,);
+}
+
+impl IPluginCompatibilityTrait for Compatibility {
+    unsafe fn getCompatibilityJSON(&self, stream: *mut IBStream) -> tresult {
+        // SAFETY: the host passes a live stream.
+        let Some(stream) = (unsafe { ComRef::from_raw(stream) }) else { return kInvalidArgument };
+        // The text form is the one on this system ([`crate::vst3::cid_hex`]); trailing commas
+        // as some plug-ins write them.
+        let text =
+            format!(r#"[ {{ "New": "{}", "Old": [ "{REPLACES}", ], }}, ]"#, crate::vst3::cid_hex(&PROCESSOR_CID));
+        let mut written = 0;
+        // SAFETY: the bytes outlive the call; the length fits an i32.
+        unsafe { stream.write(text.as_ptr() as *mut c_void, text.len() as i32, &mut written) }
+    }
+}
+
 struct Factory;
 
 impl Class for Factory {
@@ -266,7 +290,7 @@ impl IPluginFactoryTrait for Factory {
     }
 
     unsafe fn countClasses(&self) -> i32 {
-        2
+        3
     }
 
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
@@ -275,6 +299,7 @@ impl IPluginFactoryTrait for Factory {
         let (cid, category) = match index {
             0 => (PROCESSOR_CID, "Audio Module Class"),
             1 => (CONTROLLER_CID, "Component Controller Class"),
+            2 => (COMPATIBILITY_CID, "Plugin Compatibility Class"),
             _ => return kInvalidArgument,
         };
         info.cid = cid;
@@ -292,6 +317,7 @@ impl IPluginFactoryTrait for Factory {
                 ComWrapper::new(Processor { gain: Arc::new(AtomicU32::new(0.5f32.to_bits())) }).to_com_ptr::<FUnknown>()
             }
             CONTROLLER_CID => ComWrapper::new(Controller).to_com_ptr::<FUnknown>(),
+            COMPATIBILITY_CID => ComWrapper::new(Compatibility).to_com_ptr::<FUnknown>(),
             _ => None,
         };
         let Some(object) = object else { return kInvalidArgument };

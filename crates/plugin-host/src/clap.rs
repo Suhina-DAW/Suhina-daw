@@ -120,6 +120,7 @@ pub(crate) fn describe(spec: &str) -> Result<Vec<loopwerk_plugins::scan::PluginI
             vendor: text(d.vendor()),
             version: text(d.version()),
             features: d.features().map(|f| f.to_string_lossy().into_owned()).collect(),
+            replaces: Vec::new(),
         })
         .collect())
 }

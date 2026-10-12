@@ -2,7 +2,7 @@
 
 mod play;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use loopwerk_automation::{LoopwerkMcp, Workspace, render_wav, scene_as_arrangement};
@@ -13,7 +13,8 @@ const USAGE: &str = "\
 usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
        loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
-       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>)
+       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
+                             | check <project.als>)
        loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
 
 commands:
@@ -25,7 +26,8 @@ commands:
             --audio, opened projects play on the default output so agents can launch clips
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
-            folders shows where scans look, add-folder and remove-folder change that
+            folders shows where scans look, add-folder and remove-folder change that; check
+            lists a project's plug-ins and the installed plug-in found for each, or none
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
             that many seconds of silence for reverbs and delays to ring out (default 2)
@@ -289,7 +291,16 @@ fn plugin(args: &[String]) -> Result<(), String> {
 /// `plugins …`: runs the matching `plugins.*` command and prints its result.
 fn plugins(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut projects = loopwerk_session::Projects::new();
     let (id, params) = match words.as_slice() {
+        ["check", project] => {
+            let (session, warnings) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+            for warning in warnings {
+                eprintln!("warning: {warning}");
+            }
+            projects.add(session, None).map_err(|e| e.0)?;
+            ("plugins.check", serde_json::json!({}))
+        }
         ["scan"] => ("plugins.scan", serde_json::json!({})),
         ["scan", "--all"] => ("plugins.scan", serde_json::json!({ "all": true })),
         ["list"] => ("plugins.list", serde_json::json!({})),
@@ -307,7 +318,7 @@ fn plugins(args: &[String]) -> Result<(), String> {
     if id == "plugins.scan" {
         eprintln!("scanning for plug-ins; each new or changed file is loaded in a process of its own");
     }
-    let result = loopwerk_session::Projects::new().execute(id, &params).map_err(|e| e.0)?;
+    let result = projects.execute(id, &params).map_err(|e| e.0)?;
     println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
     Ok(())
 }

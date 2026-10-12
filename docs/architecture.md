@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -131,7 +131,7 @@ project directly.
 | History | Undo and redo. | moves between snapshots |
 | Transport | Sends a `LaunchCommand` to the attached `Player`; fails if no engine is playing. | none |
 | Projects | Lists, switches and closes open projects (`Projects`); only the active one keeps its `Player`. | none |
-| Plugins | Scans for installed plug-ins, lists them, and chooses the folders scans look in (`plugins.*`, on the `Library` that `Projects` holds; ADR 0006). | none |
+| Plugins | Scans for installed plug-ins, lists them, chooses the folders scans look in, and finds the installed plug-in for each of a project's devices (`plugins.*`, on the `Library` that `Projects` holds; ADR 0006). | none |
 
 **Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
 History command changes the project, the session calls `Player::update`. The controller builds a

@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -108,6 +108,22 @@ workspace forbids.
    it. Without such a VST3 the device stays in the project as a *missing plug-in* with its state
    intact, and the user can relink it by hand to a VST3 or CLAP version. Hosting VST2 itself is
    a separate decision (below).
+
+   *Finding the replacement* (`crates/plugins/src/matching.rs`, `plugins.check`). The catalog is
+   searched in order of how sure the answer is: the same id; an installed VST3 that declares it
+   replaces the plug-in (`Compatibility` in `moduleinfo.json`, or the module's
+   `Plugin Compatibility Class`, which the scanner asks through `IPluginCompatibility`); a VST3
+   whose class id is derived from the VST2 id by the SDK's convention (`VST`, the 4-byte id, the
+   first nine bytes of the name in lower case; the name part is not compared, as a project keeps
+   the name its host showed); the same name once build words (`x64`, `64bit`) and a leading
+   vendor name are set aside; and last the nearest newer version of the same name (`Serum` →
+   `Serum 2`, `Pro-Q 2` → `Pro-Q 3`). Only the first three promise that the state carries over;
+   for the last two the state is handed over and the plug-in decides, and the result says
+   which (`keeps_state`). Vendors declare their own older builds rather than older products:
+   the Pro-Q 3 module declares the VST2 builds of Pro-Q 3, not Pro-Q 2, which is why the name
+   steps exist. In a real project with 14 different VST2 plug-ins, 4 were found by the id
+   convention, 1 by name and 3 as newer versions; the other 5 exist on that machine only as
+   VST2.
 9. **Scanning** runs in its own short-lived process with a timeout per plug-in, a cache keyed by
    path, modification time and size, and a block list of plug-ins that crashed or hung. CLAP's
    factory and VST3's `moduleinfo.json` are read without instantiating plug-ins where possible.
@@ -162,7 +178,8 @@ workspace forbids.
   spinning; with 2.5 ms between blocks, as in playback, 19 µs on average and 0.8 ms at worst,
   the worst case being why the host's audio thread needs real-time priority.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
-  a CLI command that runs a WAV through a plug-in; VST3 and VST2 migration; plug-ins in the
+  a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
+  project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
   engine's track chain together with built-in devices (LOOP-35); editors.
 
 ## Sources
