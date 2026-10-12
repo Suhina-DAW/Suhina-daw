@@ -39,11 +39,18 @@ fn a_crash_or_a_hang_while_loading_is_a_failure_not_a_stall() {
     let crashed = scan_file(&host(), "test:crash", PATIENT);
     assert!(matches!(&crashed, Scanned::Failed(why) if why.contains("crashed")), "{crashed:?}");
 
+    // How long a scan takes that does not hang: mostly starting the process, which is slow on a
+    // busy machine (the antivirus checks each start).
+    let started = Instant::now();
+    let _ = scan_file(&host(), "test:clap", PATIENT);
+    let start = started.elapsed();
     let started = Instant::now();
     let hung = scan_file(&host(), "test:hang", Duration::from_millis(500));
     assert!(matches!(&hung, Scanned::Failed(why) if why.contains("hung")), "{hung:?}");
-    // Far less than "forever"; process starts are slow on a busy machine (antivirus).
-    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    // The hang costs its 500 ms timeout and a kill, on top of a start like that one (with room
+    // for the next start to be slower): far less than "forever".
+    let bound = start * 3 + Duration::from_secs(5);
+    assert!(started.elapsed() < bound, "{:?} (a start took {start:?})", started.elapsed());
 
     let dir = folder("not-a-plugin");
     let fake = dir.join("fake.clap");

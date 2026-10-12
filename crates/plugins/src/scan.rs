@@ -269,7 +269,7 @@ pub fn apply_compatibility(plugins: &mut [PluginInfo], list: &Value) {
 /// which also takes the trailing commas some lists have; a trailing NUL is ignored and text
 /// that cannot be read changes nothing.
 pub fn apply_compatibility_text(plugins: &mut [PluginInfo], text: &str) {
-    if let Ok(list) = json5::from_str::<Value>(text.trim_end_matches(' ')) {
+    if let Ok(list) = json5::from_str::<Value>(text.trim_end_matches('\0')) {
         apply_compatibility(plugins, &list);
     }
 }
@@ -433,5 +433,41 @@ impl Catalog {
             })
             .unwrap_or_default();
         Self { entries }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin(id: &str) -> PluginInfo {
+        PluginInfo {
+            path: PathBuf::from("/vst3/Thing.vst3"),
+            id: id.into(),
+            name: "Thing".into(),
+            vendor: "Maker".into(),
+            version: "1".into(),
+            features: Vec::new(),
+            replaces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_compatibility_list_is_read_as_plugins_write_it() {
+        let new = "ABCDEF019182FAEB49746D78426E6477";
+        let mut plugins = [plugin(new), plugin("00000000000000000000000000000001")];
+        // Lower-case ids, trailing commas and a trailing NUL, as some plug-ins write it; a
+        // malformed id and a duplicate are left out.
+        let text = format!(
+            "[ {{ \"New\": \"{}\", \"Old\": [ \"5653544761696e6761696e0000000000\", \"short\", \
+             \"5653544761696E6761696E0000000000\", ], }}, ]\0",
+            new.to_lowercase()
+        );
+        apply_compatibility_text(&mut plugins, &text);
+        assert_eq!(plugins[0].replaces, ["5653544761696E6761696E0000000000"]);
+        assert!(plugins[1].replaces.is_empty());
+        // Text that is not a list changes nothing.
+        apply_compatibility_text(&mut plugins, "{ broken");
+        assert_eq!(plugins[0].replaces.len(), 1);
     }
 }
