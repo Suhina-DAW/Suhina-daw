@@ -124,7 +124,7 @@ Animations are short and only show a change of state; with animations off (a set
 |---|---|
 | Bar ruler | 20 px; 10 px mono bar numbers; 1 px `line` at each bar |
 | Loop brace | 14 px row; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
-| Lanes | Separated by 1 px `line.strong`; empty area `surface.0`; default height 48 px, the lower edge of a header resizes it (20–400 px) |
+| Lanes | Overlapping (stacked) clips share the lane in sub-rows; separated by 1 px `line.strong`; empty area `surface.0`; default height 48 px, the lower edge of a header resizes it (20–400 px) |
 | Clip | `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB` at 4/5 px; selected clip `surface.3` with 1 px `text.primary` inset |
 | MIDI marks | 2 px high lines in the track colour |
 | Audio marks | 1 px vertical lines in the track colour, centred |
@@ -177,6 +177,7 @@ restart (the renderer) says so in its note.
 |---|---|---|
 | Interface | Animations | On (default), Off |
 | Arrangement | Track headers | Left, Right (default) |
+| Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
 | Audio | Output | The device in use (read only) |
 

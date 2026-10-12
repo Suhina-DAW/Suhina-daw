@@ -193,7 +193,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.move",
-        label: "Move an arrangement clip to a new start position, and to another track if asked",
+        label: "Move an arrangement clip to a new start position, and to another track if asked; it replaces what it covers unless stacked",
         params: &[
             TRACK,
             param("index", ParamType::Integer, "clip index on the track, from project.clips"),
@@ -202,6 +202,11 @@ static COMMANDS: &[CommandSpec] = &[
                 "to_track",
                 ParamType::Track,
                 "track to move the clip to (id or name); it must take the clip's kind: notes or audio",
+            ),
+            optional(
+                "stack",
+                ParamType::Bool,
+                "true leaves clips under it as they are (they all play); false (default) shortens, splits or removes them",
             ),
         ],
         kind: CommandKind::Edit,
@@ -518,6 +523,10 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     if start < 0.0 {
         return Err(format!("start must be at least 0, got {start}").into());
     }
+    let stack = match params.get("stack") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("stack must be true or false")?,
+    };
     let to = match params.get("to_track") {
         Some(_) => track_at(&session.project, params, "to_track")?,
         None => track,
@@ -556,10 +565,44 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     let mut clip = p.arrangement.lanes.get_mut(from_lane).ok_or("the lane is missing")?.clips.remove(index);
     clip.start = start;
     let lane = p.arrangement.lanes.get_mut(to_lane).ok_or("the lane is missing")?;
-    lane.clips.push(clip);
+    if !stack {
+        make_room(&mut lane.clips, start, start + clip.length);
+    }
+    lane.clips.push(clip.clone());
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-    let new_index = lane.clips.iter().position(|c| c.start == start).unwrap_or_default();
+    let new_index = lane.clips.iter().position(|c| *c == clip).unwrap_or_default();
     Ok(json!({ "start": start, "track": to.0, "index": new_index }))
+}
+
+/// Clears `[from, to)` on a lane for a clip placed there (docs/spec/arrangement-editing.md):
+/// clips entirely inside are removed, clips reaching in are shortened, and a clip around it is
+/// split in two, the second part continuing its content from where it was.
+fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
+    let mut kept = Vec::with_capacity(clips.len() + 1);
+    for clip in clips.drain(..) {
+        let (start, end) = (clip.start, clip.start + clip.length);
+        if end <= from || start >= to {
+            kept.push(clip);
+            continue;
+        }
+        if start < from {
+            kept.push(Clip { length: from - start, ..clip.clone() });
+        }
+        if end > to {
+            let offset = content_at(&clip, to - start);
+            kept.push(Clip { start: to, length: end - to, offset, ..clip });
+        }
+    }
+    *clips = kept;
+}
+
+/// Where in its content a clip is `beats` after it starts, following its loop.
+fn content_at(clip: &Clip, beats: f64) -> f64 {
+    let at = clip.offset + beats;
+    match clip.loop_range {
+        Some(r) if r.end > r.start && at >= r.end => r.start + (at - r.start).rem_euclid(r.end - r.start),
+        _ => at,
+    }
 }
 
 fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError> {

@@ -77,6 +77,9 @@ pub struct ArrangementViewState {
     pub beat_width: f32,
     /// Track headers on the left of the timeline instead of the right.
     pub headers_left: bool,
+    /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
+    pub stack_audio: bool,
+    pub stack_midi: bool,
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     selected: Option<(TrackId, usize)>,
@@ -90,6 +93,8 @@ impl Default for ArrangementViewState {
             scroll: Vec2::ZERO,
             beat_width: DEFAULT_BEAT_WIDTH,
             headers_left: false,
+            stack_audio: false,
+            stack_midi: false,
             header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: None,
@@ -346,6 +351,14 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
 }
 
+/// The part of a lane a clip in sub-row `row` of `rows` is drawn in.
+fn sub_row(lane_time: Rect, row: usize, rows: usize) -> Rect {
+    let rows = rows.max(1) as f32;
+    let height = lane_time.height() / rows;
+    let top = lane_time.top() + height * row as f32;
+    Rect::from_x_y_ranges(lane_time.x_range(), egui::Rangef::new(top.round(), (top + height).round() - 1.0))
+}
+
 fn clip_rect(lane_time: Rect, start: f64, length: f64, x_of: &dyn Fn(f64) -> f32) -> Rect {
     let left = x_of(start).round();
     Rect::from_min_max(
@@ -378,7 +391,8 @@ fn clip_box<'a>(
         _ => clip.start,
     };
     // Where it was last frame takes the pointer; it is drawn where this frame's drag puts it.
-    let visible = clip_rect(row.time, at, clip.length, x_of).intersect(row.clip);
+    let space = if clip.rows > 1 { sub_row(row.time, clip.row, clip.rows) } else { row.time };
+    let visible = clip_rect(space, at, clip.length, x_of).intersect(row.clip);
     if visible.width() <= 0.0 || visible.height() <= 0.0 {
         return None;
     }
@@ -410,17 +424,18 @@ fn clip_box<'a>(
         && (drag.track, drag.index) == key
     {
         let start = snapped(drag.start);
+        let mut params = json!({ "track": lane.track.0, "index": clip.index, "start": start });
         if drag.target != lane.track {
-            actions.push(Action::new(
-                "clip.move",
-                json!({ "track": lane.track.0, "index": clip.index, "start": start, "to_track": drag.target.0 }),
-            ));
-        } else if (start - clip.start).abs() > 1e-9 {
-            actions
-                .push(Action::new("clip.move", json!({ "track": lane.track.0, "index": clip.index, "start": start })));
+            params["to_track"] = json!(drag.target.0);
+        }
+        if (clip.audio && state.stack_audio) || (!clip.audio && state.stack_midi) {
+            params["stack"] = json!(true);
+        }
+        if drag.target != lane.track || (start - clip.start).abs() > 1e-9 {
+            actions.push(Action::new("clip.move", params));
         }
         // Drawn where it was dropped until the project has moved it.
-        let rect = clip_rect(row.time, start, clip.length, x_of);
+        let rect = clip_rect(space, start, clip.length, x_of);
         paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, true);
         return None;
     }
@@ -429,7 +444,7 @@ fn clip_box<'a>(
         Some(drag) if mine(&drag) && drag.target != lane.track => Some((lane, clip, snapped(drag.start))),
         drag => {
             let start = drag.filter(mine).map_or(clip.start, |d| snapped(d.start));
-            let rect = clip_rect(row.time, start, clip.length, x_of);
+            let rect = clip_rect(space, start, clip.length, x_of);
             let selected = state.selected == Some(key);
             paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, selected);
             None

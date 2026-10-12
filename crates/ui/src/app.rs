@@ -237,6 +237,8 @@ impl App {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
                     if let Some(session) = &self.session {
+                        self.arrangement.stack_audio = self.settings.sample_stacking;
+                        self.arrangement.stack_midi = self.settings.midi_stacking;
                         let monitor = session.player().map(|p| p.monitor());
                         // Clips and their notes are rebuilt only after the project changed; the
                         // playhead is read every frame.

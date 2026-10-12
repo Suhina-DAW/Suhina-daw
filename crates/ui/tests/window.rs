@@ -173,6 +173,40 @@ fn dragging_a_clip_moves_it_on_the_bar_grid() {
     assert!(!starts.contains(&64.0), "{starts:?}");
 }
 
+/// Drags the clip labelled `label` by `by` points in the Arrangement view.
+fn drag_clip(harness: &mut Harness<'static, App>, label: &str, by: egui::Vec2) {
+    let from = harness.get_by_label(label).rect().center();
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + by * 0.5);
+    harness.run();
+    harness.hover_at(from + by);
+    harness.run();
+    harness.drop_at(from + by);
+    harness.run();
+}
+
+#[test]
+fn a_dropped_clip_replaces_what_it_covers_unless_midi_stacking_is_on() {
+    let starts = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+    };
+    // Beat B (bars 17-28) moves two bars later, over Fill (bars 29-32), which is shortened.
+    let mut harness = arrangement_app();
+    drag_clip(&mut harness, "Clip Beat B on Drums at bar 17", egui::vec2(64.0, 0.0));
+    assert_eq!(starts(&harness).map(|s| s.contains(&(120.0, 8.0))), Some(true));
+
+    let mut harness = arrangement_app();
+    let settings = loopwerk_ui::settings::Settings { midi_stacking: true, ..Default::default() };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.run();
+    drag_clip(&mut harness, "Clip Beat B on Drums at bar 17", egui::vec2(64.0, 0.0));
+    assert_eq!(starts(&harness).map(|s| s.contains(&(112.0, 16.0))), Some(true));
+}
+
 #[test]
 fn dragging_a_clip_down_moves_it_to_the_next_track() {
     let mut harness = arrangement_app();

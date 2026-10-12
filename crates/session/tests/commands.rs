@@ -258,3 +258,50 @@ fn a_track_routes_into_a_group_and_back_to_main() {
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(session.project().channels[0].output, Some(ChannelId(3)));
 }
+
+/// One lane with three one-beat-long clips at 0, 4 and 8 and a looping eight-beat clip at 12.
+fn lane_project() -> Project {
+    let mut p = project();
+    let clip = |start: f64, length: f64| Clip { start, length, ..p.arrangement.lanes[0].clips[0].clone() };
+    let mut looping = clip(12.0, 8.0);
+    looping.loop_range = Some(LoopRange { start: 0.0, end: 4.0 });
+    looping.offset = 0.0;
+    p.arrangement.lanes[0].clips = vec![clip(0.0, 4.0), clip(4.0, 4.0), clip(8.0, 4.0), looping];
+    p
+}
+
+fn spans(session: &Session) -> Vec<(f64, f64, f64)> {
+    session.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length, c.offset)).collect()
+}
+
+#[test]
+fn a_moved_clip_replaces_what_it_covers() {
+    let mut session = Session::new(lane_project());
+    // The clip at 0 moves to 6: the clip at 4 is shortened, the one at 8 starts later.
+    let moved = run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 6 })).unwrap();
+    assert_eq!(spans(&session)[..3], [(4.0, 2.0, 0.0), (6.0, 4.0, 0.0), (10.0, 2.0, 2.0)]);
+    assert_eq!(moved["index"], 1);
+
+    // Into the middle of the looping clip: it splits, the second part keeps the loop's phase.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 13 })).unwrap();
+    let after: Vec<_> = spans(&session).into_iter().filter(|s| s.0 >= 12.0).collect();
+    assert_eq!(after, [(12.0, 1.0, 0.0), (13.0, 4.0, 0.0), (17.0, 3.0, 1.0)]);
+
+    // A clip entirely covered disappears.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "clip.move", json!({ "track": "Bass", "index": 3, "start": 4 })).unwrap();
+    assert_eq!(spans(&session), [(0.0, 4.0, 0.0), (4.0, 8.0, 0.0)]);
+}
+
+#[test]
+fn a_stacked_clip_leaves_the_others_alone() {
+    let mut session = Session::new(lane_project());
+    run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 6, "stack": true })).unwrap();
+    assert_eq!(spans(&session).len(), 4);
+    assert!(spans(&session).contains(&(4.0, 4.0, 0.0)));
+    assert!(spans(&session).contains(&(6.0, 4.0, 0.0)));
+    assert!(
+        run(&mut session, "clip.move", json!({ "track": "Bass", "index": 0, "start": 1, "stack": "yes" })).is_err()
+    );
+}

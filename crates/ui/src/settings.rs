@@ -24,11 +24,21 @@ pub struct Settings {
     pub animations: bool,
     pub track_headers: Side,
     pub graphics: Graphics,
+    /// Audio clips moved over others stack (all play) instead of replacing them.
+    pub sample_stacking: bool,
+    /// MIDI clips moved over others stack instead of replacing them.
+    pub midi_stacking: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { animations: true, track_headers: Side::Right, graphics: Graphics::Gpu }
+        Self {
+            animations: true,
+            track_headers: Side::Right,
+            graphics: Graphics::Gpu,
+            sample_stacking: false,
+            midi_stacking: false,
+        }
     }
 }
 
@@ -43,9 +53,12 @@ impl Settings {
             Graphics::Gpu => "wgpu",
             Graphics::OpenGl => "glow",
         };
+        let on = |b: bool| if b { "on" } else { "off" };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\n",
-            if self.animations { "on" } else { "off" },
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\n",
+            on(self.animations),
+            on(self.sample_stacking),
+            on(self.midi_stacking),
         )
     }
 
@@ -66,6 +79,8 @@ impl Settings {
             let (key, value) = (key.trim(), value.trim());
             match (key, value) {
                 ("animations", "on" | "off") => settings.animations = value == "on",
+                ("sample_stacking", "on" | "off") => settings.sample_stacking = value == "on",
+                ("midi_stacking", "on" | "off") => settings.midi_stacking = value == "on",
                 ("track_headers", "left") => settings.track_headers = Side::Left,
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
@@ -85,7 +100,13 @@ mod tests {
 
     #[test]
     fn settings_survive_a_round_trip() {
-        let settings = Settings { animations: false, track_headers: Side::Left, graphics: Graphics::OpenGl };
+        let settings = Settings {
+            animations: false,
+            track_headers: Side::Left,
+            graphics: Graphics::OpenGl,
+            sample_stacking: true,
+            midi_stacking: false,
+        };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
     }

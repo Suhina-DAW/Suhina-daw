@@ -263,5 +263,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
+- A clip dropped over others replaces what it covers (shortens, splits or removes them), or
+  stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
+  sub-rows ([spec](docs/spec/arrangement-editing.md)).
 - Still to do: input routing and sends, waveforms, clip fades and gain, overlapping clips, the browser, detail area (devices, clip editor), menu bar and
   settings, project tabs, meters, solo and arm, the design's monospace font, installers.

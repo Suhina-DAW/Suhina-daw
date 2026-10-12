@@ -109,6 +109,23 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, about: &About) -> Outcome {
         settings.track_headers = side;
         outcome.changed = true;
     }
+    let r = row(&mut y);
+    label(&painter, r, "Allow sample stacking", "Audio clips moved over others all play, instead of replacing them");
+    let options = [("On", true), ("Off", false)];
+    if let Some(on) =
+        segmented(ui, &painter, control_rect(r, 2), "Allow sample stacking", &options, settings.sample_stacking)
+    {
+        settings.sample_stacking = on;
+        outcome.changed = true;
+    }
+    let r = row(&mut y);
+    label(&painter, r, "Allow MIDI stacking", "MIDI clips moved over others all play, instead of replacing them");
+    if let Some(on) =
+        segmented(ui, &painter, control_rect(r, 2), "Allow MIDI stacking", &options, settings.midi_stacking)
+    {
+        settings.midi_stacking = on;
+        outcome.changed = true;
+    }
     y += SECTION_GAP;
 
     section(&mut y, "Graphics");

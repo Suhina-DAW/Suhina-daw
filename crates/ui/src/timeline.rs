@@ -28,6 +28,10 @@ pub struct ClipBox {
     pub enabled: bool,
     pub audio: bool,
     pub notes: Vec<NoteMark>,
+    /// The sub-row the clip is drawn in, and how many the lane has: more than one where clips
+    /// overlap (stacked), so each stays visible.
+    pub row: usize,
+    pub rows: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,11 +100,14 @@ impl Timeline {
                                 audio: content
                                     .is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)))),
                                 notes: content.map(|c| note_marks(c, clip)).unwrap_or_default(),
+                                row: 0,
+                                rows: 1,
                             }
                         })
                         .collect()
                 })
                 .unwrap_or_default();
+            let clips = sub_rows(clips);
             let lane = Lane {
                 track: track.id,
                 name: track.name.clone(),
@@ -134,6 +141,35 @@ impl Timeline {
         self.running = running;
         self.beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
     }
+}
+
+/// Puts each clip in the first sub-row free where it starts; every clip learns the lane's count.
+fn sub_rows(mut clips: Vec<ClipBox>) -> Vec<ClipBox> {
+    let mut ends: Vec<f64> = Vec::new();
+    let mut order: Vec<usize> = (0..clips.len()).collect();
+    let start = |i: &usize| clips.get(*i).map_or(0.0, |c| c.start);
+    order.sort_by(|a, b| start(a).total_cmp(&start(b)));
+    for i in order {
+        let Some(clip) = clips.get_mut(i) else { continue };
+        let end = clip.start + clip.length;
+        match ends.iter().position(|e| *e <= clip.start + 1e-9) {
+            Some(row) => {
+                clip.row = row;
+                if let Some(e) = ends.get_mut(row) {
+                    *e = end;
+                }
+            }
+            None => {
+                clip.row = ends.len();
+                ends.push(end);
+            }
+        }
+    }
+    let rows = ends.len().max(1);
+    for clip in &mut clips {
+        clip.rows = rows;
+    }
+    clips
 }
 
 /// How many groups a track is nested in; a broken chain stops counting.
@@ -204,6 +240,18 @@ mod tests {
         assert_eq!(timeline.main_volume_db, Some(0.0));
         assert_eq!(timeline.lanes[0].clips[1].index, 1);
         assert_eq!(timeline.lanes[0].clips[1].name, "Beat B");
+    }
+
+    #[test]
+    fn overlapping_clips_get_sub_rows() {
+        let mut project = demo_project();
+        let lane = &mut project.arrangement.lanes[0];
+        lane.clips[1].start = 32.0; // over the first clip (0..64)
+        let timeline = Timeline::build(&project, None);
+        let rows: Vec<(usize, usize)> = timeline.lanes[0].clips.iter().map(|c| (c.row, c.rows)).collect();
+        assert_eq!(rows[0], (0, 2));
+        assert_eq!(rows[1], (1, 2));
+        assert!(Timeline::build(&demo_project(), None).lanes.iter().flat_map(|l| &l.clips).all(|c| c.rows == 1));
     }
 
     #[test]
