@@ -450,6 +450,42 @@ empty templates.
 `corpus/max/README.md`, as in series 6, plus the Max version (Max › About Max) and, for 404 and
 405, the paths Live used.
 
+## Series 9: audio fades
+
+Shows where a Live Set stores an arrangement audio clip's fade-in and fade-out, in which unit,
+and how the curve is shaped, so the importer can read fades into `Clip::fade_in` and
+`Clip::fade_out` ([arrangement editing](arrangement-editing.md) › Fades). Until then the importer
+leaves fades at 0 and `als-format.md` lists them as an open question.
+
+### Setup
+
+1. Note whether Live's preferences create fades on clip edges by themselves, and log the
+   setting. Leave it as it is for the whole series.
+2. Open `35-audio-in-arrangement.als` (series 2: `loopwerk-demo.wav` at bar 1 of an audio track
+   in Arrangement View) and Save As `corpus/als/500-fades-base.als`.
+3. Set the arrangement grid to 1/4 (one beat), so dragged fades end exactly on beats.
+
+### Files (500–506)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 500 | `500-fades-base.als` | No edit. |
+| 501 | `501-fade-in-1-beat.als` | Drag the clip's fade-in handle so the fade-in is exactly 1 beat long. Log how you made it exact (grid, or a field if Live shows one). |
+| 502 | `502-fade-out-half-beat.als` | Set the grid to 1/8 and drag the fade-out handle so the fade-out is exactly half a beat. |
+| 503 | `503-fade-in-2-beats.als` | Set the grid back to 1/4 and make the fade-in exactly 2 beats. |
+| 504 | `504-fade-in-curve.als` | If the fade shows a curve handle, drag it to bend the fade-in. Log what you did, or "no curve control". |
+| 505 | `505-fade-in-off.als` | Remove the fade-in (drag it back to the clip start). |
+| 506 | `506-clip-shortened.als` | Drag the clip's end 1 beat to the left (the fade-out must stay half a beat). |
+
+Bounce `501` and `502` (File › Export Audio/Video, the arrangement from bar 1 for the clip's
+length, 48 kHz, 32-bit float, no normalising, no dither) as `501-bounce.wav` and
+`502-bounce.wav`: comparing them with Loopwerk's render shows the curve's shape.
+
+### Log
+
+`corpus/als/README.md`, as in series 2, plus the fade preference from Setup, the exact fade
+lengths Live shows, and the answer for 504.
+
 ## Tips from the first run
 
 - Live's default new set already has two MIDI tracks, two audio tracks, two returns and eight

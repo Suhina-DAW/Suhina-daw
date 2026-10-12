@@ -32,7 +32,7 @@ are changing (*Code and its documents*).
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
-| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking | How arrangement clips behave when moved: along a lane, to another track, and over other clips (replace or stack) |
+| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles | How arrangement clips behave when moved (along a lane, to another track, over other clips) and how audio clips fade in and out |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
@@ -64,6 +64,7 @@ Change this code, and check these documents.
 | `crates/device-registry/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/dsp/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/audio.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
@@ -71,7 +72,7 @@ Change this code, and check these documents.
 | `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
-| `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) |
+| `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |

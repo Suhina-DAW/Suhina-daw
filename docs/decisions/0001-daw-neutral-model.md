@@ -60,7 +60,8 @@ Its key ideas:
    - a pool of **clip contents**, each made of **content lanes**; a lane holds notes or audio and
      may target a specific track
    - **clips** that place a content from the pool on the arrangement or in a launcher slot, with
-     their own start, length, offset and loop range
+     their own start, length, offset and loop range, and (audio on the arrangement) a fade-in and
+     a fade-out in beats ([arrangement editing](../spec/arrangement-editing.md) › Fades)
    - an **arrangement** of lanes, each optionally bound to a track
    - a **launcher**: scenes and per-track slot columns
 2. **Per-format extensions.** Every object carries an `Extensions` list where an importer keeps
@@ -70,8 +71,8 @@ Its key ideas:
    convert to and from the core. Adding a format never requires changing another format.
 
 Objects refer to each other by typed ids (`TrackId`, `ChannelId`, `ContentId`), not by pointers.
-`Project::validate` checks that every id resolves, so a malformed import becomes an error
-instead of a crash.
+`Project::validate` checks that every id resolves and that every arrangement clip's fades fit it,
+so a malformed import becomes an error instead of a crash.
 
 How each DAW maps onto the core:
 
