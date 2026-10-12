@@ -146,17 +146,17 @@ pub fn drag_value(
         *preview = None;
         return Drag::Done(default);
     }
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         *preview = Some(if value.is_finite() { value } else { range.0 });
     }
-    if response.dragged() {
+    if response.dragged_by(egui::PointerButton::Primary) {
         let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
         let start = preview.unwrap_or(value);
         let next = (start - f64::from(response.drag_delta().y) * per_point * fine).clamp(range.0, range.1);
         *preview = Some(next);
         return Drag::Moving(next);
     }
-    if response.drag_stopped() {
+    if response.drag_stopped_by(egui::PointerButton::Primary) {
         return match preview.take() {
             Some(done) => Drag::Done(done),
             None => Drag::None,

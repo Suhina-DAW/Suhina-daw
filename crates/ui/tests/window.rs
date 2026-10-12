@@ -198,6 +198,34 @@ fn dragging_a_clip_moves_it_on_the_bar_grid() {
     assert!(!starts.contains(&64.0), "{starts:?}");
 }
 
+#[test]
+fn moving_the_view_with_the_middle_button_over_a_clip_leaves_the_clip_alone() {
+    let mut harness = arrangement_app();
+    let starts = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect::<Vec<_>>())
+    };
+    let before = starts(&harness);
+    let from = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().center();
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Middle,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    harness.hover_at(from);
+    harness.run();
+    harness.input_mut().events.push(button(from, true));
+    harness.run();
+    for step in 1..=4 {
+        harness.hover_at(from + egui::vec2(-20.0 * step as f32, 0.0));
+        harness.run();
+    }
+    let to = from + egui::vec2(-80.0, 0.0);
+    harness.input_mut().events.push(button(to, false));
+    harness.run();
+    assert_eq!(starts(&harness), before);
+}
+
 /// Drags the clip labelled `label` by `by` points in the Arrangement view.
 fn drag_clip(harness: &mut Harness<'static, App>, label: &str, by: egui::Vec2) {
     let from = harness.get_by_label(label).rect().center();
