@@ -239,3 +239,19 @@ fn several_editors_open_at_once_in_one_process() {
     second.close_editor().unwrap();
     assert!(!second.editor_open());
 }
+
+#[test]
+fn asking_how_an_instance_is_never_waits_for_a_sibling_loading() {
+    let (mut plugin, _audio) = start("test:gain", Some("slow-sibling"));
+    assert_eq!(plugin.health(), Health::Running);
+    // A sibling that takes two seconds to load holds the process meanwhile.
+    let sibling = std::thread::spawn(|| start("test:slow-load:2000", Some("slow-sibling")));
+    std::thread::sleep(Duration::from_millis(300));
+    let asked = Instant::now();
+    assert_eq!(plugin.health(), Health::Running);
+    assert!(!plugin.editor_open());
+    assert!(asked.elapsed() < Duration::from_millis(100), "{:?}", asked.elapsed());
+    let (mut sibling, _sibling_audio) = sibling.join().unwrap();
+    assert_eq!(sibling.process_id(), plugin.process_id());
+    assert_eq!(sibling.health(), Health::Running);
+}

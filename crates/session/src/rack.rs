@@ -30,6 +30,8 @@ const HEALTH_EVERY: Duration = Duration::from_millis(250);
 /// How often the state of each running plug-in is read, so a restart after a crash gets back
 /// what the user set in its editor (ADR 0006, decision 5).
 const SAVE_EVERY: Duration = Duration::from_secs(30);
+/// How long saving a project waits for its plug-ins to give their state.
+const SAVE_WAIT: Duration = Duration::from_secs(1);
 /// MIDI controller numbers an all-notes-off is sent as.
 const ALL_NOTES_OFF: u8 = 123;
 const SUSTAIN: u8 = 64;
@@ -234,13 +236,34 @@ struct Started {
     result: Result<(Plugin, PluginAudio, Option<String>), String>,
 }
 
+/// What a plug-in's control half did on a thread of its own, coming back.
+enum Done {
+    Opened(Result<(u32, u32), String>),
+    Closed(Result<(), String>),
+    /// Its state was read (now and then, for a restart).
+    Saved,
+    /// It was stopped; its last state, for when it starts again.
+    Stopped(Option<SavedState>),
+}
+
+/// A control half back from a thread, or (stopped) only what it left.
+struct Returned {
+    key: u64,
+    generation: u64,
+    control: Option<Plugin>,
+    done: Done,
+}
+
 struct Instance {
     status: PluginStatus,
     plugin: Option<(String, String, &'static str)>,
     info: PluginSlotInfo,
+    /// `None` while it starts, or while a thread of its own talks to it.
     control: Option<Plugin>,
     generation: u64,
     state_refused: Option<String>,
+    /// Whether its editor is open, as last known.
+    editor_open: bool,
 }
 
 /// The plug-ins one project runs, while it plays.
@@ -256,12 +279,22 @@ pub struct Rack {
     next_generation: u64,
     checked: Instant,
     saved: Instant,
+    /// The window editors open over (owned by it), when the session runs in one.
+    owner: Option<u64>,
+    returned_sender: Sender<Returned>,
+    returned: Receiver<Returned>,
+    /// What happened while the project was saved, for the next [`Rack::sync`] to tell.
+    notices: Vec<String>,
 }
 
 impl Default for Rack {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
+        let (returned_sender, returned) = mpsc::channel();
         Self {
+            returned_sender,
+            returned,
+            notices: Vec::new(),
             env: None,
             sample_rate: 0,
             instances: HashMap::new(),
@@ -271,6 +304,7 @@ impl Default for Rack {
             next_generation: 0,
             checked: Instant::now(),
             saved: Instant::now(),
+            owner: None,
         }
     }
 }
@@ -290,29 +324,107 @@ impl Rack {
         self.env.as_deref()
     }
 
-    /// The state of every plug-in device as it is now, by key: read from the running ones, or
-    /// the last state of one that stopped. A plug-in that does not answer keeps its last state.
+    /// The state of every plug-in device as it is now, by key, for saving the project. Each
+    /// running plug-in is asked on a thread of its own and the answers are waited for at most
+    /// [`SAVE_WAIT`], so a host process busy with something else (an editor opening over the
+    /// window) cannot hold the window: one that has not answered by then gives the state it last
+    /// gave, and a stopped one the state it left.
     pub(crate) fn current_states(&mut self) -> HashMap<u64, SavedState> {
+        let running: Vec<u64> = self.instances.iter().filter(|(_, i)| i.control.is_some()).map(|(k, _)| *k).collect();
+        let asked: Vec<u64> = running
+            .into_iter()
+            .filter(|key| {
+                self.lend(*key, |control| {
+                    let _kept_by_the_control_half = control.save_state();
+                    Done::Saved
+                })
+                .is_ok()
+            })
+            .collect();
+        let deadline = Instant::now() + SAVE_WAIT;
+        let mut notices = Vec::new();
+        while asked.iter().any(|key| self.instances.get(key).is_some_and(|i| i.control.is_none()))
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(2));
+            self.take_returned(&mut notices);
+        }
+        self.notices.extend(notices);
         let mut states = self.kept.clone();
-        for (key, instance) in &mut self.instances {
-            if let Some(control) = instance.control.as_mut()
-                && control.health() == Health::Running
-                && let Ok(state) = control.save_state()
-            {
-                states.insert(*key, state);
+        for (key, instance) in &self.instances {
+            if let Some(state) = instance.control.as_ref().and_then(Plugin::last_state) {
+                states.insert(*key, state.clone());
             }
         }
         states
     }
 
-    /// Stops every plug-in, keeping each one's last state for when it starts again.
+    /// Stops every plug-in, keeping each one's last state for when it starts again. The host
+    /// processes are told on threads of their own, so this never waits for them.
     pub fn stop_all(&mut self) {
-        for (key, instance) in self.instances.drain() {
-            if let Some(mut control) = instance.control
-                && control.health() == Health::Running
-                && let Ok(state) = control.save_state()
-            {
-                self.kept.insert(key, state);
+        let instances: Vec<(u64, Instance)> = self.instances.drain().collect();
+        for (key, instance) in instances {
+            if let Some(control) = instance.control {
+                self.stop(key, control);
+            }
+        }
+    }
+
+    /// Reads `control`'s last state and lets it go, on a thread of its own; the state comes
+    /// back to be kept for when the device's plug-in starts again.
+    fn stop(&self, key: u64, mut control: Plugin) {
+        let sender = self.returned_sender.clone();
+        let _detached = std::thread::Builder::new().name("loopwerk-plugin-stop".into()).spawn(move || {
+            let state = (control.health() == Health::Running).then(|| control.save_state().ok()).flatten();
+            drop(control);
+            let _gone = sender.send(Returned { key, generation: 0, control: None, done: Done::Stopped(state) });
+        });
+    }
+
+    /// Lends the control half of plug-in device `key` to a thread of its own for `work`, so
+    /// the session's thread never waits for a host process (one busy loading a sibling, or
+    /// making an editor's window that waits for the session's own window). It comes back
+    /// through [`Rack::take_returned`].
+    fn lend(&mut self, key: u64, work: impl FnOnce(&mut Plugin) -> Done + Send + 'static) -> Result<(), CommandError> {
+        let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
+        let mut control = instance.control.take().ok_or("the plug-in is busy; try again in a moment")?;
+        let (sender, generation) = (self.returned_sender.clone(), instance.generation);
+        let spawned = std::thread::Builder::new().name("loopwerk-plugin-control".into()).spawn(move || {
+            let done = work(&mut control);
+            let _gone = sender.send(Returned { key, generation, control: Some(control), done });
+        });
+        spawned.map(|_| ()).map_err(|e| CommandError(format!("no thread to talk to the plug-in on: {e}")))
+    }
+
+    /// Takes back control halves lent out, and the states of stopped plug-ins.
+    fn take_returned(&mut self, notices: &mut Vec<String>) {
+        while let Ok(returned) = self.returned.try_recv() {
+            let Returned { key, generation, control, done } = returned;
+            if let Done::Stopped(state) = done {
+                if let Some(state) = state {
+                    self.kept.insert(key, state);
+                }
+                continue;
+            }
+            let Some(control) = control else { continue };
+            match self.instances.get_mut(&key).filter(|i| i.generation == generation && i.control.is_none()) {
+                Some(instance) => {
+                    let name = instance.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
+                    match done {
+                        Done::Opened(Ok(_)) => instance.editor_open = true,
+                        Done::Opened(Err(why)) => notices.push(format!("{name}: its editor did not open ({why})")),
+                        Done::Closed(result) => {
+                            instance.editor_open = false;
+                            if let Err(why) = result {
+                                notices.push(format!("{name}: its editor did not close ({why})"));
+                            }
+                        }
+                        Done::Saved | Done::Stopped(_) => {}
+                    }
+                    instance.control = Some(control);
+                }
+                // The device went while its plug-in was out: stop it like the others.
+                None => self.stop(key, control),
             }
         }
     }
@@ -320,7 +432,10 @@ impl Rack {
     /// What is known about the plug-in device `key`.
     pub fn report(&mut self, key: u64) -> Option<PluginReport> {
         let instance = self.instances.get_mut(&key)?;
-        let editor_open = instance.control.as_mut().is_some_and(Plugin::editor_open);
+        if let Some(control) = instance.control.as_mut() {
+            instance.editor_open = control.editor_open();
+        }
+        let editor_open = instance.editor_open;
         Some(PluginReport {
             status: instance.status.clone(),
             plugin: instance.plugin.clone(),
@@ -362,7 +477,7 @@ impl Rack {
     /// (in the background), stops the ones whose devices are gone, takes in the ones that have
     /// started and looks after their health. Returns what the user should hear about.
     pub fn sync(&mut self, project: &Project, player: Option<&mut Player>) -> Vec<String> {
-        let mut notices = Vec::new();
+        let mut notices = std::mem::take(&mut self.notices);
         let Some(player) = player else {
             self.stop_all();
             return notices;
@@ -378,12 +493,9 @@ impl Rack {
         // Devices that are gone.
         let gone: Vec<u64> = self.instances.keys().copied().filter(|k| !devices.iter().any(|d| d.key == *k)).collect();
         for key in gone {
-            if let Some(mut instance) = self.instances.remove(&key) {
-                if let Some(control) = instance.control.as_mut()
-                    && control.health() == Health::Running
-                    && let Ok(state) = control.save_state()
-                {
-                    self.kept.insert(key, state);
+            if let Some(instance) = self.instances.remove(&key) {
+                if let Some(control) = instance.control {
+                    self.stop(key, control);
                 }
                 changed = true;
             }
@@ -411,6 +523,7 @@ impl Rack {
                         control: None,
                         generation: 0,
                         state_refused: None,
+                        editor_open: false,
                     },
                 );
                 continue;
@@ -436,6 +549,7 @@ impl Rack {
                     control: None,
                     generation,
                     state_refused: None,
+                    editor_open: false,
                 },
             );
             spawn_start(self.sender.clone(), found.key, generation, launch, state);
@@ -444,6 +558,7 @@ impl Rack {
             notices.push(missing_notice(&env, &missing));
         }
         changed |= self.receive(player, &mut notices);
+        self.take_returned(&mut notices);
         self.watch(&mut notices);
         if changed {
             player.set_plugin_info(self.slot_info());
@@ -500,7 +615,8 @@ impl Rack {
         if save {
             self.saved = Instant::now();
         }
-        for instance in self.instances.values_mut() {
+        let mut to_save = Vec::new();
+        for (key, instance) in self.instances.iter_mut() {
             let Some(control) = instance.control.as_mut() else { continue };
             if instance.status != PluginStatus::Running {
                 continue;
@@ -509,7 +625,7 @@ impl Rack {
             match control.health() {
                 Health::Running => {
                     if save {
-                        let _kept_for_a_restart = control.save_state();
+                        to_save.push(*key);
                     }
                 }
                 Health::Crashed => {
@@ -524,6 +640,13 @@ impl Rack {
                     instance.status = PluginStatus::Crashed("it stopped answering".into());
                 }
             }
+        }
+        // Kept by the control half for a restart; read where waiting does not matter.
+        for key in to_save {
+            let _busy_then_next_time = self.lend(key, |control| {
+                let _kept_for_a_restart = control.save_state();
+                Done::Saved
+            });
         }
     }
 
@@ -549,19 +672,44 @@ impl Rack {
         spawned.map(|_| ()).map_err(|e| CommandError(format!("could not restart the plug-in: {e}")))
     }
 
-    /// Opens the editor of the plug-in device `key`; returns the size of its inside.
-    pub fn open_editor(&mut self, key: u64) -> Result<(u32, u32), CommandError> {
-        self.running(key)?.open_editor().map_err(|e| CommandError(e.to_string()))
+    /// The window editors open over from now on: a Win32 `HWND` or an X11 window id.
+    pub fn set_owner(&mut self, owner: Option<u64>) {
+        self.owner = owner;
     }
 
+    /// Opens the editor of the plug-in device `key`; returns the size of its inside. Over an
+    /// owner window (the desktop app's) it opens on a thread of its own and `None` comes back
+    /// at once: the host making a window that the app's window owns waits for the app's window
+    /// thread, which must not be waiting for the host meanwhile.
+    pub fn open_editor(&mut self, key: u64) -> Result<Option<(u32, u32)>, CommandError> {
+        self.running(key)?;
+        match self.owner {
+            Some(owner) => {
+                self.lend(key, move |control| {
+                    Done::Opened(control.open_editor_owned(Some(owner)).map_err(|e| e.to_string()))
+                })?;
+                Ok(None)
+            }
+            None => self.running(key)?.open_editor().map(Some).map_err(|e| CommandError(e.to_string())),
+        }
+    }
+
+    /// Closes the editor of the plug-in device `key`; with an owner window, on a thread of
+    /// its own, like opening it.
     pub fn close_editor(&mut self, key: u64) -> Result<(), CommandError> {
+        self.running(key)?;
+        if self.owner.is_some() {
+            return self.lend(key, |control| Done::Closed(control.close_editor().map_err(|e| e.to_string())));
+        }
         self.running(key)?.close_editor().map_err(|e| CommandError(e.to_string()))
     }
 
     fn running(&mut self, key: u64) -> Result<&mut Plugin, CommandError> {
         let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
         match &instance.status {
-            PluginStatus::Running => instance.control.as_mut().ok_or_else(|| "the plug-in is still starting".into()),
+            PluginStatus::Running => {
+                instance.control.as_mut().ok_or_else(|| "the plug-in is busy; try again in a moment".into())
+            }
             PluginStatus::Loading => Err("the plug-in is still starting".into()),
             PluginStatus::Missing => Err("the plug-in is not installed".into()),
             PluginStatus::Crashed(why) => Err(format!("the plug-in crashed ({why}); restart it first").into()),
@@ -722,6 +870,7 @@ mod tests {
             control: None,
             generation: 0,
             state_refused: None,
+            editor_open: false,
         };
         rack.instances.insert(1, instance(PluginStatus::Running, "A"));
         rack.instances.insert(2, instance(PluginStatus::Loading, "C"));

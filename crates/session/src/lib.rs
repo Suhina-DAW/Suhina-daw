@@ -181,6 +181,12 @@ impl Session {
         self.plugins.sync(&self.project, self.player.as_mut())
     }
 
+    /// The window plug-in editors open over, owned by it (a Win32 `HWND`, an X11 window id):
+    /// they float above it, have no taskbar entry of their own and go with it.
+    pub fn set_editor_owner(&mut self, owner: Option<u64>) {
+        self.plugins.set_owner(owner);
+    }
+
     /// How far the project's plug-ins have got with starting (all zero while it does not play).
     pub fn plugin_progress(&self) -> PluginProgress {
         self.plugins.progress()

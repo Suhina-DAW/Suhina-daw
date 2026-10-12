@@ -15,7 +15,7 @@
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 5;
+pub const VERSION: u64 = 6;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -136,9 +136,12 @@ pub enum Message {
         param: ParamInfo,
     },
     /// Open the plug-in's editor in a window of its own; answered with `EditorOpened` and the
-    /// size of its inside.
+    /// size of its inside. `owner` is the engine's window (a Win32 `HWND`, an X11 window id)
+    /// that owns the editor's: it stays above it, has no taskbar entry of its own and is
+    /// minimised with it. `None`: a window of its own.
     OpenEditor {
         instance: u32,
+        owner: Option<u64>,
     },
     EditorOpened {
         instance: u32,
@@ -174,7 +177,7 @@ impl Message {
             | Self::Params { instance, .. }
             | Self::SetParam { instance, .. }
             | Self::Param { instance, .. }
-            | Self::OpenEditor { instance }
+            | Self::OpenEditor { instance, .. }
             | Self::EditorOpened { instance, .. }
             | Self::CloseEditor { instance }
             | Self::EditorClosed { instance } => Some(*instance),
@@ -211,7 +214,9 @@ impl Message {
                 json!({ "op": "set_param", "instance": instance, "id": id, "value": value })
             }
             Self::Param { instance, param } => json!({ "op": "param", "instance": instance, "param": param.to_json() }),
-            Self::OpenEditor { instance } => json!({ "op": "open_editor", "instance": instance }),
+            Self::OpenEditor { instance, owner } => {
+                json!({ "op": "open_editor", "instance": instance, "owner": owner })
+            }
             Self::EditorOpened { instance, width, height } => {
                 json!({ "op": "editor_opened", "instance": instance, "width": width, "height": height })
             }
@@ -285,7 +290,13 @@ impl Message {
                 value: value.get("value").and_then(Value::as_f64).filter(|v| v.is_finite())?,
             },
             "param" => Self::Param { instance: instance()?, param: ParamInfo::from_json(value.get("param")?)? },
-            "open_editor" => Self::OpenEditor { instance: instance()? },
+            "open_editor" => Self::OpenEditor {
+                instance: instance()?,
+                owner: match value.get("owner") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(v.as_u64()?),
+                },
+            },
             "editor_opened" => {
                 Self::EditorOpened { instance: instance()?, width: small("width")?, height: small("height")? }
             }
@@ -333,7 +344,7 @@ mod tests {
 
     #[test]
     fn every_message_round_trips() {
-        assert_eq!(VERSION, 5);
+        assert_eq!(VERSION, 6);
         let messages = [
             Message::Hello { version: VERSION },
             Message::Load { instance: 3, plugin: "test:gain".into(), link: "/dev/shm/x".into(), sample_rate: 44_100.0 },
@@ -355,7 +366,8 @@ mod tests {
             Message::Params { instance: 4, params: Vec::new() },
             Message::SetParam { instance: 5, id: 7, value: -0.5 },
             Message::Param { instance: 5, param: gain() },
-            Message::OpenEditor { instance: 6 },
+            Message::OpenEditor { instance: 6, owner: None },
+            Message::OpenEditor { instance: 6, owner: Some(0x0012_0F3A) },
             Message::EditorOpened { instance: 6, width: 800, height: 600 },
             Message::CloseEditor { instance: 6 },
             Message::EditorClosed { instance: 6 },

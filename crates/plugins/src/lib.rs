@@ -167,6 +167,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// `mutex` if nobody holds it now.
+fn try_lock<T>(mutex: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match mutex.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
 /// A running host process and its control connection.
 struct HostProcess {
     child: Child,
@@ -441,6 +450,8 @@ pub struct Plugin {
     params_since: Vec<(u32, f64)>,
     /// Whether the plug-in's editor window is open.
     editor_open: bool,
+    /// What [`Plugin::health`] last found, for when the process is busy with a sibling.
+    last_health: Health,
 }
 
 impl Plugin {
@@ -462,6 +473,7 @@ impl Plugin {
             last_state: None,
             params_since: Vec::new(),
             editor_open: false,
+            last_health: Health::Running,
         };
         Ok((plugin, PluginAudio { link, unanswered }))
     }
@@ -476,15 +488,24 @@ impl Plugin {
         lock(&self.group).process.as_ref().map_or(0, |p| p.child.id())
     }
 
+    /// How the plug-in is. Never waits: while its process is busy with another request (a
+    /// sibling loading, which can take seconds), it says what it found last time, so a window
+    /// that asks every frame does not stop.
     pub fn health(&mut self) -> Health {
-        let mut group = lock(&self.group);
-        if group.generation != self.generation || !group.alive() {
+        let Some(mut group) = try_lock(&self.group) else {
+            if self.unanswered.load(Ordering::Relaxed) >= HUNG_AFTER {
+                return Health::Hung;
+            }
+            return self.last_health;
+        };
+        self.last_health = if group.generation != self.generation || !group.alive() {
             Health::Crashed
         } else if self.unanswered.load(Ordering::Relaxed) >= HUNG_AFTER {
             Health::Hung
         } else {
             Health::Running
-        }
+        };
+        self.last_health
     }
 
     /// Whether the host's control thread answers within the launch timeout.
@@ -509,6 +530,11 @@ impl Plugin {
             self.editor_open = false;
         }
         reply
+    }
+
+    /// The state last read from or given to the plug-in, without asking it.
+    pub fn last_state(&self) -> Option<&SavedState> {
+        self.last_state.as_ref()
     }
 
     /// Reads the plug-in's state and keeps it for a restart.
@@ -577,9 +603,15 @@ impl Plugin {
     /// Opens the plug-in's editor in a window of its own (in the host process) and returns the
     /// size of its inside. Opening an open editor just returns its size.
     pub fn open_editor(&mut self) -> Result<(u32, u32), PluginError> {
+        self.open_editor_owned(None)
+    }
+
+    /// [`Plugin::open_editor`] in a window that `owner` (the engine's window: a Win32 `HWND`,
+    /// an X11 window id) owns: it floats above it and goes with it.
+    pub fn open_editor_owned(&mut self, owner: Option<u64>) -> Result<(u32, u32), PluginError> {
         let instance = self.instance;
         let reply = self.request(
-            &Message::OpenEditor { instance },
+            &Message::OpenEditor { instance, owner },
             "open_editor",
             |m| matches!(m, Message::EditorOpened { instance: i, .. } if *i == instance),
         )?;
@@ -605,8 +637,10 @@ impl Plugin {
     }
 
     /// Whether the editor is open: the user may have closed its window since it was opened.
+    /// Never waits: while the process is busy with another request, the answer is the last
+    /// one known.
     pub fn editor_open(&mut self) -> bool {
-        let mut group = lock(&self.group);
+        let Some(mut group) = try_lock(&self.group) else { return self.editor_open };
         if group.generation != self.generation {
             self.editor_open = false;
         } else {

@@ -196,6 +196,6 @@ renderer without a deadline.
   yet). Chains on tracks run, with plug-ins and latency compensation, and `device.*` commands
   edit them.
 - **Plug-ins:** consecutive plug-ins of a chain that share a host process in one round trip per
-  block; plug-in parameters as automation; editors embedded in Loopwerk's window (ADR 0006).
+  block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the browser, the detail area (device chain, clip editor), meters, and the commands
   they still need (arm, sends) (M8).

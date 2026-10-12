@@ -325,6 +325,12 @@ impl App {
         }
     }
 
+    /// The window plug-in editors open over: the native handle of the app's main window (a
+    /// Win32 `HWND`, an X11 window id), so they float above it (ADR 0006).
+    pub fn set_editor_owner(&mut self, owner: Option<u64>) {
+        self.projects.set_editor_owner(owner);
+    }
+
     /// The open projects.
     pub fn projects(&self) -> &Projects {
         &self.projects

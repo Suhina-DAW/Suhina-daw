@@ -46,8 +46,10 @@ projects saved today keep working after the rename.
    where the file is found now. A self-contained package (a zip with the audio) is a separate
    format for sharing, not decided here.
 7. **Saving is a command**, `project.save { path?, copy? }` (AGENTS.md rule 6). Without a path it
-   writes the `.locr` the project came from. It writes the running plug-ins' state as it is now
-   (read from each host process), to a file beside the target that is then moved over it, so a
+   writes the `.locr` the project came from. It writes the running plug-ins' state as it is now:
+   each host process is asked on a thread of its own and the save waits at most a second for
+   the answers, so a host busy with something else (an editor opening) cannot hold the window;
+   one that has not answered gives the state it last gave. It writes to a file beside the target that is then moved over it, so a
    failed save never leaves half a project. `copy: true` writes a template or backup and leaves
    the project with its own file. The session counts its changes, and `project.info` reports
    `unsaved_changes`.

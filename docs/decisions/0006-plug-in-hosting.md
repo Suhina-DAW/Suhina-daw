@@ -104,6 +104,7 @@ workspace forbids.
      as a parameter event at its frame.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* protocol
+     version 6 (`open_editor` names the window that owns the editor's, decision 10); since
      version 5: `load` names the instance (a number the engine chooses), and every message about
      one instance and its reply carry that number: `unload` (answered `unloaded`), state,
      parameters and editors, and `editor_closed` when it comes unasked; an `error` carries the
@@ -126,7 +127,9 @@ workspace forbids.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it
-   is then and writes that, with the last state of stopped ones
+   is then, each on a thread of its own, waits at most a second for the answers (the last state
+   read stands in for one that has not answered) and writes that, with the last state of
+   stopped ones
    ([ADR 0010](0010-project-files.md)).
 6. **`unsafe` only in two crates.** `crates/ipc` (shared memory and block sync, linked into the
    engine) and `crates/plugin-host` (the plug-in host process) may use `unsafe`; every other
@@ -209,14 +212,29 @@ workspace forbids.
    - A file that failed keeps its reason and is not tried again until it changes.
    The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
    folders and the catalog are kept as JSON in Loopwerk's settings folder.
-10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,
-    floating on Wayland and macOS, which have no public way to embed another process's window.
+10. **Editors** open from the host process, floating above Loopwerk's window and owned by it,
+    as most hosts do: the window stays above Loopwerk, has no taskbar entry of its own and is
+    minimised with it. *Amended 2026-10-12* (was: embedded in a Loopwerk window on X11 and
+    Windows): owning works on every system and keeps the editor apart from Loopwerk's own
+    layout; embedding another process's window works only on X11 and Windows. The engine names
+    its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11 window id);
+    the host makes the editor's window owned by it (Win32 owner window, X11 `WM_TRANSIENT_FOR`).
+    An owned window shares its input queue with the owner's thread on Windows, so the host
+    making one waits for Loopwerk's window thread; the session therefore opens and closes an
+    editor on a thread of its own and the command answers at once (`editor_open: "opening"`),
+    or both would wait for each other. More generally the window thread never waits for a host
+    process: `Plugin::health` and `editor_open` answer from what they last knew while the
+    process is busy (a sibling loading in a shared process takes seconds), and reading a
+    plug-in's state now and then, and stopping it, run on threads of their own. A host whose
+    window thread hangs can be ended like any other (decision 4). The host's main loop waits for its windows' messages
+    (`MsgWaitForMultipleObjectsEx`, woken by the control messages' thread) rather than looking
+    every 10 ms, which made editors such as Pro-Q 4 lag; on X11 it looks every millisecond while
+    an editor is open.
     *Built on Windows:* the host opens a top-level window of its own on its main thread
     (`crates/plugin-host/src/window.rs`, Win32) and attaches the plug-in's view to it (VST3
     `IPlugView` with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps
     its messages in the main loop between control messages, and tells the engine unasked when
-    the user closes it (`editor_closed`, protocol version 4). Until Loopwerk has a window of its
-    own, the editor's window is a top-level one rather than embedded in Loopwerk's. Checked with
+    the user closes it (`editor_closed`, protocol version 4). Checked with
     Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand.
     *Built on Linux (X11):* the host's window comes from `x11rb`, the plug-in's view is embedded
     by window id (VST3 `X11EmbedWindowID`, CLAP `x11`), and the host serves the plug-in's own
