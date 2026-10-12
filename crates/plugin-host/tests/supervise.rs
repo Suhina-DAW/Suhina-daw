@@ -356,6 +356,23 @@ fn an_editor_opens_in_a_window_and_closes() {
 }
 
 #[test]
+fn parameter_events_automate_a_parameter_from_their_frame() {
+    use loopwerk_plugins::Event;
+    for spec in ["test:clap", "test:vst3"] {
+        let (_plugin, mut audio) = start(spec);
+        let mut output = [9.0f32; FRAMES * 2];
+        // The test plug-ins take a block's last value for the whole block.
+        let automation = [Event::param(10, 0, 0.75)];
+        assert_eq!(audio.process_with_events(&[1.0; FRAMES * 2], &automation, &mut output, PATIENT), Outcome::Done);
+        assert_eq!(output[0], 0.75, "{spec}");
+        // It stays until the next value; an unknown parameter changes nothing.
+        let unknown = [Event::param(0, 99, 0.1)];
+        assert_eq!(audio.process_with_events(&[1.0; FRAMES * 2], &unknown, &mut output, PATIENT), Outcome::Done);
+        assert_eq!(output[0], 0.75, "{spec}");
+    }
+}
+
+#[test]
 fn parameters_are_listed_set_and_kept_over_a_restart() {
     for spec in ["test:clap", "test:vst3"] {
         let (mut plugin, mut audio) = start(spec);

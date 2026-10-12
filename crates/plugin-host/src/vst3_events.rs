@@ -37,12 +37,15 @@ impl MidiMapping {
         Self(table)
     }
 
-    /// The parameter change a controller or pitch bend event makes: id, frame, normalized value.
+    /// The parameter change a controller, pitch bend or parameter event makes: id, frame,
+    /// normalized value.
     pub(crate) fn change(&self, event: &LinkEvent) -> Option<(ParamID, i32, ParamValue)> {
         let (number, value) = match event.kind {
             EventKind::Controller { number, value, .. } => (usize::from(number), f64::from(value)),
             // -1 to 1 becomes 0 to 1, the centre at one half.
             EventKind::PitchBend { value, .. } => (129, (f64::from(value) + 1.0) / 2.0),
+            // A parameter's own value, kept within VST3's normalized range.
+            EventKind::Param { id, value } => return Some((id, event.frame as i32, f64::from(value).clamp(0.0, 1.0))),
             EventKind::NoteOn { .. } | EventKind::NoteOff { .. } => return None,
         };
         let id = (*self.0.get(number)?)?;
@@ -149,7 +152,7 @@ fn note(event: &LinkEvent) -> Option<Event> {
                 },
             };
         }
-        EventKind::Controller { .. } | EventKind::PitchBend { .. } => return None,
+        EventKind::Controller { .. } | EventKind::PitchBend { .. } | EventKind::Param { .. } => return None,
     }
     Some(out)
 }

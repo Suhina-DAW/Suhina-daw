@@ -70,13 +70,15 @@ workspace forbids.
      a sequence number), the audio buffers sized for the largest block, and lock-free rings of
      note and parameter events with sample offsets, so automation stays sample-accurate.
      *Built:* each block carries up to 1024 events (note on and off, MIDI controller, pitch
-     bend) as fixed 16-byte records with their frame (`crates/ipc/src/events.rs`, region
+     bend, parameter value) as fixed 16-byte records with their frame (`crates/ipc/src/events.rs`, region
      version 2); the host reads them into a list made beforehand, so neither side allocates.
      A VST3 host hands notes to `process` as an `IEventList` on event bus 0, and controllers
      and pitch bend as parameter changes at their frame through the plug-in's `IMidiMapping`
      (asked for the first MIDI channel only: Serum 2 crashes when asked about the second); a
      CLAP host sends note events to note port 0 and controllers and bend as MIDI messages, and
-     gives a plug-in without audio inputs (an instrument) no input port.
+     gives a plug-in without audio inputs (an instrument) no input port. A parameter event
+     (automation) reaches a VST3 processor as a parameter change at its frame and a CLAP plug-in
+     as a parameter event at its frame.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* parameters
      (protocol version 3): `get_params` lists each with its id, name, group, range, default,

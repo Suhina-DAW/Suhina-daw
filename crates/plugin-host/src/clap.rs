@@ -518,7 +518,7 @@ fn describe_param(
 }
 
 /// One event from the link as a CLAP event: notes as note events on note port 0, controllers
-/// and pitch bend as MIDI messages.
+/// and pitch bend as MIDI messages, parameter values as parameter events.
 fn push_event(buffer: &mut EventBuffer, event: &Event) {
     let note_id = |note: i32| u32::try_from(note).map_or(Match::All, Match::Specific);
     match event.kind {
@@ -533,6 +533,11 @@ fn push_event(buffer: &mut EventBuffer, event: &Event) {
         EventKind::Controller { channel, number, value } => {
             let value = (value * 127.0).round().clamp(0.0, 127.0) as u8;
             buffer.push(&MidiEvent::new(event.frame, 0, [0xB0 | (channel & 0x0F), number & 0x7F, value]));
+        }
+        EventKind::Param { id, value } => {
+            if let Some(id) = ClapId::from_raw(id) {
+                buffer.push(&ParamValueEvent::new(event.frame, id, Pckn::match_all(), f64::from(value)));
+            }
         }
         EventKind::PitchBend { channel, value } => {
             let bend = ((value + 1.0) / 2.0 * 16_383.0).round().clamp(0.0, 16_383.0) as u16;
