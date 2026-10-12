@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -127,6 +129,10 @@ pub struct PluginReport {
     /// The open editor is embedded in the device panel of the session's window (rather than
     /// in a window of its own), and the size of its inside in pixels, as the host last said.
     pub editor_embedded: Option<(u32, u32)>,
+    /// Blocks the engine gave it since it started, and how many it did not answer in time
+    /// (the chain went on without it for that block).
+    pub blocks: u32,
+    pub late_blocks: u32,
     /// Why it runs with its own defaults, when it did not take the saved state.
     pub state_refused: Option<String>,
 }
@@ -145,6 +151,22 @@ pub struct PluginProgress {
     pub failed: Vec<String>,
 }
 
+/// How a hosted plug-in keeps up with the engine: the blocks it was given and the ones it did
+/// not answer in time (sent late, or not sent because the host was still busy), counted on
+/// the audio thread and read by the session for the device panel.
+#[derive(Debug, Default)]
+pub struct BlockCounts {
+    blocks: AtomicU32,
+    late: AtomicU32,
+}
+
+impl BlockCounts {
+    /// Blocks given and blocks not answered in time, so far.
+    pub fn read(&self) -> (u32, u32) {
+        (self.blocks.load(Ordering::Relaxed), self.late.load(Ordering::Relaxed))
+    }
+}
+
 /// The audio half of a hosted plug-in, as the engine runs it: real-time safe.
 pub struct Hosted {
     audio: PluginAudio,
@@ -154,6 +176,7 @@ pub struct Hosted {
     /// Releases from blocks that were not sent (the host still busy with an earlier one),
     /// sent at the start of the next block that is, so no note is left hanging.
     carried: Vec<Event>,
+    counts: Arc<BlockCounts>,
 }
 
 impl Hosted {
@@ -164,7 +187,13 @@ impl Hosted {
             output: vec![0.0; MAX_BLOCK_FRAMES * 2],
             events: Vec::with_capacity(MAX_EVENTS),
             carried: Vec::with_capacity(MAX_EVENTS),
+            counts: Arc::new(BlockCounts::default()),
         }
+    }
+
+    /// The counts this keeps while the engine runs it.
+    pub fn counts(&self) -> Arc<BlockCounts> {
+        Arc::clone(&self.counts)
     }
 }
 
@@ -230,15 +259,20 @@ impl PluginProcessor for Hosted {
         for &(frame, event) in events {
             push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
         }
+        self.counts.blocks.fetch_add(1, Ordering::Relaxed);
         match self.audio.process_with_events(input, &self.events, output, timeout) {
             loopwerk_plugins::Outcome::Done => {
                 buffer.copy_from_slice(output);
                 true
             }
             // Sent, but late: the host still gets its events.
-            loopwerk_plugins::Outcome::Missed => false,
+            loopwerk_plugins::Outcome::Missed => {
+                self.counts.late.fetch_add(1, Ordering::Relaxed);
+                false
+            }
             // Not sent: its releases wait for the next block; new notes are dropped.
             loopwerk_plugins::Outcome::Busy => {
+                self.counts.late.fetch_add(1, Ordering::Relaxed);
                 carry_releases(&self.events, &mut self.carried);
                 false
             }
@@ -312,6 +346,8 @@ struct Instance {
     placement_sent: Option<Placement>,
     /// The editor is being closed to open again the other way (the embedding setting changed).
     reopen_editor: bool,
+    /// How it keeps up with the engine, while its audio half runs there.
+    counts: Option<Arc<BlockCounts>>,
 }
 
 impl Instance {
@@ -329,6 +365,7 @@ impl Instance {
             placement_wanted: None,
             placement_sent: None,
             reopen_editor: false,
+            counts: None,
         }
     }
 
@@ -549,6 +586,8 @@ impl Rack {
             latency: instance.info.latency,
             editor_open: instance.editor_open,
             editor_embedded: instance.editor_size.filter(|_| instance.editor_embedded && instance.editor_open),
+            blocks: instance.counts.as_ref().map_or(0, |c| c.read().0),
+            late_blocks: instance.counts.as_ref().map_or(0, |c| c.read().1),
             state_refused: instance.state_refused.clone(),
         })
     }
@@ -679,7 +718,9 @@ impl Rack {
                         changed = true;
                     }
                     instance.state_refused = refused;
-                    match player.send_plugin(started.key, Box::new(Hosted::new(audio))) {
+                    let hosted = Hosted::new(audio);
+                    instance.counts = Some(hosted.counts());
+                    match player.send_plugin(started.key, Box::new(hosted)) {
                         Ok(()) => instance.status = PluginStatus::Running,
                         Err(e) => instance.status = PluginStatus::Failed(e.0),
                     }

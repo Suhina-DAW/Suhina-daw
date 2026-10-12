@@ -93,14 +93,19 @@ impl PluginBox {
         let name = report.plugin.as_ref().map(|(name, vendor, _)| format!("{name} by {vendor}"));
         let (state, line) = match &report.status {
             PluginStatus::Loading => (PluginState::Loading, format!("Loading {}", name.unwrap_or_default())),
-            PluginStatus::Running => (
-                PluginState::Running,
-                match (&report.state_refused, report.latency) {
+            PluginStatus::Running => {
+                let mut line = match (&report.state_refused, report.latency) {
                     (Some(_), _) => "Running with its own settings".to_string(),
                     (None, 0) => name.unwrap_or_else(|| "Running".into()),
                     (None, latency) => format!("{} · {latency} frames", name.unwrap_or_else(|| "Running".into())),
-                },
-            ),
+                };
+                // Blocks it did not answer in time: the chain went on without it for those.
+                if report.late_blocks > 0 && report.blocks > 0 {
+                    let percent = (u64::from(report.late_blocks) * 100 / u64::from(report.blocks)).max(1);
+                    line.push_str(&format!(" · {percent}% of blocks late"));
+                }
+                (PluginState::Running, line)
+            }
             PluginStatus::Missing => (PluginState::Missing, "Not installed; kept with its settings".into()),
             PluginStatus::Crashed(why) => (PluginState::Crashed, format!("Crashed: {why}")),
             PluginStatus::Failed(why) => (PluginState::Crashed, format!("Could not start: {why}")),
@@ -645,6 +650,8 @@ mod tests {
             latency: 0,
             editor_open,
             editor_embedded: None,
+            blocks: 0,
+            late_blocks: 0,
             state_refused: None,
         }
     }

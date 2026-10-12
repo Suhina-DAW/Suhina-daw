@@ -327,6 +327,8 @@ pub(crate) fn plugin_json(report: Option<crate::PluginReport>) -> Value {
         "instrument": report.instrument,
         "latency": report.latency,
         "editor_open": report.editor_open,
+        "blocks": report.blocks,
+        "late_blocks": report.late_blocks,
         "state_refused": report.state_refused,
     })
 }
