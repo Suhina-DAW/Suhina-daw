@@ -6,6 +6,7 @@ status: draft
 last_verified: 2026-10-12
 covers:
   - crates/ui/src/theme.rs
+  - crates/ui/src/themes.rs
 ---
 
 # Design brief
@@ -96,7 +97,8 @@ From [research](#sources) and the first design rounds:
 ## Tokens
 
 All colours, spacing, radii, stroke widths and type sizes are named tokens in one theme module.
-Widgets never contain literal colours. Current values:
+Widgets never contain literal colours. The colours below are the built-in theme, Loopwerk Dark;
+a theme file can change any of them (see Themes). Current values:
 
 | Token | Value | Use |
 |---|---|---|
@@ -105,18 +107,40 @@ Widgets never contain literal colours. Current values:
 | `surface.2` | `#2E2D2A` | Fields, stopped clips, buttons |
 | `surface.3` | `#45433F` | Selected, pressed |
 | `surface.3.bright` | `#4A4843` | Playing clip, playing scene, volume fill |
+| `hover.surface.1` / `hover.surface.2` | `#2A2926` / `#34332F` | Hover over `surface.1` / `surface.2` |
 | `line` | `#383733` | Separators between regions and rows |
 | `line.strong` | `#45433F` | Session columns, arrangement tracks |
 | `text.primary` | `#ECE8E1` | |
 | `text.secondary` | `#9A958C` | |
 | `text.tertiary` | `#66625B` | Labels, inactive |
+| `text.value` | `#C9C4BB` | Clip names, values on fields, the chosen option |
+| `text.playing` | `#FFFFFF` | The name of a playing clip |
 | `accent` | `#A6A3FF` | |
 | `state.recording` | `#E5484D` | |
 | `meter.ok` / `meter.hot` | `#8BC48A` / `#E3C86A` | |
+| `slot.empty` | `#4A4743` | The mark of an empty slot |
+| `muted.fill` | `#34322F` | A muted track's fills |
+| `pan.background` / `pan.centre` | `#232220` / `#55524C` | A track header's pan field |
 | `track.1`–`track.4` | `#D08F6E` `#C6AC5E` `#73AAC0` `#A497CC` | (palette to extend to 16) |
 | type | 11 px UI, 10 px values, 9 px rulers | |
 | row height | 20 px grid rows and fields, 15–16 px inline fields, 17 px browser rows | |
 | radius | 0 everywhere | |
+
+## Themes
+
+A theme is a JSON file in the `themes` folder of Loopwerk's app-data folder, beside
+`settings.txt`; its file name without `.json` is its id, which `settings.txt` keeps as
+`theme = <id>`. It names the theme and gives colour tokens as `#RRGGBB`:
+
+```json
+{ "name": "Night", "colors": { "surface.0": "#14161A", "accent": "#7FD1B9" } }
+```
+
+A token the file leaves out keeps the built-in colour, so a file needs only the colours it
+changes; an unknown token or a value that is not `#RRGGBB` is skipped with a warning. Settings ›
+Interface › Theme picks a theme, changes its colours (writing the file), duplicates it, and reads
+the files again; a theme file saved in another editor shows within a second. Only colours belong
+to a theme: sizes, spacing and type stay the design's. Track colours come from the project.
 
 ## Squint test
 

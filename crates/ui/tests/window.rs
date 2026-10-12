@@ -248,7 +248,11 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(harness.state().settings_open());
+    harness.get_by_label("Settings page: Interface").click();
+    harness.run();
     harness.get_by_label("Animations: Off").click();
+    harness.run();
+    harness.get_by_label("Settings page: Arrangement").click();
     harness.run();
     harness.get_by_label("Track headers: Left").click();
     harness.run();
@@ -260,6 +264,48 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.get_by_label("Close settings").click();
     harness.run();
     assert!(!harness.state().settings_open());
+}
+
+#[test]
+fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
+    let mut harness = window(demo_app());
+    let mut colors = theme::Palette::DARK;
+    colors.accent = egui::Color32::from_rgb(0x12, 0xAB, 0x9F);
+    let night =
+        loopwerk_ui::themes::ThemeEntry { id: "night".into(), theme: theme::Theme { name: "Night".into(), colors } };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_themes(&ctx, vec![night], Some("themes".into()));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Theme").click();
+    harness.run();
+    assert!(harness.query_by_label("Theme: Loopwerk Dark").is_some());
+    harness.get_by_label("Theme: Night").click();
+    harness.run();
+    assert_eq!(theme::accent(), colors.accent);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.theme), Some("night".into()));
+
+    // A copy to change becomes the theme in use, and is handed out to be written.
+    harness.get_by_label("Duplicate theme").click();
+    harness.run();
+    let saved = harness.state_mut().take_changed_themes();
+    assert_eq!(
+        saved.iter().map(|(id, t)| (id.as_str(), t.name.as_str())).collect::<Vec<_>>(),
+        [("night-copy", "Night copy")]
+    );
+    assert_eq!(harness.state().settings().theme, "night-copy");
+    harness.get_by_label("Reload themes").click();
+    harness.run();
+    assert!(harness.state_mut().take_theme_reload());
+
+    // A file saved elsewhere redraws the window.
+    colors.accent = egui::Color32::from_rgb(1, 2, 3);
+    let edited = loopwerk_ui::themes::ThemeEntry {
+        id: "night-copy".into(),
+        theme: theme::Theme { name: "Night copy".into(), colors },
+    };
+    harness.state_mut().put_theme(&ctx, edited);
+    assert_eq!(theme::accent(), colors.accent);
 }
 
 #[test]
@@ -722,6 +768,18 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.get_by_label("Settings page: Theme").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("settings-theme.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.get_by_label("Settings page: Arrangement").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("settings-arrangement.png")).unwrap_or_else(|e| panic!("{e}"));
     harness.get_by_label("Settings page: Shortcuts").click();
     harness.run();
     harness.remove_cursor();

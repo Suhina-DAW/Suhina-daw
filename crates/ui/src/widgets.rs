@@ -67,10 +67,10 @@ pub fn hover(ui: &Ui, response: &Response) -> f32 {
 pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color32) {
     let hover = hover(ui, response);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), on, motion::VALUE);
-    let off_fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
-    let off_text = motion::mix(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hover);
-    let on_fill = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, hover);
-    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::SURFACE_0, lit))
+    let off_fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
+    let off_text = motion::mix(theme::text_tertiary(), theme::text_secondary(), hover);
+    let on_fill = motion::mix(theme::text_value(), theme::text_primary(), hover);
+    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::surface_0(), lit))
 }
 
 /// A track's solo button: draws it in `rect` and returns the command a click asks for. A click
@@ -87,9 +87,9 @@ pub fn solo_button(
     let label = if solo { format!("End solo on {name}") } else { format!("Solo {name}") };
     let response = button_area(ui, rect, id, label);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), solo, motion::VALUE);
-    let off = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, &response));
-    painter.rect_filled(rect, 0.0, motion::mix(off, theme::ACCENT, lit));
-    let text = motion::mix(theme::TEXT_SECONDARY, theme::SURFACE_0, lit);
+    let off = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover(ui, &response));
+    painter.rect_filled(rect, 0.0, motion::mix(off, theme::accent(), lit));
+    let text = motion::mix(theme::text_secondary(), theme::surface_0(), lit);
     text_in(painter, rect, Align2::CENTER_CENTER, "S", theme::ui_font(theme::TEXT_SMALL), text);
     if !response.clicked() {
         return None;
@@ -104,17 +104,17 @@ pub fn solo_button(
 /// A dropdown field (components › Dropdown): the current choice and a chevron; the caller opens
 /// its menu from `response`.
 pub fn dropdown(ui: &Ui, painter: &Painter, rect: Rect, response: &Response, text: &str) {
-    let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, response));
+    let fill = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover(ui, response));
     painter.rect_filled(rect, 0.0, fill);
     let inner = rect.shrink2(Vec2::new(4.0, 0.0));
     let chevron = Rect::from_center_size(Pos2::new(inner.right() - 3.0, rect.center().y), Vec2::new(6.0, 4.0));
     painter.add(egui::Shape::convex_polygon(
         vec![chevron.left_top(), chevron.right_top(), chevron.center_bottom()],
-        theme::TEXT_TERTIARY,
+        theme::text_tertiary(),
         Stroke::NONE,
     ));
     let label = Rect::from_min_max(inner.min, Pos2::new(chevron.left() - 4.0, inner.bottom()));
-    text_in(painter, label, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::TEXT_VALUE);
+    text_in(painter, label, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::text_value());
 }
 
 /// What a value control did this frame.
@@ -176,8 +176,8 @@ pub fn value_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString, value
 /// `position` 0 … 1 (components › Mixer strip).
 pub fn knob(painter: &Painter, center: Pos2, size: f32, position: f32, pointer: Color32) {
     let radius = size * 9.0 / 22.0;
-    painter.circle_filled(center, radius, theme::SURFACE_2);
-    painter.circle_stroke(center, radius, theme::hairline(theme::TEXT_TERTIARY));
+    painter.circle_filled(center, radius, theme::surface_2());
+    painter.circle_stroke(center, radius, theme::hairline(theme::text_tertiary()));
     let angle = (-135.0 + 270.0 * position.clamp(0.0, 1.0)).to_radians();
     let tip = center + Vec2::new(angle.sin(), -angle.cos()) * (radius - 1.0);
     painter.line_segment([center, tip], Stroke::new(1.5, pointer));

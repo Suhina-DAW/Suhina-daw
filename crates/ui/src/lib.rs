@@ -14,6 +14,7 @@ pub mod session_view;
 pub mod settings;
 pub mod settings_view;
 pub mod theme;
+pub mod themes;
 pub mod timeline;
 pub mod waveform;
 pub mod widgets;

@@ -4,6 +4,8 @@
 // Release builds on Windows start without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod theme_files;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -24,13 +26,14 @@ usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations
                      default is the one chosen in Options > Settings
   --no-animations    turn the interface's animations off this time
 Without a project the window opens empty; drop a .als file on it to open one.
-Settings are kept in settings.txt and the keys in keymap.json, in Loopwerk's folder of the
-user's app data.";
+Settings are kept in settings.txt, the keys in keymap.json and themes in themes/<name>.json,
+in Loopwerk's folder of the user's app data.";
 
 /// The folder eframe keeps Loopwerk's window state in; the settings file lives beside it.
 const APP_ID: &str = "Loopwerk";
 const SETTINGS_FILE: &str = "settings.txt";
 const KEYMAP_FILE: &str = "keymap.json";
+const THEMES_FOLDER: &str = "themes";
 
 #[derive(Debug, PartialEq)]
 enum Source {
@@ -70,7 +73,10 @@ fn main() -> ExitCode {
         eframe::Renderer::Glow => Graphics::OpenGl,
         eframe::Renderer::Wgpu => Graphics::Gpu,
     };
-    let mut window = Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new() };
+    let mut themes = theme_files::ThemeFiles::new(eframe::storage_dir(APP_ID).map(|d| d.join(THEMES_FOLDER)));
+    let (theme_list, theme_warnings) = themes.read_all();
+    settings_warnings.extend(theme_warnings);
+    let mut window = Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new(), themes };
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
@@ -103,6 +109,8 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
             window.app.set_settings(&cc.egui_ctx, settings);
+            let folder = window.themes.folder_text();
+            window.app.set_themes(&cc.egui_ctx, theme_list, folder);
             window.app.set_keymap(keymap);
             if !animations {
                 App::set_animations(&cc.egui_ctx, false);
@@ -157,6 +165,7 @@ struct Window {
     audio_output: Option<String>,
     /// Each open project's decoded audio, kept so a project made active again can play.
     pools: HashMap<ProjectId, AudioPool>,
+    themes: theme_files::ThemeFiles,
 }
 
 impl eframe::App for Window {
@@ -194,6 +203,7 @@ impl eframe::App for Window {
         {
             self.app.set_status(Status::Error(e));
         }
+        self.sync_themes(ui.ctx());
     }
 }
 
@@ -219,6 +229,36 @@ impl Window {
                 self.share_about();
             }
             Err(e) => self.app.set_status(Status::Error(e.0)),
+        }
+    }
+
+    /// Writes the themes changed in Settings, reads them all again when asked, and reads a theme
+    /// file saved elsewhere. While a theme file is in use the folder is looked at every second.
+    fn sync_themes(&mut self, ctx: &eframe::egui::Context) {
+        for (id, theme) in self.app.take_changed_themes() {
+            if let Err(e) = self.themes.write(&id, &theme) {
+                self.app.set_status(Status::Error(e));
+            }
+        }
+        let (entries, warnings) = if self.app.take_theme_reload() {
+            let (entries, warnings) = self.themes.read_all();
+            let count = entries.len();
+            self.app.set_themes(ctx, entries, self.themes.folder_text());
+            if warnings.is_empty() {
+                self.app.set_status(Status::Done(format!("Read {count} theme files")));
+            }
+            (Vec::new(), warnings)
+        } else {
+            self.themes.changed()
+        };
+        for entry in entries {
+            self.app.put_theme(ctx, entry);
+        }
+        if let Some(warning) = warnings.first() {
+            self.app.set_status(Status::Error(warning.clone()));
+        }
+        if self.app.settings().theme != loopwerk_ui::theme::BUILT_IN {
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
     }
 
