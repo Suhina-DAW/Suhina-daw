@@ -1,0 +1,62 @@
+name: Generated docs
+
+# Regenerates docs/INDEX.md (from the documents' front matter) and docs/commands.md (from the
+# command registry) on main after every merge and commits them when they changed. Pull requests
+# leave both files alone, so two pull requests never conflict on them.
+#
+# The commit is pushed with a deploy key that the main ruleset lets bypass pull requests. Setup:
+# `ssh-keygen -t ed25519 -N "" -f docs-bot`, add docs-bot.pub under Settings › Deploy keys with
+# write access, docs-bot as the Actions secret DOCS_DEPLOY_KEY, and "Deploy keys" to the bypass
+# list of the main ruleset. Without the secret the files are generated but not pushed.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, in order; a run that finds main moved on leaves the work to the newer run.
+concurrency:
+  group: docs-generated
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
+      - name: Install ALSA headers (cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: docs/commands.md
+        run: |
+          cargo run --quiet -p loopwerk-cli -- commands --markdown > "$RUNNER_TEMP/commands.md"
+          mv "$RUNNER_TEMP/commands.md" docs/commands.md
+      - name: docs/INDEX.md
+        run: python3 scripts/docs.py index
+      - name: Commit and push when they changed
+        env:
+          HAS_KEY: ${{ secrets.DOCS_DEPLOY_KEY != '' }}
+        run: |
+          if git diff --quiet -- docs/INDEX.md docs/commands.md; then
+            echo "Generated documentation is current."
+            exit 0
+          fi
+          git diff --stat -- docs/INDEX.md docs/commands.md
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::warning::DOCS_DEPLOY_KEY is not set, so the regenerated files are not pushed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Docs: regenerate INDEX.md and commands.md" -- docs/INDEX.md docs/commands.md
+          if ! git push origin HEAD:main; then
+            echo "::notice::main moved on during this run; the run for the newer commit regenerates the files."
+          fi

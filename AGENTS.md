@@ -81,6 +81,7 @@ docs/
   spec/       clean-room specs written from observation (formats, behaviour, UI views)
   design/     UI design brief, component measurements and reference mockups (ADR 0009)
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
+  commands.md generated list of every command (loopwerk-cli commands --markdown)
 scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```
 
@@ -114,16 +115,23 @@ that no longer exists:
 | A crate's role, a dependency between crates, threads, how commands or data flow | [`docs/architecture.md`](docs/architecture.md), and the crate map above |
 | A decision recorded in an ADR | that ADR (status, consequences), or a new ADR that supersedes it |
 | What is read from a format, or behaviour described in a spec | the spec in `docs/spec/` |
-| Commands or MCP tools | [`docs/mcp.md`](docs/mcp.md) and the command list in [`ROADMAP.md`](ROADMAP.md) |
+| MCP tools, or how agents use commands | [`docs/mcp.md`](docs/mcp.md) (the command list, [`docs/commands.md`](docs/commands.md), is generated) |
 | What works for users | [`ROADMAP.md`](ROADMAP.md) › What works now, and [`README.md`](README.md) if it shows it |
 | A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
 
 A limit or a planned part that a change resolves is removed from the docs in the same change.
 
+**Write documents so parallel pull requests do not collide.** In a list that several changes add
+to (ROADMAP's *What works now*, the crate map), add a bullet or a row of your own rather than
+extending someone else's sentence. Leave generated files out of the change:
+[`docs/INDEX.md`](docs/INDEX.md) (from the documents' front matter) and
+[`docs/commands.md`](docs/commands.md) (from the command registry) are regenerated on `main` after
+every merge.
+
 ```sh
 python scripts/docs.py impact   # documents that cover code you changed but you have not updated
-python scripts/docs.py index    # after adding a document or changing its front matter
-python scripts/docs.py check    # what CI runs: front matter, covered paths, INDEX.md current
+python scripts/docs.py check    # what CI runs: front matter, covered paths
+python scripts/docs.py index    # to look at the index locally; do not commit it
 ```
 
 Every file under `docs/` starts with front matter (format in `scripts/docs.py`): `description`,

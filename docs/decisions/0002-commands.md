@@ -84,5 +84,7 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 - New behaviour starts as a command with tests, then gets a UI. The UI never edits the model
   directly.
 - Command ids are part of the public interface for agents; renaming one is a breaking change.
+- The registry is the only list of commands: [`docs/commands.md`](../commands.md) is generated
+  from it (`loopwerk-cli commands --markdown`) on `main` after every merge.
 - Saving to `.als` is not possible yet (there is no writer), so sessions opened from Live Sets
   can be changed, rendered and played, but not saved. A native project format comes later.

@@ -219,6 +219,30 @@ pub fn all_commands() -> Value {
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 
+/// `docs/commands.md`: every command in the order of [`all_commands`], as `loopwerk-cli commands
+/// --markdown` prints it.
+pub fn commands_markdown() -> String {
+    let mut out = String::from(
+        "# Commands\n\n\
+         Every command Loopwerk has, generated from the command registry in `crates/session` by\n\
+         `loopwerk-cli commands --markdown`; do not edit by hand. A workflow regenerates it on `main`\n\
+         after every merge, so pull requests leave it alone. The CLI, the MCP server and the UI run\n\
+         these same commands ([ADR 0002](decisions/0002-commands.md), [`mcp.md`](mcp.md)).\n\n\
+         | Command | Kind | What it does | Parameters |\n\
+         |---|---|---|---|\n",
+    );
+    let rows = PROJECT_COMMANDS
+        .iter()
+        .chain(plugin_commands())
+        .map(CommandSpec::markdown_row)
+        .chain(commands().iter().map(CommandSpec::markdown_row));
+    for row in rows {
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
 fn check_params(id: &str, expected: &[Param], params: &Value) -> Result<(), CommandError> {
     if !(params.is_object() || params.is_null()) {
         return Err(format!("{id}: parameters must be a JSON object").into());

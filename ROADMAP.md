@@ -196,13 +196,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
-- Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
-  `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `clip.move`,
-  `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
-  `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
-  `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
-  `plugins.check` (also as `loopwerk-cli plugins …`); for devices `devices.list`,
-  `track.devices`, `device.add`, `device.remove`, `device.setEnabled`, `device.setParam`.
+- Commands for the project, tracks, clips, undo, the open projects, plug-ins and devices:
+  [`docs/commands.md`](docs/commands.md) lists every one with its parameters (generated from the
+  registry; `loopwerk-cli commands` prints them).
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access

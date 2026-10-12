@@ -66,7 +66,8 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
 | `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |
 
 Commands are defined once in `loopwerk-session` (ADR 0002); the MCP server, the CLI and later
-the UI all run the same ones.
+the UI all run the same ones. [`commands.md`](commands.md) lists every command with its
+parameters; it is generated from the registry, so a new command needs no edit there.
 
 ## Errors
 

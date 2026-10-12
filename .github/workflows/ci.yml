@@ -59,7 +59,8 @@ jobs:
         with:
           # A pull request is checked out as a merge commit; its first parent is the base.
           fetch-depth: 2
-      - name: Front matter, covered paths and docs/INDEX.md
+      # docs/INDEX.md and docs/commands.md are generated on main (docs-generated.yml), not checked here.
+      - name: Front matter and covered paths
         run: python3 scripts/docs.py check
       # Warnings only: documents that describe code this pull request changes, left unchanged.
       - name: Documents that describe the changed code

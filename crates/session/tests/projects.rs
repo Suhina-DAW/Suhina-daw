@@ -145,3 +145,25 @@ fn project_commands_check_their_parameters() {
     assert!(run(&mut projects, "projects.switch", json!([1])).is_err());
     assert!(projects.execute_in(Some(a), "projects.list", &json!({})).is_err(), "no target for project commands");
 }
+
+#[test]
+fn the_commands_document_lists_every_command_once_with_its_parameters() {
+    let doc = loopwerk_session::commands_markdown();
+    let ids: Vec<String> = loopwerk_session::all_commands()
+        .as_array()
+        .map(|all| all.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    assert!(ids.len() > 20, "only {} commands", ids.len());
+    for id in &ids {
+        let rows = doc.lines().filter(|l| l.starts_with(&format!("| `{id}` |"))).count();
+        assert_eq!(rows, 1, "{id} has {rows} rows");
+    }
+    assert_eq!(doc.lines().filter(|l| l.starts_with("| `")).count(), ids.len());
+    assert!(doc.contains("| `track.setPan` | edit |"));
+    assert!(doc.contains("`track` (track):"));
+    assert!(doc.contains(", optional):"));
+    // Every row has the four columns: a `|` in a description would add one.
+    for row in doc.lines().filter(|l| l.starts_with("| `")) {
+        assert_eq!(row.replace(r"\|", "").matches('|').count(), 5, "{row}");
+    }
+}
