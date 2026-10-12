@@ -181,6 +181,5 @@ queued clips.
   per-block deadline through the `ipc` crate (which exists: blocks, deadline, crash and hang
   tests), state and control over messages, crashed or hung plug-ins restarted from their last
   state. `ipc` and `plugin-host` are the only crates allowed `unsafe` (M6).
-- **UI:** the browser, the detail area (device chain, clip editor), the
-  menu bar and settings, meters, and the commands they need (solo, arm, sends); the monospace
-  font the design brief asks for (M8).
+- **UI:** the browser, the detail area (device chain, clip editor), meters, configurable
+  shortcuts, and the commands they still need (arm, sends) (M8).
