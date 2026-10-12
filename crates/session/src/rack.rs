@@ -33,13 +33,16 @@ const SAVE_EVERY: Duration = Duration::from_secs(30);
 const ALL_NOTES_OFF: u8 = 123;
 const SUSTAIN: u8 = 64;
 
+/// The host process group a plug-in runs in (`None`: a process of its own).
+pub type ProcessGroup = Box<dyn Fn(&PluginInfo) -> Option<String> + Send + Sync>;
+
 /// What the session needs to start plug-ins: the catalog of installed ones, the host
 /// executable, and which plug-ins share a host process (ADR 0006, decision 2).
 pub struct PluginEnv {
     pub catalog: Catalog,
     pub host: PathBuf,
     /// The process group of a plug-in (`None`: a process of its own).
-    pub group: Box<dyn Fn(&PluginInfo) -> Option<String> + Send + Sync>,
+    pub group: ProcessGroup,
 }
 
 impl PluginEnv {
