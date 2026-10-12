@@ -564,7 +564,8 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     assert_eq!(remove, 1, "the added folder is listed with a Remove button");
 
     harness.get_by_label("Scan").click();
-    harness.run();
+    // The window keeps redrawing while the scan runs, so it is stepped, not run until still.
+    harness.step();
     for _ in 0..200 {
         if !harness.state().scanning() {
             break;
