@@ -29,6 +29,7 @@ const HEADER_ROW: f32 = 15.0;
 const FIELD: f32 = 16.0;
 const PAN_FIELD: f32 = 46.0;
 const ON_TOGGLE: f32 = 30.0;
+const SOLO: f32 = 18.0;
 /// The volume field on a return or main row.
 const FIXED_FIELD: f32 = 90.0;
 /// Points per beat: the default and the zoom range.
@@ -529,11 +530,18 @@ fn track_header(
     // Row 1: track on, colour, name.
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
     let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
-    let square = Rect::from_min_size(Pos2::new(toggle.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
+    let solo = Rect::from_min_size(Pos2::new(toggle.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
+    let square = Rect::from_min_size(Pos2::new(solo.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     painter.rect_filled(square, 0.0, if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) });
     let name = Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), row.max);
     let name_color = if lane.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), name_color);
+    if solo.intersects(clip)
+        && let Some(action) =
+            widgets::solo_button(ui, painter, solo, id.with("solo"), lane.track.0, &lane.name, lane.solo)
+    {
+        actions.push(action);
+    }
     if toggle.intersects(clip) {
         let label = if lane.mute { format!("Turn {} on", lane.name) } else { format!("Turn {} off", lane.name) };
         let response = widgets::button_area(ui, toggle.intersect(clip), id.with("on"), label);

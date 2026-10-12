@@ -436,6 +436,11 @@ fn mixer_strip(
         Vec2::new(inner.width(), theme::TOGGLE),
     );
     let label = if column.mute { format!("Turn {} on", column.name) } else { format!("Turn {} off", column.name) };
+    let solo = Rect::from_min_max(Pos2::new(toggle.right() - (toggle.width() - 2.0) / 3.0, toggle.top()), toggle.max);
+    let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
+    if let Some(action) = widgets::solo_button(ui, painter, solo, id.with("solo"), track.0, &column.name, column.solo) {
+        actions.push(action);
+    }
     let response = widgets::button_area(ui, toggle, id.with("on"), label);
     if response.clicked() {
         actions.push(Action::new("track.setMute", json!({ "track": track.0, "mute": !column.mute })));

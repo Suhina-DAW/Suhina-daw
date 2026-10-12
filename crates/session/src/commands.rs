@@ -174,6 +174,17 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_mute,
     },
     CommandSpec {
+        id: "track.setSolo",
+        label: "Solo a track or end its solo: while any track is soloed, only soloed tracks, the groups they play into and return tracks are heard",
+        params: &[
+            TRACK,
+            param("solo", ParamType::Bool, "true solos the track"),
+            optional("exclusive", ParamType::Bool, "true also ends every other solo (false by default)"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_solo,
+    },
+    CommandSpec {
         id: "clip.move",
         label: "Move an arrangement clip to a new start position, and to another track if asked",
         params: &[
@@ -413,6 +424,23 @@ fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError
     let mute = params.get("mute").and_then(Value::as_bool).ok_or("mute must be true or false")?;
     channel_param(session, params)?.mute = mute;
     Ok(json!({ "mute": mute }))
+}
+
+fn set_solo(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let solo = params.get("solo").and_then(Value::as_bool).ok_or("solo must be true or false")?;
+    let exclusive = match params.get("exclusive") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("exclusive must be true or false")?,
+    };
+    let id = channel_param(session, params)?.id;
+    for channel in &mut session.project.channels {
+        if channel.id == id {
+            channel.solo = solo;
+        } else if exclusive {
+            channel.solo = false;
+        }
+    }
+    Ok(json!({ "solo": solo }))
 }
 
 fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

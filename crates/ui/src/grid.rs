@@ -55,6 +55,7 @@ pub struct Column {
     /// The track's stop is queued for the next quantisation point.
     pub stop_queued: bool,
     pub mute: bool,
+    pub solo: bool,
     pub volume_db: f64,
     /// -1 is full left, 1 full right.
     pub pan: f64,
@@ -144,6 +145,7 @@ impl Grid {
                 slots,
                 stop_queued: queued == Some(Queued::Stop),
                 mute: channel.is_some_and(|c| c.mute),
+                solo: channel.is_some_and(|c| c.solo),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 pan: channel.map_or(0.0, |c| c.pan),
             };

@@ -218,3 +218,19 @@ fn a_clip_moves_to_another_track_that_takes_its_kind() {
     );
     assert!(run(&mut session, "clip.move", json!({ "track": "Bass", "index": 9, "start": 0, "to_track": 2 })).is_err());
 }
+
+#[test]
+fn solo_is_an_edit_and_can_be_exclusive() {
+    let mut session = Session::new(project());
+    run(&mut session, "track.setSolo", json!({ "track": "Bass", "solo": true })).unwrap();
+    run(&mut session, "track.setSolo", json!({ "track": "Lead", "solo": true })).unwrap();
+    let solos = |s: &Session| s.project().channels.iter().map(|c| c.solo).collect::<Vec<_>>();
+    assert_eq!(solos(&session), [true, true]);
+
+    run(&mut session, "track.setSolo", json!({ "track": "Lead", "solo": true, "exclusive": true })).unwrap();
+    assert_eq!(solos(&session), [false, true]);
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(solos(&session), [true, true]);
+    assert!(run(&mut session, "track.setSolo", json!({ "track": "Bass", "solo": "yes" })).is_err());
+}

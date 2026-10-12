@@ -224,6 +224,28 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     assert!(!harness.state().settings_open());
 }
 
+#[test]
+fn solo_is_exclusive_unless_ctrl_is_held() {
+    let mut harness = window(demo_app());
+    let solos = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().channels.iter().take(4).map(|c| c.solo).collect::<Vec<_>>())
+    };
+    harness.get_by_label("Solo Drums").click();
+    harness.run();
+    harness.get_by_label("Solo Keys").click();
+    harness.run();
+    assert_eq!(solos(&harness), Some(vec![false, false, true, false]));
+    harness.get_by_label("Solo Vox").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    assert_eq!(solos(&harness), Some(vec![false, false, true, true]));
+
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("End solo on Keys").click();
+    harness.run();
+    assert_eq!(solos(&harness), Some(vec![false, false, false, true]));
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.

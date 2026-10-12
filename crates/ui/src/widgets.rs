@@ -62,6 +62,34 @@ pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color3
     (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::SURFACE_0, lit))
 }
 
+/// A track's solo button: draws it in `rect` and returns the command a click asks for. A click
+/// solos the track alone; with Ctrl (Cmd) held it is added to the tracks already soloed.
+pub fn solo_button(
+    ui: &Ui,
+    painter: &Painter,
+    rect: Rect,
+    id: egui::Id,
+    track: u32,
+    name: &str,
+    solo: bool,
+) -> Option<Action> {
+    let label = if solo { format!("End solo on {name}") } else { format!("Solo {name}") };
+    let response = button_area(ui, rect, id, label);
+    let lit = motion::toward(ui.ctx(), response.id.with("on"), solo, motion::VALUE);
+    let off = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, &response));
+    painter.rect_filled(rect, 0.0, motion::mix(off, theme::ACCENT, lit));
+    let text = motion::mix(theme::TEXT_SECONDARY, theme::SURFACE_0, lit);
+    text_in(painter, rect, Align2::CENTER_CENTER, "S", theme::ui_font(theme::TEXT_SMALL), text);
+    if !response.clicked() {
+        return None;
+    }
+    let adding = ui.input(|i| i.modifiers.command);
+    Some(Action::new(
+        "track.setSolo",
+        serde_json::json!({ "track": track, "solo": !solo, "exclusive": !solo && !adding }),
+    ))
+}
+
 /// What a value control did this frame.
 pub enum Drag {
     None,

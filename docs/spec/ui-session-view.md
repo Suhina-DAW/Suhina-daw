@@ -6,6 +6,7 @@ status: draft
 last_verified: 2026-10-12
 covers:
   - crates/ui/src/session_view.rs
+  - crates/engine/src/lib.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/app.rs
 ---
@@ -98,7 +99,10 @@ One knob per return track (A, B, …). Return tracks show pre/post toggles on th
 ### Mixer (toggleable, resizable height)
 
 Per track, top to bottom: pan, volume with numeric field and meter, track on/off (shows the
-track number), solo, arm (MIDI and audio tracks). MIDI tracks without an instrument show no
+track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
+soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
+the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
+the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
 

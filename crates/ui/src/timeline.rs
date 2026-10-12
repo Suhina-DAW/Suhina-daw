@@ -39,6 +39,7 @@ pub struct Lane {
     /// How many groups the track is inside.
     pub depth: usize,
     pub mute: bool,
+    pub solo: bool,
     pub volume_db: f64,
     pub pan: f64,
     pub clips: Vec<ClipBox>,
@@ -105,6 +106,7 @@ impl Timeline {
                 kind,
                 depth: depth(project, track.parent),
                 mute: channel.is_some_and(|c| c.mute),
+                solo: channel.is_some_and(|c| c.solo),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 pan: channel.map_or(0.0, |c| c.pan),
                 clips,

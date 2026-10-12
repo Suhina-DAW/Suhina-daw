@@ -112,9 +112,9 @@ Animations are short and only show a change of state; with animations off (a set
 |---|---|
 | Knob | 22 px; circle r 9, `surface.2` fill, 1 px `text.tertiary` stroke; pointer 1.5 px from centre to r 8, round cap; travel −135° … +135°; sends `#C9C4BB`, pan `text.primary` |
 | Values row | Pan left, volume right, 10 px mono |
-| Toggles | 18 px high in one row: track on (flex 2, shows the track number), solo (flex 1), arm (flex 1) |
+| Toggles | 18 px high in one row: track on (flex 2, shows the track number), solo (flex 1); arm (flex 1) to come |
 | Track on | On: `#C9C4BB` with `surface.0` text. Off: `surface.2` |
-| Solo | On: `accent` with `surface.0` text |
+| Solo | "S". On: `accent` with `surface.0` text; off: `surface.2`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
 | Arm | Off: 1.2 px `text.secondary` ring. On: `#3A2B2A` background, filled red dot |
 | Meter | Two 4 px bars, 2 px apart, on `surface.0`; `meter.ok`, the top 12 % `meter.hot` when above −3 dB |
 
@@ -137,7 +137,7 @@ The header reveals groups as the track grows. Thresholds are the heights at whic
 
 | Track height | Shows |
 |---|---|
-| ≥ 26 px | Row 1: track on (30 px, the track number), 6 px colour square, name; solo and arm (18 px) to come |
+| ≥ 26 px | Row 1: track on (30 px, the track number), solo (18 px), 6 px colour square, name; arm (18 px) to come |
 | ≥ 48 px | Volume field (full width) and pan field (46 px) |
 | ≥ 70 px | Send fields, one per return, labelled "Send A", "Send B" |
 | ≥ 114 px | Routing, with 4 px extra space above it: input and channel dropdowns, output dropdown ("→ Main"), monitor In / Auto / Off |

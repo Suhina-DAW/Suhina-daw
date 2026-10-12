@@ -19,7 +19,7 @@ pub use audio::{AudioData, AudioPool};
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
 pub use loopwerk_model as model;
-use loopwerk_model::{ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use loopwerk_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use stretch::StretchVoice;
 
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
@@ -594,6 +594,10 @@ pub fn render_launches(
 /// Equal-power pan and channel volume for a track; `None` when the track is silent (muted, or
 /// it has no channel). The volume and mute of every channel the track's output passes through
 /// (groups, then the master) apply too; their pan does not yet.
+///
+/// Solo: while any channel is soloed, a track sounds only if a channel on its way to the master
+/// is soloed (its own, or a group it plays into), or a soloed track plays into it (a group), or
+/// it is a return track, so effects stay audible.
 fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
@@ -612,6 +616,9 @@ fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
         volume *= gain(c);
         next = c.output.and_then(|id| project.channels.iter().find(|o| o.id == id));
     }
+    if !heard_with_solo(project, channel, &visited) {
+        return None;
+    }
     if let Some(master) = project.channels.iter().find(|c| c.role == ChannelRole::Master && !visited.contains(&c.id)) {
         if master.mute {
             return None;
@@ -622,6 +629,28 @@ fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     // Scaled so a centred note has unity gain on each side, and quieter overall to leave headroom.
     let scale = volume * std::f64::consts::SQRT_2 * 0.25;
     Some(((angle.cos() * scale) as f32, (angle.sin() * scale) as f32))
+}
+
+/// Whether a track whose output passes through `chain` is heard while channels are soloed.
+fn heard_with_solo(project: &Project, channel: &loopwerk_model::Channel, chain: &[ChannelId]) -> bool {
+    let soloed = |c: &loopwerk_model::Channel| c.solo && c.role != ChannelRole::Master;
+    if !project.channels.iter().any(soloed) || channel.role == ChannelRole::Effect {
+        return true;
+    }
+    let on_chain = project.channels.iter().any(|c| soloed(c) && chain.contains(&c.id));
+    // A group sounds when something soloed plays into it.
+    let feeds_it = project.channels.iter().filter(|c| soloed(c)).any(|c| {
+        let mut next = c.output;
+        for _ in 0..64 {
+            match next {
+                Some(id) if id == channel.id => return true,
+                Some(id) => next = project.channels.iter().find(|o| o.id == id).and_then(|o| o.output),
+                None => return false,
+            }
+        }
+        false
+    });
+    on_chain || feeds_it
 }
 
 /// Adds the notes of one content lane, as placed by `clip`, to `events`. Notes outside the clip's
@@ -861,6 +890,35 @@ mod tests {
         project.channels[1].mute = true;
         let out = render_offline(&project, SR, 256).unwrap();
         assert_onsets(&out, &[0, 2 * beat]);
+    }
+
+    #[test]
+    fn solo_leaves_only_soloed_tracks_their_groups_and_returns() {
+        let lanes = vec![
+            ContentLane { target: Some(TrackId(1)), data: LaneData::Notes(vec![note(0.0, 0.25, 36)]) },
+            ContentLane { target: Some(TrackId(2)), data: LaneData::Notes(vec![note(0.5, 0.25, 38)]) },
+        ];
+        let mut project = project_with(lanes, vec![clip(0.0, 1.0)], 2);
+        project.arrangement.lanes[0].track = None;
+        let beat = SR as usize / 2;
+
+        project.channels[1].solo = true;
+        assert_onsets(&render_offline(&project, SR, 256).unwrap(), &[beat / 2]);
+
+        // A return track stays audible.
+        project.channels[0].role = ChannelRole::Effect;
+        assert_onsets(&render_offline(&project, SR, 256).unwrap(), &[0, beat / 2]);
+        project.channels[0].role = ChannelRole::Regular;
+
+        // Soloing a group plays what is routed into it.
+        project.channels[1].solo = false;
+        project.channels.push(Channel { id: ChannelId(5), solo: true, ..project.channels[1].clone() });
+        project.channels[0].output = Some(ChannelId(5));
+        assert_onsets(&render_offline(&project, SR, 256).unwrap(), &[0]);
+
+        // Muting still wins over solo.
+        project.channels[0].mute = true;
+        assert_eq!(render_offline(&project, SR, 256), Ok(Vec::new()));
     }
 
     #[test]
