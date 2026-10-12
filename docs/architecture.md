@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -56,7 +56,7 @@ The engine does not run them yet (see *Planned parts*).
 | `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation. No behaviour beyond that. | nothing |
 | `stretch` | Time-stretching and pitch-shifting DSP for interleaved audio: a pure-Rust port of Signalsmith Stretch (MIT), behind every stretch mode except `Repitch` ([ADR 0003](decisions/0003-time-stretching.md)). | nothing (rustfft) |
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
-| `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), group and master gain. Never touches files. | model |
+| `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), device chains on tracks, with an instrument playing its track's notes ([ADR 0004](decisions/0004-built-in-devices.md)), group and master gain. Never touches files. | model, device-registry |
 | `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`. | engine |
 | `session` | An open project with its undo history (`Session`), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)) and the `Player` that connects a session to a running engine. | model, engine, als |
 | `automation` | The MCP server over the open projects, file roots for agents, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media |
@@ -65,7 +65,8 @@ The engine does not run them yet (see *Planned parts*).
 | `loopwerk-cli` | The command line: render, play, mcp. | all of the above |
 | `loopwerk` | The desktop app: opens a project (argument or a dropped `.als`), decodes its audio, plays it stopped through `output` and runs `ui` in an eframe window; loads and saves the settings file. | session, media, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
-| `device-api` | The `Device` trait, `DeviceInfo` and `ParamInfo` (plain values in their unit, conversion to knob travel), and the contract tests every device runs (`conformance::check`). | nothing |
+| `device-registry` | Every built-in device by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
+| `device-api` | The `Device` trait, `DeviceInfo` (an effect or an instrument) and `ParamInfo` (plain values in their unit, conversion to knob travel), `NoteEvent` for instruments, and the contract tests every device runs (`conformance::check`, with note checks for instruments). | nothing |
 | `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region, one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Not used by the engine yet. | nothing |
 | `plugins` | The engine's side of plug-in hosting: `Plugin::start` launches a `loopwerk-plugin-host` process and returns a control half (health, ping, state, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. `scan` and `scan_pool` find installed CLAP and VST3 plug-ins (standard folders, `CLAP_PATH`, folders the user adds), read VST3 bundles' `moduleinfo.json` without loading them and load the rest in a few long-lived `--scan-worker` processes with per-file timeouts, into a catalog that can be saved. `offline::render` runs audio through a plug-in without a deadline (`loopwerk-cli plugin run`). Not used by the engine yet. | ipc |
 | `plugin-host` | The `loopwerk-plugin-host` executable: answers control messages and serves plug-ins' main-thread callbacks on its main thread, and audio blocks on a thread of its own. Loads CLAP plug-ins (`clap:<file>[#<id>]`, through `clack-host`) and VST3 plug-ins (`vst3:<bundle>[#<class id>]`, through the `vst3` bindings), stereo in and out, with state and latency, and test plug-ins (`test:clap`, `test:vst3`, `test:gain`, `test:crash-after:<n>`, `test:hang-after:<n>`). `--scan <file>` and `--scan-worker` describe plug-in files for the scanner. The second crate allowed `unsafe`: opening plug-in files and the VST3 COM calls, each block documented. | ipc, plugins, clack |
@@ -74,6 +75,7 @@ The engine does not run them yet (see *Planned parts*).
 | `devices/dj-eq` | The DJ EQ: low, mid and high bands with gains and kills, movable crossovers at 24 or 48 dB/octave, flat when every gain is at 0 dB. | dsp, device-api |
 | `devices/vinyl-distortion` | Vinyl distortion: tracing (even harmonics in a band), pinch (odd harmonics, out of phase between the sides or mono) and crackle; shaped at twice the sample rate, 31 frames of latency. | dsp, device-api |
 | `devices/overdrive` | Pedal-style overdrive: a band into a biased, asymmetric soft curve at twice the sample rate, then tone, dynamics, dry/wet and output; 31 frames of latency. | dsp, device-api |
+| `devices/fm-synth` | The FM synth, an instrument: six operators, 32 algorithms, sixteen voices; the engine is a port of MSFA (the engine in Dexed, Apache-2.0) that matches it sample for sample; reads and writes DX7 voice files ([spec](spec/dx7-voice-format.md)). | device-api |
 
 ## From a file to the speakers
 
@@ -93,8 +95,9 @@ The engine does not run them yet (see *Planned parts*).
 3. **Build the renderer.** `Renderer::with_audio` turns the project into flat, sorted lists the
    audio thread can walk without searching: note events, audio events, one stretch voice per
    warped clip placement (two stretchers each, so a fresh one takes over before every strong
-   onset and transients stay on the grid; ADR 0003), the prepared launcher clips and the
-   per-track gains (group and master chain included). Every buffer the renderer will ever need
+   onset and transients stay on the grid; ADR 0003), the prepared launcher clips, the
+   per-track gains (group and master chain included) and a device chain for each track whose
+   channel holds built-in devices, made through `device-registry` and prepared (ADR 0004). Every buffer the renderer will ever need
    is allocated here. The player takes the stretch worker (`Renderer::take_stretch_worker`) and
    runs it on its own thread.
 4. **Play.** `Renderer::process` fills one block of interleaved stereo. It never allocates,
@@ -144,9 +147,11 @@ project directly.
 **Edits while playing** ([ADR 0005](decisions/0005-edits-while-playing.md)): after an Edit or
 History command changes the project, the session calls `Player::update`. The controller builds a
 new `Graph` (everything the renderer derives from the project) on the main thread and the audio
-thread swaps it in at an exact frame about 0.15 s ahead, carrying over the playhead (on the same
-beat when the tempo changed), the transport, sounding notes and the launcher's playing and
-queued clips.
+thread swaps it in at the start of the next block (0.15 s ahead when stretched arrangement clips
+need their voices moved first), carrying over the playhead (on the same beat when the tempo
+changed), the transport, sounding notes (which take their track's new mix), device chains and
+the launcher's playing and queued clips. A device parameter is not a new graph: it goes to the
+audio thread as a message, applied at the next block (ADR 0005, amendment).
 
 ## Where new code goes
 
@@ -171,10 +176,10 @@ queued clips.
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;
   launched clips' stretch voices still run on the audio thread.
 - **Native project format:** so edits can be saved; written and read by its own crate.
-- **Devices in the engine:** per-track buffers and device chains in the renderer, a registry
-  from `DeviceKind::Builtin` ids to the device crates, parameter values in the model, parameter
-  commands and automation ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
-  The devices themselves (`dsp`, `device-api`, `devices/*`) exist and are tested on their own.
+- **Device automation and more chains:** automation of device parameters, chains on group,
+  return and master channels, and latency compensation
+  ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet). Chains on tracks run and
+  `device.*` commands edit them.
 - **Plug-in host:** third-party plug-ins in their own processes, never in the engine's
   (AGENTS.md rule 5), as [ADR 0006](decisions/0006-plug-in-hosting.md) decides: a
   `loopwerk-plugin-host` executable per plug-in binary, shared-memory audio and events with a

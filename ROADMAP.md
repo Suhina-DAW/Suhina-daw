@@ -28,8 +28,12 @@ the first device.
   command and can be automated, from the UI, CLI and MCP alike. Because devices do not depend on
   the engine, they can later be split into their own repository or built as CLAP plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
-- **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion and the overdrive exist and are tested on their own; the
-  engine does not run devices yet (per-track chains come after the renderer swap, LOOP-26).
+- **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
+  overdrive and the FM synth (the first instrument: the DX7-style engine ported from MSFA, with
+  DX7 voice files) exist and are tested on their own. The engine runs them in chains on tracks:
+  a track's sound goes through its devices before its fader, and an instrument first in the
+  chain plays the track's notes (LOOP-35); `device.*` commands add, remove, switch and set them.
+  Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
   most used ones. After import, the user sees which devices came in exactly, approximately or as
@@ -90,7 +94,7 @@ placeholder):
 | Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
 | Saturator, Roar | multi-stage saturation | own, oversampled | planned |
 | EQ Eight, Auto Filter | EQ, filter | own (`dsp` filters) | planned |
-| Operator | FM synth | MSFA (Apache-2.0) via Dexed | planned |
+| Operator | FM synth | MSFA (Apache-2.0) via Dexed | DX7-style engine done; Operator's algorithms, waveforms and filter, and import, planned |
 | Wavetable | wavetable synth | Vital (GPL-3.0), under its own name | planned |
 | Drift, Analog | subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
 | Simpler, Sampler, Drum Rack | sampler, drum rack | own | planned |
@@ -184,7 +188,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M2 Playing
 - `loopwerk-cli play` plays a set, or one launcher scene, on the default audio device; `render`
   writes a 32-bit float WAV. Both run the same engine code.
-- MIDI notes play as sine tones until instruments arrive. Group and master volume and mute apply.
+- Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
+  instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
+  master volume and mute apply. `--fm` on `play` and `render` puts the FM synth on every MIDI
+  track, with a voice from a DX7 file; `loopwerk-cli fm-synth voices` lists a file's voices.
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
@@ -195,13 +202,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
-  `loopwerk-cli plugins …`).
+  `loopwerk-cli plugins …`); for devices `devices.list`, `track.devices`, `device.add`,
+  `device.remove`, `device.setEnabled`, `device.setParam`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
   only below granted roots ([`docs/mcp.md`](docs/mcp.md)).
-- Edits and undo/redo are heard by a playing engine about 0.15 s later, without a gap: a new
-  graph is swapped in at an exact frame and playing clips carry on
+- Edits and undo/redo are heard by a playing engine from its next audio block, without a gap:
+  a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
+  as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
 - Still to do: more commands (notes, clips, sends, tracks), a native project format so edits can
   be saved, MCP resources.

@@ -18,6 +18,9 @@ loopwerk-media.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
 loopwerk-output.workspace = true
 serde_json.workspace = true
+loopwerk-device-api.workspace = true
+loopwerk-device-registry.workspace = true
+loopwerk-device-fm-synth.workspace = true
 loopwerk-plugins.workspace = true
 hound.workspace = true
 

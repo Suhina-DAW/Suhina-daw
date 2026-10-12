@@ -8,6 +8,8 @@ rust-version.workspace = true
 [dependencies]
 loopwerk-model.workspace = true
 loopwerk-stretch.workspace = true
+loopwerk-device-api.workspace = true
+loopwerk-device-registry.workspace = true
 rtrb.workspace = true
 
 [lints]

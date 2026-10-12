@@ -71,6 +71,14 @@ not to a project, so these also run on `Projects`, never change a project and re
 step. Agents over MCP may scan and list but not add or remove folders: a folder decides whose
 code a scan runs.
 
+## Amendment: device commands (2026-10-12)
+
+Devices on tracks are edited with ordinary **edit** commands, one undo step each:
+`device.add`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
+`track.devices` read. A device is addressed by its track and its index in the track's chain
+(`device`, from 0, as `track.devices` lists them), and a parameter by its stable id
+([ADR 0004](0004-built-in-devices.md)). Agents may run all of them.
+
 ## Consequences
 
 - New behaviour starts as a command with tests, then gets a UI. The UI never edits the model

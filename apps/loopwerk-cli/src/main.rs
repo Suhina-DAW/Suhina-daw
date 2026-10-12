@@ -10,8 +10,9 @@ use loopwerk_engine::AudioPool;
 use loopwerk_engine::model::*;
 
 const USAGE: &str = "\
-usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>]
-       loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher]
+usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>] [<fm>]
+       loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>]
+       loopwerk-cli fm-synth voices <file.syx>
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>)
        loopwerk-cli plugin run <plug-in> <in-audio> <out.wav> [--tail <seconds>]
@@ -26,6 +27,7 @@ commands:
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
             folders shows where scans look, add-folder and remove-folder change that
+  fm-synth  fm-synth voices: list the voices in a DX7 voice or bank file (.syx)
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
             that many seconds of silence for reverbs and delays to ring out (default 2)
@@ -37,7 +39,10 @@ options:
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
   --launcher         play only: start stopped and read launcher commands (scene 2, clip Bass 1,
                      stop Bass, quit, help) from standard input
-  --sample-rate      sample rate in Hz (render only; default 48000)";
+  --sample-rate      sample rate in Hz (render only; default 48000)
+  <fm>               --fm [--voices <file.syx>] [--voice <n>]: play every track's notes on the
+                     built-in FM synth, with voice n (from 1, default 1) of a DX7 voice or bank
+                     file, or its initial voice";
 
 #[derive(Debug)]
 enum Source {
@@ -52,6 +57,15 @@ struct Args {
     scene: Option<usize>,
     launcher: bool,
     sample_rate: u32,
+    fm: Option<FmChoice>,
+}
+
+/// `--fm`, with the voice to load.
+#[derive(Debug, Default)]
+struct FmChoice {
+    voices: Option<PathBuf>,
+    /// From 0.
+    voice: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +94,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Some("fm-synth") => match fm_synth(args.get(1..).unwrap_or_default()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        },
         Some("plugin") => match plugin(args.get(1..).unwrap_or_default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
@@ -122,6 +143,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
     let mut scene = None;
     let mut launcher = false;
     let mut source = None;
+    let mut fm: Option<FmChoice> = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let next = match arg.as_str() {
@@ -143,6 +165,22 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
             }
             "--launcher" => {
                 launcher = true;
+                None
+            }
+            "--fm" => {
+                fm.get_or_insert_with(FmChoice::default);
+                None
+            }
+            "--voices" => {
+                fm.get_or_insert_with(FmChoice::default).voices =
+                    Some(PathBuf::from(it.next().ok_or("--voices needs a .syx file")?));
+                None
+            }
+            "--voice" => {
+                let value = it.next().ok_or("--voice needs a number")?;
+                let n: usize = value.parse().map_err(|_| format!("invalid voice number: {value}"))?;
+                fm.get_or_insert_with(FmChoice::default).voice =
+                    n.checked_sub(1).ok_or("voices are numbered from 1")?;
                 None
             }
             other if other.starts_with('-') => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
@@ -169,6 +207,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         scene,
         launcher,
         sample_rate,
+        fm,
     })
 }
 
@@ -191,11 +230,88 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
             (import.project, audio)
         }
     };
-    let project = match args.scene {
+    let mut project = match args.scene {
         Some(scene) => scene_as_arrangement(&project, scene)?,
         None => project,
     };
+    if let Some(choice) = &args.fm {
+        let patch = load_voice(choice)?;
+        eprintln!("FM synth: {}", if patch.name().is_empty() { "(no name)".to_string() } else { patch.name() });
+        put_fm_synth_on_note_tracks(&mut project, &patch);
+    }
     Ok((project, audio))
+}
+
+/// The voice `--fm` asks for: from a DX7 voice or bank file, or the initial voice.
+fn load_voice(choice: &FmChoice) -> Result<loopwerk_device_fm_synth::Patch, String> {
+    let Some(path) = &choice.voices else { return Ok(loopwerk_device_fm_synth::Patch::default()) };
+    let voices = read_voices(path)?;
+    let count = voices.patches.len();
+    voices
+        .patches
+        .get(choice.voice)
+        .copied()
+        .ok_or_else(|| format!("{} has {count} voices; --voice must be from 1 to {count}", path.display()))
+}
+
+fn read_voices(path: &std::path::Path) -> Result<loopwerk_device_fm_synth::patch::Voices, String> {
+    const MAX_FILE: u64 = 1 << 20;
+    let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    if size > MAX_FILE {
+        return Err(format!("{} is too large for DX7 voice data", path.display()));
+    }
+    let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let voices = loopwerk_device_fm_synth::patch::read(&data).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !voices.checksum_ok {
+        eprintln!("warning: {}: the checksum does not match; the voices are read anyway", path.display());
+    }
+    Ok(voices)
+}
+
+/// Puts the FM synth with `patch` first on the channel of every track that plays notes, in
+/// place of an instrument already there.
+fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &loopwerk_device_fm_synth::Patch) {
+    use loopwerk_device_api::Device as _;
+    let mut synth = loopwerk_device_fm_synth::FmSynth::new();
+    synth.load_patch(patch);
+    let params: Vec<DeviceParam> = loopwerk_device_fm_synth::INFO
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| synth.param(i).map(|v| DeviceParam::new(p.id, v)))
+        .collect();
+    let device = Device {
+        name: loopwerk_device_fm_synth::INFO.name.into(),
+        kind: DeviceKind::Builtin(loopwerk_device_fm_synth::INFO.id.into()),
+        enabled: true,
+        state: None,
+        params,
+        extensions: Extensions::default(),
+    };
+    let channels: Vec<ChannelId> =
+        project.tracks.iter().filter(|t| t.content.notes).filter_map(|t| t.channel).collect();
+    for channel in project.channels.iter_mut().filter(|c| channels.contains(&c.id)) {
+        let first_is_instrument = channel.devices.first().is_some_and(|d| {
+            matches!(&d.kind, DeviceKind::Builtin(id) if loopwerk_device_registry::info(id)
+                .is_some_and(|i| i.role == loopwerk_device_api::Role::Instrument))
+        });
+        if first_is_instrument {
+            channel.devices.remove(0);
+        }
+        channel.devices.insert(0, device.clone());
+    }
+}
+
+/// `fm-synth voices <file.syx>`.
+fn fm_synth(args: &[String]) -> Result<(), String> {
+    let (Some("voices"), Some(path)) = (args.first().map(String::as_str), args.get(1)) else {
+        return Err(format!("usage: loopwerk-cli fm-synth voices <file.syx>\n\n{USAGE}"));
+    };
+    let voices = read_voices(std::path::Path::new(path))?;
+    for (i, patch) in voices.patches.iter().enumerate() {
+        println!("{:>2}  {}", i + 1, patch.name());
+    }
+    Ok(())
 }
 
 fn render(args: &Args) -> Result<(), String> {
@@ -471,5 +587,39 @@ mod tests {
         assert_eq!(scene_2.arrangement.lanes[0].clips.len(), 1);
         assert!(scene_as_arrangement(&project, 0).unwrap().arrangement.lanes[0].clips.is_empty());
         assert!(scene_as_arrangement(&project, 2).is_err());
+    }
+
+    #[test]
+    fn fm_plays_every_note_track_with_a_voice_from_a_bank() {
+        use loopwerk_device_fm_synth::{FmSynth, Patch, patch};
+        // A bank whose second voice is a two-operator sound, written to a file.
+        let mut synth = FmSynth::new();
+        let index = |id: &str| loopwerk_device_fm_synth::INFO.param_index(id).unwrap();
+        use loopwerk_device_api::Device as _;
+        synth.set_param(index("op2.level"), 80.0);
+        synth.set_param(index("op2.coarse"), 3.0);
+        let mut voice = synth.patch();
+        voice.set_name("TWO OPS");
+        let path = std::env::temp_dir().join(format!("loopwerk-cli-bank-{}.syx", std::process::id()));
+        std::fs::write(&path, patch::write_bank(&[Patch::default(), voice])).unwrap();
+
+        let choice = FmChoice { voices: Some(path.clone()), voice: 1 };
+        let loaded = load_voice(&choice).unwrap();
+        assert_eq!(loaded.name(), "TWO OPS");
+        assert!(load_voice(&FmChoice { voices: Some(path.clone()), voice: 40 }).is_err());
+        assert!(fm_synth(&["voices".into(), path.display().to_string()]).is_ok());
+
+        let mut project = demo_project();
+        put_fm_synth_on_note_tracks(&mut project, &loaded);
+        // Twice: the synth replaces the instrument it put there before.
+        put_fm_synth_on_note_tracks(&mut project, &loaded);
+        assert!(project.channels.iter().all(|c| c.devices.len() == 1));
+        let stored = &project.channels[0].devices[0];
+        assert_eq!(stored.kind, DeviceKind::Builtin("fm-synth".into()));
+        assert!(stored.params.iter().any(|p| p.id == "op2.coarse" && p.value == 3.0));
+        let samples = loopwerk_engine::render_offline(&project, 48_000, 512).unwrap();
+        let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.05 && peak <= 1.0, "peak {peak}");
+        let _ = std::fs::remove_file(path);
     }
 }

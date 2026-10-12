@@ -2194,6 +2194,9 @@ dependencies = [
  "hound",
  "loopwerk-als",
  "loopwerk-automation",
+ "loopwerk-device-api",
+ "loopwerk-device-fm-synth",
+ "loopwerk-device-registry",
  "loopwerk-engine",
  "loopwerk-media",
  "loopwerk-output",
@@ -2224,11 +2227,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopwerk-device-fm-synth"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+]
+
+[[package]]
 name = "loopwerk-device-overdrive"
 version = "0.0.1"
 dependencies = [
  "loopwerk-device-api",
  "loopwerk-dsp",
+]
+
+[[package]]
+name = "loopwerk-device-registry"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-device-auto-pan",
+ "loopwerk-device-dj-eq",
+ "loopwerk-device-fm-synth",
+ "loopwerk-device-overdrive",
+ "loopwerk-device-utility",
+ "loopwerk-device-vinyl-distortion",
 ]
 
 [[package]]
@@ -2255,6 +2278,8 @@ version = "0.0.1"
 name = "loopwerk-engine"
 version = "0.0.1"
 dependencies = [
+ "loopwerk-device-api",
+ "loopwerk-device-registry",
  "loopwerk-model",
  "loopwerk-stretch",
  "rtrb",
@@ -2320,6 +2345,8 @@ name = "loopwerk-session"
 version = "0.0.1"
 dependencies = [
  "loopwerk-als",
+ "loopwerk-device-api",
+ "loopwerk-device-registry",
  "loopwerk-engine",
  "loopwerk-model",
  "loopwerk-plugins",
