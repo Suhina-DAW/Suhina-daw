@@ -52,6 +52,8 @@ const FADE_HANDLE_HIT: f32 = 11.0;
 /// so the fade-out handle has room.
 const GAIN_FIELD: Vec2 = Vec2::new(44.0, 12.0);
 const GAIN_FIELD_INSET: f32 = 12.0;
+/// The play start marker on the ruler: a triangle this wide and tall, pointing down.
+const MARKER: Vec2 = Vec2::new(9.0, 6.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -226,6 +228,16 @@ impl ArrangementViewState {
     }
 }
 
+/// Where a click `raw` beats into the ruler puts the play start marker: on the clip grid, or
+/// where it was with `free` (Alt held); never before the start.
+fn ruler_beat(raw: f64, bar_beats: f64, beat_width: f32, free: bool) -> f64 {
+    let grid = snap(beat_width, bar_beats);
+    let beat = if free || grid <= 0.0 { raw } else { (raw / grid).round() * grid };
+    // Free clicks keep a thousandth of a beat, as the engine reports it.
+    let beat = if free { (beat * 1000.0).round() / 1000.0 } else { beat };
+    if beat.is_finite() { beat.max(0.0) } else { 0.0 }
+}
+
 /// The grid clips snap to at a zoom level: a sixteenth, a beat or a bar, whichever is at least
 /// a few points wide.
 fn snap(beat_width: f32, bar_beats: f64) -> f64 {
@@ -397,6 +409,31 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::line_strong()));
+
+    // A click on the ruler moves the play start marker there, on the clip grid (Alt: free); while
+    // playing, playback jumps there (`docs/spec/arrangement-editing.md` › Play position).
+    let ruler_response = ui.interact(ruler, Id::new("arrangement-ruler"), Sense::click());
+    ruler_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Ruler"));
+    if ruler_response.clicked()
+        && let Some(pointer) = ruler_response.interact_pointer_pos()
+    {
+        let free = ui.input(|i| i.modifiers.alt);
+        let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width);
+        actions.push(Action::new(
+            "transport.setPosition",
+            json!({ "beats": ruler_beat(raw, bar_beats, state.beat_width, free) }),
+        ));
+    }
+    // The marker: a small triangle hanging from the ruler's lower edge.
+    let marker_x = x_of(timeline.start_beat).round() + 0.5;
+    if (time.left()..=time.right()).contains(&marker_x) {
+        let (top, half) = (ruler.bottom() - MARKER.y, MARKER.x / 2.0);
+        ruler_painter.add(egui::Shape::convex_polygon(
+            vec![Pos2::new(marker_x - half, top), Pos2::new(marker_x + half, top), Pos2::new(marker_x, ruler.bottom())],
+            theme::text_primary(),
+            egui::Stroke::NONE,
+        ));
+    }
 
     // Header column top, beside the ruler: right-click moves the headers to the other side.
     let corner = Rect::from_x_y_ranges(headers, ruler.y_range());
@@ -1366,5 +1403,17 @@ mod tests {
         assert_eq!(snap(60.0, 4.0), 0.25);
         assert_eq!(snap(20.0, 4.0), 1.0);
         assert_eq!(snap(4.0, 3.0), 3.0);
+    }
+
+    #[test]
+    fn a_ruler_click_lands_on_the_clip_grid_unless_alt_is_held() {
+        // 8 points a beat: the grid is a bar.
+        assert_eq!(ruler_beat(17.9, 4.0, 8.0, false), 16.0);
+        assert_eq!(ruler_beat(18.1, 4.0, 8.0, false), 20.0);
+        // 60 points a beat: sixteenths.
+        assert_eq!(ruler_beat(2.13, 4.0, 60.0, false), 2.25);
+        assert_eq!(ruler_beat(2.1337, 4.0, 60.0, true), 2.134);
+        assert_eq!(ruler_beat(-3.0, 4.0, 8.0, true), 0.0);
+        assert_eq!(ruler_beat(f64::NAN, 4.0, 8.0, false), 0.0);
     }
 }

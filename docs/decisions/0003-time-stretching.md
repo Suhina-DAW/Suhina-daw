@@ -92,9 +92,10 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
    per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
    position in the clip. A worker that falls behind costs silence, counted as underruns, never
-   timing: late frames are dropped. When the transport stops, a lock-free handshake (request,
-   worker paused, rings emptied) lets the worker rewind the voices and fill the rings again
-   before the next start. Without a worker thread (offline rendering) the renderer fills the
+   timing: late frames are dropped. When the transport stops or the play start marker moves, a
+   lock-free handshake (request, worker paused, rings emptied) lets the worker move the voices to
+   the marker and fill the rings again before the next start; a jump while playing moves them the
+   same way, silent until the worker has caught up. Without a worker thread (offline rendering) the renderer fills the
    rings itself just before reading them, through the same voices and rings (rule 4); tests
    check that both give the same samples. Launched clips' voices still run on the audio thread.
 

@@ -242,6 +242,82 @@ fn dragging_a_clip_down_moves_it_to_the_next_track() {
     assert!(bass.contains(&64.0), "{bass:?}");
 }
 
+/// The demo project in the Arrangement view with `renderer` (stopped, made from the demo
+/// project) as its player, driven by the test instead of an audio device.
+fn arrangement_app_with_engine(renderer: &mut loopwerk_engine::Renderer) -> Harness<'static, App> {
+    let mut session = Session::new(demo_project());
+    session.attach_player(loopwerk_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness
+}
+
+/// Renders a block, so the engine takes the commands sent so far.
+fn render_a_block(renderer: &mut loopwerk_engine::Renderer) {
+    renderer.process(&mut [0.0f32; 2 * 64]);
+}
+
+#[test]
+fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
+    let mut renderer =
+        loopwerk_engine::Renderer::stopped(&demo_project(), &loopwerk_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let monitor = renderer.monitor();
+    let ruler = harness.get_by_label("Ruler").rect();
+    // 8 points a beat by default, so the grid is a bar: 130 points in is beat 16.25, bar 5.
+    let at = egui::pos2(ruler.left() + 130.0, ruler.center().y);
+    harness.hover_at(at);
+    harness.run();
+    harness.drag_at(at);
+    harness.drop_at(at);
+    harness.run();
+    render_a_block(&mut renderer);
+    assert_eq!(monitor.start_beat(), 16.0);
+    assert!(!monitor.running());
+
+    // Play starts there; Stop goes back to it, as the setting says by default.
+    harness.get_by_label("Play").click();
+    harness.run();
+    render_a_block(&mut renderer);
+    assert!(monitor.running() && monitor.beat() >= 16.0);
+    for _ in 0..400 {
+        render_a_block(&mut renderer);
+    }
+    harness.get_by_label("Stop").click();
+    // While playing the window repaints on its own: step it instead of running it to rest.
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat(), monitor.beat()), (false, 16.0, 16.0));
+
+    // With Stop set to stay, the marker moves to where it stopped.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    harness.get_by_label("Stop: Stay").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_changed_settings().map(|s| s.stop),
+        Some(loopwerk_ui::settings::StopReturn::Here)
+    );
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run();
+    for _ in 0..375 {
+        render_a_block(&mut renderer);
+    }
+    harness.get_by_label("Stop").click();
+    // While playing the window repaints on its own: step it instead of running it to rest.
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    // 375 blocks of 64 frames at 120 bpm are one beat, and the blocks around Play and Stop.
+    assert!((monitor.start_beat() - 17.0).abs() < 0.03, "{}", monitor.start_beat());
+}
+
 #[test]
 fn arrangement_headers_turn_tracks_off() {
     let mut harness = arrangement_app();

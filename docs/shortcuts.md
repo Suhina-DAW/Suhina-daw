@@ -50,7 +50,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 
 | Action | Keys |
 |---|---|
-| Play or stop (`transport.toggle`) | Space |
+| Play or stop (`transport.toggle`; Stop goes back to the play start marker or stays, as Settings › General › Stop says) | Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Open or close Settings (`settings.open`) | Ctrl+, |

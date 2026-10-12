@@ -44,7 +44,9 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
    once. Until then the column shows the launch as queued; a later launch in the same column
    replaces the queued one.
 3. **Launching starts the transport.** If the transport is stopped, launching a clip or scene
-   starts it at beat 0 and the launch happens immediately. **(hypothesis)**
+   starts it at the play start marker (beat 0 unless moved,
+   [arrangement editing](arrangement-editing.md) › Play position) and the launch happens
+   immediately. **(hypothesis)**
 4. **Playing a clip.** A launched clip plays from its start marker. With its loop on, it plays to
    the loop end, then repeats the loop region until it is stopped or replaced. With its loop off,
    it plays from the start marker to the end marker once and the column stops.
@@ -55,7 +57,9 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
    triggered.**)**
 6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
    quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
-   transport stops everything at once, and clears queued launches.
+   transport stops everything at once, and clears queued launches. A jump of the playhead
+   (`transport.setPosition` while playing) keeps queued launches, queued again for the next
+   boundary from the new beat.
 7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored.
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
@@ -81,7 +85,8 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   keeps its frame positions for now; a tempo map for the arrangement comes later.
 - **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
-  `transport.play`, `transport.stop`, `launcher.state`), sent to the audio thread through a
+  `transport.play`, `transport.stop`, `transport.setPosition`, `launcher.state`), sent to the
+  audio thread through a
   lock-free queue and applied at the start of the next audio block.
 
 ## To observe

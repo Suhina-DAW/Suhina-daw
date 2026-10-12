@@ -28,7 +28,7 @@ pub use audio::{AudioData, AudioPool};
 use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 use launcher::Launcher;
-pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
+pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
 pub use loopwerk_device_api::NoteEvent as DeviceEvent;
 use loopwerk_device_api::ProcessContext;
 pub use loopwerk_model as model;
@@ -195,6 +195,9 @@ pub struct Renderer {
     /// arrangement frame playing then: arrangement time is `position - origin + time_at_origin`.
     origin: u64,
     time_at_origin: u64,
+    /// The play start marker, in beats: where the transport starts and, while stopped, the
+    /// playhead (`docs/spec/arrangement-editing.md` › Play position).
+    start_beat: f64,
     running: bool,
     /// What the graph was built from, so a controller can build the next one (ADR 0005).
     audio: Arc<AudioPool>,
@@ -248,6 +251,7 @@ impl Renderer {
             position: 0,
             origin: 0,
             time_at_origin: 0,
+            start_beat: 0.0,
             running: true,
             audio: Arc::new(audio.clone()),
             swap: swap::SwapState::default(),
@@ -299,9 +303,9 @@ impl Renderer {
         self.graph.length
     }
 
-    /// The arrangement frame playing now.
+    /// The arrangement frame playing now; while stopped, the play start marker's.
     fn time(&self) -> u64 {
-        self.position - self.origin + self.time_at_origin
+        if self.running { self.position - self.origin + self.time_at_origin } else { self.start_frame() }
     }
 
     /// Whether the transport is running.
@@ -1674,5 +1678,145 @@ mod tests {
                 assert!((ratio - want).abs() < 0.01, "{edit:?} side {right}: {ratio}");
             }
         }
+    }
+
+    /// Renders `frames` frames from `renderer` in 333-frame blocks.
+    fn frames(renderer: &mut Renderer, frames: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; frames * 2];
+        for block in out.chunks_mut(333 * 2) {
+            renderer.process(block);
+        }
+        out
+    }
+
+    /// Notes before beat 2 end well before it; notes from beat 2 on.
+    fn notes_around_beat_two() -> Project {
+        let notes = vec![note(0.0, 0.25, 60), note(1.0, 0.25, 62), note(2.0, 0.5, 64), note(3.25, 0.5, 67)];
+        project_with(untargeted(notes), vec![clip(0.0, 4.0)], 1)
+    }
+
+    #[test]
+    fn playing_from_a_beat_renders_the_tail_of_the_whole_render() {
+        let beat = SR as usize / 2;
+        let project = notes_around_beat_two();
+        let whole = render_offline(&project, SR, 256).unwrap();
+        // Running from the start, jumped to beat 2 before the first block.
+        let mut renderer = Renderer::new(&project, SR).unwrap();
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        let tail = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert!(tail.iter().any(|s| s.abs() > 0.1));
+        assert_eq!(max_diff(&tail, &whole[2 * beat * 2..]), 0.0);
+        // Stopped, the marker set, then started: the same.
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        renderer.handle(LaunchCommand::Play);
+        let started = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert_eq!(max_diff(&started, &whole[2 * beat * 2..]), 0.0);
+    }
+
+    #[test]
+    fn audio_clips_play_from_their_middle_when_the_transport_starts_inside_them() {
+        let beat = SR as usize / 2;
+        for mode in [StretchMode::Repitch, StretchMode::Smooth] {
+            // 4 s on 8 beats at 120 bpm: the clip runs from beat 0 to 8.
+            let (project, pool) = stretched_project(440.0, 4.0, 8.0, 120.0, mode);
+            let whole = render_offline_with_audio(&project, &pool, SR, 333).unwrap();
+            let mut renderer = Renderer::stopped(&project, &pool, SR).unwrap();
+            renderer.handle(LaunchCommand::SetPosition { beat: 3.0 });
+            renderer.handle(LaunchCommand::Play);
+            let tail = frames(&mut renderer, whole.len() / 2 - 3 * beat);
+            let reference = &whole[3 * beat * 2..];
+            assert!(tail.iter().any(|s| s.abs() > 0.1), "{mode:?}");
+            let worst = max_diff(&tail, reference);
+            // A stretcher started mid-clip has no history yet: close, not identical.
+            let allowed = if mode == StretchMode::Repitch { 0.0 } else { 0.05 };
+            assert!(worst <= allowed, "{mode:?}: differs by {worst}");
+            assert_eq!(renderer.stretch_underruns(), 0, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_jump_while_playing_plays_on_from_the_new_beat() {
+        let beat = SR as usize / 2;
+        let project = notes_around_beat_two();
+        let whole = render_offline(&project, SR, 256).unwrap();
+        let mut renderer = Renderer::new(&project, SR).unwrap();
+        // Half a beat in (nothing sounding), jump to beat 2.
+        let before = frames(&mut renderer, beat / 2);
+        assert_eq!(max_diff(&before, &whole[..beat]), 0.0);
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        let after = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert_eq!(max_diff(&after, &whole[2 * beat * 2..]), 0.0);
+        let monitor = renderer.monitor();
+        assert!(monitor.running());
+        assert_eq!(monitor.start_beat(), 2.0);
+    }
+
+    #[test]
+    fn stop_returns_to_the_marker_and_a_second_stop_to_the_start() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.5 });
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (1.5, 1.5), "stopped, the playhead is at the marker");
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, SR as usize / 2);
+        assert!((monitor.beat() - 2.5).abs() < 1e-3, "{}", monitor.beat());
+        renderer.handle(LaunchCommand::Stop);
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (1.5, 1.5));
+        renderer.handle(LaunchCommand::Stop);
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn stop_here_moves_the_marker_to_the_playhead() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.0 });
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, SR as usize);
+        renderer.handle(LaunchCommand::StopHere);
+        frames(&mut renderer, 10);
+        assert!((monitor.start_beat() - 3.0).abs() < 1e-3, "{}", monitor.start_beat());
+        // The next start carries on from there.
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, 10);
+        assert!(monitor.beat() > 3.0 - 1e-3 && monitor.beat() < 3.01, "{}", monitor.beat());
+        // Stopped already, it goes to the start like Stop.
+        renderer.handle(LaunchCommand::StopHere);
+        renderer.handle(LaunchCommand::StopHere);
+        frames(&mut renderer, 10);
+        assert_eq!(monitor.start_beat(), 0.0);
+    }
+
+    #[test]
+    fn hostile_positions_are_ignored_or_kept_in_range() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        for (beat, want) in [(f64::NAN, 0.0), (-4.0, 0.0), (f64::INFINITY, 0.0), (1e300, MAX_START_BEAT)] {
+            renderer.handle(LaunchCommand::SetPosition { beat });
+            frames(&mut renderer, 1);
+            assert_eq!(monitor.start_beat(), want, "{beat}");
+        }
+        // Far past the end: plays silence, never panics.
+        renderer.handle(LaunchCommand::Play);
+        assert!(frames(&mut renderer, 1000).iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn the_metronome_waits_for_the_next_beat_after_a_start_between_beats() {
+        let project = project_with(untargeted(Vec::new()), vec![clip(0.0, 4.0)], 1);
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.5 });
+        renderer.handle(LaunchCommand::Play);
+        let out = frames(&mut renderer, SR as usize / 2);
+        // The first click is at beat 2, a quarter of a second in.
+        assert_onsets(&out, &[SR as usize / 4]);
     }
 }

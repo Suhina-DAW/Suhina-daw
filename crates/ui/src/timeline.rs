@@ -112,6 +112,8 @@ pub struct Timeline {
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
+    /// The play start marker: where the transport starts, in beats.
+    pub start_beat: f64,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
 }
@@ -185,17 +187,28 @@ impl Timeline {
         let end = lanes.iter().flat_map(|l| &l.clips).map(|c| c.start + c.length).fold(0.0, f64::max);
         let main_volume_db =
             project.channels.iter().find(|c| c.role == ChannelRole::Master).map(|c| gain_to_db(c.volume));
-        let mut timeline =
-            Self { lanes, main_volume_db, end, bar_beats, running: false, beat: 0.0, waveforms: Arc::default() };
+        let mut timeline = Self {
+            lanes,
+            main_volume_db,
+            end,
+            bar_beats,
+            running: false,
+            beat: 0.0,
+            start_beat: 0.0,
+            waveforms: Arc::default(),
+        };
         timeline.follow(monitor);
         timeline
     }
 
-    /// Takes the transport and playhead from the engine, leaving the rest as it was built.
+    /// Takes the transport, playhead and play start marker from the engine, leaving the rest as
+    /// it was built.
     pub fn follow(&mut self, monitor: Option<&LauncherMonitor>) {
-        let (running, beat) = monitor.map_or((false, 0.0), |m| (m.running(), m.beat()));
+        let (running, beat, start) = monitor.map_or((false, 0.0, 0.0), |m| (m.running(), m.beat(), m.start_beat()));
+        let beats = |b: f64| if b.is_finite() { b.max(0.0) } else { 0.0 };
         self.running = running;
-        self.beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+        self.beat = beats(beat);
+        self.start_beat = beats(start);
     }
 }
 

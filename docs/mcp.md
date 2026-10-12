@@ -30,7 +30,7 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Audio output.** With `--audio`, each opened project also plays on the default output device
   with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
-  `transport.setMetronome`,
+  `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
@@ -38,6 +38,13 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
+
+- **Play position.** `transport.setPosition {beats}` moves the play start marker, where
+  `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the
+  marker; with `return: "here"` the marker moves to where it stopped; stopping while stopped
+  moves the marker to beat 0. `launcher.state` reports `start_beat`. In a `project_render`
+  launch script, `transport.setPosition` then `transport.play` renders from that beat
+  ([arrangement editing](spec/arrangement-editing.md) › Play position).
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades;
   `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`, `clip.cut`, `clip.paste`,

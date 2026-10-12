@@ -342,6 +342,11 @@ impl App {
         self.shown
     }
 
+    /// `transport.stop`, with where the playhead goes from the settings.
+    fn stop_action(&self) -> Action {
+        Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
+    }
+
     pub fn status(&self) -> &Status {
         &self.status
     }
@@ -993,7 +998,7 @@ impl App {
             "view.arrangement" => self.shown = View::Arrangement,
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
-                actions.push(Action::new(if running { "transport.stop" } else { "transport.play" }, json!({})));
+                actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
             }
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
                 let Some((track, index)) = self.arrangement.selected_clip() else { return };
@@ -1150,7 +1155,7 @@ impl App {
         let stop = row(x, 28.0);
         let response = widgets::button_area(ui, stop, Id::new("stop"), "Stop");
         if response.clicked() {
-            actions.push(Action::new("transport.stop", json!({})));
+            actions.push(self.stop_action());
         }
         painter.rect_filled(
             stop,

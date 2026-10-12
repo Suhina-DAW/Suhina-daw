@@ -21,6 +21,26 @@ pub enum OnOpen {
     Replace,
 }
 
+/// Where the playhead goes when the transport stops (`transport.stop`'s `return`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StopReturn {
+    /// Back to the play start marker, where it started.
+    #[default]
+    Marker,
+    /// It stays where it stopped: the marker moves there.
+    Here,
+}
+
+impl StopReturn {
+    /// The value `transport.stop` takes for it.
+    pub fn param(self) -> &'static str {
+        match self {
+            Self::Marker => "marker",
+            Self::Here => "here",
+        }
+    }
+}
+
 /// How the detail area lays out a device chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceLayout {
@@ -51,6 +71,8 @@ pub struct Settings {
     /// MIDI clips moved over others stack instead of replacing them.
     pub midi_stacking: bool,
     pub on_open: OnOpen,
+    /// Where Stop leaves the playhead.
+    pub stop: StopReturn,
     pub device_layout: DeviceLayout,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
     /// without `.json`.
@@ -66,6 +88,7 @@ impl Default for Settings {
             sample_stacking: false,
             midi_stacking: false,
             on_open: OnOpen::Ask,
+            stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
             theme: crate::theme::BUILT_IN.into(),
         }
@@ -94,11 +117,12 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\ndevice_chain = {devices}\ntheme = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
             self.theme,
+            stop = self.stop.param(),
         )
     }
 
@@ -128,6 +152,8 @@ impl Settings {
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
                 ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
+                ("stop", "marker") => settings.stop = StopReturn::Marker,
+                ("stop", "here") => settings.stop = StopReturn::Here,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
                 ("theme", id) if is_theme_id(id) => settings.theme = id.to_string(),
@@ -158,6 +184,7 @@ mod tests {
             sample_stacking: true,
             midi_stacking: false,
             on_open: OnOpen::Replace,
+            stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
             theme: "Night blue".into(),
         };

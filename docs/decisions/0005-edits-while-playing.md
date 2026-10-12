@@ -32,7 +32,8 @@ clip; devices (ADR 0004) will add many more parameters.
 1. **The renderer is split into a graph and its state.** The *graph* is everything derived from
    the project: note and audio events, stretched clip placements and their stretch voices, the
    launcher's prepared clips, lengths and the tempo. The *state* is what playing has produced:
-   the playhead, the transport, sounding note voices, playing audio clips, and the launcher's
+   the playhead and the play start marker, the transport, sounding note voices, playing audio
+   clips, and the launcher's
    runtime (what each column plays, fades and has queued, the beat, the tempo, quantisation).
 2. **An edit builds a new graph off the audio thread.** `Controller::update(project)` builds it
    on the calling thread with the audio pool and sample rate the renderer was built with, and
@@ -56,9 +57,10 @@ clip; devices (ADR 0004) will add many more parameters.
 5. **Nothing is freed on the audio thread.** The old graph goes back to the controller through
    a second queue and is dropped there, on the next update or when the controller is dropped. If
    that queue is full, the audio thread keeps the old graph and takes no new one until it can.
-6. **If the playhead moved unexpectedly** (the transport stopped or started between the build
-   and the swap), the swap moves the stretch voices to where the playhead really is
-   (`AheadReader::move_to`). Until the worker has done so, stretched clips are silent; they
+6. **If the playhead moved unexpectedly** (the transport stopped, started or jumped between the
+   build and the swap), the swap moves the stretch voices to where the playhead really is
+   (`AheadReader::move_to`); with the transport stopped, to the play start marker, where the
+   next start begins. Until the worker has done so, stretched clips are silent; they
    never play out of time.
 7. **The stretch worker thread serves every graph.** It owns a list of workers; a new graph's
    worker joins it before the graph is sent, and a worker leaves when its graph has been dropped.

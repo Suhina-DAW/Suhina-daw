@@ -1,7 +1,7 @@
 //! The command registry. Each command is a [`CommandSpec`]; new commands are added to
 //! [`COMMANDS`] with tests below.
 
-use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
+use loopwerk_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use loopwerk_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
@@ -348,17 +348,28 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "transport.play",
-        label: "Start the transport from the beginning: the arrangement plays, launches follow the beat",
+        label: "Start the transport from the play start marker (beat 0 unless moved): the arrangement plays, launches follow the beat",
         params: &[],
         kind: CommandKind::Transport,
         run: play,
     },
     CommandSpec {
         id: "transport.stop",
-        label: "Stop the transport, the arrangement and every launched clip at once",
-        params: &[],
+        label: "Stop the transport, the arrangement and every launched clip at once; stopping while stopped moves the play start marker to beat 0",
+        params: &[optional(
+            "return",
+            ParamType::Text,
+            "marker (default): the playhead goes back to the play start marker; here: the marker moves to where the playhead stopped",
+        )],
         kind: CommandKind::Transport,
         run: stop,
+    },
+    CommandSpec {
+        id: "transport.setPosition",
+        label: "Move the play start marker, where the transport starts; while playing, playback jumps there at once",
+        params: &[param("beats", ParamType::Number, "beats from the beginning, 0 … 120000")],
+        kind: CommandKind::Transport,
+        run: set_position,
     },
     CommandSpec {
         id: "transport.setMetronome",
@@ -1237,6 +1248,7 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
 fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     let monitor = session.player_mut()?.monitor();
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
+    let start_beat = monitor.start_beat();
     let monitor_metronome = monitor.metronome();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
@@ -1271,13 +1283,15 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
             })
         })
         .collect();
-    let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+    // Rounded once, so the beat and the position agree.
+    let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
     Ok(json!({
         "running": running,
         "metronome": monitor_metronome,
         "tempo_bpm": tempo,
-        "beat": (beat * 1000.0).round() / 1000.0,
+        "beat": beat,
         "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),
+        "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
     }))
 }
@@ -1291,9 +1305,24 @@ fn play(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(json!({ "transport": "playing" }))
 }
 
-fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
-    send(session, LaunchCommand::Stop)?;
+fn stop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let command = match params.get("return") {
+        None => LaunchCommand::Stop,
+        Some(Value::String(s)) if s == "marker" => LaunchCommand::Stop,
+        Some(Value::String(s)) if s == "here" => LaunchCommand::StopHere,
+        Some(other) => return Err(format!("return must be \"marker\" or \"here\", got {other}").into()),
+    };
+    send(session, command)?;
     Ok(json!({ "transport": "stopped" }))
+}
+
+fn set_position(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let beats = number(params, "beats")?;
+    if !(0.0..=MAX_START_BEAT).contains(&beats) {
+        return Err(format!("beats must be between 0 and {MAX_START_BEAT}, got {beats}").into());
+    }
+    send(session, LaunchCommand::SetPosition { beat: beats })?;
+    Ok(json!({ "start_beat": beats }))
 }
 
 fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

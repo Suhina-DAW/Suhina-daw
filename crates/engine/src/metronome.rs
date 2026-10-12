@@ -46,6 +46,15 @@ impl Metronome {
         self.sounding = None;
     }
 
+    /// Like [`Metronome::reset`] for a transport starting at `beat`: a start on a beat clicks,
+    /// a start between beats waits for the next one.
+    pub(crate) fn reset_at(&mut self, beat: f64) {
+        self.reset();
+        if beat.is_finite() && beat.fract().abs() > 1e-9 {
+            self.last_beat = Some(beat.floor() as i64);
+        }
+    }
+
     /// The click's sample for a frame at launcher beat `beat` (`bar_beats` beats to a bar).
     pub(crate) fn frame(&mut self, running: bool, beat: f64, bar_beats: f64) -> f32 {
         if running && beat.is_finite() {

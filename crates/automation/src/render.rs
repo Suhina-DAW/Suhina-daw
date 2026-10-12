@@ -295,6 +295,24 @@ mod tests {
     }
 
     #[test]
+    fn a_launch_script_can_move_the_play_start_marker() {
+        let path = temp_wav("position");
+        let steps = [
+            step(0.0, "transport.setPosition", json!({ "beats": 8 })),
+            step(0.0, "transport.play", json!({})),
+            step(0.5, "launcher.state", json!({})),
+            step(0.6, "transport.setPosition", json!({ "beats": -1 })),
+        ];
+        let (_, results) = render_launch_script(&project(), &AudioPool::new(), &path, SR, &steps, 1.0, None).unwrap();
+        assert_eq!(results[2]["result"]["start_beat"], 8.0);
+        // Half a second at 120 bpm: about a beat on from the marker (read as the last block began).
+        let beat = results[2]["result"]["beat"].as_f64().unwrap_or_default();
+        assert!((8.9..=9.0).contains(&beat), "{beat}");
+        assert_eq!(results[3]["ok"], false);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn launch_scripts_take_only_transport_and_read_commands() {
         let path = temp_wav("bad");
         let run = |steps: &[LaunchStep], seconds: f64| {

@@ -48,7 +48,8 @@ Layers: `model` (L0) ← `als`, `engine` (L1) ← `session` (L2) ← CLI, MCP, U
 
 ## Amendment: transport commands (2026-10-11)
 
-Launching clips and starting or stopping playback are commands too, of a fourth kind,
+Launching clips, starting or stopping playback and moving where it starts
+(`transport.setPosition`) are commands too, of a fourth kind,
 **transport** (next to read, edit and history). They act on the audio engine attached to the
 session (a `Player`: the renderer's lock-free command queue and its state monitor), never change
 the project and record no undo step. Without an attached engine they return an error that says

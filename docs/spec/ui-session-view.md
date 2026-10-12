@@ -28,7 +28,9 @@ From top to bottom:
    - groove amount, metronome, global launch quantisation
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
-     start, punch, loop, loop length
+     start, punch, loop, loop length. **Loopwerk:** play starts from the play start marker and
+     stop returns to it or stays, as Settings › General › Stop says
+     ([arrangement editing](arrangement-editing.md) › Play position)
    - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
    - view switches (Session / Arrangement)
 3. **Main area**, left to right:

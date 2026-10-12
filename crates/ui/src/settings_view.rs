@@ -6,7 +6,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
-use crate::settings::{DeviceLayout, Graphics, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, Graphics, OnOpen, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
 
@@ -232,6 +232,19 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 segmented(ui, &painter, control_rect(r, 3), "When opening a project", &options, settings.on_open)
             {
                 settings.on_open = choice;
+                outcome.changed = true;
+            }
+            section(&mut y, "Transport");
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Stop",
+                "Back to the play start marker, or stay where it stopped; stop again for the start",
+            );
+            let options = [("Marker", StopReturn::Marker), ("Stay", StopReturn::Here)];
+            if let Some(choice) = segmented(ui, &painter, control_rect(r, 2), "Stop", &options, settings.stop) {
+                settings.stop = choice;
                 outcome.changed = true;
             }
         }

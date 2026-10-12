@@ -157,7 +157,8 @@ track along the bottom edge.
 
 | Part | Spec |
 |---|---|
-| Bar ruler | 20 px, `surface.1`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `line`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart |
+| Bar ruler | 20 px, `surface.1`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `line`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart. A click sets the play start marker (`transport.setPosition`) to the beat under the pointer, on the clip grid of that zoom, Alt for free ([spec](../spec/arrangement-editing.md) › Play position) |
+| Play start marker | A 9 × 6 px triangle in `text.primary`, pointing down, its tip on the ruler's lower edge at the marker's beat |
 | Loop brace | (planned) a 14 px row under the ruler; 6 px bar `surface.3` with 1 px `text.tertiary` inset |
 | Zoom and moving | 8 px per beat by default, 1–400 px; Ctrl and the wheel zoom around the pointer, Alt and the wheel make every track lane taller or shorter (within 20–400 px) keeping the lane under the pointer in place, the wheel scrolls; holding the middle button down over the timeline moves it freely both ways (the cursor grabs) |
 | Grid lines | In the lanes and the fixed rows (not the empty space below the lanes): a 1 px `line` at each bar, and a 1 px `surface.1` line at each beat once beats are 10 px apart |
@@ -167,7 +168,7 @@ track along the bottom edge.
 | Audio marks | The waveform: one 1 px vertical line per pixel column in the track colour, from the lowest to the highest sample it covers (the engine's beat-to-file mapping: offset, loop, warp markers), scaled by the clip gain and its fades (both as they are dragged, before the edit lands); a centred line until the file is decoded. Clips at least 80 × 30 px show their gain 12 px from the top right (44 × 12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
 | Fades | On an audio clip: a 1 px `text.secondary` line from the bottom-left corner to where the fade-in ends at the top (2 px down, under the colour strip), and from where the fade-out starts to the bottom-right corner |
 | Fade handles | 7 × 7 px squares at the clip's top corners, inside the clip, shown while it is hovered or selected (and while dragged) on clips at least 21 × 14 px; with a fade, at the fade's end along the top edge. `text.secondary`, `text.primary` hovered, 1 px `surface.0` outline; an 11 × 11 px area takes the pointer, drawn and hit above the gain field. A horizontal drag sets the fade (`clip.setFades`): the fade's end snaps to the clip grid, Alt for free; double-click removes it |
-| Playhead | 1 px `accent` through the ruler and all lanes while playing |
+| Playhead | 1 px `accent` through the ruler and all lanes while playing; while stopped, at the play start marker once it is past beat 0 |
 | Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1` (`surface.2` when selected), 5 px top/bottom and 6 px side padding (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
 | Return and main rows | 20 px each along the bottom, `surface.1` headers: the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only) |
 
@@ -234,6 +235,7 @@ read-only setting (Output) shows its value as the note.
 | Page | Setting | Values |
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
+| General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | Interface | Animations | On (default), Off |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |

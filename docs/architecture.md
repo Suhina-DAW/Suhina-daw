@@ -121,12 +121,12 @@ The engine does not run them yet (see *Planned parts*).
 The main thread and the audio thread share nothing mutable. They talk in two directions:
 
 - **To the audio thread:** a `Controller` holds the producer end of a lock-free queue (`rtrb`)
-  of `LaunchCommand`s (play, stop, launch clip or scene, stop column, quantisation, back to
-  arrangement). `process` drains the queue at the start of each block. A second queue carries
+  of `LaunchCommand`s (play, stop, set the play start marker, launch clip or scene, stop column,
+  quantisation, back to arrangement). `process` drains the queue at the start of each block. A second queue carries
   new graphs after edits, and a third takes the old graphs back to be freed on the main thread
   (ADR 0005).
 - **From the audio thread:** a `LauncherMonitor` of atomics (running, beat, tempo, what each
-  column plays and has queued, the playhead, stretch underruns), read by the `launcher.state`
+  column plays and has queued, the playhead and the play start marker, stretch underruns), read by the `launcher.state`
   command and by `Controller::update` to pick the frame a new graph takes over at.
 
 ## Commands

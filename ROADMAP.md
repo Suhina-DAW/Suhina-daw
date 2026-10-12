@@ -199,7 +199,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `track.group`, `track.ungroup`, `track.move`, `track.rename`,
   `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`, `clip.setFades`, `clip.copy`, `clip.cut`, `clip.paste`,
-  `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
+  `edit.undo`, `edit.redo`; for the transport `transport.play`, `transport.stop`,
+  `transport.setPosition`, `transport.setMetronome`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
   `plugins.check`, `plugins.setHosting` (also as `loopwerk-cli plugins …`); for devices
@@ -231,7 +232,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Warped launched clips are time-stretched like arrangement clips, and re-pitched after a tempo
   change.
 - Transport commands (`clip.launch`, `scene.launch`, `track.stop`, `launcher.*`,
-  `transport.play`/`stop`) reach the audio thread through a lock-free queue:
+  `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
   `loopwerk-cli play --launcher` takes them as typed lines, `loopwerk-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
 - Still to do: follow actions, launch modes, per-clip quantisation, reading the global
@@ -281,6 +282,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
+  Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
+  marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
+  beginning ([spec](docs/spec/arrangement-editing.md)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the

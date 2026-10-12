@@ -112,7 +112,7 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
     for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport) {
-        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true });
+        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0 });
         let params: Value = params
             .as_object()
             .unwrap()
@@ -323,4 +323,74 @@ fn devices_added_while_playing_are_heard() {
     }
     let back = beat_peaks(&mut renderer, 5)[4];
     assert!((back / sine - 1.0).abs() < 0.01, "{sine} -> {back}");
+}
+
+#[test]
+fn the_play_start_marker_moves_and_stop_returns_to_it() {
+    let (mut session, mut renderer) = playing();
+    let set = run(&mut session, "transport.setPosition", json!({ "beats": 6.0 })).unwrap();
+    assert_eq!(set["start_beat"], 6.0);
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["position"].as_str()), (Some(6.0), Some("2.3")));
+
+    run(&mut session, "transport.play", json!({})).unwrap();
+    advance(&mut renderer, 2 * BEAT);
+    // The beat is published as a block starts.
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["position"], "3.1");
+
+    // Stop goes back to the marker; stop again goes to the beginning.
+    run(&mut session, "transport.stop", json!({})).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["position"].as_str()), (Some(6.0), Some("2.3")));
+    run(&mut session, "transport.stop", json!({ "return": "marker" })).unwrap();
+    advance(&mut renderer, 1);
+    assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["start_beat"], 0.0);
+
+    // "here" leaves the marker where the playhead stopped.
+    run(&mut session, "transport.play", json!({})).unwrap();
+    advance(&mut renderer, 3 * BEAT);
+    run(&mut session, "transport.stop", json!({ "return": "here" })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(3.0), Some(false)));
+
+    // While playing, a new position is a jump.
+    run(&mut session, "transport.play", json!({})).unwrap();
+    advance(&mut renderer, BEAT);
+    run(&mut session, "transport.setPosition", json!({ "beats": 0 })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["running"].as_bool(), state["position"].as_str()), (Some(true), Some("1.1")));
+}
+
+#[test]
+fn bad_positions_and_stop_returns_are_errors() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "transport.setPosition", json!({ "beats": 2 })).unwrap();
+    let bad = [
+        ("transport.setPosition", json!({ "beats": -1 })),
+        ("transport.setPosition", json!({ "beats": -0.001 })),
+        ("transport.setPosition", json!({ "beats": 120_000.5 })),
+        ("transport.setPosition", json!({ "beats": 1e300 })),
+        ("transport.setPosition", json!({ "beats": "NaN" })),
+        ("transport.setPosition", json!({ "beats": "4" })),
+        ("transport.setPosition", json!({ "beats": null })),
+        ("transport.setPosition", json!({})),
+        ("transport.stop", json!({ "return": "start" })),
+        ("transport.stop", json!({ "return": true })),
+    ];
+    for (id, params) in bad {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    // JSON has no NaN; a non-finite number from code is refused the same way.
+    assert!(run(&mut session, "transport.setPosition", json!({ "beats": f64::NAN })).is_err());
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(2.0), Some(false)));
+    // The largest position is accepted.
+    run(&mut session, "transport.setPosition", json!({ "beats": 120_000 })).unwrap();
 }

@@ -307,8 +307,10 @@ impl Renderer {
             }
             self.stretch_fresh = false;
         } else {
-            if swap.arrangement.is_some() {
-                self.graph.ahead.rewind();
+            // The new graph's voices are at the start; the next start is at the marker.
+            let start = self.start_frame();
+            if swap.arrangement.is_some() || start > 0 {
+                self.graph.ahead.move_to(start);
             }
             self.stretch_fresh = true;
         }
@@ -323,6 +325,7 @@ impl Renderer {
         monitor.arrangement.store(self.time(), Ordering::Relaxed);
         monitor.stretch_underruns.store(self.stretch_underruns(), Ordering::Relaxed);
         monitor.frames_per_beat.store(self.graph.frames_per_beat.to_bits(), Ordering::Relaxed);
+        monitor.start_beat.store(self.start_beat.to_bits(), Ordering::Relaxed);
     }
 }
 

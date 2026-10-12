@@ -57,9 +57,12 @@ const LAUNCHER_HELP: &str = "\
 commands (scenes count from 1; a track is its name or id):
   scene <n>             launch scene n
   clip <track> <n>      launch the clip in scene n of a track
-  stop <track>          stop a track's clip
+  stop <track>          stop a track's clip (a track named here: by its id)
   stopall               stop every clip
-  play / stop           start the transport from the beginning / stop everything now
+  play / stop           start the transport from the play start marker / stop everything now
+                        and go back to the marker (stop again: the marker to the beginning)
+  stop here             stop, and move the marker to where it stopped
+  pos <beats>           move the play start marker, e.g. pos 16 (bar 5 in 4/4); jumps while playing
   metronome on|off [db] click on every beat, e.g. metronome on -12
   quant <value>         launch quantisation: none, 8 bars ... 1 bar, 1/2 ... 1/32, triplets as 1/8T
   back                  tracks that launched clips play their arrangement again
@@ -150,6 +153,11 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["help" | "?"] => Ok(Line::Help),
         ["play"] => command("transport.play", json!({})),
         ["stop"] => command("transport.stop", json!({})),
+        ["stop", "here"] => command("transport.stop", json!({ "return": "here" })),
+        ["pos" | "position", beats] => {
+            let beats: f64 = beats.parse().map_err(|_| format!("{beats:?} is not a number of beats"))?;
+            command("transport.setPosition", json!({ "beats": beats }))
+        }
         ["stopall"] => command("launcher.stopAll", json!({})),
         ["back"] => command("launcher.backToArrangement", json!({})),
         ["state" | "s"] => command("launcher.state", json!({})),
@@ -288,6 +296,10 @@ mod tests {
         assert_eq!(parse_line("clip 4 1"), cmd("clip.launch", json!({ "track": 4, "scene": 1 })));
         assert_eq!(parse_line("stop"), cmd("transport.stop", json!({})));
         assert_eq!(parse_line("stop Drums"), cmd("track.stop", json!({ "track": "Drums" })));
+        assert_eq!(parse_line("stop here"), cmd("transport.stop", json!({ "return": "here" })));
+        assert_eq!(parse_line("pos 16"), cmd("transport.setPosition", json!({ "beats": 16.0 })));
+        assert_eq!(parse_line("position 2.5"), cmd("transport.setPosition", json!({ "beats": 2.5 })));
+        assert!(parse_line("pos bar5").is_err());
         assert_eq!(parse_line("quant 2 bars"), cmd("launcher.setQuantization", json!({ "value": "2 bars" })));
         assert_eq!(parse_line("tempo 100"), cmd("transport.setTempo", json!({ "bpm": 100.0 })));
         assert_eq!(parse_line("vol Lead Vox -6"), cmd("track.setVolume", json!({ "track": "Lead Vox", "db": -6.0 })));

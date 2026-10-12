@@ -27,7 +27,7 @@ undo step; edit.undo reverts it). Several projects can be open, like tabs: each 
 active; projects.list, projects.switch, projects.next and projects.close manage them, and the `project` argument \
 of a tool targets another open project without switching. project_render writes a WAV file below the write root; with `launches` it \
 renders clip launches offline. Transport commands (clip.launch, scene.launch, track.stop, transport.play, \
-launcher.state) play on a real audio device only when the server was started with --audio.";
+transport.stop, transport.setPosition, launcher.state) play on a real audio device only when the server was started with --audio.";
 
 /// Most steps a single `command_batch` may run.
 const MAX_BATCH_STEPS: usize = 256;
