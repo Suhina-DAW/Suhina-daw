@@ -8,7 +8,9 @@
 //! of them does not click. With every parameter at its default the output equals the input
 //! exactly.
 
-use loopwerk_device_api::{Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Scale, Unit, check_sample_rate};
+use loopwerk_device_api::{
+    Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
+};
 use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
 use loopwerk_dsp::{DcBlocker, LinkwitzRiley, Smoother};
 
@@ -65,7 +67,7 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::toggle("bassMonoListen", "Bass Mono Listen", false),
 ];
 
-pub const INFO: DeviceInfo = DeviceInfo { id: "utility", name: "Utility", params: &PARAMS };
+pub const INFO: DeviceInfo = DeviceInfo { id: "utility", name: "Utility", role: Role::Effect, params: &PARAMS };
 
 const DEFAULT_SAMPLE_RATE: f64 = 48_000.0;
 

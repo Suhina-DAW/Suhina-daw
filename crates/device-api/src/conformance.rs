@@ -1,7 +1,9 @@
 //! Checks every device must pass, whatever it does. Each device crate calls [`check`] from a
-//! test; the checks cover the [`Device`] contract, not the device's sound.
+//! test; the checks cover the [`Device`] contract, not the device's sound. Instruments also go
+//! through note checks: a fixed performance played in blocks of every size, `reset` while notes
+//! sound, hostile events and every sample rate.
 
-use crate::{Device, ParamKind, ProcessContext};
+use crate::{Device, NoteEvent, ParamKind, ProcessContext, Role, controller};
 
 /// Frames of test signal per check.
 const FRAMES: usize = 8_192;
@@ -17,6 +19,9 @@ pub fn check(make: &dyn Fn() -> Box<dyn Device>) -> Vec<String> {
     check_block_sizes(make, &mut failures);
     check_reset(make, &mut failures);
     check_sample_rates(make, &mut failures);
+    if make().info().role == Role::Instrument {
+        check_notes(make, &mut failures);
+    }
     failures
 }
 
@@ -199,13 +204,144 @@ fn check_sample_rates(make: &dyn Fn() -> Box<dyn Device>, failures: &mut Vec<Str
     }
 }
 
+/// A short performance for instruments, as (frame, event): overlapping notes on and off frames
+/// that fall inside blocks, the sustain pedal, the bend wheel, the modulation wheel and pressure.
+pub fn test_notes() -> Vec<(usize, NoteEvent)> {
+    use NoteEvent::*;
+    vec![
+        (0, On { key: 60, velocity: 0.8 }),
+        (100, On { key: 64, velocity: 0.5 }),
+        (517, On { key: 67, velocity: 1.0 }),
+        (1_000, PitchBend(0.3)),
+        (1_500, Controller { number: controller::MODULATION, value: 0.7 }),
+        (2_000, Off { key: 60, velocity: 0.5 }),
+        (2_600, Controller { number: controller::SUSTAIN, value: 1.0 }),
+        (2_700, Off { key: 64, velocity: 0.5 }),
+        (3_000, Pressure(0.6)),
+        (3_500, Off { key: 67, velocity: 0.2 }),
+        (4_100, Controller { number: controller::SUSTAIN, value: 0.0 }),
+        (4_500, On { key: 48, velocity: 0.9 }),
+        (4_501, On { key: 48, velocity: 0.9 }),
+        (5_000, PitchBend(-1.0)),
+        (6_000, AllNotesOff),
+    ]
+}
+
+/// Plays `notes` on `device` into `frames` frames of silence, in blocks of `sizes` (repeated),
+/// split where an event falls, as the host does.
+fn play(device: &mut dyn Device, notes: &[(usize, NoteEvent)], sizes: &[usize], frames: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; frames * 2];
+    let mut frame = 0usize;
+    let mut next = 0usize;
+    for &size in sizes.iter().cycle() {
+        if frame >= frames || size == 0 {
+            break;
+        }
+        while let Some((at, event)) = notes.get(next)
+            && *at <= frame
+        {
+            device.event(*event);
+            next += 1;
+        }
+        let until = notes.get(next).map_or(frames, |(at, _)| (*at).min(frames));
+        let size = size.min(until - frame).max(1).min(frames - frame);
+        if let Some(block) = out.get_mut(frame * 2..(frame + size) * 2) {
+            device.process(&ProcessContext::default(), block);
+        }
+        frame += size;
+    }
+    out
+}
+
+fn check_notes(make: &dyn Fn() -> Box<dyn Device>, failures: &mut Vec<String>) {
+    let notes = test_notes();
+    let reference = play(make().as_mut(), &notes, &[512], FRAMES);
+    if !reference.iter().any(|s| s.abs() > 1e-3) {
+        failures.push("the test notes make no sound".into());
+    }
+    if let Some(n) = reference.iter().position(|s| !s.is_finite() || s.abs() > 1e4) {
+        failures.push(format!("the test notes produce {:?} at sample {n}", reference.get(n)));
+    }
+    for sizes in [&[1][..], &[7, 64, 333], &[1_024], &[3, 1, 250, 900]] {
+        let other = play(make().as_mut(), &notes, sizes, FRAMES);
+        let diff = largest_difference(&reference, &other);
+        if diff > TOLERANCE {
+            failures.push(format!("notes in blocks of {sizes:?} differ from blocks of 512 by {diff}"));
+        }
+    }
+
+    // Reset while notes sound, with the pedal down and the wheels moved, then play again.
+    let mut device = make();
+    let held = [
+        (0, NoteEvent::Controller { number: controller::SUSTAIN, value: 1.0 }),
+        (0, NoteEvent::PitchBend(0.8)),
+        (0, NoteEvent::On { key: 30, velocity: 1.0 }),
+        (10, NoteEvent::On { key: 90, velocity: 1.0 }),
+    ];
+    play(device.as_mut(), &held, &[256], 4_096);
+    device.reset();
+    let after = play(device.as_mut(), &notes, &[512], FRAMES);
+    let diff = largest_difference(&reference, &after);
+    if diff > TOLERANCE {
+        failures.push(format!("after reset with notes sounding the output differs from a fresh device by {diff}"));
+    }
+
+    // Hostile events: keys out of range, numbers that are not finite, far more notes than
+    // any polyphony.
+    let mut hostile = Vec::new();
+    for (i, value) in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -5.0, 5.0, 1e30, 0.5].into_iter().enumerate() {
+        hostile.push((i, NoteEvent::On { key: 200, velocity: value }));
+        hostile.push((i, NoteEvent::On { key: 61, velocity: value }));
+        hostile.push((i, NoteEvent::Off { key: 255, velocity: value }));
+        hostile.push((i, NoteEvent::PitchBend(value)));
+        hostile.push((i, NoteEvent::Pressure(value)));
+        for number in [0, controller::MODULATION, controller::SUSTAIN, controller::PORTAMENTO_TIME, 127, 255] {
+            hostile.push((i, NoteEvent::Controller { number, value }));
+        }
+    }
+    for round in 0..3 {
+        for key in 0..=127u8 {
+            hostile.push((10 + round * 200 + usize::from(key), NoteEvent::On { key, velocity: 1.0 }));
+        }
+    }
+    let mut device = make();
+    let loud = play(device.as_mut(), &hostile, &[512], FRAMES);
+    if let Some(n) = loud.iter().position(|s| !s.is_finite() || s.abs() > 1e4) {
+        failures.push(format!("hostile events produce {:?} at sample {n}", loud.get(n)));
+    }
+
+    // At the default settings, every note ends after all notes are released.
+    let mut device = make();
+    play(device.as_mut(), &notes, &[512], FRAMES);
+    device.event(NoteEvent::AllNotesOff);
+    let mut released = vec![0.0f32; 480_000 * 2];
+    for block in released.chunks_mut(1_024) {
+        device.process(&ProcessContext::default(), block);
+    }
+    let end = released.len().saturating_sub(2_048);
+    if released.iter().skip(end).any(|s| s.abs() > 1e-4) {
+        failures.push("notes still sound ten seconds after all notes are released".into());
+    }
+
+    let mut device = make();
+    for sr in [8_000.0, 22_050.0, 44_100.0, 96_000.0, 192_000.0, 384_000.0] {
+        if device.prepare(sr).is_err() {
+            continue;
+        }
+        let out = play(device.as_mut(), &notes, &[512], 2_048);
+        if out.iter().any(|s| !s.is_finite() || s.abs() > 1e4) {
+            failures.push(format!("notes at {sr} Hz produce non-finite or runaway output"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DeviceError, DeviceInfo, ParamInfo, Scale, Unit};
+    use crate::{DeviceError, DeviceInfo, ParamInfo, Role, Scale, Unit};
 
     const PARAMS: [ParamInfo; 1] = [ParamInfo::continuous("gain", "Gain", (0.0, 2.0), 1.0, Unit::None, Scale::Linear)];
-    const INFO: DeviceInfo = DeviceInfo { id: "broken", name: "Broken", params: &PARAMS };
+    const INFO: DeviceInfo = DeviceInfo { id: "broken", name: "Broken", role: Role::Effect, params: &PARAMS };
 
     /// Breaks the contract in two ways: it applies a gain change once per block (so the output
     /// depends on the block size) and keeps state across `reset`.

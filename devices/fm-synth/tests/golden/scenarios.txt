@@ -1,0 +1,128 @@
+# Golden renders for the FM synth: each scenario is played by the original MSFA engine (the
+# reference renderer, see README.md here) and by the port, which must match it sample for sample.
+#
+# scenario <name> <sample rate> <frames> <keep every n-th frame>
+# patch <155 voice bytes, operator 6 first> <operator switch>
+# perf <bend range> <bend step> <portamento> <glissando> <portamento time 0-99>
+#      <wheel range> <wheel pitch> <wheel amp> <wheel eg> <pressure range> <pitch> <amp> <eg>
+# event <frame> on <key> <velocity 0-127> | off <key> | bend <0-16383> | wheel <0-127>
+#       | pressure <0-127> | sustain <0|1>
+# Voices are written for these tests; none comes from a product's library.
+
+scenario init 48000 24000 3
+patch 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 99 0 1 0 7 99 99 99 99 50 50 50 50 0 0 1 35 0 0 0 1 0 3 24 73 78 73 84 32 86 79 73 67 69 63
+perf 2 0 0 0 0 50 1 0 0 0 0 0 0
+event 0 on 69 100
+event 20000 off 69
+end
+
+scenario epiano 48000 24000 3
+patch 95 29 20 50 99 95 0 0 41 0 19 0 3 3 0 6 79 0 14 0 10 95 20 20 50 99 95 0 0 0 0 0 0 0 3 0 2 99 0 1 0 4 95 29 20 50 99 95 0 0 0 0 0 0 0 3 0 6 89 0 1 0 7 95 20 20 50 99 95 0 0 0 0 0 0 0 3 0 2 99 0 1 0 10 80 70 30 60 99 90 80 0 50 30 40 1 2 2 0 4 70 0 3 25 9 96 25 25 67 99 75 0 0 0 0 0 0 0 3 0 2 99 0 1 0 7 94 67 95 60 50 50 50 50 4 6 1 34 33 0 0 0 4 3 24 69 80 73 65 78 79 32 84 83 84 63
+perf 2 0 0 0 0 50 1 0 0 0 0 0 0
+event 0 on 60 90
+event 300 on 64 70
+event 517 on 67 127
+event 9000 off 60
+event 9001 off 64
+event 12000 off 67
+end
+
+scenario brass 48000 24000 3
+patch 72 76 99 71 99 88 96 0 39 0 0 0 0 0 1 3 70 1 2 50 7 62 51 29 71 82 95 96 0 27 0 7 0 1 0 2 0 86 0 0 0 12 72 76 99 71 99 88 96 0 39 0 14 0 3 3 3 0 98 0 0 0 8 72 76 99 71 99 88 96 0 39 0 14 0 3 7 0 7 98 0 1 2 6 62 51 29 71 82 95 96 0 27 0 7 0 1 0 2 3 86 0 0 0 7 77 76 82 71 99 98 98 0 39 10 0 3 0 1 0 2 98 0 1 0 2 80 50 60 70 70 40 50 50 21 7 1 50 30 20 30 0 4 5 24 66 82 65 83 83 32 76 70 79 32 63
+perf 2 0 0 0 0 50 1 0 0 60 0 1 1
+event 0 on 48 110
+event 2000 wheel 100
+event 5000 pressure 80
+event 8000 bend 12000
+event 15000 off 48
+end
+
+scenario sh16 44100 20000 3
+patch 99 50 40 60 99 80 70 0 39 0 0 0 0 0 0 0 80 0 3 0 7 99 50 40 60 99 80 70 0 39 0 0 0 0 0 0 0 75 0 5 0 7 99 50 40 60 99 80 70 0 39 0 0 0 0 0 0 0 70 0 2 0 7 99 50 40 60 99 80 70 0 39 0 0 0 0 0 0 0 85 0 7 0 7 99 50 40 60 99 80 70 0 39 0 0 0 0 0 0 0 60 0 1 50 7 99 60 40 60 99 90 80 0 39 0 0 0 0 0 0 5 99 0 1 0 7 99 99 99 99 50 50 50 50 15 5 1 70 0 40 0 1 5 7 24 83 72 32 65 76 71 32 49 54 32 45
+perf 12 2 0 0 0 50 1 0 0 0 0 0 0
+event 0 on 72 64
+event 3000 bend 16383
+event 6000 bend 0
+event 8000 bend 8192
+event 10000 off 72
+event 10500 on 72 64
+event 16000 off 72
+end
+
+scenario porta 48000 20000 3
+patch 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 70 0 1 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 60 0 2 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 50 0 3 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 40 0 4 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 30 0 5 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 90 0 1 0 7 99 99 99 99 50 50 50 50 31 3 1 35 0 0 0 1 0 3 24 80 79 82 84 65 32 84 69 83 84 63
+perf 2 0 1 0 60 50 1 0 0 0 0 0 0
+event 0 on 60 100
+event 4000 on 72 100
+event 4100 off 60
+event 9000 off 72
+event 9500 sustain 1
+event 10000 on 55 100
+event 10500 off 55
+event 14000 sustain 0
+end
+
+scenario glissando 48000 20000 3
+patch 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 70 0 1 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 60 0 2 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 50 0 3 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 40 0 4 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 30 0 5 0 7 99 70 50 60 99 95 90 0 39 0 0 0 0 0 0 0 90 0 1 0 7 99 99 99 99 50 50 50 50 31 3 1 35 0 0 0 1 0 3 24 80 79 82 84 65 32 84 69 83 84 63
+perf 2 0 1 1 60 50 1 0 0 0 0 0 0
+event 0 on 60 100
+event 4000 on 72 100
+event 4100 off 60
+event 9000 off 72
+end
+
+scenario lowrate 22050 12000 2
+patch 95 29 20 50 99 95 0 0 41 0 19 0 3 3 0 6 79 0 14 0 10 95 20 20 50 99 95 0 0 0 0 0 0 0 3 0 2 99 0 1 0 4 95 29 20 50 99 95 0 0 0 0 0 0 0 3 0 6 89 0 1 0 7 95 20 20 50 99 95 0 0 0 0 0 0 0 3 0 2 99 0 1 0 10 80 70 30 60 99 90 80 0 50 30 40 1 2 2 0 4 70 0 3 25 9 96 25 25 67 99 75 0 0 0 0 0 0 0 3 0 2 99 0 1 0 7 94 67 95 60 50 50 50 50 4 6 1 34 33 0 0 0 4 3 24 69 80 73 65 78 79 32 84 83 84 63
+perf 2 0 0 0 0 50 1 0 0 0 0 0 0
+event 0 on 96 100
+event 0 on 24 100
+event 8000 off 96
+event 8000 off 24
+end
+
+scenario steal 48000 16000 3
+patch 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 40 30 50 99 70 60 0 39 0 0 0 0 0 0 0 60 0 2 0 7 99 30 20 40 99 90 80 0 39 0 0 0 0 0 0 0 99 0 1 0 7 99 99 99 99 50 50 50 50 0 0 0 35 0 0 0 1 0 3 24 83 84 69 65 76 32 84 69 83 84 63
+perf 2 0 0 0 0 50 1 0 0 0 0 0 0
+event 0 on 40 100
+event 100 on 41 100
+event 200 on 42 100
+event 300 on 43 100
+event 400 on 44 100
+event 500 on 45 100
+event 600 on 46 100
+event 700 on 47 100
+event 800 on 48 100
+event 900 on 49 100
+event 1000 on 50 100
+event 1100 on 51 100
+event 1200 on 52 100
+event 1300 on 53 100
+event 1400 on 54 100
+event 1500 on 55 100
+event 1600 on 56 100
+event 1700 on 57 100
+event 1800 on 58 100
+event 1900 on 59 100
+event 2100 on 45 80
+event 6000 off 40
+event 6000 off 41
+event 6000 off 42
+event 6000 off 43
+event 6000 off 44
+event 6000 off 45
+event 6000 off 46
+event 6000 off 47
+event 6000 off 48
+event 6000 off 49
+event 6000 off 50
+event 6000 off 51
+event 6000 off 52
+event 6000 off 53
+event 6000 off 54
+event 6000 off 55
+event 6000 off 56
+event 6000 off 57
+event 6000 off 58
+event 6000 off 59
+event 7000 off 45
+end

@@ -13,7 +13,9 @@
 //! output is the input exactly, delayed by the oversampler's [`LATENCY`] frames (reported to the
 //! host for compensation, whatever the settings).
 
-use loopwerk_device_api::{Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Scale, Unit, check_sample_rate};
+use loopwerk_device_api::{
+    Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
+};
 use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
 use loopwerk_dsp::shape::Curve;
 use loopwerk_dsp::{Biquad, Coefficients, DcBlocker, Oversampler2x, Smoother};
@@ -89,7 +91,8 @@ const PARAMS: [ParamInfo; param::COUNT] = [
     ParamInfo::continuous("crackleDensity", "Crackle Density", (0.1, 200.0), 10.0, Unit::Hertz, Scale::Logarithmic),
 ];
 
-pub const INFO: DeviceInfo = DeviceInfo { id: "vinyl-distortion", name: "Vinyl Distortion", params: &PARAMS };
+pub const INFO: DeviceInfo =
+    DeviceInfo { id: "vinyl-distortion", name: "Vinyl Distortion", role: Role::Effect, params: &PARAMS };
 
 const DEFAULT_SAMPLE_RATE: f64 = 48_000.0;
 /// Seed of the crackle's random numbers after a reset.

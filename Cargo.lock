@@ -564,6 +564,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopwerk-device-fm-synth"
+version = "0.0.1"
+dependencies = [
+ "loopwerk-device-api",
+]
+
+[[package]]
 name = "loopwerk-device-overdrive"
 version = "0.0.1"
 dependencies = [

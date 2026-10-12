@@ -7,6 +7,9 @@
 //! a stored value keeps its meaning if a range changes; [`ParamInfo`] converts to and from the
 //! 0..1 range a knob or an automation lane uses.
 //!
+//! Instruments also take notes: the host hands them [`NoteEvent`]s through [`Device::event`]
+//! between blocks, splitting a block where an event falls, as it does for automation.
+//!
 //! This crate depends on nothing in Loopwerk, so devices can be built, tested and later shipped
 //! as plug-ins without the engine.
 
@@ -45,6 +48,8 @@ pub enum ParamKind {
     Toggle,
     /// The value is the index of the chosen option.
     Choice(&'static [&'static str]),
+    /// A whole number between `min` and `max` (a level from 0 to 99, a number of semitones).
+    Integer,
 }
 
 /// One parameter of a device. `id` is stable: projects store values by it, so renaming it is a
@@ -77,6 +82,19 @@ impl ParamInfo {
         Self { id, name, kind: ParamKind::Toggle, min: 0.0, max: 1.0, default, unit: Unit::None }
     }
 
+    /// A whole number in `range`.
+    pub const fn integer(id: &'static str, name: &'static str, range: (i32, i32), default: i32, unit: Unit) -> Self {
+        Self {
+            id,
+            name,
+            kind: ParamKind::Integer,
+            min: range.0 as f64,
+            max: range.1 as f64,
+            default: default as f64,
+            unit,
+        }
+    }
+
     /// A choice between `options`; the default is the option at index `default`.
     pub const fn choice(
         id: &'static str,
@@ -88,8 +106,8 @@ impl ParamInfo {
         Self { id, name, kind: ParamKind::Choice(options), min: 0.0, max, default: default as f64, unit: Unit::None }
     }
 
-    /// `value` made valid for this parameter: limited to its range, rounded to a whole option
-    /// for toggles and choices, and the default when it is not a finite number.
+    /// `value` made valid for this parameter: limited to its range, rounded to a whole number
+    /// for toggles, choices and integers, and the default when it is not a finite number.
     pub fn clamp(&self, value: f64) -> f64 {
         if !value.is_finite() {
             return self.default;
@@ -97,7 +115,7 @@ impl ParamInfo {
         let value = value.clamp(self.min, self.max);
         match self.kind {
             ParamKind::Continuous(_) => value,
-            ParamKind::Toggle | ParamKind::Choice(_) => value.round(),
+            ParamKind::Toggle | ParamKind::Choice(_) | ParamKind::Integer => value.round(),
         }
     }
 
@@ -130,13 +148,24 @@ impl ParamInfo {
     }
 }
 
+/// Whether a device changes the sound it gets or makes its own from notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// Processes the signal in the buffer.
+    Effect,
+    /// Plays the notes it gets through [`Device::event`] and writes its output over the
+    /// buffer, whatever was in it.
+    Instrument,
+}
+
 /// What a device is: its stable id (the model's `DeviceKind::Builtin` id), the name the user
-/// sees, and its parameters in a fixed order. A parameter's index in `params` is how the host
-/// addresses it while playing.
+/// sees, whether it is an effect or an instrument, and its parameters in a fixed order. A
+/// parameter's index in `params` is how the host addresses it while playing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeviceInfo {
     pub id: &'static str,
     pub name: &'static str,
+    pub role: Role,
     pub params: &'static [ParamInfo],
 }
 
@@ -163,6 +192,38 @@ impl Default for ProcessContext {
     fn default() -> Self {
         Self { tempo: 120.0, beat: 0.0, playing: false }
     }
+}
+
+/// A note or a performance control for an instrument. Values are plain and in range for a
+/// well-behaved host, but a device must accept any value without misbehaving: keys above 127
+/// are ignored, numbers that are not finite are ignored, and the rest are limited to their
+/// range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NoteEvent {
+    /// A key goes down. `key` is a MIDI key (60 is middle C); `velocity` runs from 0.0 to 1.0,
+    /// and 0.0 counts as a release.
+    On { key: u8, velocity: f32 },
+    /// A key comes up; `velocity` (0.0 to 1.0) is how fast.
+    Off { key: u8, velocity: f32 },
+    /// A MIDI controller moved: `number` 0 to 127 (1 is the modulation wheel, 64 the sustain
+    /// pedal), `value` from 0.0 to 1.0.
+    Controller { number: u8, value: f32 },
+    /// The pitch bend wheel, from -1.0 (full down) through 0.0 to 1.0 (full up).
+    PitchBend(f32),
+    /// Channel pressure (aftertouch), from 0.0 to 1.0.
+    Pressure(f32),
+    /// Every held note is released, as if each key came up and the sustain pedal was lifted.
+    AllNotesOff,
+}
+
+/// MIDI controller numbers instruments commonly read from [`NoteEvent::Controller`].
+pub mod controller {
+    pub const MODULATION: u8 = 1;
+    pub const BREATH: u8 = 2;
+    pub const FOOT: u8 = 4;
+    pub const PORTAMENTO_TIME: u8 = 5;
+    pub const SUSTAIN: u8 = 64;
+    pub const PORTAMENTO: u8 = 65;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,10 +279,17 @@ pub trait Device: Send {
     /// The current (target) value of parameter `index`.
     fn param(&self, index: usize) -> Option<f64>;
 
-    /// Processes `buffer`, interleaved stereo (`buffer.len() / 2` frames), in place. A trailing
-    /// odd sample is left as it is. The output must not depend on how the host divides a stream
-    /// into blocks.
+    /// Processes `buffer`, interleaved stereo (`buffer.len() / 2` frames), in place. An
+    /// instrument writes its output over the buffer. A trailing odd sample is left as it is. The
+    /// output must not depend on how the host divides a stream into blocks.
     fn process(&mut self, context: &ProcessContext, buffer: &mut [f32]);
+
+    /// Takes a note or a performance control, at the frame where the next [`process`]
+    /// (Self::process) call starts: the host splits a block where an event falls, as it does
+    /// for automation. Effects ignore events; [`reset`](Self::reset) silences every note.
+    fn event(&mut self, event: NoteEvent) {
+        let _ = event;
+    }
 
     /// Delay the device adds, in frames, for the host to compensate.
     fn latency(&self) -> u32 {
@@ -238,6 +306,7 @@ mod tests {
     const GAIN: ParamInfo = ParamInfo::continuous("gain", "Gain", (-12.0, 12.0), 0.0, Unit::Decibels, Scale::Linear);
     const MODE: ParamInfo = ParamInfo::choice("mode", "Mode", &["A", "B", "C"], 1);
     const ON: ParamInfo = ParamInfo::toggle("on", "On", true);
+    const LEVEL: ParamInfo = ParamInfo::integer("level", "Level", (0, 99), 99, Unit::None);
 
     #[test]
     fn clamps_values_to_the_parameter() {
@@ -248,6 +317,9 @@ mod tests {
         assert_eq!(MODE.clamp(-3.0), 0.0);
         assert_eq!(ON.clamp(0.4), 0.0);
         assert_eq!(ON.default, 1.0);
+        assert_eq!(LEVEL.clamp(41.6), 42.0);
+        assert_eq!(LEVEL.clamp(120.0), 99.0);
+        assert_eq!(LEVEL.from_normalized(0.5), 50.0);
     }
 
     #[test]

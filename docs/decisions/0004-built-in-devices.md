@@ -3,7 +3,7 @@ description: The interface of built-in devices (Device trait, parameters, real-t
 read_when: device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/dsp/**
   - crates/device-api/**
@@ -67,6 +67,19 @@ the device code should not have to change when it lands.
 7. **Order of work per device** stays as the roadmap says: observed behaviour written down, our
    own design, DSP, import mapping, tests. The import mapping lives in the format crate
    (`crates/als`), never in the device.
+8. **Instruments take notes as events, between blocks** (added 2026-10-12 with the first one,
+   the FM synth, LOOP-16). `DeviceInfo::role` says whether a device is an `Effect` or an
+   `Instrument`; an instrument writes its output over the buffer. `Device::event` hands it a
+   `NoteEvent` (key on and off with velocity 0..1, a MIDI controller 0..1, pitch bend -1..1,
+   pressure, all notes off) at the frame where the next `process` starts: the host splits a
+   block where an event falls, exactly as for automation, so one mechanism times both and the
+   trait needs no event list. Values are plain and in range from a well-behaved host, but a
+   device accepts anything without misbehaving. Effects ignore events. Whole-number parameters
+   (a level from 0 to 99, an algorithm number) get their own kind, `ParamKind::Integer`, so they
+   never take a fraction. The contract tests add, for instruments, a fixed performance (notes
+   that start inside blocks, the sustain pedal, bend, the wheel, pressure) in every block size,
+   `reset` while notes sound, hostile events (keys over 127, values that are not numbers, far
+   more notes than voices), silence after all notes are released, and every sample rate.
 
 ## Not decided yet
 
@@ -76,8 +89,10 @@ the device code should not have to change when it lands.
 - **The engine side:** per-track buffers, device chains in the renderer, a registry from
   `DeviceKind::Builtin` ids to constructors, parameter commands in `session`, and automation
   lanes. This needs the renderer swap from LOOP-26/LOOP-32 and gets its own task.
-- **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out. Instruments
-  (which take notes) and side-chained dynamics extend it when the first one is built.
+- **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
+  Side-chained dynamics extend it when the first one is built.
+- **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI
+  Polyphonic Expression, per-note pitch); they come with the first instrument that uses them.
 
 ## Consequences
 
@@ -87,3 +102,7 @@ the device code should not have to change when it lands.
   passthrough at the defaults.
 - Parameter ids and device ids are stored in projects: renaming one is a breaking change, like a
   command id (ADR 0002).
+- An instrument that works in fixed internal blocks (the FM synth renders 64 frames at a time)
+  applies an event at its next internal block boundary on a grid counted from `reset`, which
+  keeps the output independent of the host's block sizes at the cost of up to one internal
+  block of timing.
