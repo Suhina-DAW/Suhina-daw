@@ -20,6 +20,10 @@ change. An action is one of:
 - any command that needs no parameters (`transport.play`, `edit.undo`, `launcher.stopAll`,
   `projects.next` …), the same commands the CLI and MCP run.
 
+Keys go to the actions, not to moving between buttons: Tab and the arrow keys never move the
+keyboard focus from widget to widget (a button holding it would also make every shortcut wait).
+Only a text field keeps the keys while it is being typed in.
+
 ## Changing keys
 
 Options › Settings › **Shortcuts** lists every action with its keys. **Change** waits for the next

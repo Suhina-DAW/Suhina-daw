@@ -511,6 +511,7 @@ impl App {
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
         self.dropped_files(ui);
+        keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
@@ -1250,6 +1251,22 @@ impl App {
 
 /// Darkens the view while a project file is dragged over the window, so it is clear the window
 /// takes the drop.
+/// Keys are the shortcuts' (Tab switches the view, the arrows move the selection): egui's own
+/// keyboard focus, which Tab and the arrows move from widget to widget, is kept to text fields.
+/// A button that held it would also make every shortcut wait, as if the user were typing.
+fn keys_for_shortcuts(ctx: &egui::Context) {
+    let focused = ctx.memory(|m| m.focused());
+    let typing = focused.is_some_and(|id| egui::text_edit::TextEditState::load(ctx, id).is_some());
+    if !typing {
+        ctx.memory_mut(|m| {
+            m.move_focus(egui::FocusDirection::None);
+            if let Some(id) = focused {
+                m.surrender_focus(id);
+            }
+        });
+    }
+}
+
 fn drop_overlay(ui: &Ui, area: Rect) {
     let is = |f: &egui::HoveredFile, ext: &str| {
         f.path.as_ref().is_none_or(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))

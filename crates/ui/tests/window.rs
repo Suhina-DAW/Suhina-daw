@@ -349,6 +349,24 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
 }
 
 #[test]
+fn tab_only_switches_the_view() {
+    let mut harness = window(demo_app());
+    harness.run();
+    for expected in [View::Arrangement, View::Session, View::Arrangement] {
+        harness.key_press(Key::Tab);
+        harness.run();
+        assert_eq!(harness.state().view(), expected);
+        // No widget took the keyboard, so the next Tab is a shortcut again.
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
+    for key in [Key::ArrowDown, Key::ArrowRight] {
+        harness.key_press(key);
+        harness.run();
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
+}
+
+#[test]
 fn solo_is_exclusive_unless_ctrl_is_held() {
     let mut harness = window(demo_app());
     let solos = |h: &Harness<'static, App>| {
