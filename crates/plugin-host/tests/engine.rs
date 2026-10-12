@@ -111,6 +111,8 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
                     offset: 0.0,
                     loop_range: None,
                     enabled: true,
+                    fade_in: 0.0,
+                    fade_out: 0.0,
                     extensions: Extensions::default(),
                 }],
             }],

@@ -145,6 +145,8 @@ fn clip_of(content: ContentId) -> Clip {
         offset: 0.0,
         loop_range: None,
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     }
 }

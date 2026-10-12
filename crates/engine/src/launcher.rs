@@ -527,10 +527,13 @@ fn plan_clip(
             }
             LaneData::Audio(region) => {
                 let Some(data) = audio.files.get(&region.file) else { continue };
-                // Placed at frame 0; a looping clip is given an endless length.
+                // Placed at frame 0; a looping clip is given an endless length. Fades belong to
+                // arrangement clips; a launched clip has only the click guard.
                 let placed = loopwerk_model::Clip {
                     start: 0.0,
                     length: if loop_range.is_some() { ENDLESS_BEATS } else { clip.length },
+                    fade_in: 0.0,
+                    fade_out: 0.0,
                     ..clip.clone()
                 };
                 let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
@@ -732,7 +735,6 @@ impl Renderer {
             let chains = &mut self.graph.chains;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
-            let fade_in = self.fade_frames;
             let (tempo, project_tempo) = (launcher.tempo_bpm, launcher.project_tempo_bpm);
             let Some(column) = launcher.columns.get_mut(index) else { continue };
             for state in [&mut column.playing, &mut column.fading] {
@@ -753,7 +755,7 @@ impl Renderer {
                             // The same fades as the direct reader: in at the start, out at a
                             // clip end.
                             let until_end = a.event.end as f64 - p.elapsed_frames;
-                            let fade = (p.elapsed_frames / fade_in).min(until_end / fade_in).clamp(0.0, 1.0) as f32;
+                            let fade = a.event.fades().gain(p.elapsed_frames, until_end);
                             (frame[0] * a.stretch_gains.0 * fade, frame[1] * a.stretch_gains.1 * fade)
                         }
                         _ => {
@@ -929,6 +931,8 @@ mod tests {
             offset: 0.0,
             loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }

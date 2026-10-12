@@ -18,8 +18,9 @@ use crate::keymap::Keymap;
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
-use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView};
+use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
+use crate::themes::{ThemeEntry, Themes};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
 
@@ -127,6 +128,8 @@ pub struct App {
     /// The Settings page is showing instead of the view.
     settings_open: bool,
     about: About,
+    /// The themes to pick from; the settings say which is in use.
+    themes: Themes,
 }
 
 impl Default for App {
@@ -169,6 +172,7 @@ impl App {
             settings_changed: false,
             settings_open: false,
             about: About::default(),
+            themes: Themes::default(),
         }
     }
 
@@ -347,6 +351,32 @@ impl App {
         motion::set_enabled(ctx, settings.animations);
         self.arrangement.headers_left = settings.track_headers == Side::Left;
         self.settings = settings;
+        theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
+    }
+
+    /// Uses the themes read from the theme files in `folder`, and draws with the one the settings
+    /// name (the built-in one when there is no such file).
+    pub fn set_themes(&mut self, ctx: &egui::Context, files: Vec<ThemeEntry>, folder: Option<String>) {
+        self.themes.set(files, folder);
+        theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
+    }
+
+    /// A theme file read again after it changed on disk; the window redraws in it if it is the
+    /// theme in use.
+    pub fn put_theme(&mut self, ctx: &egui::Context, entry: ThemeEntry) {
+        if self.themes.put(entry) {
+            theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
+        }
+    }
+
+    /// Themes changed in Settings, with their ids, for the app to write to their files.
+    pub fn take_changed_themes(&mut self) -> Vec<(String, theme::Theme)> {
+        self.themes.take_unsaved()
+    }
+
+    /// Whether the user asked to read the theme files again, once.
+    pub fn take_theme_reload(&mut self) -> bool {
+        self.themes.take_reload()
     }
 
     /// The waveforms of the open project's audio files, once they are decoded.
@@ -458,23 +488,23 @@ impl App {
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
-            .frame(egui::Frame::NONE.fill(theme::SURFACE_1).inner_margin(egui::Margin::symmetric(4, 0)))
+            .frame(egui::Frame::NONE.fill(theme::surface_1()).inner_margin(egui::Margin::symmetric(4, 0)))
             .show(ui, |ui| self.menu_bar(ui, &mut actions));
         if self.projects.len() >= 2 {
             egui::Panel::top("tabs")
                 .exact_size(TABS)
-                .frame(egui::Frame::NONE.fill(theme::SURFACE_0))
+                .frame(egui::Frame::NONE.fill(theme::surface_0()))
                 .show(ui, |ui| self.tab_row(ui, &mut actions));
         }
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
-            .frame(egui::Frame::NONE.fill(theme::SURFACE_1))
+            .frame(egui::Frame::NONE.fill(theme::surface_1()))
             .show(ui, |ui| self.control_bar(ui, grid.as_ref(), &mut actions));
         egui::Panel::bottom("status-bar")
             .exact_size(theme::STATUS_BAR)
-            .frame(egui::Frame::NONE.fill(theme::SURFACE_1))
+            .frame(egui::Frame::NONE.fill(theme::surface_1()))
             .show(ui, |ui| self.status_bar(ui, grid.as_ref()));
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::LINE)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::line())).show(ui, |ui| {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
@@ -572,9 +602,9 @@ impl App {
             }
         }
         let painter = ui.painter_at(splitter);
-        painter.rect_filled(splitter, 0.0, theme::SURFACE_2);
+        painter.rect_filled(splitter, 0.0, theme::surface_2());
         let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
-        painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::TEXT_TERTIARY);
+        painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_tertiary());
 
         // What it shows: the selected clip, or the selected track's devices.
         let (track, clip) = match self.shown {
@@ -623,7 +653,7 @@ impl App {
         let mut x = bar.left();
         for id in self.projects.ids() {
             let name = self.projects.name(id).unwrap_or("Untitled").to_string();
-            let galley = widgets::fitted(&painter, &name, theme::ui_font(theme::TEXT), theme::TEXT_PRIMARY, 180.0);
+            let galley = widgets::fitted(&painter, &name, theme::ui_font(theme::TEXT), theme::text_primary(), 180.0);
             let width = galley.size().x + PAD * 2.0 + 16.0;
             let tab = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(width, bar.height()));
             x = tab.right() + 1.0;
@@ -636,16 +666,16 @@ impl App {
                 actions.push(Action::new("projects.switch", json!({ "project": id.0 })));
             }
             let lit = motion::toward(ui.ctx(), response.id.with("active"), Some(id) == active, motion::VALUE);
-            let idle = motion::mix(theme::SURFACE_0, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response));
-            painter.rect_filled(tab, 0.0, motion::mix(idle, theme::SURFACE_1, lit));
-            let text = motion::mix(theme::TEXT_SECONDARY, theme::TEXT_PRIMARY, lit);
+            let idle = motion::mix(theme::surface_0(), theme::hover_on_surface_1(), widgets::hover(ui, &response));
+            painter.rect_filled(tab, 0.0, motion::mix(idle, theme::surface_1(), lit));
+            let text = motion::mix(theme::text_secondary(), theme::text_primary(), lit);
             painter.galley(Pos2::new(tab.left() + PAD, tab.center().y - galley.size().y / 2.0), galley, text);
-            let cross = motion::mix(theme::TEXT_TERTIARY, theme::TEXT_PRIMARY, widgets::hover(ui, &close_response));
+            let cross = motion::mix(theme::text_tertiary(), theme::text_primary(), widgets::hover(ui, &close_response));
             let c = close.center();
             for (a, b) in [(Vec2::new(-3.0, -3.0), Vec2::new(3.0, 3.0)), (Vec2::new(-3.0, 3.0), Vec2::new(3.0, -3.0))] {
                 painter.line_segment([c + a, c + b], theme::hairline(cross));
             }
-            painter.vline(tab.right() + 0.5, bar.y_range(), theme::hairline(theme::LINE));
+            painter.vline(tab.right() + 0.5, bar.y_range(), theme::hairline(theme::line()));
         }
     }
 
@@ -653,14 +683,14 @@ impl App {
     fn open_prompt_bar(&mut self, ui: &mut Ui) {
         let Some(path) = self.open_prompt.clone() else { return };
         let bar = ui.max_rect();
-        ui.painter().rect_filled(bar, 0.0, theme::SURFACE_1);
+        ui.painter().rect_filled(bar, 0.0, theme::surface_1());
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().to_string());
         let current = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
         let mut choice = None;
         let mut cancel = false;
         ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(PAD, 6.0))), |ui| {
             ui.horizontal_centered(|ui| {
-                ui.label(egui::RichText::new(format!("Open {name}:")).color(theme::TEXT_PRIMARY));
+                ui.label(egui::RichText::new(format!("Open {name}:")).color(theme::text_primary()));
                 if ui.button("In a new tab").clicked() {
                     choice = Some(OpenAs::NewTab);
                 }
@@ -797,14 +827,17 @@ impl App {
         if !self.plugins_read {
             self.read_plugins();
         }
-        let outcome = settings_view::show(
-            ui,
-            &mut self.settings,
-            &self.about,
-            &mut self.plugins,
-            &mut self.keymap,
-            &mut self.page,
-        );
+        let themes = self.themes.view(&self.settings.theme);
+        let sources =
+            Sources { about: &self.about, plugins: &mut self.plugins, themes: &themes, keymap: &mut self.keymap };
+        let outcome = settings_view::show(ui, &mut self.settings, sources, &mut self.page);
+        if let Some(request) = outcome.themes.clone() {
+            if let Some(id) = self.themes.request(&self.settings.theme, request) {
+                self.settings.theme = id;
+                self.settings_changed = true;
+            }
+            theme::set_palette(ui.ctx(), self.themes.palette(&self.settings.theme));
+        }
         if outcome.keymap_changed {
             self.keymap_changed = true;
         }
@@ -828,7 +861,7 @@ impl App {
         let several = self.projects.len() >= 2;
         let keymap = self.keymap.clone();
         let keys = move |action: &str| keymap.label(action).unwrap_or_default();
-        ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::TEXT_SECONDARY);
+        ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::text_secondary());
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Quit").clicked() {
@@ -1015,7 +1048,7 @@ impl App {
                 Align2::LEFT_CENTER,
                 "Loopwerk",
                 theme::ui_font(theme::TEXT),
-                theme::TEXT_SECONDARY,
+                theme::text_secondary(),
             );
             return;
         };
@@ -1037,7 +1070,7 @@ impl App {
         painter.rect_filled(
             tempo_rect,
             0.0,
-            motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response)),
+            motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response)),
         );
         let mono = theme::mono_font(theme::TEXT);
         widgets::text_in(
@@ -1046,21 +1079,21 @@ impl App {
             Align2::RIGHT_CENTER,
             &format!("{tempo_shown:.2}"),
             mono.clone(),
-            theme::TEXT_PRIMARY,
+            theme::text_primary(),
         );
         x = tempo_rect.right() + PAD;
         let session = self.session();
         let signature = session.map(|s| s.project().transport.time_signature);
         let signature = signature.map_or_else(String::new, |ts| format!("{} / {}", ts.numerator, ts.denominator));
         let ts_rect = row(x, 40.0);
-        widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::TEXT_SECONDARY);
+        widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::text_secondary());
         x = ts_rect.right() + PAD;
         let quant_rect = row(x, 64.0);
         let mut chosen = self.quantization;
         ui.scope_builder(egui::UiBuilder::new().max_rect(quant_rect), |ui| {
             egui::ComboBox::from_id_salt("quantization")
                 .width(quant_rect.width())
-                .selected_text(egui::RichText::new(chosen).font(mono.clone()).color(theme::TEXT_VALUE))
+                .selected_text(egui::RichText::new(chosen).font(mono.clone()).color(theme::text_value()))
                 .show_ui(ui, |ui| {
                     for q in QUANTIZATION {
                         ui.selectable_value(&mut chosen, q, egui::RichText::new(q).font(mono.clone()));
@@ -1080,9 +1113,9 @@ impl App {
             actions.push(Action::new("transport.play", json!({})));
         }
         let running = motion::toward(ui.ctx(), response.id.with("running"), grid.running, motion::VALUE);
-        let hover = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
-        painter.rect_filled(play, 0.0, motion::mix(hover, theme::SURFACE_3, running));
-        let glyph = motion::mix(theme::TEXT_PRIMARY, theme::ACCENT, running);
+        let hover = motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response));
+        painter.rect_filled(play, 0.0, motion::mix(hover, theme::surface_3(), running));
+        let glyph = motion::mix(theme::text_primary(), theme::accent(), running);
         let c = play.center();
         painter.add(egui::Shape::convex_polygon(
             vec![c + Vec2::new(-3.5, -5.0), c + Vec2::new(5.0, 0.0), c + Vec2::new(-3.5, 5.0)],
@@ -1098,26 +1131,26 @@ impl App {
         painter.rect_filled(
             stop,
             0.0,
-            motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response)),
+            motion::mix(theme::surface_2(), theme::hover_on_surface_2(), widgets::hover(ui, &response)),
         );
-        painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::TEXT_PRIMARY);
+        painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::text_primary());
         x = stop.right() + PAD;
         let position = row(x, 64.0);
-        painter.rect_filled(position, 0.0, theme::SURFACE_0);
+        painter.rect_filled(position, 0.0, theme::surface_0());
         widgets::text_in(
             &painter,
             position.shrink2(Vec2::new(PAD, 0.0)),
             Align2::LEFT_CENTER,
             &grid.position(),
             mono,
-            theme::TEXT_PRIMARY,
+            theme::text_primary(),
         );
 
         // Right: the view switch; the current view is underlined.
         let mut right = bar.right() - PAD;
         let mut underline_at = None;
         for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
-            let color = if self.shown == view { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+            let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
             let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
             let size = galley.size();
             let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
@@ -1125,7 +1158,7 @@ impl App {
             if response.clicked() {
                 self.shown = view;
             }
-            let color = motion::mix(color, theme::TEXT_PRIMARY, widgets::hover(ui, &response));
+            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
             let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
             painter.galley(pos, galley, color);
             if self.shown == view {
@@ -1138,18 +1171,22 @@ impl App {
             let ctx = ui.ctx();
             let x = motion::value(ctx, Id::new("view-underline-x"), x, motion::SLIDE);
             let width = motion::value(ctx, Id::new("view-underline-width"), width, motion::SLIDE);
-            painter.rect_filled(Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, 1.0)), 0.0, theme::TEXT_PRIMARY);
+            painter.rect_filled(
+                Rect::from_min_size(Pos2::new(x, y), Vec2::new(width, 1.0)),
+                0.0,
+                theme::text_primary(),
+            );
         }
-        painter.hline(bar.x_range(), bar.bottom() - 0.5, theme::hairline(theme::LINE));
+        painter.hline(bar.x_range(), bar.bottom() - 0.5, theme::hairline(theme::line()));
     }
 
     fn status_bar(&self, ui: &mut Ui, grid: Option<&Grid>) {
         let bar = ui.max_rect();
         let painter = ui.painter_at(bar);
         let (text, color) = match &self.status {
-            Status::Hint(t) => (t.as_str(), theme::TEXT_SECONDARY),
-            Status::Done(t) => (t.as_str(), theme::TEXT_SECONDARY),
-            Status::Error(t) => (t.as_str(), theme::RECORDING),
+            Status::Hint(t) => (t.as_str(), theme::text_secondary()),
+            Status::Done(t) => (t.as_str(), theme::text_secondary()),
+            Status::Error(t) => (t.as_str(), theme::recording()),
         };
         let right = grid.map(|g| {
             let tracks = g.columns.iter().filter(|c| c.kind != crate::grid::ColumnKind::Return).count();
@@ -1168,7 +1205,7 @@ impl App {
                 Align2::RIGHT_CENTER,
                 &right,
                 theme::ui_font(theme::TEXT_SMALL),
-                theme::TEXT_TERTIARY,
+                theme::text_tertiary(),
             );
         }
     }
@@ -1188,8 +1225,8 @@ fn drop_overlay(ui: &Ui, area: Rect) {
         return;
     }
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0.gamma_multiply(DROP_DIM * shown));
-    let text = theme::TEXT_PRIMARY.gamma_multiply(shown);
+    painter.rect_filled(area, 0.0, theme::surface_0().gamma_multiply(DROP_DIM * shown));
+    let text = theme::text_primary().gamma_multiply(shown);
     painter.text(area.center(), Align2::CENTER_CENTER, "Drop to open", theme::ui_font(theme::TEXT + 2.0), text);
 }
 
@@ -1198,13 +1235,13 @@ fn empty(ui: &mut Ui) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0);
+    painter.rect_filled(area, 0.0, theme::surface_0());
     painter.text(
         area.center(),
         Align2::CENTER_CENTER,
         "Drop a Live Set (.als) here to open it",
         theme::ui_font(theme::TEXT),
-        theme::TEXT_TERTIARY,
+        theme::text_tertiary(),
     );
 }
 

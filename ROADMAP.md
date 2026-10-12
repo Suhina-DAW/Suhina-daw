@@ -198,7 +198,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `track.group`, `track.ungroup`, `track.move`, `track.rename`,
-  `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`, `clip.copy`, `clip.cut`, `clip.paste`,
+  `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`, `clip.setFades`, `clip.copy`, `clip.cut`, `clip.paste`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
@@ -280,8 +280,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
-- A menu bar and a **Settings** page (Options › Settings, Ctrl+,): animations, which side the
-  track headers are on, the renderer (wgpu or OpenGL); saved in `settings.txt`.
+- A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
+  left: General, Interface (with Theme, Arrangement and Detail area under it), Graphics, Audio,
+  Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
+  OpenGL); saved in `settings.txt`.
+- **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Settings › Interface › Theme picks
+  one, changes its colours, duplicates it and reads the files again; a file saved in an editor
+  shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
 - The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
@@ -298,7 +304,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
-  gain, which a drag changes (`clip.setGain`).
+  gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
+- Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades
+  on the grid (Alt for free, double-click removes), the fades are drawn over the waveform, and
+  the engine plays them sample-accurately in renders and playback (`clip.setFades`,
+  [spec](docs/spec/arrangement-editing.md#fades)).
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
@@ -307,9 +317,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
-- A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
+- A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
-- Still to do: clip fades, input routing and sends, arm, meters, the browser, device editing
+- Still to do: fades read from Live Sets, input routing and sends, arm, meters, the browser, device editing
   and the clip editor in the detail area, installers.

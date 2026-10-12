@@ -103,6 +103,8 @@ pub struct ClipInfo {
     pub looping: bool,
     pub audio: bool,
     pub gain_db: Option<f64>,
+    /// Fade-in and fade-out in beats (`clip.setFades`).
+    pub fades: (f64, f64),
     pub notes: usize,
 }
 
@@ -174,6 +176,7 @@ pub fn build_with(
                 looping: placed.loop_range.is_some(),
                 audio: audio.is_some(),
                 gain_db: audio.map(gain_to_db),
+                fades: (placed.fade_in, placed.fade_out),
                 notes,
             },
             chain(project, id, plugins),
@@ -234,7 +237,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0);
+    painter.rect_filled(area, 0.0, theme::surface_0());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
         Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions),
@@ -272,7 +275,7 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0);
+    painter.rect_filled(area, 0.0, theme::surface_0());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
         Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions),
@@ -331,16 +334,16 @@ fn plugin_button(
         format!("{label} {}", device.name),
     );
     let hover = widgets::hover(ui, &response);
-    let fill = crate::motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
+    let fill = crate::motion::mix(theme::surface_2(), theme::hover_on_surface_2(), hover);
     painter.rect_filled(button, 0.0, fill);
-    painter.rect_stroke(button, 0.0, theme::hairline(theme::LINE_STRONG), egui::StrokeKind::Inside);
+    painter.rect_stroke(button, 0.0, theme::hairline(theme::line_strong()), egui::StrokeKind::Inside);
     widgets::text_in(
         painter,
         button,
         Align2::CENTER_CENTER,
         label,
         theme::ui_font(theme::TEXT_SMALL),
-        theme::TEXT_PRIMARY,
+        theme::text_primary(),
     );
     if response.clicked() {
         actions.push(Action::new(command, json!({ "track": track.0, "device": device.index })));
@@ -355,24 +358,24 @@ fn name_for_readers(ui: &Ui, rect: Rect, device: &DeviceBox) {
 }
 
 fn hint(painter: &egui::Painter, area: Rect, text: &str) {
-    painter.text(area.center(), Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT), theme::TEXT_TERTIARY);
+    painter.text(area.center(), Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT), theme::text_tertiary());
 }
 
 /// One device: a header with its on switch and name, then its parameters, one per row.
 fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
-    painter.rect_filled(rect, 0.0, theme::SURFACE_1);
+    painter.rect_filled(rect, 0.0, theme::surface_1());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
-    painter.rect_filled(header, 0.0, theme::SURFACE_2);
+    painter.rect_filled(header, 0.0, theme::surface_2());
     let switch = Rect::from_min_size(
         Pos2::new(header.left() + PAD, header.center().y - ON_SWITCH / 2.0),
         Vec2::splat(ON_SWITCH),
     );
     if device.enabled {
-        painter.rect_filled(switch, 0.0, theme::TEXT_PRIMARY);
+        painter.rect_filled(switch, 0.0, theme::text_primary());
     } else {
-        painter.rect_stroke(switch, 0.0, theme::hairline(theme::TEXT_TERTIARY), egui::StrokeKind::Inside);
+        painter.rect_stroke(switch, 0.0, theme::hairline(theme::text_tertiary()), egui::StrokeKind::Inside);
     }
-    let name_color = if device.enabled { theme::TEXT_PRIMARY } else { theme::TEXT_TERTIARY };
+    let name_color = if device.enabled { theme::text_primary() } else { theme::text_tertiary() };
     let name = Rect::from_min_max(
         Pos2::new(switch.right() + PAD, header.top()),
         Pos2::new(header.right() - PAD, header.bottom()),
@@ -384,7 +387,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         Align2::RIGHT_CENTER,
         &device.kind,
         theme::ui_font(theme::TEXT_TINY),
-        theme::TEXT_TERTIARY,
+        theme::text_tertiary(),
     );
 
     let body = Rect::from_min_max(
@@ -393,9 +396,9 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
     );
     if let Some(plugin) = &device.plugin {
         let color = match plugin.state {
-            PluginState::Crashed => theme::RECORDING,
-            PluginState::Running => theme::TEXT_SECONDARY,
-            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::TEXT_TERTIARY,
+            PluginState::Crashed => theme::recording(),
+            PluginState::Running => theme::text_secondary(),
+            PluginState::Stopped | PluginState::Loading | PluginState::Missing => theme::text_tertiary(),
         };
         widgets::text_in(
             painter,
@@ -419,7 +422,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             Align2::LEFT_CENTER,
             text,
             theme::ui_font(theme::TEXT_SMALL),
-            theme::TEXT_TERTIARY,
+            theme::text_tertiary(),
         );
         return;
     }
@@ -437,7 +440,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             Align2::LEFT_CENTER,
             id,
             theme::ui_font(theme::TEXT_SMALL),
-            theme::TEXT_SECONDARY,
+            theme::text_secondary(),
         );
         widgets::text_in(
             painter,
@@ -445,7 +448,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             Align2::RIGHT_CENTER,
             value,
             theme::mono_font(theme::TEXT_SMALL),
-            theme::TEXT_VALUE,
+            theme::text_value(),
         );
     }
 }
@@ -462,6 +465,9 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
     ];
     if info.audio {
         rows.push(("Gain", info.gain_db.map_or_else(|| "-".into(), |db| format!("{} dB", widgets::format_db(db)))));
+        let beats = |b: f64| if b > 0.0 { format!("{} beats", (b * 100.0).round() / 100.0) } else { "-".into() };
+        rows.push(("Fade in", beats(info.fades.0)));
+        rows.push(("Fade out", beats(info.fades.1)));
     } else {
         rows.push(("Notes", info.notes.to_string()));
     }
@@ -472,7 +478,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
         Rect::from_min_max(area.min, Pos2::new(area.left() + CLIP_WIDTH, area.bottom()))
     }
     .intersect(area);
-    painter.rect_filled(column, 0.0, theme::SURFACE_1);
+    painter.rect_filled(column, 0.0, theme::surface_1());
     let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
     widgets::text_in(
         painter,
@@ -480,7 +486,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
         Align2::LEFT_CENTER,
         &info.name,
         theme::ui_font(theme::TEXT),
-        theme::TEXT_PRIMARY,
+        theme::text_primary(),
     );
     let mut y = title.bottom() + PAD;
     for (label, value) in rows {
@@ -494,7 +500,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
             Align2::LEFT_CENTER,
             label,
             theme::ui_font(theme::TEXT_SMALL),
-            theme::TEXT_SECONDARY,
+            theme::text_secondary(),
         );
         widgets::text_in(
             painter,
@@ -502,7 +508,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
             Align2::RIGHT_CENTER,
             &value,
             theme::mono_font(theme::TEXT_SMALL),
-            theme::TEXT_VALUE,
+            theme::text_value(),
         );
     }
     column

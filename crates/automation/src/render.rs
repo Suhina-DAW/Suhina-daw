@@ -230,6 +230,8 @@ mod tests {
                             offset: 0.0,
                             loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
                             enabled: true,
+                            fade_in: 0.0,
+                            fade_out: 0.0,
                             extensions: Extensions::default(),
                         }),
                         has_stop: true,

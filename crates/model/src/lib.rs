@@ -272,8 +272,41 @@ pub struct Clip {
     pub offset: f64,
     pub loop_range: Option<LoopRange>,
     pub enabled: bool,
+    /// Fade-in and fade-out of an audio clip on the arrangement, in beats from the clip's start
+    /// and to its end; 0.0 is no fade. Both are at least 0 and together at most `length`
+    /// ([`Clip::fades_valid`]). Notes and launcher slots ignore them.
+    pub fade_in: f64,
+    pub fade_out: f64,
     pub extensions: Extensions,
 }
+
+impl Clip {
+    /// Whether the fades are finite, not negative and together no longer than the clip.
+    pub fn fades_valid(&self) -> bool {
+        let fades = [self.fade_in, self.fade_out];
+        fades.iter().all(|f| f.is_finite() && *f >= 0.0) && self.fade_in + self.fade_out <= self.length + FADE_EPSILON
+    }
+
+    /// Shortens the fades so they fit the clip, as when the clip itself is shortened. See
+    /// [`Clip::fitted_fades`].
+    pub fn fit_fades(&mut self) {
+        (self.fade_in, self.fade_out) = self.fitted_fades();
+    }
+
+    /// The fades made to fit the clip: a fade that is negative or not finite is 0, and when
+    /// together they are longer than the clip, both shrink in proportion.
+    pub fn fitted_fades(&self) -> (f64, f64) {
+        let length = if self.length.is_finite() { self.length.max(0.0) } else { 0.0 };
+        let fit = |f: f64| if f.is_finite() { f.max(0.0) } else { 0.0 };
+        let (fade_in, fade_out) = (fit(self.fade_in), fit(self.fade_out));
+        let total = fade_in + fade_out;
+        let scale = if total > length && total > 0.0 { length / total } else { 1.0 };
+        (fade_in * scale, fade_out * scale)
+    }
+}
+
+/// How much longer than the clip its fades may be together, for rounding in beat arithmetic.
+const FADE_EPSILON: f64 = 1e-9;
 
 /// Loop start and end inside the content, in beats.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -347,6 +380,12 @@ pub enum ValidationError {
     MissingTrack(TrackId),
     MissingChannel(ChannelId),
     MissingContent(ContentId),
+    /// The clip at this index on the arrangement lane at this index has fades that are negative,
+    /// not finite, or together longer than the clip.
+    BadFades {
+        lane: usize,
+        clip: usize,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -358,6 +397,9 @@ impl fmt::Display for ValidationError {
             Self::MissingTrack(id) => write!(f, "track {} does not exist", id.0),
             Self::MissingChannel(id) => write!(f, "channel {} does not exist", id.0),
             Self::MissingContent(id) => write!(f, "clip content {} does not exist", id.0),
+            Self::BadFades { lane, clip } => {
+                write!(f, "clip {clip} on arrangement lane {lane} has fades that are negative or longer than the clip")
+            }
         }
     }
 }
@@ -413,12 +455,15 @@ impl Project {
                 }
             }
         }
-        for lane in &self.arrangement.lanes {
+        for (lane_index, lane) in self.arrangement.lanes.iter().enumerate() {
             if let Some(track) = lane.track {
                 track_ref(track, &mut errors);
             }
-            for clip in &lane.clips {
+            for (clip_index, clip) in lane.clips.iter().enumerate() {
                 content_ref(clip.content, &mut errors);
+                if !clip.fades_valid() {
+                    errors.push(ValidationError::BadFades { lane: lane_index, clip: clip_index });
+                }
             }
         }
         for column in &self.launcher.columns {
@@ -501,6 +546,8 @@ mod tests {
             offset: 0.0,
             loop_range: None,
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }
@@ -614,6 +661,50 @@ mod tests {
         assert!(errors.contains(&ValidationError::MissingChannel(ChannelId(8))));
         assert!(errors.contains(&ValidationError::MissingTrack(TrackId(5))));
         assert!(errors.contains(&ValidationError::MissingContent(ContentId(3))));
+    }
+
+    #[test]
+    fn fades_must_be_non_negative_and_fit_the_clip() {
+        let with = |fade_in: f64, fade_out: f64| Clip { fade_in, fade_out, ..clip(1, 0.0) };
+        assert!(with(0.0, 0.0).fades_valid());
+        assert!(with(1.5, 2.5).fades_valid(), "together exactly the clip's length");
+        assert!(!with(-0.1, 0.0).fades_valid());
+        assert!(!with(0.0, f64::NAN).fades_valid());
+        assert!(!with(f64::INFINITY, 0.0).fades_valid());
+        assert!(!with(3.0, 1.5).fades_valid(), "4.5 beats of fades on a 4-beat clip");
+
+        let content = ClipContent {
+            id: ContentId(1),
+            name: String::new(),
+            length: 4.0,
+            lanes: Vec::new(),
+            extensions: Extensions::default(),
+        };
+        let project = Project {
+            contents: vec![content],
+            arrangement: Arrangement {
+                lanes: vec![ArrangementLane {
+                    name: String::new(),
+                    track: None,
+                    clips: vec![with(1.0, 1.0), with(3.0, 3.0)],
+                }],
+            },
+            ..Project::default()
+        };
+        assert_eq!(project.validate(), Err(vec![ValidationError::BadFades { lane: 0, clip: 1 }]));
+    }
+
+    #[test]
+    fn fitting_fades_keeps_them_inside_the_clip() {
+        let mut c = Clip { fade_in: 3.0, fade_out: 1.0, length: 2.0, ..clip(1, 0.0) };
+        c.fit_fades();
+        assert_eq!((c.fade_in, c.fade_out), (1.5, 0.5), "both shrink in proportion");
+        let mut c = Clip { fade_in: -1.0, fade_out: f64::NAN, ..clip(1, 0.0) };
+        c.fit_fades();
+        assert_eq!((c.fade_in, c.fade_out), (0.0, 0.0));
+        let mut c = Clip { fade_in: 1.0, fade_out: 0.5, ..clip(1, 0.0) };
+        c.fit_fades();
+        assert_eq!((c.fade_in, c.fade_out), (1.0, 0.5), "fades that fit are kept");
     }
 
     #[test]

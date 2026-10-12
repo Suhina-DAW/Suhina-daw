@@ -39,6 +39,11 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 
+- **Clips.** `project.clips` lists each arrangement clip with its start, length and fades;
+  `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`, `clip.cut`, `clip.paste`,
+  `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats) edit them through
+  `command_run` ([arrangement editing](spec/arrangement-editing.md)).
+
 - **Devices.** `devices.list` lists the built-in devices with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
   `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through

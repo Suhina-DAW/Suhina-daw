@@ -69,7 +69,9 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   chain starts with one, like arrangement notes; a launch that replaces a clip, stopping the
   column or stopping the transport releases them (ADR 0004).
 - **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
-  launched audio clip fades in over 2 ms, to avoid clicks.
+  launched audio clip fades in over 2 ms, to avoid clicks. The fade-in and fade-out an
+  arrangement clip has ([arrangement editing](arrangement-editing.md) › Fades) do not apply to
+  launched clips yet.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
   0003): each one's stretcher is prepared for the project tempo when the project opens and
   rewound at every launch.

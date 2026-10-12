@@ -250,6 +250,18 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_clip_gain,
     },
     CommandSpec {
+        id: "clip.setFades",
+        label: "Set an audio clip's fade-in and fade-out lengths, in beats; together at most the clip's length",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            optional("in", ParamType::Number, "fade-in length in beats from the clip's start, at least 0; 0 is none"),
+            optional("out", ParamType::Number, "fade-out length in beats before the clip's end, at least 0; 0 is none"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_clip_fades,
+    },
+    CommandSpec {
         id: "clip.copy",
         label: "Copy an arrangement clip, with what it plays, for clip.paste",
         params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
@@ -608,6 +620,8 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
         "start": clip.start,
         "length": clip.length,
         "enabled": clip.enabled,
+        "fade_in": clip.fade_in,
+        "fade_out": clip.fade_out,
         "notes": notes,
         "audio_file": audio,
     })
@@ -890,6 +904,46 @@ fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, Command
     Ok(json!({ "gain_db": to_db(gain) }))
 }
 
+fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let length_of = |name: &str| -> Result<Option<f64>, CommandError> {
+        match params.get(name) {
+            None => Ok(None),
+            Some(_) => {
+                let beats = number(params, name)?;
+                if beats < 0.0 {
+                    return Err(format!("{name} must be at least 0 beats, got {beats}").into());
+                }
+                Ok(Some(beats))
+            }
+        }
+    };
+    let (fade_in, fade_out) = (length_of("in")?, length_of("out")?);
+    if fade_in.is_none() && fade_out.is_none() {
+        return Err("give in, out or both, in beats".into());
+    }
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    let p = &mut session.project;
+    let clip = p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?;
+    let audio = p.content(clip.content).is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))));
+    if !audio {
+        return Err("only an audio clip has fades".into());
+    }
+    let changed =
+        Clip { fade_in: fade_in.unwrap_or(clip.fade_in), fade_out: fade_out.unwrap_or(clip.fade_out), ..clip.clone() };
+    if !changed.fades_valid() {
+        return Err(format!(
+            "the fades ({} + {} beats) are longer than the clip ({} beats)",
+            changed.fade_in, changed.fade_out, changed.length
+        )
+        .into());
+    }
+    let result = json!({ "fade_in": changed.fade_in, "fade_out": changed.fade_out });
+    if let Some(slot) = p.arrangement.lanes.get_mut(lane).and_then(|l| l.clips.get_mut(index)) {
+        *slot = changed;
+    }
+    Ok(result)
+}
+
 fn copy_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let (lane, index) = lane_and_index(&session.project, params)?;
     let clip = session.project.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).cloned();
@@ -1104,7 +1158,8 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
 
 /// Clears `[from, to)` on a lane for a clip placed there (docs/spec/arrangement-editing.md):
 /// clips entirely inside are removed, clips reaching in are shortened, and a clip around it is
-/// split in two, the second part continuing its content from where it was.
+/// split in two, the second part continuing its content from where it was. A split clip's
+/// first part keeps its fade-in and the second its fade-out; fades are fitted to what is left.
 fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
     let mut kept = Vec::with_capacity(clips.len() + 1);
     for clip in clips.drain(..) {
@@ -1113,12 +1168,23 @@ fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
             kept.push(clip);
             continue;
         }
+        let split = start < from && end > to;
         if start < from {
-            kept.push(Clip { length: from - start, ..clip.clone() });
+            let mut first = Clip { length: from - start, ..clip.clone() };
+            if split {
+                first.fade_out = 0.0;
+            }
+            first.fit_fades();
+            kept.push(first);
         }
         if end > to {
             let offset = content_at(&clip, to - start);
-            kept.push(Clip { start: to, length: end - to, offset, ..clip });
+            let mut second = Clip { start: to, length: end - to, offset, ..clip };
+            if split {
+                second.fade_in = 0.0;
+            }
+            second.fit_fades();
+            kept.push(second);
         }
     }
     *clips = kept;
