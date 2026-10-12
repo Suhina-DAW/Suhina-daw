@@ -231,6 +231,16 @@ impl Chain {
         self.next_off = next;
     }
 
+    /// Releases `key` now, at `frame` of the block, if it is held.
+    pub(crate) fn release_key(&mut self, frame: usize, key: u8) {
+        if let Some(held) = self.held.get_mut(usize::from(key))
+            && *held != NOT_HELD
+        {
+            *held = NOT_HELD;
+            self.push(frame, NoteEvent::Off { key, velocity: 0.5 });
+        }
+    }
+
     /// Releases every note now, at `frame` of the block.
     /// Each held key is released on its own, then everything: an instrument that ignores an
     /// all-notes-off (many plug-ins do) still lets go of its notes.

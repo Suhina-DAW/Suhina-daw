@@ -41,7 +41,8 @@ From top to bottom:
      effects, presets, plug-ins); a sidebar of places only (Pinned, Recent, Folders, add folder);
      a file tree with expandable folders, type icons and length or duration; colour tags as dots
      on rows; a preview strip with play, waveform, playhead, duration, BPM and key; tags and the
-     selection count at the bottom.
+     selection count at the bottom. **Loopwerk:** how it behaves (places, search, preview,
+     dragging into the project) is in [`browser.md`](browser.md).
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
@@ -64,7 +65,10 @@ create a new scene or track.
 Track name over a strip in the track colour (Live colours the name itself). Clicking selects the
 track; dragging moves it; right-clicking opens its menu (rename, colour, group, ungroup, delete).
 Double-clicking to rename is planned.
-Dropping a device or file on the empty area right of the last track creates a new track.
+Dropping a device or file from the browser on the empty area right of the last track creates a
+new track; the area also has **+ MIDI track** and **+ Audio track** buttons ([browser](browser.md) ›
+Files). A file dropped on a slot or below the stop row becomes a clip in that slot (scenes are
+added below when needed); a device dropped on a column joins the track's chain.
 
 ### Clip slots
 
@@ -134,4 +138,4 @@ full list)**.
 
 - Clip editor (piano roll, sample editor): separate spec.
 - Arrangement view: separate spec.
-- Browser behaviour in detail (search, preview, hot-swap).
+- Hot-swapping a device or sample from the browser ([browser](browser.md) › Not decided yet).

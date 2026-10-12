@@ -109,8 +109,12 @@ the device code should not have to change when it lands.
 ## Not decided yet
 
 - **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
-  `track.devices`, `device.add` (an instrument always first, one per track), `device.remove`,
-  `device.setEnabled` and `device.setParam` (values stored limited to the parameter's range).
+  `track.devices`, `device.add` (an instrument always first, one per track, and only on a track
+  that plays notes), `device.remove`, `device.setEnabled` and `device.setParam` (values stored
+  limited to the parameter's range). `device.add {preset, voice?}` adds a device with a preset's
+  values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
+  parameter's value, which the project stores like any other (presets of other devices are not
+  decided yet; [browser spec](../spec/browser.md)).
 - **Chains on group, return and master channels.** Latency compensation is built for track
   chains: a device's `latency()` (the overdrive and vinyl distortion, 31 frames) delays every
   other track to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences).

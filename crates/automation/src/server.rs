@@ -2,10 +2,11 @@
 //! one tool per command: agents discover commands with `command_list` and run them with
 //! `command_run` or `command_batch`, so the tool list stays small as commands grow.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use loopwerk_engine::AudioPool;
-use loopwerk_engine::model::Project;
+use loopwerk_engine::model::{LaneData, Project};
 use loopwerk_session::{CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
@@ -165,6 +166,16 @@ impl LoopwerkMcp {
         }
     }
 
+    /// Gives agents the user's browser library (`library.*`, ADR 0012), kept up to date on a
+    /// thread of its own. Agents may search it and read what it lists inside the read root.
+    pub fn with_file_library(self, mut library: loopwerk_library::Library) -> Self {
+        let _ = library.start();
+        if let Ok(mut projects) = self.projects.lock() {
+            projects.set_file_library(library);
+        }
+        self
+    }
+
     /// Plays each opened project on `output`, so transport and launcher commands are heard.
     pub fn with_audio_output(mut self, output: Arc<dyn AudioOutput>) -> Self {
         self.audio_output = Some(output);
@@ -274,7 +285,10 @@ impl LoopwerkMcp {
         if let Some(why) = refused(&p.id) {
             return Ok(fail(why));
         }
-        let params = p.params.unwrap_or_else(|| json!({}));
+        let params = match confine(&self.workspace, &p.id, p.params.unwrap_or_else(|| json!({}))) {
+            Ok(params) => params,
+            Err(e) => return Ok(fail(e)),
+        };
         let output = self.audio_output.clone();
         let target = p.project.map(ProjectId);
         let result = self
@@ -300,16 +314,18 @@ impl LoopwerkMcp {
         }
         let stop_on_error = p.stop_on_error.unwrap_or(true);
         let output = self.audio_output.clone();
+        let workspace = Arc::clone(&self.workspace);
         let target = p.project.map(ProjectId);
         let result = self
             .with_projects(move |projects| {
                 let mut results = Vec::new();
                 let mut failed = false;
                 for step in p.steps {
-                    let params = step.params.unwrap_or_else(|| json!({}));
-                    let outcome = match refused(&step.id) {
-                        Some(why) => Err(why.into()),
-                        None => projects.execute_in(target, &step.id, &params),
+                    let params = confine(&workspace, &step.id, step.params.unwrap_or_else(|| json!({})));
+                    let outcome = match (refused(&step.id), params) {
+                        (Some(why), _) => Err(why.into()),
+                        (None, Err(e)) => Err(loopwerk_session::CommandError(e)),
+                        (None, Ok(params)) => projects.execute_in(target, &step.id, &params),
                     };
                     if outcome.is_ok() {
                         play_active(projects, &step.id, output.as_deref());
@@ -367,11 +383,7 @@ impl LoopwerkMcp {
                     }
                     let seconds = seconds.ok_or("launches needs seconds, the length of the render")?;
                     let project = session.project().clone();
-                    let folder = session.source().and_then(|s| s.parent()).map(|p| p.to_path_buf());
-                    let (audio, warnings) = match folder {
-                        Some(folder) => loopwerk_media::load_project_audio(&project, &folder),
-                        None => Default::default(),
-                    };
+                    let (audio, warnings) = project_audio(session, &project);
                     let (summary, steps) =
                         render_launch_script(&project, &audio, &path, sample_rate, &steps, seconds, Some(&env))?;
                     return Ok(json!({
@@ -393,11 +405,7 @@ impl LoopwerkMcp {
                     }
                     None => session.project().clone(),
                 };
-                let folder = session.source().and_then(|s| s.parent()).map(|p| p.to_path_buf());
-                let (audio, warnings) = match folder {
-                    Some(folder) => loopwerk_media::load_project_audio(&project, &folder),
-                    None => Default::default(),
-                };
+                let (audio, warnings) = project_audio(session, &project);
                 let summary = render_wav(&project, &audio, &path, sample_rate, Some(&env))?;
                 Ok(json!({
                     "output": display_path(&path),
@@ -416,13 +424,11 @@ impl LoopwerkMcp {
 /// Starts `output` playing `session`'s project. Returns the device description, or why it is not
 /// available; missing audio files are added to `warnings`.
 fn start_audio(session: &mut Session, output: &dyn AudioOutput, warnings: &mut Vec<String>) -> Value {
-    let folder = session.source().and_then(|s| s.parent()).map(|p| p.to_path_buf());
-    let (audio, audio_warnings) = match folder {
-        Some(folder) => loopwerk_media::load_project_audio(session.project(), &folder),
-        None => Default::default(),
-    };
+    let project = session.project().clone();
+    let (audio, audio_warnings) = project_audio(session, &project);
     warnings.extend(audio_warnings);
-    match output.open(session.project(), &audio) {
+    session.set_audio(audio);
+    match output.open(session.project(), session.audio()) {
         Ok((player, description)) => {
             session.attach_player(player);
             json!(description)
@@ -431,15 +437,100 @@ fn start_audio(session: &mut Session, output: &dyn AudioOutput, warnings: &mut V
     }
 }
 
+/// The audio `project` (the session's, or a scene of it) plays: its files decoded from where
+/// the session's project file is, with what the session has decoded already (files added since
+/// it opened, ADR 0011) for the rest.
+fn project_audio(session: &Session, project: &Project) -> (loopwerk_media::AudioPool, Vec<String>) {
+    let folder = session
+        .audio_folder()
+        .map(Path::to_path_buf)
+        .or_else(|| session.source().and_then(|s| s.parent()).map(Path::to_path_buf));
+    let mut have = session.audio().clone();
+    let missing = project
+        .contents
+        .iter()
+        .flat_map(|c| &c.lanes)
+        .any(|lane| matches!(&lane.data, LaneData::Audio(region) if !have.files.contains_key(&region.file)));
+    let mut warnings = Vec::new();
+    if missing {
+        let (loaded, found) = loopwerk_media::load_project_audio(project, folder.as_deref().unwrap_or(Path::new(".")));
+        for (key, data) in loaded.files {
+            have.files.entry(key).or_insert(data);
+        }
+        warnings = found;
+    }
+    (have, warnings)
+}
+
+/// `params` with every path a command reads checked against the read root and made real
+/// (`docs/spec/browser.md` › Commands): files for `clip.addFiles`, `preview.play` and presets,
+/// folders for `library.list` and a folder place, and file items for `library.*`.
+fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, String> {
+    match id {
+        "clip.addFiles" => {
+            if let Some(paths) = params.get_mut("paths").and_then(Value::as_array_mut) {
+                for path in paths.iter_mut() {
+                    let given = path.as_str().ok_or("paths must be a list of file paths")?;
+                    *path = json!(display_path(&workspace.readable(given)?));
+                }
+            }
+        }
+        "preview.play" => confine_file(workspace, &mut params, "path")?,
+        "device.add" | "track.add" => confine_file(workspace, &mut params, "preset")?,
+        "library.list" => {
+            let folder = params.get("folder").and_then(Value::as_str).ok_or("folder must be a text")?;
+            params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));
+        }
+        "library.search" => {
+            if let Some(place) = params.get("place").and_then(Value::as_str)
+                && place != "pinned"
+                && !place.starts_with("recent:")
+            {
+                params["place"] = json!(display_path(&workspace.readable_folder(place)?));
+            }
+        }
+        "library.info" | "library.pin" | "library.unpin" | "library.tag" => {
+            if let Some(item) = params.get("item").and_then(Value::as_str)
+                && !item.starts_with("device:")
+                && !item.starts_with("plugin:")
+            {
+                let (file, voice) = match item.rsplit_once('#') {
+                    Some((file, voice)) if voice.parse::<usize>().is_ok() => (file, Some(voice.to_string())),
+                    _ => (item, None),
+                };
+                let file = display_path(&workspace.readable(file)?);
+                params["item"] = json!(voice.map_or(file.clone(), |v| format!("{file}#{v}")));
+            }
+        }
+        _ => {}
+    }
+    Ok(params)
+}
+
+fn confine_file(workspace: &Workspace, params: &mut Value, name: &str) -> Result<(), String> {
+    if let Some(given) = params.get(name).and_then(Value::as_str) {
+        let path = workspace.readable(given)?;
+        params[name] = json!(display_path(&path));
+    }
+    Ok(())
+}
+
 /// Commands agents may not run. They choose the folders whose plug-ins a scan loads and runs,
 /// so an agent could otherwise add its write root and run code it wrote there. The user chooses
 /// plug-in folders (`loopwerk-cli plugins add-folder`, later the UI); agents may still scan them.
-const NOT_FOR_AGENTS: [&str; 2] = ["plugins.addFolder", "plugins.removeFolder"];
+const NOT_FOR_AGENTS: [&str; 4] =
+    ["plugins.addFolder", "plugins.removeFolder", "library.addFolder", "library.removeFolder"];
 
 /// Why an agent may not run command `id`, if it may not.
 fn refused(id: &str) -> Option<String> {
     NOT_FOR_AGENTS.contains(&id).then(|| {
-        format!("{id} is not available to agents: the user chooses plug-in folders (loopwerk-cli plugins add-folder)")
+        if id.starts_with("library.") {
+            format!("{id} is not available to agents: the user chooses the browser's folders")
+        } else {
+            format!(
+                "{id} is not available to agents: the user chooses plug-in folders (loopwerk-cli plugins add-folder)"
+            )
+        }
     })
 }
 
@@ -516,6 +607,60 @@ mod refused_tests {
         assert!(refused("plugins.addFolder").is_some());
         assert!(refused("plugins.removeFolder").is_some());
         for id in ["plugins.scan", "plugins.list", "plugins.folders", "plugins.check", "track.setPan"] {
+            assert!(refused(id).is_none(), "{id}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod confine_tests {
+    use super::*;
+
+    fn roots(name: &str) -> (std::path::PathBuf, Workspace) {
+        let dir = std::env::temp_dir().join(format!("loopwerk-confine-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("inside/pack")).unwrap();
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+        for file in ["inside/pack/kick.wav", "inside/bank.syx", "outside/secret.wav"] {
+            std::fs::write(dir.join(file), b"x").unwrap();
+        }
+        let workspace = Workspace::new(Some(&dir.join("inside")), None).unwrap();
+        (dir, workspace)
+    }
+
+    #[test]
+    fn paths_agents_give_must_be_inside_the_read_root() {
+        let (dir, workspace) = roots("paths");
+        let ok = confine(&workspace, "clip.addFiles", json!({ "paths": ["pack/kick.wav"], "start": 0.0 })).unwrap();
+        assert!(ok["paths"][0].as_str().unwrap().ends_with("kick.wav"));
+        assert!(Path::new(ok["paths"][0].as_str().unwrap()).is_absolute());
+        let outside = dir.join("outside").join("secret.wav").display().to_string();
+        for (id, params) in [
+            ("clip.addFiles", json!({ "paths": [outside.clone()] })),
+            ("clip.addFiles", json!({ "paths": ["../outside/secret.wav"] })),
+            ("preview.play", json!({ "path": outside.clone() })),
+            ("device.add", json!({ "track": 1, "preset": outside.clone() })),
+            ("library.list", json!({ "folder": dir.join("outside").display().to_string() })),
+            ("library.search", json!({ "place": dir.join("outside").display().to_string() })),
+            ("library.info", json!({ "item": outside.clone() })),
+            ("library.tag", json!({ "item": format!("{outside}#3"), "tag": "Red", "on": true })),
+        ] {
+            assert!(confine(&workspace, id, params.clone()).is_err(), "{id} {params}");
+        }
+        let kept = json!({ "item": "device:overdrive" });
+        assert_eq!(confine(&workspace, "library.pin", kept.clone()).unwrap(), kept);
+        let place = json!({ "place": "recent:samples" });
+        assert_eq!(confine(&workspace, "library.search", place.clone()).unwrap(), place);
+        let voice = confine(&workspace, "library.info", json!({ "item": "bank.syx#4" })).unwrap();
+        assert!(voice["item"].as_str().unwrap().ends_with("bank.syx#4"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agents_may_search_the_library_but_not_choose_its_folders() {
+        assert!(refused("library.addFolder").is_some());
+        assert!(refused("library.removeFolder").is_some());
+        for id in ["library.search", "library.refresh", "library.folders", "clip.addFiles", "preview.play"] {
             assert!(refused(id).is_none(), "{id}");
         }
     }

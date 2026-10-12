@@ -18,7 +18,7 @@ are changing (*Code and its documents*).
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
@@ -29,12 +29,15 @@ are changing (*Code and its documents*).
 | [0008: Patch devices](decisions/0008-patch-devices.md) | decision | draft | Pure Data, Pd, plugdata, libpd, patch, patch device, community devices, Max for Live, Max device, amxd, scripting devices, collect and save | Proposed way for the community to build devices as Pure Data patches (plugdata, libpd) with access to commands, and how imported Max devices are kept |
 | [0009: egui for the UI; familiar workflow, Loopwerk's own look](decisions/0009-ui-toolkit-and-look.md) | decision | current | UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton | Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Loopwerk's own look |
 | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) | decision | current | project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects | Loopwerk's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects |
+| [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) | decision | current | preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, MIDI preview, browser sound | How a sample added while the project plays reaches the engine, and how the browser previews samples and MIDI files through the engine without locks or allocation on the audio thread |
+| [0012: The file library: an index on disk, watched](decisions/0012-file-library.md) | decision | current | file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed | How the browser's folders are indexed, kept on disk and kept up to date (start-up check, file-system watching, polling), and the limits that protect it from hostile folders |
 | [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Loopwerk's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
 | [Arrangement editing](spec/arrangement-editing.md) | spec | draft | moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker) |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
+| [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts |
@@ -72,12 +75,17 @@ Change this code, and check these documents.
 | `crates/engine/src/launcher.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/plugin.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/engine/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
-| `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/library/**` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
 | `crates/locr` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/locr/src/lib.rs` | [The .locr project file](spec/locr-format.md) |
+| `crates/media/src/info.rs` | [Browser](spec/browser.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
+| `crates/media/src/midi.rs` | [Browser](spec/browser.md) |
+| `crates/media/src/tempo.rs` | [Browser](spec/browser.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
@@ -85,14 +93,20 @@ Change this code, and check these documents.
 | `crates/session/src/blank.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
-| `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/session/src/files.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
+| `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
+| `crates/session/src/library.rs` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
+| `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/src/rack.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/browser.rs` | [Browser](spec/browser.md) |
+| `crates/ui/src/browser_view.rs` | [Browser](spec/browser.md) |
 | `crates/ui/src/detail_view.rs` | [Components](design/components.md) |
+| `crates/ui/src/drop.rs` | [Browser](spec/browser.md) |
 | `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |

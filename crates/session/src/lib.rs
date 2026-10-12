@@ -5,7 +5,10 @@
 mod blank;
 mod commands;
 mod devices;
+mod files;
+mod library;
 mod plugins;
+mod preview;
 mod projects;
 mod rack;
 
@@ -18,6 +21,8 @@ use serde_json::Value;
 
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
+pub use files::{MAX_FILES, file_tempo};
+pub use library::{Category, Found, file_info, library_commands, search_items};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 pub use rack::{
@@ -93,6 +98,20 @@ impl Player {
         self.controller.set_plugin_info(info);
     }
 
+    /// Builds the engine's graphs from now on with `audio` (ADR 0011).
+    pub fn set_audio(&mut self, audio: std::sync::Arc<loopwerk_engine::AudioPool>) {
+        self.controller.set_audio(audio);
+    }
+
+    /// Whether a preview plays, and where (ADR 0011).
+    pub fn preview_monitor(&self) -> &loopwerk_engine::PreviewMonitor {
+        self.controller.preview_monitor()
+    }
+
+    pub(crate) fn controller_mut(&mut self) -> &mut Controller {
+        &mut self.controller
+    }
+
     /// Hands a running plug-in's audio half to the engine for the plug-in device `key`.
     pub fn send_plugin(
         &mut self,
@@ -135,7 +154,16 @@ pub struct Session {
     pub(crate) param_edit: Option<ParamEdit>,
     /// The project's plug-ins, running while it plays (ADR 0006).
     pub(crate) plugins: rack::Rack,
+    /// The project's decoded audio, by the key its regions name (ADR 0011).
+    audio: loopwerk_engine::AudioPool,
+    /// Files added to `audio` since the player last got it.
+    audio_changed: bool,
+    /// Files decoded ahead of a command that uses them (`provide_audio`), newest last.
+    decoded: Vec<(String, std::sync::Arc<loopwerk_engine::AudioData>)>,
 }
+
+/// Files kept decoded ahead of the commands that use them.
+const MAX_DECODED: usize = 16;
 
 impl Session {
     pub fn new(project: Project) -> Self {
@@ -151,13 +179,71 @@ impl Session {
             clipboard: None,
             param_edit: None,
             plugins: rack::Rack::default(),
+            audio: loopwerk_engine::AudioPool::new(),
+            audio_changed: false,
+            decoded: Vec::new(),
         }
     }
 
+    /// The project's decoded audio, which players are started with (ADR 0011).
+    pub fn audio(&self) -> &loopwerk_engine::AudioPool {
+        &self.audio
+    }
+
+    /// Gives the session its project's decoded audio (`media::load_project_audio`), before a
+    /// player is started with [`Session::audio`].
+    pub fn set_audio(&mut self, audio: loopwerk_engine::AudioPool) {
+        self.audio = audio;
+        self.audio_changed = true;
+    }
+
+    /// Hands over a file decoded ahead (on another thread), so a command that uses `path` next
+    /// (`clip.addFiles`, `preview.play`) need not decode it. Only the latest few are kept.
+    pub fn provide_audio(&mut self, path: &Path, data: std::sync::Arc<loopwerk_engine::AudioData>) {
+        let key = files::absolute(path).display().to_string();
+        self.decoded.retain(|(k, _)| *k != key);
+        if self.decoded.len() >= MAX_DECODED {
+            self.decoded.remove(0);
+        }
+        self.decoded.push((key, data));
+    }
+
+    /// The decoded audio of the file at `path` (absolute): from the pool, from what was
+    /// provided, or decoded now.
+    pub(crate) fn decoded_audio(&mut self, path: &Path) -> Result<std::sync::Arc<loopwerk_engine::AudioData>, String> {
+        let key = path.display().to_string();
+        let data = if let Some(data) = self.audio.files.get(&key) {
+            return Ok(std::sync::Arc::clone(data));
+        } else if let Some((_, data)) = self.decoded.iter().find(|(k, _)| *k == key) {
+            std::sync::Arc::clone(data)
+        } else {
+            std::sync::Arc::new(loopwerk_media::decode_file(path)?)
+        };
+        self.audio.files.insert(key, std::sync::Arc::clone(&data));
+        self.audio_changed = true;
+        Ok(data)
+    }
+
+    /// Decoded audio for a preview, which does not join the project's pool.
+    pub(crate) fn preview_audio(&mut self, path: &Path) -> Result<std::sync::Arc<loopwerk_engine::AudioData>, String> {
+        let key = path.display().to_string();
+        if let Some(data) = self.audio.files.get(&key) {
+            return Ok(std::sync::Arc::clone(data));
+        }
+        if let Some((_, data)) = self.decoded.iter().find(|(k, _)| *k == key) {
+            return Ok(std::sync::Arc::clone(data));
+        }
+        let data = std::sync::Arc::new(loopwerk_media::decode_file(path)?);
+        self.provide_audio(path, std::sync::Arc::clone(&data));
+        Ok(data)
+    }
+
     /// Connects an audio engine playing this session's project; transport and launcher commands
-    /// go to it from now on. Replaces (and so closes) any previous player.
+    /// go to it from now on. Replaces (and so closes) any previous player. It should have been
+    /// started with [`Session::audio`]; audio added later reaches it with the next edit.
     pub fn attach_player(&mut self, player: Player) {
         self.player = Some(player);
+        self.audio_changed = false;
     }
 
     /// Disconnects the audio engine; the project's plug-ins stop (each keeps its last state for
@@ -211,7 +297,7 @@ impl Session {
         self.player.as_ref()
     }
 
-    fn player_mut(&mut self) -> Result<&mut Player, CommandError> {
+    pub(crate) fn player_mut(&mut self) -> Result<&mut Player, CommandError> {
         self.player.as_mut().ok_or_else(|| {
             CommandError(
                 "no audio engine is playing this project: start one with `loopwerk-cli play --launcher`, or the MCP                  server with --audio"
@@ -340,6 +426,7 @@ impl Session {
             | CommandKind::Transport
             | CommandKind::Projects
             | CommandKind::Plugins
+            | CommandKind::Library
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
                 let value = (spec.run)(self, params)?;
@@ -378,9 +465,14 @@ impl Session {
         }
     }
 
-    /// Lets a playing engine hear the project as it is now. The edit stays made if this fails.
+    /// Lets a playing engine hear the project as it is now, with any audio added to the pool.
+    /// The edit stays made if this fails.
     fn update_player(&mut self) -> Result<(), CommandError> {
         let Some(player) = self.player.as_mut() else { return Ok(()) };
+        if self.audio_changed {
+            player.set_audio(std::sync::Arc::new(self.audio.clone()));
+            self.audio_changed = false;
+        }
         player.update(&self.project).map_err(|e| {
             CommandError(format!("the edit was made, but the playing engine could not follow it: {}", e.0))
         })

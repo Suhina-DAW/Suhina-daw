@@ -1,0 +1,391 @@
+//! The browser panel in the window (`docs/spec/browser.md`), driven like a user would: search,
+//! filters, places, the keyboard, and dragging samples, MIDI files and devices into the
+//! project, which runs the same commands agents use.
+#![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use egui::{Key, Modifiers, Pos2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use loopwerk_engine::model::{ChannelId, LaneData};
+use loopwerk_library::Library;
+use loopwerk_session::Session;
+use loopwerk_ui::demo::demo_project;
+use loopwerk_ui::{App, theme};
+
+const SIZE: (f32, f32) = (1280.0, 800.0);
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("loopwerk-browser-ui-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn wav(path: &Path, seconds: f32) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let spec =
+        hound::WavSpec { channels: 1, sample_rate: 8000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for _ in 0..(seconds * 8000.0) as usize {
+        writer.write_sample(8000i16).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+/// A MIDI file with one note a beat long.
+fn midi(path: &Path) {
+    let mut file = b"MThd\0\0\0\x06\0\0\0\x01\0\x60".to_vec();
+    let track = [0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0, 0x00, 0xFF, 0x2F, 0x00];
+    file.extend_from_slice(b"MTrk");
+    file.extend_from_slice(&(track.len() as u32).to_be_bytes());
+    file.extend_from_slice(&track);
+    std::fs::write(path, file).unwrap();
+}
+
+/// A sample pack: drums, a loop, a MIDI file and a project.
+fn pack(root: &Path) {
+    wav(&root.join("Drums").join("Kick Hard.wav"), 0.25);
+    wav(&root.join("Drums").join("Snare.wav"), 0.25);
+    wav(&root.join("Loop 120bpm.wav"), 2.0);
+    midi(&root.join("Groove.mid"));
+    std::fs::write(root.join("Song.locr"), b"{}").unwrap();
+}
+
+/// The window with the demo project and a browser whose library is kept in `settings` and
+/// holds `folder`.
+fn window(settings: &Path, folder: &Path) -> Harness<'static, App> {
+    let mut app = App::new();
+    let mut library = Library::new(Some(settings.to_path_buf()));
+    library.add_folder(folder).unwrap();
+    app.set_file_library(library);
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(0.05)
+        .with_max_steps(20)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness
+}
+
+fn row(name: &str) -> String {
+    format!("Browser {name}")
+}
+
+/// Drags from `from` to `to` and lets go, a frame at a time.
+fn drag(harness: &mut Harness<'static, App>, from: Pos2, to: Pos2) {
+    // A drag repaints every frame, so the window is stepped rather than run to rest.
+    harness.hover_at(from);
+    harness.step();
+    harness.drag_at(from);
+    harness.step();
+    for share in [0.1, 0.3, 0.6, 1.0] {
+        harness.hover_at(from + (to - from) * share);
+        harness.step();
+    }
+    harness.drop_at(to);
+    harness.step();
+    harness.step();
+}
+
+/// Presses and lets go twice, a frame apart: a double-click.
+fn double_click(harness: &mut Harness<'static, App>, label: &str) {
+    let at = harness.get_by_label(label).rect().center();
+    harness.hover_at(at);
+    harness.run();
+    for _ in 0..2 {
+        harness.hover_at(at);
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.step();
+    }
+    harness.run();
+}
+
+/// Steps the window until `done` holds (a drop decodes its samples on another thread).
+fn until(harness: &mut Harness<'static, App>, done: impl Fn(&App) -> bool) -> bool {
+    let end = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < end {
+        harness.step();
+        if done(harness.state()) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+#[test]
+fn the_tree_lists_devices_and_folders_and_opens_them() {
+    let (settings, folder) = (temp("tree-settings"), temp("tree"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    for heading in ["Instruments", "Effects", "Plug-ins"] {
+        assert!(harness.query_by_label(&row(heading)).is_some(), "{heading}");
+    }
+    harness.get_by_label(&row("Instruments")).click();
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some(), "a heading opens with a click");
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    double_click(&mut harness, &row(&name));
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "a folder opens with a double-click");
+    double_click(&mut harness, &row("Drums"));
+    harness.run();
+    assert!(harness.query_by_label(&row("Kick Hard.wav")).is_some());
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn search_and_the_category_filters_narrow_the_results() {
+    let (settings, folder) = (temp("search-settings"), temp("search"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().browser.search = "kick".into();
+    harness.run();
+    assert!(harness.query_by_label(&row("Kick Hard.wav")).is_some());
+    assert!(harness.query_by_label(&row("Snare.wav")).is_none());
+
+    harness.state_mut().browser.search.clear();
+    harness.get_by_label("Show MIDI").click();
+    harness.run();
+    harness.state_mut().browser.search = "o".into();
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some());
+    assert!(harness.query_by_label(&row("Loop 120bpm.wav")).is_none(), "MIDI only");
+    harness.get_by_label("Show Instruments").click();
+    harness.run();
+    harness.state_mut().browser.search = "synth".into();
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some());
+    assert!(harness.query_by_label(&row("Overdrive")).is_none());
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn ctrl_f_searches_ctrl_b_hides_and_rows_never_take_the_keyboard() {
+    let (settings, folder) = (temp("keys-settings"), temp("keys"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.get_by_label(&row("Instruments")).click();
+    harness.run();
+    let focused = harness.ctx.memory(|m| m.focused());
+    assert_eq!(focused, None, "a click on a row leaves the keyboard to the shortcuts");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
+    harness.run();
+    harness.run();
+    assert!(
+        harness.ctx.memory(|m| m.has_focus(egui::Id::new("browser-search"))),
+        "Ctrl+F puts the cursor in the search"
+    );
+    // Typing goes to the field, and Down selects the first result.
+    harness.input_mut().events.push(egui::Event::Text("snare".into()));
+    harness.run();
+    assert_eq!(harness.state().browser.search, "snare");
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert_eq!(harness.state().browser.selected().first().map(|s| s.name.as_str()), Some("Snare.wav"));
+    // Escape clears the search, a second Escape gives the keyboard back.
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.state().browser.search.is_empty());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.ctx.memory(|m| m.has_focus(egui::Id::new("browser-search"))));
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::B);
+    harness.run();
+    assert!(!harness.state().settings().browser_open);
+    assert!(harness.query_by_label(&row("Instruments")).is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::B);
+    harness.run();
+    assert!(harness.state().settings().browser_open);
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_midi_file_dragged_onto_a_slot_becomes_a_clip_there() {
+    let (settings, folder) = (temp("slot-settings"), temp("slot"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().browser.search = "groove".into();
+    harness.run();
+    let from = harness.get_by_label(&row("Groove.mid")).rect().center();
+    let to = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    drag(&mut harness, from, to);
+    let keys_clip = |app: &App| {
+        app.session().is_some_and(|s| {
+            let p = s.project();
+            let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+            p.launcher.columns.iter().find(|c| Some(c.track) == keys).and_then(|c| c.slots[0].clip.as_ref()).is_some()
+        })
+    };
+    assert!(until(&mut harness, keys_clip), "the clip is in Keys' first slot");
+    assert!(harness.state().browser.drag.is_none());
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_sample_dragged_onto_the_empty_space_makes_an_audio_track() {
+    let (settings, folder) = (temp("empty-settings"), temp("empty"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().browser.search = "loop".into();
+    harness.run();
+    let tracks = |app: &App| app.session().map_or(0, |s| s.project().tracks.len());
+    let before = tracks(harness.state());
+    let from = harness.get_by_label(&row("Loop 120bpm.wav")).rect().center();
+    let to = harness.get_by_label("+ Audio track").rect().center() + egui::vec2(0.0, 40.0);
+    drag(&mut harness, from, to);
+    assert!(until(&mut harness, |app| tracks(app) == before + 1), "a new track");
+    let session = harness.state().session().unwrap();
+    let track = session.project().tracks.iter().find(|t| t.name == "Loop 120bpm").unwrap();
+    assert!(track.content.audio);
+    // The loop's tempo is in its name, so it is warped.
+    let warped = session
+        .project()
+        .contents
+        .iter()
+        .flat_map(|c| &c.lanes)
+        .any(|l| matches!(&l.data, LaneData::Audio(r) if r.warped));
+    assert!(warped);
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_device_dragged_onto_a_track_header_joins_its_chain_and_becomes_recent() {
+    let (settings, folder) = (temp("device-settings"), temp("device"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.get_by_label(&row("Effects")).click();
+    harness.run();
+    let from = harness.get_by_label(&row("Overdrive")).rect().center();
+    let to = harness.get_by_label("Track Bass").rect().center();
+    drag(&mut harness, from, to);
+    let bass_devices = |app: &App| {
+        app.session().map_or(0, |s| {
+            let p = s.project();
+            let channel = p.tracks.iter().find(|t| t.name == "Bass").and_then(|t| t.channel).unwrap_or(ChannelId(0));
+            p.channels.iter().find(|c| c.id == channel).map_or(0, |c| c.devices.len())
+        })
+    };
+    assert!(until(&mut harness, |app| bass_devices(app) == 1));
+    harness.get_by_label("Place Effects").click();
+    harness.run();
+    assert!(harness.query_by_label(&row("Overdrive")).is_some(), "Recent › Effects lists it");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn escape_cancels_a_drag_and_a_project_opens_with_a_double_click() {
+    let (settings, folder) = (temp("cancel-settings"), temp("cancel"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().browser.search = "song".into();
+    harness.run();
+    double_click(&mut harness, &row("Song.locr"));
+    harness.run();
+    let asked = harness.state_mut().take_open_request().is_some()
+        || harness.query_by_label_contains("Open Song.locr").is_some();
+    assert!(asked, "the project is asked to open");
+
+    harness.state_mut().browser.search = "kick".into();
+    harness.run();
+    let from = harness.get_by_label(&row("Kick Hard.wav")).rect().center();
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.step();
+    harness.hover_at(from + egui::vec2(300.0, 0.0));
+    harness.step();
+    assert!(harness.state().browser.drag.is_some());
+    harness.key_press(Key::Escape);
+    harness.step();
+    assert!(harness.state().browser.drag.is_none());
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_folder_is_added_from_the_sidebar_and_the_panel_moves_to_the_right() {
+    let (settings, folder) = (temp("add-settings"), temp("add"));
+    let other = temp("add-other");
+    pack(&folder);
+    wav(&other.join("Clap.wav"), 0.1);
+    let mut harness = window(&settings, &folder);
+    harness.get_by_label("Add folder").click();
+    harness.run();
+    harness.input_mut().events.push(egui::Event::Text(other.display().to_string()));
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    let name = other.file_name().unwrap().to_string_lossy().to_string();
+    assert!(harness.query_by_label(&format!("Place {name}")).is_some(), "the folder is in the sidebar");
+
+    let left = harness.get_by_label("Place Pinned").rect().center().x;
+    assert!(left < SIZE.0 / 2.0);
+    let mut settings_now = harness.state().settings().clone();
+    settings_now.browser_side = loopwerk_ui::settings::Side::Right;
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_settings(&ctx, settings_now);
+    harness.run();
+    assert!(harness.get_by_label("Place Pinned").rect().center().x > SIZE.0 / 2.0);
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+/// Renders the window with the browser open to `target/ui-snapshots/browser.png`, for looking
+/// at: `cargo test -p loopwerk-ui --test browser -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_browser() {
+    let (settings, folder) = (temp("render-settings"), temp("render"));
+    pack(&folder);
+    let mut app = App::new();
+    let mut library = Library::new(Some(settings.clone()));
+    library.add_folder(&folder).unwrap();
+    library.tag(&folder.join("Drums").join("Kick Hard.wav").display().to_string(), "Red", true).unwrap();
+    app.set_file_library(library);
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(2.0)
+        .with_step_dt(0.05)
+        .with_max_steps(40)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.get_by_label(&row("Instruments")).click();
+    harness.run();
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    double_click(&mut harness, &row(&name));
+    double_click(&mut harness, &row("Drums"));
+    harness.get_by_label(&row("Kick Hard.wav")).click();
+    for _ in 0..20 {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&out).unwrap_or_else(|e| panic!("{e}"));
+    image.save(out.join("browser.png")).unwrap_or_else(|e| panic!("{e}"));
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}

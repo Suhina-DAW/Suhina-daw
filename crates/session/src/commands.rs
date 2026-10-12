@@ -5,7 +5,7 @@ use loopwerk_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization,
 use loopwerk_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
-use crate::{CommandError, Session, devices};
+use crate::{CommandError, Session, devices, files, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -27,6 +27,9 @@ pub enum CommandKind {
     /// Acts on one of the project's running plug-ins (opens or closes its editor, restarts
     /// it); never changes the project or its undo history.
     Plugin,
+    /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
+    /// to Loopwerk, not to one project. Runs on [`crate::Projects`].
+    Library,
 }
 
 impl CommandKind {
@@ -39,6 +42,7 @@ impl CommandKind {
             Self::Projects => "projects",
             Self::Plugins => "plugins",
             Self::Plugin => "plugin",
+            Self::Library => "library",
         }
     }
 }
@@ -58,6 +62,8 @@ pub enum ParamType {
     Text,
     /// A list of tracks, each an id or a name.
     Tracks,
+    /// A list of texts (file paths).
+    Texts,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,13 +101,17 @@ impl<T> CommandSpec<T> {
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
         for p in self.params {
-            if p.ty == ParamType::Tracks {
-                let items = json!({ "type": ["integer", "string"] });
+            if matches!(p.ty, ParamType::Tracks | ParamType::Texts) {
+                let items = if p.ty == ParamType::Tracks {
+                    json!({ "type": ["integer", "string"] })
+                } else {
+                    json!({ "type": "string" })
+                };
                 properties.insert(p.name.to_string(), json!({ "type": "array", "items": items, "description": p.doc }));
                 continue;
             }
             let ty = match p.ty {
-                ParamType::Tracks => json!("array"),
+                ParamType::Tracks | ParamType::Texts => json!("array"),
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -464,15 +474,89 @@ static COMMANDS: &[CommandSpec] = &[
         label: "Add a built-in device to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given",
         params: &[
             TRACK,
-            param("id", ParamType::Text, "built-in device id, from devices.list"),
+            optional("id", ParamType::Text, "built-in device id, from devices.list (not needed with a preset)"),
             optional(
                 "position",
                 ParamType::Integer,
                 "where in the chain, from 0 (default: last; an instrument is always first)",
             ),
+            optional("preset", ParamType::Text, "a preset file to load: DX7 voice data (.syx) for the FM synth"),
+            optional("voice", ParamType::Integer, "which voice of a preset bank, from 1 (default 1)"),
         ],
         kind: CommandKind::Edit,
         run: devices::add,
+    },
+    CommandSpec {
+        id: "track.add",
+        label: "Add an audio or MIDI track with its mixer channel, clip slots and arrangement lane, optionally with a device (an instrument makes a MIDI track, an effect an audio track)",
+        params: &[
+            optional("kind", ParamType::Text, "audio or midi (default: from the device)"),
+            optional("name", ParamType::Text, "the track's name (default: the device's, or Audio n / MIDI n)"),
+            optional(
+                "after",
+                ParamType::Track,
+                "put it after this track, in its group (default: after the last regular track)",
+            ),
+            optional(
+                "device",
+                ParamType::Text,
+                "a built-in device id from devices.list, or a plug-in from plugins.list",
+            ),
+            optional("preset", ParamType::Text, "a preset file for the device (DX7 voice data for the FM synth)"),
+            optional("voice", ParamType::Integer, "which voice of a preset bank, from 1"),
+        ],
+        kind: CommandKind::Edit,
+        run: files::add_track,
+    },
+    CommandSpec {
+        id: "clip.addFiles",
+        label: "Place samples and MIDI files as clips: on a track (or new tracks when none is given), one after another from a beat in the arrangement or down the clip slots from a scene; separate gives each clip a track of its own",
+        params: &[
+            param(
+                "paths",
+                ParamType::Texts,
+                "the files: samples (wav, aiff, flac, mp3, ogg) and MIDI files (.mid); at most 256",
+            ),
+            optional(
+                "track",
+                ParamType::Track,
+                "the track to place them on; files it cannot hold go on a new track after it (default: new tracks)",
+            ),
+            optional("start", ParamType::Number, "arrangement beat the first clip starts at"),
+            optional("scene", ParamType::Integer, "scene number, from 1, of the first clip slot"),
+            optional(
+                "separate",
+                ParamType::Bool,
+                "one track per clip, side by side, instead of one after another (default false)",
+            ),
+            optional("stack", ParamType::Bool, "in the arrangement, keep the clips the new ones cover (default false)"),
+            optional(
+                "warp",
+                ParamType::Text,
+                "stretch mode for samples with a known tempo: repitch, rhythmic (default), tonal, texture, smooth, high-quality",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: files::add_files,
+    },
+    CommandSpec {
+        id: "preview.play",
+        label: "Preview a sample or a MIDI file once, at its own speed, after the main channel; a MIDI file plays through a track's instrument or the FM synth",
+        params: &[
+            param("path", ParamType::Text, "the sample or MIDI file"),
+            optional("from", ParamType::Number, "seconds into the file to start at (default 0)"),
+            optional("track", ParamType::Track, "a MIDI file plays through this track's instrument when it has one"),
+            optional("gain", ParamType::Number, "level in dB (default -6)"),
+        ],
+        kind: CommandKind::Transport,
+        run: preview::play,
+    },
+    CommandSpec {
+        id: "preview.stop",
+        label: "Stop the preview",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: preview::stop,
     },
     CommandSpec {
         id: "device.remove",
@@ -1206,7 +1290,7 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
 /// clips entirely inside are removed, clips reaching in are shortened, and a clip around it is
 /// split in two, the second part continuing its content from where it was. A split clip's
 /// first part keeps its fade-in and the second its fade-out; fades are fitted to what is left.
-fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
+pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
     let mut kept = Vec::with_capacity(clips.len() + 1);
     for clip in clips.drain(..) {
         let (start, end) = (clip.start, clip.start + clip.length);
@@ -1281,6 +1365,10 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
 }
 
 fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    let preview_state = session.player().map(|player| {
+        let preview = player.preview_monitor();
+        json!({ "playing": preview.playing(), "seconds": (preview.seconds() * 1000.0).round() / 1000.0 })
+    });
     let monitor = session.player_mut()?.monitor();
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
     let start_beat = monitor.start_beat();
@@ -1328,6 +1416,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),
         "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
+        "preview": preview_state,
     }))
 }
 

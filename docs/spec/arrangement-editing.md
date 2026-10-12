@@ -144,6 +144,10 @@ Stop returns to the marker.
 | `track.ungroup {track}` | The group goes; its tracks stay where they were and play where the group played. |
 | `track.move {track, to}` | Moves a track, a group with everything inside it, to position `to` in the track order. |
 | `track.rename`, `track.setColor`, `track.delete` | Name (not empty), colour (`#rrggbb` or `none`), and deleting a track with its clips and slots; deleting a group ungroups it. |
+| `track.add {kind?, name?, after?, device?, preset?, voice?}` | A new audio or MIDI track with its channel, slots and lane, after `after` or after the last regular track ([browser](browser.md) › Commands). |
+
+Clips placed from the browser (`clip.addFiles`) replace what they cover in the Arrangement like a
+moved clip, unless the stacking settings allow it ([browser](browser.md) › Files).
 
 In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G groups the selection,
 dragging a header moves the track above the lane under the pointer (below it from its lower half),

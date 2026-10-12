@@ -712,7 +712,8 @@ fn mcp(args: &[String]) -> Result<(), String> {
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let mut server = LoopwerkMcp::new(workspace);
+    let library = loopwerk_library::Library::new(loopwerk_plugins::library::settings_folder());
+    let mut server = LoopwerkMcp::new(workspace).with_file_library(library);
     if audio {
         server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
     }

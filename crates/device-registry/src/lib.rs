@@ -33,9 +33,80 @@ pub fn create(id: &str) -> Option<Box<dyn Device>> {
     })
 }
 
+/// Largest preset file read.
+pub const MAX_PRESET_BYTES: usize = 64 * 1024;
+
+/// A device's values from a preset file (`docs/spec/browser.md` › Built-in devices, presets
+/// and plug-ins).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preset {
+    /// The device it is for.
+    pub device: &'static str,
+    /// The preset's own name (a DX7 voice's name).
+    pub name: String,
+    /// Every parameter by its id, with the preset's value.
+    pub params: Vec<(&'static str, f64)>,
+}
+
+/// The voices a preset file holds: a DX7 single voice (1) or bank (32). Each is `(number from
+/// 1, name)`.
+pub fn preset_voices(data: &[u8]) -> Result<Vec<(usize, String)>, String> {
+    let voices = read_voices(data)?;
+    Ok(voices.patches.iter().enumerate().map(|(i, p)| (i + 1, p.name().trim().to_string())).collect())
+}
+
+/// The preset `voice` (from 1) of a preset file: DX7 voice data for the FM synth.
+pub fn preset(data: &[u8], voice: usize) -> Result<Preset, String> {
+    let voices = read_voices(data)?;
+    let count = voices.patches.len();
+    let patch = voice
+        .checked_sub(1)
+        .and_then(|i| voices.patches.get(i))
+        .ok_or_else(|| format!("voice {voice} is not in the file; it holds {count}"))?;
+    let mut synth = loopwerk_device_fm_synth::FmSynth::new();
+    synth.load_patch(patch);
+    let info = &loopwerk_device_fm_synth::INFO;
+    let params =
+        info.params.iter().enumerate().filter_map(|(i, p)| synth.param(i).map(|value| (p.id, value))).collect();
+    Ok(Preset { device: info.id, name: patch.name().trim().to_string(), params })
+}
+
+fn read_voices(data: &[u8]) -> Result<loopwerk_device_fm_synth::patch::Voices, String> {
+    if data.len() > MAX_PRESET_BYTES {
+        return Err(format!("a preset file is at most {} KiB", MAX_PRESET_BYTES / 1024));
+    }
+    loopwerk_device_fm_synth::patch::read(data).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dx7_voice_is_a_preset_for_the_fm_synth() {
+        use loopwerk_device_fm_synth::patch::{Patch, write_bank, write_voice};
+        let mut patch = Patch::default();
+        patch.set_name("GLASS BELL");
+        patch.set(134, 21); // algorithm 22
+        let single = write_voice(&patch);
+        let preset = preset(&single, 1).unwrap();
+        assert_eq!((preset.device, preset.name.as_str()), ("fm-synth", "GLASS BELL"));
+        assert_eq!(preset.params.len(), loopwerk_device_fm_synth::INFO.params.len());
+        let mut synth = loopwerk_device_fm_synth::FmSynth::new();
+        synth.load_patch(&patch);
+        for (i, (id, value)) in preset.params.iter().enumerate() {
+            assert_eq!(Some(*value), synth.param(i), "{id}");
+        }
+        assert_eq!(preset_voices(&single).unwrap(), vec![(1, "GLASS BELL".to_string())]);
+
+        let bank = write_bank(&vec![patch; 32]);
+        assert_eq!(preset_voices(&bank).unwrap().len(), 32);
+        assert_eq!(super::preset(&bank, 32).unwrap().name, "GLASS BELL");
+        assert!(super::preset(&bank, 33).is_err());
+        assert!(super::preset(&bank, 0).is_err());
+        assert!(super::preset(b"not a preset", 1).is_err());
+        assert!(super::preset(&vec![0u8; MAX_PRESET_BYTES + 1], 1).is_err());
+    }
 
     #[test]
     fn every_listed_device_can_be_made_and_ids_are_unique() {

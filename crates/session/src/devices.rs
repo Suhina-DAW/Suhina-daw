@@ -120,9 +120,37 @@ fn device_index(len: usize, params: &Value) -> Result<usize, CommandError> {
 }
 
 pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let id = params.get("id").and_then(Value::as_str).ok_or("id must be a built-in device id, from devices.list")?;
+    let preset = match params.get("preset") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let path = v.as_str().ok_or("preset must be a preset file's path")?;
+            let voice = match params.get("voice") {
+                None | Some(Value::Null) => 1,
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .filter(|n| *n >= 1)
+                    .ok_or("voice must be a whole number from 1")?,
+            };
+            Some(read_preset(std::path::Path::new(path), voice)?)
+        }
+    };
+    let id = match (params.get("id").and_then(Value::as_str), &preset) {
+        (Some(id), Some(p)) if id != p.device => {
+            return Err(format!("the preset is for {:?}, not {id:?}", p.device).into());
+        }
+        (Some(id), _) => id,
+        (None, Some(p)) => p.device,
+        (None, None) => return Err("id must be a built-in device id, from devices.list".into()),
+    };
     let info = loopwerk_device_registry::info(id)
         .ok_or_else(|| format!("no built-in device {id:?}; devices.list lists them"))?;
+    if info.role == Role::Instrument {
+        let track = track_id(&session.project, params)?;
+        if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
+            return Err("an instrument goes on a MIDI track".into());
+        }
+    }
     let channel = channel_param(session, params)?;
     if channel.devices.len() >= MAX_DEVICES {
         return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
@@ -164,11 +192,23 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         kind: DeviceKind::Builtin(info.id.to_string()),
         enabled: true,
         state: None,
-        params: Vec::new(),
+        params: preset
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.params.iter().map(|(id, value)| DeviceParam::new(*id, *value)).collect()),
         extensions: Extensions::default(),
     };
     channel.devices.insert(position, device);
-    Ok(json!({ "device": position, "id": info.id, "name": info.name }))
+    Ok(json!({ "device": position, "id": info.id, "name": info.name, "preset": preset.map(|p| p.name) }))
+}
+
+/// Reads voice `voice` of the preset file at `path`.
+fn read_preset(path: &std::path::Path, voice: usize) -> Result<loopwerk_device_registry::Preset, CommandError> {
+    let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    if size > loopwerk_device_registry::MAX_PRESET_BYTES as u64 {
+        return Err(format!("{}: a preset file is at most 64 KiB", path.display()).into());
+    }
+    let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    loopwerk_device_registry::preset(&data, voice).map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
 pub(crate) fn remove(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -237,6 +277,12 @@ pub(crate) fn add_plugin(session: &mut Session, params: &Value) -> Result<Value,
         .ok_or_else(|| format!("no plug-in {name:?} in the catalog; plugins.list lists them"))?
         .clone();
     let instrument = crate::is_instrument(&plugin);
+    if instrument {
+        let track = track_id(&session.project, params)?;
+        if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
+            return Err("an instrument goes on a MIDI track".into());
+        }
+    }
     let channel = channel_param(session, params)?;
     if channel.devices.len() >= MAX_DEVICES {
         return Err(format!("a track holds at most {MAX_DEVICES} devices").into());

@@ -17,6 +17,7 @@ loopwerk-locr = { path = "crates/locr" }
 loopwerk-session = { path = "crates/session" }
 loopwerk-automation = { path = "crates/automation" }
 loopwerk-media = { path = "crates/media" }
+loopwerk-library = { path = "crates/library" }
 loopwerk-dsp = { path = "crates/dsp" }
 loopwerk-device-api = { path = "crates/device-api" }
 loopwerk-ipc = { path = "crates/ipc" }
@@ -41,6 +42,7 @@ roxmltree = "0.21"  # MIT OR Apache-2.0
 cpal = "0.18"  # Apache-2.0
 serde_json = "1"  # MIT OR Apache-2.0
 rtrb = "0.3"  # MIT OR Apache-2.0
+notify-debouncer-full = "0.6"  # MIT OR Apache-2.0; with notify (CC0-1.0)
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

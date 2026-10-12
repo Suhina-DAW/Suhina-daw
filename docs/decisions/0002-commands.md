@@ -80,6 +80,13 @@ They run on the session, never change the project and record no undo step. Addin
 (`device.addPlugin`) is an edit like `device.add`; `device.plugin` reads where a plug-in device
 stands. `plugins.setHosting` (kind plugins) chooses how a plug-in shares host processes.
 
+An eighth kind, **library**, runs on `Projects` like the plugins kind: the browser's folders,
+search, pins, recent items and colour tags (`library.*`, [ADR 0012](0012-file-library.md)). It
+never changes a project. A successful edit that adds something from the browser (`clip.addFiles`,
+`track.add`, `device.add`, `device.addPlugin`) is recorded among the library's recent items by
+`Projects`, so the CLI, MCP and the window all keep them. Parameters may also be a list of
+texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings.
+
 ## Amendment: device commands (2026-10-12)
 
 Devices on tracks are edited with ordinary **edit** commands, one undo step each:

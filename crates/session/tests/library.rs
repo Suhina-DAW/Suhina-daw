@@ -1,0 +1,176 @@
+//! The `library.*` commands (`docs/spec/browser.md` › Commands): folders, search across files,
+//! built-in devices and plug-ins, pins, recent items recorded from what was added, tags.
+#![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions
+
+use std::path::{Path, PathBuf};
+
+use loopwerk_library::Library;
+use loopwerk_session::{Projects, Session, blank_project};
+use serde_json::{Value, json};
+
+fn temp(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("loopwerk-libcmd-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn wav(path: &Path) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let spec =
+        hound::WavSpec { channels: 1, sample_rate: 8000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for _ in 0..4000 {
+        writer.write_sample(8000i16).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+/// Projects with a library kept in `settings` (and its own empty plug-in library) and one open
+/// blank project.
+fn projects(settings: &Path) -> Projects {
+    let plugins = loopwerk_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
+    let mut projects = Projects::with_library(plugins);
+    projects.set_file_library(Library::new(Some(settings.to_path_buf())));
+    projects.add(Session::new(blank_project()), None).unwrap();
+    projects
+}
+
+fn run(projects: &mut Projects, id: &str, params: Value) -> Result<Value, String> {
+    projects.execute(id, &params).map_err(|e| e.0)
+}
+
+fn names(result: &Value) -> Vec<String> {
+    result["items"]
+        .as_array()
+        .map(|l| l.iter().filter_map(|i| i["name"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn folders_are_added_listed_searched_and_removed() {
+    let settings = temp("folders-settings");
+    let samples = temp("folders");
+    wav(&samples.join("Drums").join("Kick Hard.wav"));
+    wav(&samples.join("Drums").join("Snare.wav"));
+    std::fs::write(samples.join("groove.mid"), b"MThd").unwrap();
+    let mut p = projects(&settings);
+    let folder = samples.display().to_string();
+    run(&mut p, "library.addFolder", json!({ "folder": folder })).unwrap();
+    let listed = run(&mut p, "library.folders", json!({})).unwrap();
+    assert_eq!(listed["folders"][0]["files"], 3);
+    assert!(run(&mut p, "library.addFolder", json!({ "folder": folder })).is_err());
+
+    let found = run(&mut p, "library.search", json!({ "text": "kick", "category": "samples" })).unwrap();
+    assert_eq!(names(&found), ["Kick Hard.wav"]);
+    assert_eq!(found["items"][0]["kind"], "sample");
+    let midi = run(&mut p, "library.search", json!({ "category": "midi" })).unwrap();
+    assert_eq!(names(&midi), ["groove.mid"]);
+    let inside =
+        run(&mut p, "library.search", json!({ "place": samples.join("Drums").display().to_string() })).unwrap();
+    assert_eq!(names(&inside).len(), 2);
+
+    let top = run(&mut p, "library.list", json!({ "folder": folder })).unwrap();
+    assert_eq!(names(&top), ["Drums", "groove.mid"]);
+    assert_eq!(top["items"][0]["kind"], "folder");
+
+    run(&mut p, "library.removeFolder", json!({ "folder": folder })).unwrap();
+    assert_eq!(run(&mut p, "library.folders", json!({})).unwrap()["folders"], json!([]));
+    for bad in [
+        ("library.addFolder", json!({ "folder": samples.join("nope").display().to_string() })),
+        ("library.addFolder", json!({})),
+        ("library.removeFolder", json!({ "folder": folder })),
+        ("library.list", json!({ "folder": samples.join("nope").display().to_string() })),
+        ("library.search", json!({ "category": "videos" })),
+        ("library.search", json!({ "place": "recent:videos" })),
+        ("library.search", json!({ "limit": 0 })),
+        ("library.refresh", json!({ "folder": folder })),
+    ] {
+        assert!(run(&mut p, bad.0, bad.1.clone()).is_err(), "{} {}", bad.0, bad.1);
+    }
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&samples);
+}
+
+#[test]
+fn search_finds_built_in_devices_by_category() {
+    let settings = temp("devices");
+    let mut p = projects(&settings);
+    let instruments = run(&mut p, "library.search", json!({ "category": "instruments" })).unwrap();
+    assert_eq!(names(&instruments), ["FM Synth"]);
+    assert_eq!(instruments["items"][0]["item"], "device:fm-synth");
+    let effects = run(&mut p, "library.search", json!({ "category": "effects", "text": "drive" })).unwrap();
+    assert_eq!(names(&effects), ["Overdrive"]);
+    assert!(names(&run(&mut p, "library.search", json!({ "category": "plugins" })).unwrap()).is_empty());
+    let info = run(&mut p, "library.info", json!({ "item": "device:dj-eq" })).unwrap();
+    assert_eq!(info["kind"], "effect");
+    let _ = std::fs::remove_dir_all(&settings);
+}
+
+#[test]
+fn what_is_added_to_a_project_becomes_recent() {
+    let settings = temp("recent-settings");
+    let samples = temp("recent");
+    let kick = samples.join("kick 120bpm.wav");
+    wav(&kick);
+    let mut p = projects(&settings);
+    run(&mut p, "clip.addFiles", json!({ "paths": [kick.display().to_string()], "track": 3, "start": 0.0 })).unwrap();
+    run(&mut p, "device.add", json!({ "track": 3, "id": "overdrive" })).unwrap();
+    run(&mut p, "track.add", json!({ "device": "fm-synth" })).unwrap();
+    // A failed command records nothing.
+    let _ = run(&mut p, "device.add", json!({ "track": 3, "id": "fm-synth" }));
+    let recent = run(&mut p, "library.recent", json!({})).unwrap();
+    let absolute = std::path::absolute(&kick).unwrap().display().to_string();
+    assert_eq!(recent["samples"], json!([absolute]));
+    assert_eq!(recent["effects"], json!(["device:overdrive"]));
+    assert_eq!(recent["instruments"], json!(["device:fm-synth"]));
+    let listed = run(&mut p, "library.search", json!({ "place": "recent:samples" })).unwrap();
+    assert_eq!(names(&listed), ["kick 120bpm.wav"]);
+    // A sample's tempo comes from its name.
+    let info = run(&mut p, "library.info", json!({ "item": absolute })).unwrap();
+    assert_eq!((info["bpm"].as_f64(), info["bpm_from"].as_str()), (Some(120.0), Some("name")));
+    assert_eq!(info["seconds"], 0.5);
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&samples);
+}
+
+#[test]
+fn pins_and_tags_are_kept_between_runs() {
+    let settings = temp("tags");
+    let mut p = projects(&settings);
+    run(&mut p, "library.pin", json!({ "item": "device:utility" })).unwrap();
+    run(&mut p, "library.setTag", json!({ "name": "Mixing", "color": "#336699" })).unwrap();
+    run(&mut p, "library.tag", json!({ "item": "device:utility", "tag": "Mixing", "on": true })).unwrap();
+    assert!(run(&mut p, "library.tag", json!({ "item": "device:utility", "tag": "Nope", "on": true })).is_err());
+    assert!(run(&mut p, "library.setTag", json!({ "name": "Bad", "color": "blue" })).is_err());
+    assert!(run(&mut p, "library.setTag", json!({})).is_err());
+    assert!(run(&mut p, "library.setTag", json!({ "limit": 2 })).is_err(), "there are more tags than that");
+
+    let mut again = projects(&settings);
+    assert_eq!(run(&mut again, "library.pinned", json!({})).unwrap()["items"], json!(["device:utility"]));
+    let tagged = run(&mut again, "library.search", json!({ "tags": ["Mixing"] })).unwrap();
+    assert_eq!(names(&tagged), ["Utility"]);
+    assert_eq!(tagged["items"][0]["tags"], json!(["Mixing"]));
+    let pinned = run(&mut again, "library.search", json!({ "place": "pinned" })).unwrap();
+    assert_eq!(names(&pinned), ["Utility"]);
+    run(&mut again, "library.removeTag", json!({ "name": "Mixing" })).unwrap();
+    run(&mut again, "library.unpin", json!({ "item": "device:utility" })).unwrap();
+    assert_eq!(run(&mut again, "library.tags", json!({})).unwrap()["tagged"], json!({}));
+    let _ = std::fs::remove_dir_all(&settings);
+}
+
+#[test]
+fn library_commands_are_listed_and_need_no_project() {
+    let settings = temp("listed");
+    let mut p = Projects::default();
+    p.set_file_library(Library::new(Some(settings.clone())));
+    assert!(run(&mut p, "library.folders", json!({})).is_ok(), "no project is open");
+    let all = run(&mut p, "commands.list", json!({})).unwrap();
+    let ids: Vec<&str> = all.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
+    for id in ["library.search", "library.addFolder", "track.add", "clip.addFiles", "preview.play"] {
+        assert!(ids.contains(&id), "{id}");
+    }
+    let _ = std::fs::remove_dir_all(&settings);
+}

@@ -6,6 +6,7 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
+use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
 use crate::menus::{self, TrackMenu};
 use crate::motion;
@@ -32,6 +33,9 @@ pub struct SessionViewState {
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
     drag: Option<(TrackId, Control, f64)>,
+    /// A drag from the browser over the window: the view says which target is under the
+    /// pointer (`docs/spec/browser.md` › Dragging into the project).
+    pub drop: Option<DropProbe>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +125,49 @@ pub fn show(
         let progress = progress.get(index).copied().flatten();
         draw_column(ui, &painter, &bands, clip, span, column, track_number, progress, state, actions);
     }
+    // The empty space right of the last track: buttons that add a track, and new tracks for
+    // what the browser drops there.
+    let empty = Rect::from_min_max(
+        Pos2::new(track_x.max(area.left()), area.top()),
+        Pos2::new(returns_x - 1.0, mixer.top() - 1.0),
+    );
+    if empty.width() > 24.0 {
+        empty_space(ui, &painter, empty, actions);
+    }
+    if let Some(probe) = state.drop.as_mut() {
+        let row_of = |y: f32| ((y - bands.top) / PITCH).floor().max(0.0) as usize;
+        for (column, span) in &spans {
+            if column.kind != ColumnKind::Track {
+                continue;
+            }
+            let header_rect = Rect::from_x_y_ranges(*span, header.y_range());
+            probe.offer(header_rect, DropTarget::Track(column.track));
+            let column_body = Rect::from_x_y_ranges(*span, body.y_range()).intersect(tracks_clip);
+            if column_body.contains(probe.pointer) {
+                let scene = row_of(probe.pointer.y).min(grid.scenes.len());
+                let top = bands.top + scene as f32 * PITCH;
+                let cell = Rect::from_x_y_ranges(*span, egui::Rangef::new(top, top + ROW)).intersect(column_body);
+                let target = if probe.files {
+                    DropTarget::Slot { track: column.track, scene }
+                } else {
+                    DropTarget::Track(column.track)
+                };
+                probe.offer(if probe.files { cell } else { column_body }, target);
+            }
+        }
+        if empty.width() > 0.0 && empty.contains(probe.pointer) {
+            let scene = if probe.pointer.y > body.top() { row_of(probe.pointer.y).min(grid.scenes.len()) } else { 0 };
+            probe.offer(empty, DropTarget::NewTracks { beat: None, scene: Some(scene) });
+        }
+        if let Some(target_area) = probe.area {
+            painter.with_clip_rect(area).rect_stroke(
+                target_area.shrink(0.5),
+                0.0,
+                egui::Stroke::new(1.5, theme::accent()),
+                StrokeKind::Inside,
+            );
+        }
+    }
     // A header let go over a column moves its track there: before the column under the
     // pointer, or after it from its right half; a group moves with its tracks.
     let target_of = |x: f32| spans.iter().find(|(_, span)| span.contains(x)).map(|(c, span)| (*c, x > span.center()));
@@ -176,6 +223,39 @@ pub fn show(
     );
     let main_mixer = Rect::from_x_y_ranges(scene_span, mixer.y_range());
     painter.rect_filled(main_mixer, 0.0, theme::panel_background());
+}
+
+/// The two buttons that add an empty track, at the top of the empty space after the tracks;
+/// the space below takes drops (`docs/spec/browser.md` › Files).
+pub(crate) fn empty_space(ui: &Ui, painter: &egui::Painter, area: Rect, actions: &mut Vec<Action>) {
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mut y = area.top() + PAD;
+    for (kind, label) in [("midi", "+ MIDI track"), ("audio", "+ Audio track")] {
+        let width = (widgets::text_width(ui, label, font.clone()) + PAD * 2.0).min(area.width() - PAD * 2.0);
+        let rect = Rect::from_min_size(Pos2::new(area.left() + PAD, y), Vec2::new(width, ROW));
+        y = rect.bottom() + 2.0;
+        if rect.bottom() > area.bottom() || width <= 0.0 {
+            break;
+        }
+        let response = widgets::button_area(ui, rect, Id::new(("add-track", kind, area.min.x as i32)), label);
+        let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, fill);
+        widgets::text_in(painter, rect, Align2::CENTER_CENTER, label, font.clone(), theme::text_secondary());
+        if response.clicked() {
+            actions.push(Action::new("track.add", json!({ "kind": kind })));
+        }
+    }
+    if area.height() > y - area.top() + ROW * 2.0 {
+        let hint = Rect::from_min_max(Pos2::new(area.left(), y), area.max);
+        widgets::text_in(
+            painter,
+            hint.shrink(PAD),
+            Align2::CENTER_CENTER,
+            "Drop files or devices to add a track",
+            font,
+            theme::text_hint(),
+        );
+    }
 }
 
 /// The view's horizontal bands, and where the first scene row is after scrolling.

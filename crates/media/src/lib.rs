@@ -1,6 +1,10 @@
 //! Audio files for a project: finds the files its audio clips refer to and decodes them into
 //! memory with symphonia (MPL-2.0), so the engine can play them without touching the disk.
 
+pub mod info;
+pub mod midi;
+pub mod tempo;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

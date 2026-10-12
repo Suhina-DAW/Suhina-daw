@@ -12,7 +12,10 @@ use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
+use crate::browser::BrowserState;
+use crate::browser_view;
 use crate::detail_view;
+use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
@@ -63,6 +66,16 @@ pub enum NewProject {
 struct ScanDone {
     library: loopwerk_plugins::library::Library,
     report: Result<(usize, usize), String>,
+}
+
+/// The handle between the browser and the view.
+const BROWSER_HANDLE: f32 = 4.0;
+
+/// A drop whose samples are being decoded on another thread before its commands run.
+struct PendingDrop {
+    commands: Vec<(&'static str, serde_json::Value)>,
+    decoded:
+        std::sync::mpsc::Receiver<Vec<(PathBuf, std::sync::Arc<loopwerk_engine::AudioData>, crate::waveform::Peaks)>>,
 }
 
 /// A project's view state, kept while another project's tab is showing.
@@ -156,6 +169,11 @@ pub struct App {
     default_folders: (PathBuf, PathBuf),
     /// The window's title as last set: the active project, marked when it has unsaved changes.
     window_title: String,
+    /// The browser panel (`docs/spec/browser.md`), the same for every project.
+    pub browser: BrowserState,
+    pending_drop: Option<PendingDrop>,
+    /// Where the detail area is this frame and the track it shows, for drops on its devices.
+    detail_drop: Option<(Rect, TrackId)>,
 }
 
 impl Default for App {
@@ -208,6 +226,31 @@ impl App {
             saved_path: None,
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
             window_title: String::new(),
+            browser: BrowserState::default(),
+            pending_drop: None,
+            detail_drop: None,
+        }
+    }
+
+    /// Uses `library` for the browser and the `library.*` commands (ADR 0012); the app gives
+    /// it Loopwerk's settings folder and starts it.
+    pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
+        self.projects.set_file_library(library);
+        self.browser.relist();
+    }
+
+    /// The open projects, to change (the browser's library, for the app).
+    pub fn projects_mut(&mut self) -> &mut Projects {
+        &mut self.projects
+    }
+
+    /// Puts a project opened or saved first among the browser's recent projects.
+    pub fn record_project(&mut self, path: &Path) {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Err(e) =
+            self.projects.file_library_mut().record(loopwerk_library::Group::Projects, &path.display().to_string())
+        {
+            self.status = Status::Error(e);
         }
     }
 
@@ -729,9 +772,19 @@ impl App {
             if self.open_prompt.is_some() {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
             }
+            let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
             let view_area = inner;
+            self.detail_drop = None;
             let inner =
                 if grid.is_some() && self.detail_open { self.detail_area(ui, inner, &mut actions) } else { inner };
+            // A drag from the browser: the views say what is under the pointer.
+            let probe = self
+                .browser
+                .drag
+                .as_ref()
+                .and_then(|items| ui.ctx().pointer_latest_pos().map(|pointer| DropProbe::new(pointer, items)));
+            self.view.drop = probe.clone();
+            self.arrangement.drop = probe;
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
@@ -766,6 +819,8 @@ impl App {
             });
             drop_overlay(ui, view_area);
         });
+        self.browser_drag(ui);
+        self.poll_drop(ui.ctx());
 
         self.plugin_dialog(ui, window);
         self.project_dialogs(ui, window);
@@ -842,6 +897,9 @@ impl App {
                     reports.insert((shown_track, index), report);
                 }
             }
+        }
+        if let Some(shown_track) = clip.map(|(t, _)| t).or(track) {
+            self.detail_drop = Some((detail, shown_track));
         }
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
@@ -1045,8 +1103,14 @@ impl App {
         let themes = self.themes.view(&self.settings.theme);
         self.about.projects_default = self.default_folders.0.display().to_string();
         self.about.templates_default = self.default_folders.1.display().to_string();
-        let sources =
-            Sources { about: &self.about, plugins: &mut self.plugins, themes: &themes, keymap: &mut self.keymap };
+        let tag_limit = self.projects.file_library_mut().tag_limit();
+        let sources = Sources {
+            about: &self.about,
+            plugins: &mut self.plugins,
+            themes: &themes,
+            keymap: &mut self.keymap,
+            tag_limit,
+        };
         let outcome = settings_view::show(ui, &mut self.settings, sources, &mut self.page);
         if let Some(request) = outcome.themes.clone() {
             if let Some(id) = self.themes.request(&self.settings.theme, request) {
@@ -1057,6 +1121,11 @@ impl App {
         }
         if outcome.keymap_changed {
             self.keymap_changed = true;
+        }
+        if let Some(limit) = outcome.tag_limit
+            && let Err(e) = self.projects.execute("library.setTag", &json!({ "limit": limit }))
+        {
+            self.status = Status::Error(e.0);
         }
         if let Some(request) = outcome.plugins.clone() {
             self.plugin_request(request);
@@ -1134,6 +1203,10 @@ impl App {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
+                let label = if self.settings.browser_open { "Hide browser" } else { "Show browser" };
+                if ui.add(egui::Button::new(label).shortcut_text(keys("view.browser"))).clicked() {
+                    self.toggle_browser();
+                }
                 let label = if self.detail_open { "Hide detail area" } else { "Show detail area" };
                 if ui.add_enabled(has_project, egui::Button::new(label).shortcut_text(keys("view.detail"))).clicked() {
                     self.detail_open = !self.detail_open;
@@ -1176,13 +1249,22 @@ impl App {
         let is = |path: &PathBuf, ext: &str| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
         let mut opened = false;
         for path in dropped {
-            if is(&path, "json") || is(&path, "zip") {
+            if path.is_dir() {
+                match self.projects.execute("library.addFolder", &json!({ "folder": path.display().to_string() })) {
+                    Ok(_) => {
+                        self.settings.browser_open = true;
+                        self.browser.relist();
+                        self.status = Status::Done(format!("Added {} to the browser", path.display()));
+                    }
+                    Err(e) => self.status = Status::Error(e.0),
+                }
+            } else if is(&path, "json") || is(&path, "zip") {
                 self.themes.import(path);
             } else if (is(&path, "als") || is(&path, "locr")) && !opened {
                 opened = true;
                 self.request_open(path);
             } else {
-                let what = "is not a project (.locr), a Live Set (.als), a theme (.json) or a zip of themes";
+                let what = "is not a project (.locr), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
                 self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
@@ -1209,6 +1291,14 @@ impl App {
             "settings.open" => self.settings_open = !self.settings_open,
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
+            "view.browser" => self.toggle_browser(),
+            "browser.search" => {
+                if !self.settings.browser_open {
+                    self.toggle_browser();
+                }
+                self.settings_open = false;
+                self.browser.focus_search = true;
+            }
             _ if !has_project => {}
             "file.save" => self.save_active(false),
             "file.saveAs" => self.save_active(true),
@@ -1266,6 +1356,265 @@ impl App {
             }
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
+        }
+    }
+
+    /// Shows or hides the browser panel, as Ctrl+B does.
+    pub fn set_browser_open(&mut self, open: bool) {
+        if self.settings.browser_open != open {
+            self.toggle_browser();
+        }
+    }
+
+    fn toggle_browser(&mut self) {
+        self.settings.browser_open = !self.settings.browser_open;
+        self.settings_changed = true;
+        if !self.settings.browser_open {
+            browser_view::stop_preview(&mut self.browser, &mut self.projects);
+            self.browser.drag = None;
+        }
+    }
+
+    /// The track selected in the view shown.
+    fn selected_track(&self) -> Option<TrackId> {
+        match self.shown {
+            View::Session => self.view.selected,
+            View::Arrangement => self.arrangement.selected_tracks.first().copied(),
+        }
+    }
+
+    /// Lays out the browser at the side of `area`, draws it with its handle, and returns what is
+    /// left for the view.
+    fn browser_panel(&mut self, ui: &mut Ui, area: Rect) -> Rect {
+        let (low, high) = crate::settings::BROWSER_WIDTHS;
+        let width = (self.settings.browser_width as f32)
+            .clamp(low as f32, (high as f32).min(area.width() - 240.0).max(low as f32));
+        let left = self.settings.browser_side == Side::Left;
+        let (panel, handle, rest) = if left {
+            let panel = Rect::from_min_max(area.min, Pos2::new(area.left() + width, area.bottom()));
+            let handle = Rect::from_min_max(
+                Pos2::new(panel.right(), area.top()),
+                Pos2::new(panel.right() + BROWSER_HANDLE, area.bottom()),
+            );
+            (panel, handle, Rect::from_min_max(Pos2::new(handle.right(), area.top()), area.max))
+        } else {
+            let panel = Rect::from_min_max(Pos2::new(area.right() - width, area.top()), area.max);
+            let handle = Rect::from_min_max(
+                Pos2::new(panel.left() - BROWSER_HANDLE, area.top()),
+                Pos2::new(panel.left(), area.bottom()),
+            );
+            (panel, handle, Rect::from_min_max(area.min, Pos2::new(handle.left(), area.bottom())))
+        };
+        if let Some(new) = browser_view::resize_handle(ui, handle, width, left) {
+            let new = new.round().clamp(low as f32, high as f32) as u32;
+            if new != self.settings.browser_width {
+                self.settings.browser_width = new;
+                self.settings_changed = true;
+            }
+        }
+        let search_key = self.keymap.label("browser.search").unwrap_or_default();
+        let selected_track = self.selected_track();
+        let out = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
+                let cx = browser_view::Context {
+                    projects: &mut self.projects,
+                    settings: &self.settings,
+                    selected_track,
+                    search_key,
+                    other_results: None,
+                };
+                browser_view::show(ui, panel, &mut self.browser, cx)
+            })
+            .inner;
+        if let Some(status) = out.status {
+            self.status = status;
+        }
+        if let Some(path) = out.open_project {
+            self.request_open(path);
+        }
+        if !out.add.is_empty() {
+            self.add_to_selected(out.add);
+        }
+        rest
+    }
+
+    /// Adds browser items to the selected track, as Enter and a double-click do: devices to its
+    /// chain, files in the Arrangement at the play start marker, in the Session from its first
+    /// empty slot; without a selected track, on new tracks.
+    fn add_to_selected(&mut self, items: Vec<BrowserItem>) {
+        let Some(session) = self.session() else {
+            self.status = Status::Hint("Open a project to add to".into());
+            return;
+        };
+        let project = session.project();
+        let track = self.selected_track().filter(|t| project.tracks.iter().any(|x| x.id == *t));
+        let files = items.iter().any(|i| i.kind.is_file_clip());
+        let target = match (track, self.shown) {
+            (Some(track), _) if !files => DropTarget::Track(track),
+            (Some(track), View::Arrangement) => {
+                let beat = session.player().map_or(0.0, |p| p.monitor().start_beat());
+                DropTarget::Lane { track, beat }
+            }
+            (Some(track), View::Session) => {
+                let column = project.launcher.columns.iter().find(|c| c.track == track);
+                let scene = column
+                    .and_then(|c| c.slots.iter().position(|s| s.clip.is_none()))
+                    .unwrap_or(project.launcher.scenes.len());
+                DropTarget::Slot { track, scene }
+            }
+            (None, View::Arrangement) => DropTarget::NewTracks { beat: Some(0.0), scene: None },
+            (None, View::Session) => DropTarget::NewTracks { beat: None, scene: Some(0) },
+        };
+        self.drop_items(&items, target, false);
+    }
+
+    /// While items are dragged from the browser: the label beside the pointer, Escape to stop,
+    /// and the drop when the button is let go.
+    fn browser_drag(&mut self, ui: &Ui) {
+        let Some(items) = self.browser.drag.clone() else { return };
+        let (released, escape, ctrl, pointer) = ui.input(|i| {
+            (!i.pointer.primary_down(), i.key_pressed(Key::Escape), i.modifiers.command, i.pointer.latest_pos())
+        });
+        let mut target = match self.shown {
+            View::Session => self.view.drop.as_ref().and_then(|p| p.target),
+            View::Arrangement => self.arrangement.drop.as_ref().and_then(|p| p.target),
+        };
+        if let (None, Some(pointer), Some((detail, track))) = (target, pointer, self.detail_drop)
+            && detail.contains(pointer)
+            && items.iter().any(|i| i.kind.is_device())
+        {
+            target = Some(DropTarget::Track(track));
+        }
+        if escape {
+            self.browser.drag = None;
+            return;
+        }
+        let separate = ctrl != self.settings.drop_separate;
+        let label = target.and_then(|t| self.plan_drop(&items, t, separate)).map(|p| p.label);
+        if let Some(pointer) = pointer {
+            let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("browser-drag"));
+            let painter = ui.ctx().layer_painter(layer);
+            let text = label.clone().unwrap_or_else(|| match items.as_slice() {
+                [one] => one.name.clone(),
+                many => format!("{} items", many.len()),
+            });
+            let font = theme::ui_font(theme::TEXT_SMALL);
+            let galley = widgets::fitted(&painter, &text, font, theme::text_primary(), 280.0);
+            let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(PAD * 2.0, 6.0));
+            painter.rect_filled(rect, 0.0, theme::control_active());
+            painter.rect_stroke(
+                rect,
+                0.0,
+                theme::hairline(if label.is_some() { theme::accent() } else { theme::border_strong() }),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(rect.min + Vec2::new(PAD, 3.0), galley, theme::text_primary());
+            ui.ctx().request_repaint();
+        }
+        if released {
+            self.browser.drag = None;
+            self.view.drop = None;
+            self.arrangement.drop = None;
+            if let Some(target) = target {
+                self.drop_items(&items, target, separate);
+            }
+        }
+    }
+
+    fn plan_drop(&self, items: &[BrowserItem], target: DropTarget, separate: bool) -> Option<drop::DropPlan> {
+        let project = self.session()?.project();
+        let name =
+            |t: TrackId| project.tracks.iter().find(|x| x.id == t).map_or_else(|| t.0.to_string(), |x| x.name.clone());
+        let stack = self.settings.sample_stacking || self.settings.midi_stacking;
+        drop::plan(items, target, separate, self.settings.warp_mode.param(), stack, &name)
+    }
+
+    /// Runs a drop: decodes its samples on another thread first, so the window never waits,
+    /// then runs its commands (ADR 0011).
+    fn drop_items(&mut self, items: &[BrowserItem], target: DropTarget, separate: bool) {
+        let Some(plan) = self.plan_drop(items, target, separate) else {
+            self.status = Status::Hint("Nothing to add there".into());
+            return;
+        };
+        if plan.samples.is_empty() {
+            self.run_drop(plan.commands);
+            return;
+        }
+        let (send, decoded) = std::sync::mpsc::channel();
+        let samples = plan.samples.clone();
+        let started = std::thread::Builder::new().name("loopwerk-drop".into()).spawn(move || {
+            let done: Vec<_> = samples
+                .into_iter()
+                .filter_map(|path| {
+                    let data = loopwerk_media::decode_file(&path).ok()?;
+                    let peaks = crate::waveform::peaks(&data);
+                    Some((path, std::sync::Arc::new(data), peaks))
+                })
+                .collect();
+            let _ = send.send(done);
+        });
+        match started {
+            Ok(_) => {
+                let count = plan.samples.len();
+                self.status = Status::Hint(format!("Reading {count} sample{}", if count == 1 { "" } else { "s" }));
+                self.pending_drop = Some(PendingDrop { commands: plan.commands, decoded });
+            }
+            Err(_) => self.run_drop(plan.commands),
+        }
+    }
+
+    /// Picks up the samples of a drop once they are decoded and runs its commands.
+    fn poll_drop(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &self.pending_drop else { return };
+        match pending.decoded.try_recv() {
+            Ok(decoded) => {
+                let Some(pending) = self.pending_drop.take() else { return };
+                let mut waveforms = (*self.waveforms).clone();
+                if let Ok(session) = self.projects.session_mut(None) {
+                    for (path, data, peaks) in decoded {
+                        let key = std::path::absolute(&path).unwrap_or(path.clone()).display().to_string();
+                        session.provide_audio(&path, data);
+                        waveforms.insert(key, std::sync::Arc::new(peaks));
+                    }
+                }
+                self.waveforms = std::sync::Arc::new(waveforms);
+                self.run_drop(pending.commands);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(30))
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending_drop = None;
+                self.status = Status::Error("reading the samples stopped".into());
+            }
+        }
+    }
+
+    /// Runs a drop's commands through the open projects, so what was added becomes recent.
+    fn run_drop(&mut self, commands: Vec<(&'static str, serde_json::Value)>) {
+        for (id, params) in commands {
+            match self.projects.execute(id, &params) {
+                Ok(result) => {
+                    self.revision += 1;
+                    self.timeline = None;
+                    let skipped = result["skipped"].as_array().map_or(0, Vec::len);
+                    let placed = result["clips"].as_array().map_or(0, Vec::len);
+                    self.status = match (id, skipped) {
+                        ("clip.addFiles", 0) => {
+                            Status::Done(format!("Added {placed} clip{}", if placed == 1 { "" } else { "s" }))
+                        }
+                        ("clip.addFiles", n) => Status::Hint(format!(
+                            "Added {placed} clips; {n} skipped: {}",
+                            result["skipped"][0]["reason"].as_str().unwrap_or_default()
+                        )),
+                        _ => Status::Done("Added".into()),
+                    };
+                }
+                Err(e) => {
+                    self.status = Status::Error(e.0);
+                    break;
+                }
+            }
         }
     }
 

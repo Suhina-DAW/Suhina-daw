@@ -109,6 +109,7 @@ pub enum Page {
     Theme,
     Arrangement,
     DetailArea,
+    Browser,
     Graphics,
     Audio,
     Shortcuts,
@@ -117,12 +118,13 @@ pub enum Page {
 
 impl Page {
     /// Every page with its name, and whether it belongs to the page above it (Interface).
-    pub const ALL: [(Page, &'static str, bool); 9] = [
+    pub const ALL: [(Page, &'static str, bool); 10] = [
         (Page::General, "General", false),
         (Page::Interface, "Interface", false),
         (Page::Theme, "Theme", true),
         (Page::Arrangement, "Arrangement", true),
         (Page::DetailArea, "Detail area", true),
+        (Page::Browser, "Browser", true),
         (Page::Graphics, "Graphics", false),
         (Page::Audio, "Audio", false),
         (Page::Shortcuts, "Shortcuts", false),
@@ -150,6 +152,8 @@ pub struct Outcome {
     pub plugins: Option<PluginRequest>,
     pub themes: Option<ThemeRequest>,
     pub keymap_changed: bool,
+    /// The most colour tags the browser may have, as chosen.
+    pub tag_limit: Option<usize>,
 }
 
 /// What the page shows and changes besides the settings.
@@ -158,11 +162,13 @@ pub struct Sources<'a> {
     pub plugins: &'a mut PluginsView,
     pub themes: &'a ThemesView,
     pub keymap: &'a mut Keymap,
+    /// The most colour tags the browser may have now.
+    pub tag_limit: usize,
 }
 
 /// Draws the page into the space left in `ui`.
 pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &mut PageState) -> Outcome {
-    let Sources { about, plugins, themes, keymap } = sources;
+    let Sources { about, plugins, themes, keymap, tag_limit } = sources;
     let mut outcome = Outcome::default();
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
@@ -290,6 +296,31 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 }
             }
             y += 8.0;
+            section(&mut y, "Dropping files");
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Several files",
+                "Onto one track, or one track each; Ctrl while dropping does the other",
+            );
+            let options = [("One track", false), ("One each", true)];
+            if let Some(choice) =
+                segmented(ui, &painter, control_rect(r, 2), "Several files", &options, settings.drop_separate)
+            {
+                settings.drop_separate = choice;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Warp mode", "How a sample with a known tempo is stretched to the project's");
+            let options: Vec<(&str, crate::settings::WarpMode)> =
+                crate::settings::WarpMode::ALL.iter().map(|m| (m.title(), *m)).collect();
+            if let Some(choice) = segmented(ui, &painter, control_rect(r, 6), "Warp mode", &options, settings.warp_mode)
+            {
+                settings.warp_mode = choice;
+                outcome.changed = true;
+            }
+            y += 8.0;
             section(&mut y, "Transport");
             let r = row(&mut y);
             label(
@@ -311,6 +342,41 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             if let Some(on) = segmented(ui, &painter, control_rect(r, 2), "Animations", &on_off, settings.animations) {
                 settings.animations = on;
                 outcome.changed = true;
+            }
+        }
+        Page::Browser => {
+            section(&mut y, "Browser");
+            let r = row(&mut y);
+            label(&painter, r, "Side", "Which side of the window the browser is on");
+            let options = [("Left", Side::Left), ("Right", Side::Right)];
+            if let Some(side) =
+                segmented(ui, &painter, control_rect(r, 2), "Browser side", &options, settings.browser_side)
+            {
+                settings.browser_side = side;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Auto-play", "Selecting a sample or MIDI file previews it");
+            if let Some(on) =
+                segmented(ui, &painter, control_rect(r, 2), "Auto-play", &on_off, settings.preview_autoplay)
+            {
+                settings.preview_autoplay = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Preview volume", "How loud previews play, after the main channel");
+            let options = [("-18 dB", -18), ("-12 dB", -12), ("-6 dB", -6), ("0 dB", 0)];
+            if let Some(db) =
+                segmented(ui, &painter, control_rect(r, 4), "Preview volume", &options, settings.preview_volume)
+            {
+                settings.preview_volume = db;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Tag limit", "The most colour tags there may be");
+            let options = [("64", 64usize), ("128", 128), ("256", 256), ("1024", 1024)];
+            if let Some(limit) = segmented(ui, &painter, control_rect(r, 4), "Tag limit", &options, tag_limit) {
+                outcome.tag_limit = Some(limit);
             }
         }
         Page::Theme => {

@@ -9,12 +9,20 @@ rust-version.workspace = true
 [dependencies]
 loopwerk-model.workspace = true
 loopwerk-engine.workspace = true
+loopwerk-media.workspace = true
+loopwerk-library.workspace = true
 loopwerk-als.workspace = true
 loopwerk-locr.workspace = true
 loopwerk-plugins.workspace = true
 loopwerk-device-api.workspace = true
 loopwerk-device-registry.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+hound.workspace = true
+loopwerk-device-fm-synth.workspace = true
+loopwerk-library.workspace = true
+loopwerk-plugins.workspace = true
 
 [lints]
 workspace = true

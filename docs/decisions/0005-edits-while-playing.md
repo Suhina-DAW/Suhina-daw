@@ -36,7 +36,8 @@ clip; devices (ADR 0004) will add many more parameters.
    clips, and the launcher's
    runtime (what each column plays, fades and has queued, the beat, the tempo, quantisation).
 2. **An edit builds a new graph off the audio thread.** `Controller::update(project)` builds it
-   on the calling thread with the audio pool and sample rate the renderer was built with, and
+   on the calling thread with the audio pool and sample rate the renderer was built with (or
+   the pool given since with `Controller::set_audio`, when files were added; ADR 0011), and
    sends it to the audio thread through a lock-free queue (`rtrb`).
 3. **The swap happens at an exact frame.** The controller picks a frame a little ahead of the
    playhead it reads from the monitor (`SWAP_AHEAD`), moves the new graph's stretch voices there
