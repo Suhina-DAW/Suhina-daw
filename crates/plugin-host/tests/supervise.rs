@@ -332,9 +332,10 @@ fn an_editor_opens_in_a_window_and_closes() {
     if cfg!(windows) {
         assert_eq!(opened.unwrap(), (300, 200));
         assert!(plugin.editor_open());
-        // Opening it again gives the same editor; audio keeps flowing.
+        // Opening it again gives the same editor; audio keeps flowing, with the gain the
+        // editor set.
         assert_eq!(plugin.open_editor().unwrap(), (300, 200));
-        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
         plugin.close_editor().unwrap();
         assert!(!plugin.editor_open());
         // And it opens again after being closed; when the user closes its window, the host
@@ -348,6 +349,14 @@ fn an_editor_opens_in_a_window_and_closes() {
         }
     } else {
         assert!(matches!(opened, Err(PluginError::Host(_))), "{opened:?}");
+    }
+    // An edit made in the editor (the test plug-in's turns the gain to 0.125 when it opens)
+    // reaches the processor and the saved state.
+    if cfg!(windows) {
+        let (mut edited, mut audio) = start("test:vst3");
+        edited.open_editor().unwrap();
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+        assert_eq!(edited.save_state().unwrap().data, 0.125f32.to_le_bytes());
     }
     // A plug-in without an editor says so.
     let (mut plain, _audio) = start("test:clap");

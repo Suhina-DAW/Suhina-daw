@@ -16,11 +16,46 @@ pub(crate) const MAX_CHANGES: usize = 4096;
 /// Values waiting for the next block: parameter id and normalized value.
 pub(crate) type Pending = Arc<Mutex<Vec<(ParamID, ParamValue)>>>;
 
-/// One parameter's change in a block: a single point, at `offset`.
+/// Most values one parameter takes in one block; past that the last one is replaced.
+const MAX_POINTS: usize = 16;
+
+/// One parameter's changes in a block: up to [`MAX_POINTS`] values, each at an offset, in
+/// order.
 struct Queue {
     id: Cell<ParamID>,
-    offset: Cell<int32>,
-    value: Cell<ParamValue>,
+    points: [Cell<(int32, ParamValue)>; MAX_POINTS],
+    count: Cell<usize>,
+}
+
+impl Queue {
+    fn new() -> Self {
+        Self { id: Cell::new(0), points: std::array::from_fn(|_| Cell::new((0, 0.0))), count: Cell::new(0) }
+    }
+
+    /// Starts the queue over for parameter `id`.
+    fn reset(&self, id: ParamID) {
+        self.id.set(id);
+        self.count.set(0);
+    }
+
+    /// Adds `value` at `offset`, never before the last point (points must be in order).
+    fn push(&self, offset: int32, value: ParamValue) {
+        let count = self.count.get();
+        let last = count.checked_sub(1).and_then(|i| self.points.get(i)).map(|p| p.get().0);
+        let offset = last.map_or(offset, |last| offset.max(last));
+        if last == Some(offset)
+            && let Some(point) = count.checked_sub(1).and_then(|i| self.points.get(i))
+        {
+            // A second value at the same frame replaces the first.
+            point.set((offset, value));
+            return;
+        }
+        let index = count.min(MAX_POINTS - 1);
+        if let Some(point) = self.points.get(index) {
+            point.set((offset, value));
+        }
+        self.count.set((count + 1).min(MAX_POINTS));
+    }
 }
 
 impl Class for Queue {
@@ -33,17 +68,17 @@ impl IParamValueQueueTrait for Queue {
     }
 
     unsafe fn getPointCount(&self) -> int32 {
-        1
+        self.count.get() as int32
     }
 
     unsafe fn getPoint(&self, index: int32, offset: *mut int32, value: *mut ParamValue) -> tresult {
-        if index != 0 || offset.is_null() || value.is_null() {
-            return kInvalidArgument;
-        }
+        let point = usize::try_from(index).ok().filter(|i| *i < self.count.get()).and_then(|i| self.points.get(i));
+        let Some(point) = point.filter(|_| !offset.is_null() && !value.is_null()) else { return kInvalidArgument };
+        let (at, to) = point.get();
         // SAFETY: both pointers are non-null and point at values the plug-in passed to fill.
-        unsafe { *offset = self.offset.get() };
+        unsafe { *offset = at };
         // SAFETY: as above.
-        unsafe { *value = self.value.get() };
+        unsafe { *value = to };
         kResultOk
     }
 
@@ -91,9 +126,7 @@ pub(crate) struct BlockChanges {
 impl BlockChanges {
     /// Made before processing starts; allocates the list for [`MAX_CHANGES`] parameters.
     pub(crate) fn new(pending: Pending) -> Self {
-        let queues: Vec<ComWrapper<Queue>> = (0..MAX_CHANGES)
-            .map(|_| ComWrapper::new(Queue { id: Cell::new(0), offset: Cell::new(0), value: Cell::new(0.0) }))
-            .collect();
+        let queues: Vec<ComWrapper<Queue>> = (0..MAX_CHANGES).map(|_| ComWrapper::new(Queue::new())).collect();
         let pointers = queues.iter().filter_map(|q| q.to_com_ptr::<IParamValueQueue>()).collect();
         let changes = ComWrapper::new(Changes { queues, pointers, count: Cell::new(0) });
         let pointer = changes.to_com_ptr::<IParameterChanges>();
@@ -101,23 +134,26 @@ impl BlockChanges {
     }
 
     /// Takes what is pending (if the control thread is not using the list right now) and the
-    /// block's `extra` changes (id, frame, value; a controller moving), and returns the list for
-    /// this block, or null when nothing changed. A parameter changed twice keeps the later
-    /// value. Real-time safe: no allocation, and it never waits for the lock.
+    /// block's `extra` changes (id, frame, value, in frame order: a controller moving,
+    /// automation), and returns the list for this block, or null when nothing changed. A
+    /// parameter changed several times gets each value at its frame. Real-time safe: no
+    /// allocation, and it never waits for the lock.
     pub(crate) fn take(&mut self, extra: impl Iterator<Item = (ParamID, int32, ParamValue)>) -> *mut IParameterChanges {
         let mut count = 0;
         let mut add = |id: ParamID, offset: int32, value: ParamValue| {
             let queues = &self.changes.queues;
-            let slot = queues.iter().take(count).position(|q| q.id.get() == id).or_else(|| {
+            let found = queues.iter().take(count).position(|q| q.id.get() == id);
+            let slot = found.or_else(|| {
                 (count < queues.len()).then(|| {
                     count += 1;
                     count - 1
                 })
             });
             if let Some(queue) = slot.and_then(|i| queues.get(i)) {
-                queue.id.set(id);
-                queue.offset.set(offset);
-                queue.value.set(value);
+                if found.is_none() {
+                    queue.reset(id);
+                }
+                queue.push(offset, value);
             }
         };
         if let Ok(mut pending) = self.pending.try_lock() {
@@ -140,5 +176,47 @@ impl BlockChanges {
     /// Empties the list after the block.
     pub(crate) fn done(&self) {
         self.changes.count.set(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vst3::ComRef;
+
+    use super::*;
+
+    #[test]
+    fn a_parameter_changed_several_times_in_a_block_gets_each_value() {
+        let pending = Pending::default();
+        if let Ok(mut list) = pending.lock() {
+            list.push((5, 0.1));
+        }
+        let mut changes = BlockChanges::new(pending);
+        // In frame order; a second value at frame 20 replaces the first, and one before the
+        // last point is moved to it.
+        let extra = [(5, 10, 0.2), (5, 20, 0.4), (5, 20, 0.5), (7, 3, 0.9), (5, 15, 0.6)];
+        let list = changes.take(extra.into_iter());
+        // SAFETY: the list `take` returned, alive while `changes` is.
+        let list = unsafe { ComRef::from_raw(list) }.unwrap();
+        // SAFETY: a live list.
+        assert_eq!(unsafe { list.getParameterCount() }, 2);
+        // SAFETY: as above; index 0 is below its count.
+        let raw = unsafe { list.getParameterData(0) };
+        // SAFETY: a queue the list holds while `changes` is alive.
+        let queue = unsafe { ComRef::from_raw(raw) }.unwrap();
+        // SAFETY: a live queue.
+        assert_eq!((unsafe { queue.getParameterId() }, unsafe { queue.getPointCount() }), (5, 3));
+        let points: Vec<(i32, f64)> = (0..3)
+            .map(|index| {
+                let (mut offset, mut value) = (0, 0.0);
+                // SAFETY: a live queue and two values to fill.
+                assert_eq!(unsafe { queue.getPoint(index, &mut offset, &mut value) }, kResultOk);
+                (offset, value)
+            })
+            .collect();
+        assert_eq!(points, [(0, 0.1), (10, 0.2), (20, 0.6)]);
+        changes.done();
+        // The next block starts empty.
+        assert!(changes.take(std::iter::empty()).is_null());
     }
 }

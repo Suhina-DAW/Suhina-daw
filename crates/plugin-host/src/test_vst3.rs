@@ -8,7 +8,8 @@
 //! processor follows when a block brings a change. It has an event input too: a note-on adds
 //! its velocity to the first output channel at its frame, and its controller maps MIDI
 //! controller 7 to the gain (`IMidiMapping`). Its editor is an empty 300 × 200 view that
-//! accepts a native window and does nothing in it. Modelled on the `vst3` crate's gain
+//! accepts a native window and, when it opens, moves the gain to [`EDITOR_GAIN`] through the
+//! host's component handler, as a user turning a knob would. Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -26,6 +27,8 @@ const PROCESSOR_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x47616931);
 const CONTROLLER_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x43746C31);
 /// The id of its one parameter, the gain.
 const GAIN_PARAMETER: u32 = 0;
+/// The gain the editor sets when it opens.
+const EDITOR_GAIN: f64 = 0.125;
 const COMPATIBILITY_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x436D7031);
 /// The class id of the VST2 plug-in the test plug-in says it replaces: `Gain` named "Gain".
 pub(crate) const REPLACES: &str = "5653544761696E6761696E0000000000";
@@ -237,6 +240,8 @@ struct Controller {
     state: std::sync::Mutex<Vec<u8>>,
     /// What it shows for the gain parameter, as `f64` bits.
     gain: std::sync::atomic::AtomicU64,
+    /// The host's component handler, which edits go through.
+    handler: Arc<std::sync::Mutex<Option<ComPtr<IComponentHandler>>>>,
 }
 
 impl Class for Controller {
@@ -330,12 +335,17 @@ impl IEditControllerTrait for Controller {
         kResultOk
     }
 
-    unsafe fn setComponentHandler(&self, _handler: *mut IComponentHandler) -> tresult {
+    unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
+        if let Ok(mut slot) = self.handler.lock() {
+            // SAFETY: the host's handler (or null); a reference is added while it is kept.
+            *slot = unsafe { ComRef::from_raw(handler) }.map(|h| h.to_com_ptr());
+        }
         kResultOk
     }
 
     unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {
-        ComWrapper::new(View).to_com_ptr::<IPlugView>().map_or(std::ptr::null_mut(), |view| view.into_raw())
+        let view = View { handler: self.handler.clone() };
+        ComWrapper::new(view).to_com_ptr::<IPlugView>().map_or(std::ptr::null_mut(), |view| view.into_raw())
     }
 }
 
@@ -413,7 +423,9 @@ impl IMidiMappingTrait for Controller {
 }
 
 /// An editor that shows nothing.
-struct View;
+struct View {
+    handler: Arc<std::sync::Mutex<Option<ComPtr<IComponentHandler>>>>,
+}
 
 impl Class for View {
     type Interfaces = (IPlugView,);
@@ -425,7 +437,21 @@ impl IPlugViewTrait for View {
     }
 
     unsafe fn attached(&self, parent: *mut c_void, _platform: FIDString) -> tresult {
-        if parent.is_null() { kInvalidArgument } else { kResultOk }
+        if parent.is_null() {
+            return kInvalidArgument;
+        }
+        // The user turns the gain as soon as the editor is open.
+        if let Ok(slot) = self.handler.lock()
+            && let Some(handler) = slot.as_ref()
+        {
+            // SAFETY: the host's live handler, told about one whole edit.
+            unsafe { handler.beginEdit(GAIN_PARAMETER) };
+            // SAFETY: as above.
+            unsafe { handler.performEdit(GAIN_PARAMETER, EDITOR_GAIN) };
+            // SAFETY: as above.
+            unsafe { handler.endEdit(GAIN_PARAMETER) };
+        }
+        kResultOk
     }
 
     unsafe fn removed(&self) -> tresult {

@@ -75,7 +75,8 @@ impl Event {
     pub(crate) fn decode(bytes: &[u8; EVENT_BYTES]) -> Option<Self> {
         let [f0, f1, f2, f3, kind, channel, number, _, v0, v1, v2, v3, n0, n1, n2, n3] = *bytes;
         let value = f32::from_le_bytes([v0, v1, v2, v3]);
-        let value = if value.is_nan() { 0.0 } else { value };
+        // NaN becomes 0 and infinities the largest finite numbers, so no plug-in gets them.
+        let value = if value.is_nan() { 0.0 } else { value.clamp(f32::MIN, f32::MAX) };
         let (channel, number) = (channel.min(15), number.min(127));
         let unit = value.clamp(0.0, 1.0);
         let kind = match kind {
@@ -121,5 +122,7 @@ mod tests {
         assert_eq!(Event::decode(&wild), Some(Event::note_on(1, 15, 127, 1.0)));
         wild[4] = 9;
         assert_eq!(Event::decode(&wild), None);
+        let endless = Event::decode(&Event::param(0, 3, f32::INFINITY).encode());
+        assert_eq!(endless, Some(Event::param(0, 3, f32::MAX)));
     }
 }

@@ -64,6 +64,11 @@ fn cid_from_hex(hex: &str) -> Option<TUID> {
     Some(cid)
 }
 
+/// `value`, or `otherwise` when it is NaN or infinite (a plug-in's numbers are not trusted).
+pub(crate) fn finite(value: f64, otherwise: f64) -> f64 {
+    if value.is_finite() { value } else { otherwise }
+}
+
 /// Text from a fixed-size UTF-16 field (`String128`), up to its first zero.
 fn utf16(field: &[TChar]) -> String {
     let units: Vec<u16> = field.iter().take_while(|c| **c != 0).copied().collect();
@@ -318,7 +323,11 @@ impl IHostApplicationTrait for HostApplication {
     }
 }
 
-struct ComponentHandler;
+/// What the controller tells the host: the user moving a control in the editor. Each edit goes
+/// to the processor with its next block, as the SDK asks the host to do.
+struct ComponentHandler {
+    pending: Pending,
+}
 
 impl Class for ComponentHandler {
     type Interfaces = (IComponentHandler,);
@@ -329,7 +338,14 @@ impl IComponentHandlerTrait for ComponentHandler {
         kResultOk
     }
 
-    unsafe fn performEdit(&self, _id: ParamID, _value: ParamValue) -> tresult {
+    unsafe fn performEdit(&self, id: ParamID, value: ParamValue) -> tresult {
+        if !value.is_finite() {
+            return kInvalidArgument;
+        }
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.retain(|(other, _)| *other != id);
+            pending.push((id, value.clamp(0.0, 1.0)));
+        }
         kResultOk
     }
 
@@ -488,7 +504,8 @@ impl Vst3Plugin {
 
         let component = module.create::<IComponent>(&cid).ok_or("could not make the plug-in's component")?;
         let host = ComWrapper::new(HostApplication);
-        let handler = ComWrapper::new(ComponentHandler);
+        let pending = Pending::default();
+        let handler = ComWrapper::new(ComponentHandler { pending: pending.clone() });
         let context = host.to_com_ptr::<FUnknown>().ok_or("host object")?;
         // SAFETY: a live component, given the host's context object for the call.
         if !ok(unsafe { component.initialize(context.as_ptr()) }) {
@@ -515,7 +532,7 @@ impl Vst3Plugin {
             connections: None,
             controller,
             separate_controller,
-            pending: Pending::default(),
+            pending,
             name,
             editor: None,
             component,
@@ -525,6 +542,13 @@ impl Vst3Plugin {
         };
         plugin.connect();
         plugin.sync_controller();
+        if let (Some(controller), Some(handler)) =
+            (&plugin.controller, plugin._handler.to_com_ptr::<IComponentHandler>())
+        {
+            // SAFETY: a live controller and a handler that outlives it (it is let go of in
+            // `drop` before the controller is terminated).
+            let _ = unsafe { controller.setComponentHandler(handler.as_ptr()) };
+        }
 
         let processor = plugin.component.cast::<IAudioProcessor>().ok_or("the plug-in does not process audio")?;
         let max_frames = served.max_frames();
@@ -747,8 +771,8 @@ impl Vst3Plugin {
             group: String::new(),
             min: 0.0,
             max: 1.0,
-            default: info.defaultNormalizedValue,
-            value,
+            default: finite(info.defaultNormalizedValue, 0.0),
+            value: finite(value, 0.0),
             text,
             steps: u32::try_from(info.stepCount).unwrap_or(0),
             automatable: flag(Flags::kCanAutomate),
@@ -829,6 +853,10 @@ impl Drop for Vst3Plugin {
             let _ = unsafe { a.disconnect(b.as_ptr()) };
             // SAFETY: as above, the other way.
             let _ = unsafe { b.disconnect(a.as_ptr()) };
+        }
+        if let Some(controller) = &self.controller {
+            // SAFETY: a live controller letting go of the handler before it is released.
+            let _ = unsafe { controller.setComponentHandler(std::ptr::null_mut()) };
         }
         if self.separate_controller
             && let Some(controller) = self.controller.take()

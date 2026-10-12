@@ -48,6 +48,8 @@ pub(crate) struct Shared {
     gui_resize: Mutex<Option<GuiSize>>,
     /// The plug-in said its editor is gone.
     gui_closed: AtomicBool,
+    /// ... and that it destroyed it itself, so the host must not.
+    gui_destroyed: AtomicBool,
 }
 
 impl HostGuiImpl for Shared {
@@ -68,7 +70,8 @@ impl HostGuiImpl for Shared {
         Ok(())
     }
 
-    fn closed(&self, _was_destroyed: bool) {
+    fn closed(&self, was_destroyed: bool) {
+        self.gui_destroyed.store(was_destroyed, Ordering::Release);
         self.gui_closed.store(true, Ordering::Release);
     }
 }
@@ -211,6 +214,7 @@ impl ClapPlugin {
             gui: OnceLock::new(),
             gui_resize: Mutex::new(None),
             gui_closed: AtomicBool::new(false),
+            gui_destroyed: AtomicBool::new(false),
         };
         let mut instance =
             PluginInstance::<Host>::new(shared, |_| MainThread, &entry, &id, &info).map_err(|e| e.to_string())?;
@@ -274,7 +278,10 @@ impl ClapPlugin {
             return Ok(editor.size);
         }
         let gui = self.gui_extension().ok_or("the plug-in has no editor")?;
-        self.instance.access_shared_handler(|s| s.gui_closed.store(false, Ordering::Release));
+        self.instance.access_shared_handler(|s| {
+            s.gui_closed.store(false, Ordering::Release);
+            s.gui_destroyed.store(false, Ordering::Release);
+        });
         let handle = self.instance.plugin_handle();
         if !gui.is_api_supported(&handle, GUI) {
             return Err("the plug-in's editor does not run on this system".into());
@@ -306,7 +313,8 @@ impl ClapPlugin {
 
     pub(crate) fn close_editor(&mut self) {
         let Some(editor) = self.editor.take() else { return };
-        if let Some(gui) = self.gui_extension() {
+        let destroyed = self.instance.access_shared_handler(|s| s.gui_destroyed.swap(false, Ordering::AcqRel));
+        if let Some(gui) = self.gui_extension().filter(|_| !destroyed) {
             let handle = self.instance.plugin_handle();
             let _ = gui.hide(&handle);
             gui.destroy(&handle);
@@ -380,7 +388,8 @@ impl ClapPlugin {
             })
             .and_then(|index| params.get_info(&handle, index, &mut buffer))
             .ok_or_else(|| format!("no parameter {id}"))?;
-        let value = value.clamp(info.min_value.min(info.max_value), info.max_value.max(info.min_value));
+        let (low, high) = (crate::vst3::finite(info.min_value, 0.0), crate::vst3::finite(info.max_value, 1.0));
+        let value = value.clamp(low.min(high), high.max(low));
         if let Ok(mut pending) = self.pending.lock() {
             pending.retain(|(other, _)| *other != id);
             pending.push((id, value));
@@ -426,7 +435,8 @@ fn serve(
     let mut outputs = vec![vec![0.0f32; max_frames]; channels];
     let mut input_ports = AudioPorts::with_capacity(channels, 1);
     let mut output_ports = AudioPorts::with_capacity(channels, 1);
-    let mut in_events = EventBuffer::with_capacity(MAX_EVENTS);
+    // Room for a block's parameter values and its events, so pushing never grows it.
+    let mut in_events = EventBuffer::with_capacity(MAX_EVENTS + MAX_PARAM_CHANGES);
     let mut out_events = EventBuffer::with_capacity(EVENT_CAPACITY);
     let mut steady_time = 0u64;
 
@@ -500,15 +510,17 @@ fn describe_param(
     let mut shown = [0u8; 256];
     let shown = params.value_to_text(handle, info.id, value, &mut shown).map(|t| text(t)).unwrap_or_default();
     let stepped = info.flags.contains(ParamInfoFlags::IS_STEPPED);
-    let span = (info.max_value - info.min_value).abs();
+    // A plug-in's numbers are not trusted: every one sent on is finite.
+    let (min, max) = (crate::vst3::finite(info.min_value, 0.0), crate::vst3::finite(info.max_value, 1.0));
+    let span = (max - min).abs();
     ParamInfo {
         id: info.id.get(),
         name: text(info.name),
         group: text(info.module),
-        min: info.min_value,
-        max: info.max_value,
-        default: info.default_value,
-        value,
+        min,
+        max,
+        default: crate::vst3::finite(info.default_value, min),
+        value: crate::vst3::finite(value, min),
         text: shown,
         steps: if stepped && span.is_finite() { span.round().min(f64::from(u32::MAX)) as u32 } else { 0 },
         automatable: info.flags.contains(ParamInfoFlags::IS_AUTOMATABLE),
