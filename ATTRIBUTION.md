@@ -27,7 +27,6 @@ changed. The full list with copyright lines is in [`NOTICE`](NOTICE).
 |---|---|---|---|---|
 | `crates/stretch` | Signalsmith Stretch, Signalsmith Linear (STFT) | Geraint Luff / Signalsmith Audio | https://github.com/Signalsmith-Audio/signalsmith-stretch, https://github.com/Signalsmith-Audio/linear | MIT |
 | `devices/fm-synth/src/{tables,env,lfo,core,voice}.rs` | MSFA engine as found in Dexed | Google Inc., Pascal Gauthier, Jean Pierre Cimalando | https://github.com/asb2m10/dexed (`Source/msfa`) | Apache-2.0 |
-| `devices/fm-synth/src/lib.rs` (voice allocation, sustain) | Dexed `PluginProcessor.cpp`, `PluginMidi.cpp` | Pascal Gauthier | https://github.com/asb2m10/dexed | GPL-3.0-or-later |
 
 ## Test data in the repository
 

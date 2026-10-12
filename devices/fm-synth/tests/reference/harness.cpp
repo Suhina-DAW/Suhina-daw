@@ -45,7 +45,7 @@ struct Synth {
     Controllers c;
     Lfo lfo = Lfo();
     Slot slots[VOICES];
-    int next_slot = 0; long next_seq = 0; int last = -1; bool sustain = false;
+    long next_seq = 0; int last = -1; bool sustain = false;
     uint8_t patch[156];
 
     Synth(const Scenario &s) {
@@ -70,34 +70,40 @@ struct Synth {
         lfo.reset(patch + 137);
     }
 
+    // The voice already sounding the pitch, then a silent one, then the oldest released one,
+    // then the oldest; as the port picks them.
+    int first_started(int which, int sounding) {
+        int best = -1;
+        for (int i = 0; i < VOICES; i++) {
+            Slot &s = slots[i];
+            bool playing = s.live && s.note->isPlaying();
+            bool ok = which == 0 ? (playing && s.sounding == sounding)
+                    : which == 1 ? !playing
+                    : which == 2 ? (!s.down && !s.sustained)
+                    : true;
+            if (ok && (best < 0 || s.seq < slots[best].seq)) best = i;
+        }
+        return best;
+    }
+
     void key_down(int key, int velocity) {
         int sounding = key + patch[144] - 24;
         if (sounding < 0) sounding = 0;
         if (sounding > 127) sounding = 127;
-        bool trigger = true; int best = next_slot; int best_score = -1; long best_seq = 0x7fffffffffffffffL;
-        for (int o = 0; o < VOICES; o++) {
-            int i = (next_slot + o) % VOICES;
-            Slot &s = slots[i];
-            if (s.down) trigger = false;
-            int score = 4 * !s.note->isPlaying() + 2 * !s.down + (s.sounding == sounding);
-            if (score > best_score || (score == best_score && s.seq < best_seq)) { best = i; best_score = score; best_seq = s.seq; }
-        }
-        if (trigger) lfo.keydown();
-        next_slot = (best + 1) % VOICES;
-        Slot &s = slots[best];
+        bool any_down = false;
+        for (auto &s : slots) any_down = any_down || s.down;
+        if (!any_down) lfo.keydown();
+        int index = -1;
+        for (int which = 0; which < 4 && index < 0; which++) index = first_started(which, sounding);
+        bool glide = c.portamento_enable_cc && c.portamento_cc > 0;
+        Slot &s = slots[index];
+        bool was_sounding = s.live && s.note->isPlaying();
         s.key = key; s.sounding = sounding; s.velocity = velocity; s.sustained = sustain; s.down = true; s.seq = next_seq++;
-        bool stealing = s.note->isPlaying();
         s.note->init(patch, sounding, velocity, 1, &c);
-        bool sync = patch[136] != 0;
-        if (sync && !stealing) s.note->oscSync();
-        if (last >= 0 && last != best && slots[last].sounding >= 0 && c.portamento_enable_cc && c.portamento_cc > 0)
-            s.note->initPortamento(*slots[last].note);
-        if (!sync) {
-            for (int i = 0; i < VOICES; i++)
-                if (i != best && slots[i].note->isPlaying() && slots[i].sounding == sounding) { s.note->transferPhase(*slots[i].note); break; }
-        }
+        if (patch[136] != 0 && !was_sounding) s.note->oscSync();
+        if (glide && last >= 0 && last != index && slots[last].sounding >= 0) s.note->initPortamento(*slots[last].note);
         s.live = true;
-        last = best;
+        last = index;
     }
 
     void key_up(int key) {

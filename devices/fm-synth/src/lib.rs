@@ -12,9 +12,9 @@
 //! so the output never depends on how the host divides a stream, and timing is exact to 64
 //! frames (1.3 ms at 48 kHz). The engine is mono; both sides carry the same signal.
 //!
-//! Voice allocation (sixteen voices, stealing the least useful one), the sustain pedal and the
-//! controller handling follow Dexed's `PluginProcessor.cpp` and `PluginMidi.cpp`, Copyright
-//! 2013-2025 Pascal Gauthier, GPL-3.0-or-later. The engine files carry their own notices.
+//! Sixteen voices; a new note takes the voice already on its pitch, then a silent one, then the
+//! oldest released one, then the oldest. The engine files carry their own notices (Apache-2.0);
+//! the rest of this crate is Loopwerk's own.
 
 mod core;
 mod env;
@@ -85,7 +85,6 @@ pub struct FmSynth {
     controllers: Controllers,
     tables: Box<Tables>,
     slots: [Slot; VOICES],
-    next_slot: usize,
     next_seq: i64,
     last_slot: Option<usize>,
     lfo: Lfo,
@@ -113,7 +112,6 @@ impl FmSynth {
             controllers: Controllers::default(),
             tables: Box::new(Tables::new(DEFAULT_SAMPLE_RATE)),
             slots: [Slot::default(); VOICES],
-            next_slot: 0,
             next_seq: 0,
             last_slot: None,
             lfo: Lfo::default(),
@@ -242,71 +240,49 @@ impl FmSynth {
         }
     }
 
+    /// The voice for a new note sounding `sounding`, in this order: the voice already sounding
+    /// that pitch, so a repeated key neither doubles nor cancels itself; a silent voice; the
+    /// released voice that started first; the voice that started first.
+    fn pick_voice(&self, sounding: i32) -> usize {
+        let first_started = |wanted: &dyn Fn(&Slot) -> bool| {
+            self.slots.iter().enumerate().filter(|(_, s)| wanted(s)).min_by_key(|(_, s)| s.seq).map(|(i, _)| i)
+        };
+        first_started(&|s| s.live && s.note.is_playing() && s.sounding == sounding)
+            .or_else(|| first_started(&|s| !s.live || !s.note.is_playing()))
+            .or_else(|| first_started(&|s| !s.down && !s.sustained))
+            .or_else(|| first_started(&|_| true))
+            .unwrap_or(0)
+    }
+
     fn key_down(&mut self, key: u8, velocity: i32) {
         let sounding = (i32::from(key) + self.patch.transpose()).clamp(0, 127);
-        // Prefer a voice that is silent, then one whose key is up, then one on the same key;
-        // among equals, the one pressed longest ago.
-        let mut trigger_lfo = true;
-        let mut best = self.next_slot;
-        let mut best_score = -1;
-        let mut best_seq = i64::MAX;
-        for offset in 0..VOICES {
-            let index = (self.next_slot + offset) % VOICES;
-            let Some(slot) = self.slots.get(index) else { continue };
-            if slot.down {
-                trigger_lfo = false;
-            }
-            let score = 4 * i32::from(!slot.note.is_playing())
-                + 2 * i32::from(!slot.down)
-                + i32::from(slot.sounding == sounding);
-            if score > best_score || (score == best_score && slot.seq < best_seq) {
-                best = index;
-                best_score = score;
-                best_seq = slot.seq;
-            }
-        }
-        if trigger_lfo {
+        // The LFO starts over with the first key of a phrase.
+        if !self.slots.iter().any(|s| s.down) {
             self.lfo.key_down();
         }
-        self.next_slot = (best + 1) % VOICES;
-        // Glide from the note played last, unless this voice is that note.
-        let from_last = self
+        let index = self.pick_voice(sounding);
+        let glide = self.controllers.portamento && self.controllers.portamento_time > 0;
+        // A glide starts from wherever the previous note's pitch is now.
+        let glide_from = self
             .last_slot
-            .filter(|&last| last != best)
+            .filter(|&last| glide && last != index)
             .and_then(|last| self.slots.get(last))
             .filter(|s| s.sounding >= 0)
             .map(|s| s.note);
-        let same_pitch = self
-            .slots
-            .iter()
-            .enumerate()
-            .find(|(i, s)| *i != best && s.note.is_playing() && s.sounding == sounding)
-            .map(|(_, s)| s.note);
         let (sustain, seq, sync) = (self.sustain, self.next_seq, self.patch.osc_key_sync());
-        let glide = self.controllers.portamento && self.controllers.portamento_time > 0;
         self.next_seq += 1;
-        let Some(slot) = self.slots.get_mut(best) else { return };
-        slot.key = key;
-        slot.sounding = sounding;
-        slot.velocity = velocity;
-        slot.sustained = sustain;
-        slot.down = true;
-        slot.seq = seq;
-        // Restarting a sounding voice at phase 0 would click.
-        let stealing = slot.note.is_playing();
+        let Some(slot) = self.slots.get_mut(index) else { return };
+        // A voice taken over while it sounds keeps its phases, so the change does not click.
+        let was_sounding = slot.live && slot.note.is_playing();
+        *slot = Slot { key, sounding, velocity, down: true, sustained: sustain, live: true, seq, note: slot.note };
         slot.note.init(&self.patch, sounding, velocity, &self.tables);
-        if sync && !stealing {
+        if sync && !was_sounding {
             slot.note.sync_oscillators();
         }
-        if glide && let Some(from) = from_last {
+        if let Some(from) = glide_from {
             slot.note.take_portamento(&from);
         }
-        if !sync && let Some(from) = same_pitch {
-            // Two notes on one pitch in different phases would cancel unpredictably.
-            slot.note.take_phases(&from);
-        }
-        slot.live = true;
-        self.last_slot = Some(best);
+        self.last_slot = Some(index);
     }
 
     fn key_up(&mut self, key: u8) {
@@ -390,7 +366,6 @@ impl Device for FmSynth {
 
     fn reset(&mut self) {
         self.slots = [Slot::default(); VOICES];
-        self.next_slot = 0;
         self.next_seq = 0;
         self.last_slot = None;
         self.lfo = Lfo::default();
