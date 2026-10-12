@@ -220,6 +220,11 @@ mod imp {
         }
     }
 
+    impl Drop for Window {
+        /// Nothing to close here; the editors that drop it explicitly do the same everywhere.
+        fn drop(&mut self) {}
+    }
+
     pub(crate) fn resize(_size: Size) {}
 
     pub(crate) fn take_close_request() -> bool {
