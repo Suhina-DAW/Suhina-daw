@@ -8,6 +8,8 @@ pub mod demo;
 pub mod grid;
 pub mod motion;
 pub mod session_view;
+pub mod settings;
+pub mod settings_view;
 pub mod theme;
 pub mod timeline;
 pub mod widgets;

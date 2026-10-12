@@ -15,6 +15,8 @@ use crate::arrangement_view::{self, ArrangementViewState};
 use crate::grid::{Grid, SlotState};
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
+use crate::settings::{Settings, Side};
+use crate::settings_view::{self, About};
 use crate::theme::{self, PAD};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
@@ -29,6 +31,7 @@ const DEFAULT_QUANTIZATION: &str = "1 bar";
 const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z);
 const REDO_Y: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
+const SETTINGS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma);
 
 /// The main view; Tab switches between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -61,6 +64,12 @@ pub struct App {
     revision: u64,
     /// The Arrangement view's data and the revision it was built from.
     timeline: Option<(u64, Timeline)>,
+    settings: Settings,
+    /// The settings changed and should be saved.
+    settings_changed: bool,
+    /// The Settings page is showing instead of the view.
+    settings_open: bool,
+    about: About,
 }
 
 impl Default for App {
@@ -83,6 +92,10 @@ impl App {
             open_request: None,
             revision: 0,
             timeline: None,
+            settings: Settings::default(),
+            settings_changed: false,
+            settings_open: false,
+            about: About::default(),
         }
     }
 
@@ -106,7 +119,10 @@ impl App {
         self.session = Some(session);
         self.revision += 1;
         self.view = SessionViewState::default();
+        let (headers_left, header_width) = (self.arrangement.headers_left, self.arrangement.header_width);
         self.arrangement = ArrangementViewState::default();
+        self.arrangement.headers_left = headers_left;
+        self.arrangement.header_width = header_width;
         self.launches.clear();
         self.quantization = DEFAULT_QUANTIZATION;
     }
@@ -126,6 +142,31 @@ impl App {
     /// Turns animations on or off (a setting; on by default).
     pub fn set_animations(ctx: &egui::Context, on: bool) {
         motion::set_enabled(ctx, on);
+    }
+
+    /// Uses `settings` from now on, as loaded from the settings file.
+    pub fn set_settings(&mut self, ctx: &egui::Context, settings: Settings) {
+        motion::set_enabled(ctx, settings.animations);
+        self.arrangement.headers_left = settings.track_headers == Side::Left;
+        self.settings = settings;
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// The settings, once after each change, for the app to save.
+    pub fn take_changed_settings(&mut self) -> Option<Settings> {
+        std::mem::take(&mut self.settings_changed).then(|| self.settings.clone())
+    }
+
+    /// Facts the Settings page shows, such as the audio output in use.
+    pub fn set_about(&mut self, about: About) {
+        self.about = about;
+    }
+
+    pub fn settings_open(&self) -> bool {
+        self.settings_open
     }
 
     pub fn set_status(&mut self, status: Status) {
@@ -172,6 +213,10 @@ impl App {
         let grid = self.session.as_ref().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
 
+        egui::Panel::top("menu-bar")
+            .exact_size(theme::MENU_BAR)
+            .frame(egui::Frame::NONE.fill(theme::SURFACE_1).inner_margin(egui::Margin::symmetric(4, 0)))
+            .show(ui, |ui| self.menu_bar(ui, &mut actions));
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
             .frame(egui::Frame::NONE.fill(theme::SURFACE_1))
@@ -184,6 +229,10 @@ impl App {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
+            if self.settings_open {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.settings_page(ui));
+                return;
+            }
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
@@ -200,6 +249,12 @@ impl App {
                         };
                         arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
                         self.timeline = Some((self.revision, timeline));
+                        // The headers can be moved from the view itself; that is the setting too.
+                        let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
+                        if side != self.settings.track_headers {
+                            self.settings.track_headers = side;
+                            self.settings_changed = true;
+                        }
                     }
                 }
                 (None, _) => empty(ui),
@@ -214,6 +269,56 @@ impl App {
         }) {
             ui.ctx().request_repaint();
         }
+    }
+
+    /// The Settings page, applying each change as it is made.
+    fn settings_page(&mut self, ui: &mut Ui) {
+        let outcome = settings_view::show(ui, &mut self.settings, &self.about);
+        if outcome.changed {
+            motion::set_enabled(ui.ctx(), self.settings.animations);
+            self.arrangement.headers_left = self.settings.track_headers == Side::Left;
+            self.settings_changed = true;
+        }
+        if outcome.close {
+            self.settings_open = false;
+        }
+    }
+
+    /// The menu bar: the same actions as the shortcuts and the views' controls.
+    fn menu_bar(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let has_project = self.session.is_some();
+        let (can_undo, can_redo) = self.session.as_ref().map_or((false, false), |s| (s.can_undo(), s.can_redo()));
+        ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::TEXT_SECONDARY);
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Quit").clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui.add_enabled(can_undo, egui::Button::new("Undo").shortcut_text("Ctrl+Z")).clicked() {
+                    actions.push(Action::new("edit.undo", json!({})));
+                }
+                if ui.add_enabled(can_redo, egui::Button::new("Redo").shortcut_text("Ctrl+Shift+Z")).clicked() {
+                    actions.push(Action::new("edit.redo", json!({})));
+                }
+            });
+            ui.menu_button("View", |ui| {
+                if ui.add_enabled(has_project, egui::Button::new("Session").shortcut_text("Tab")).clicked() {
+                    self.shown = View::Session;
+                    self.settings_open = false;
+                }
+                if ui.add_enabled(has_project, egui::Button::new("Arrangement").shortcut_text("Tab")).clicked() {
+                    self.shown = View::Arrangement;
+                    self.settings_open = false;
+                }
+            });
+            ui.menu_button("Options", |ui| {
+                if ui.add(egui::Button::new("Settings").shortcut_text("Ctrl+,")).clicked() {
+                    self.settings_open = true;
+                }
+            });
+        });
     }
 
     fn dropped_files(&mut self, ui: &Ui) {
@@ -232,6 +337,9 @@ impl App {
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
         if self.session.is_none() || ui.ctx().egui_wants_keyboard_input() {
             return;
+        }
+        if ui.input_mut(|i| i.consume_shortcut(&SETTINGS)) {
+            self.settings_open = !self.settings_open;
         }
         ui.input_mut(|i| {
             if i.consume_shortcut(&REDO) || i.consume_shortcut(&REDO_Y) {

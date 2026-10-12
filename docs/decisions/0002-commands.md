@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-12
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs

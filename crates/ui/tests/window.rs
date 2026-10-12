@@ -204,6 +204,26 @@ fn arrangement_headers_turn_tracks_off() {
     assert!(harness.query_by_label("Keys pan").is_some());
 }
 
+#[test]
+fn settings_change_right_away_and_are_handed_out_to_be_saved() {
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings_open());
+    harness.get_by_label("Animations: Off").click();
+    harness.run();
+    harness.get_by_label("Track headers: Left").click();
+    harness.run();
+    let saved = harness.state_mut().take_changed_settings();
+    assert_eq!(saved.as_ref().map(|s| s.animations), Some(false));
+    assert_eq!(saved.map(|s| s.track_headers), Some(loopwerk_ui::settings::Side::Left));
+    assert!(!loopwerk_ui::motion::enabled(&harness.ctx));
+    assert_eq!(harness.state_mut().take_changed_settings(), None);
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    assert!(!harness.state().settings_open());
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.
@@ -228,4 +248,9 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("arrangement.png")).unwrap_or_else(|e| panic!("{e}"));
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
 }

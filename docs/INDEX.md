@@ -80,6 +80,7 @@ Change this code, and check these documents.
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/settings_view.rs` | [Components](design/components.md) |
 | `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md) |

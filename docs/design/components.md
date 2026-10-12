@@ -11,6 +11,7 @@ covers:
   - crates/ui/src/arrangement_view.rs
   - crates/ui/src/timeline.rs
   - crates/ui/src/motion.rs
+  - crates/ui/src/settings_view.rs
 ---
 
 # Components
@@ -59,7 +60,7 @@ Animations are short and only show a change of state; with animations off (a set
 
 | Region | Size |
 |---|---|
-| Menu bar | 20 px high, items 14 px apart, `text.secondary` |
+| Menu bar | 20 px high, items 14 px apart, `text.secondary`; File, Edit, View, Options so far |
 | Control bar | 28 px high, three groups on `surface.1`: tempo and meter left, transport centre, status and view switch right |
 | Transport button | 28 × 20, `surface.2`; play shows `surface.3` while playing, glyph in `accent`; record glyph is a 1.5 px red ring |
 | View switch | Text only; current view `text.primary` with a 1 px underline |
@@ -128,7 +129,7 @@ Animations are short and only show a change of state; with animations off (a set
 | MIDI marks | 2 px high lines in the track colour |
 | Audio marks | 1 px vertical lines in the track colour, centred |
 | Playhead | 1 px `accent` through all lanes |
-| Header column | 232 px, `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
+| Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
 
 ### Track header levels
 
@@ -136,7 +137,7 @@ The header reveals groups as the track grows. Thresholds are the heights at whic
 
 | Track height | Shows |
 |---|---|
-| ≥ 26 px | Row 1: 6 px colour square, name, on / solo / arm (on 30 px wide, solo and arm 18 px) |
+| ≥ 26 px | Row 1: track on (30 px, the track number), 6 px colour square, name; solo and arm (18 px) to come |
 | ≥ 48 px | Volume field (full width) and pan field (46 px) |
 | ≥ 70 px | Send fields, one per return, labelled "Send A", "Send B" |
 | ≥ 114 px | Routing, with 4 px extra space above it: input and channel dropdowns, output dropdown ("→ Main"), monitor In / Auto / Off |
@@ -152,7 +153,7 @@ A number field that is its own slider: drag vertically to change, double-click t
 | Size | 16 px high, full width | 16 × 46 | 16 px, half width each |
 | Background | `surface.2` | `#232220` | `surface.2` |
 | Value shown as | Fill from the left, `#4A4843`, full height | 2 px bar along the bottom from the centre, `#C9C4BB` | Fill `#3E3C38` |
-| Marker | 1 px tick in `#C9C4BB`, only the top and bottom 3 px | 1 px centre tick `#55524C`, top and bottom 3 px | none |
+| Marker | 1 px tick in `#C9C4BB`, only the top and bottom 2 px | 1 px centre tick `#55524C`, top and bottom 2 px | none |
 | Text | Value right-aligned, 10 px mono | Centred | Label left (sans), value right (mono) |
 | Mapping | 0 dB at 85 % of the travel | 50L … C … 50R | as volume |
 
@@ -162,6 +163,25 @@ A number field that is its own slider: drag vertically to change, double-click t
 |---|---|
 | Dropdown | 15 px high, `surface.2`, 4 px padding, 10 px text `#C9C4BB`, 6 × 4 chevron `text.tertiary` right |
 | Segmented (monitor) | 15 px, three equal parts 1 px apart; selected `#C9C4BB` with `surface.0` text |
+
+## Settings page
+
+Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
+no dialogs. A centred column at most 560 px wide: a title with Close on the right, then sections
+(10 px `text.tertiary` heading over a 1 px `line`), each setting a 34 px row with its name (11 px
+`text.primary`), a note under it (10 px `text.secondary`) and its control on the right, a
+segmented control of 64 px per part. A change applies at once and is saved; one that needs a
+restart (the renderer) says so in its note.
+
+| Section | Setting | Values |
+|---|---|---|
+| Interface | Animations | On (default), Off |
+| Arrangement | Track headers | Left, Right (default) |
+| Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |
+| Audio | Output | The device in use (read only) |
+
+The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder; unknown lines
+are skipped with a warning in the status bar.
 
 ## Device panel
 

@@ -16,7 +16,7 @@ loopwerk-session.workspace = true
 loopwerk-media.workspace = true
 loopwerk-output.workspace = true
 loopwerk-ui.workspace = true
-eframe = { version = "0.36", features = ["glow"] }  # MIT OR Apache-2.0
+eframe = { version = "0.36", features = ["glow", "persistence"] }  # MIT OR Apache-2.0
 
 [lints]
 workspace = true

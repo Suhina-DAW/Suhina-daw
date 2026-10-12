@@ -9,6 +9,8 @@ use std::process::ExitCode;
 
 use loopwerk_engine::AudioPool;
 use loopwerk_session::Session;
+use loopwerk_ui::settings::{Graphics, Settings};
+use loopwerk_ui::settings_view::About;
 use loopwerk_ui::{App, Status};
 
 const USAGE: &str = "\
@@ -16,9 +18,15 @@ usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations
 
   <project.als>      a Live Set to import and open
   --demo             open a small built-in project
-  --renderer         how the window is drawn: wgpu (default) or glow (OpenGL)
-  --no-animations    turn the interface's animations off
-Without a project the window opens empty; drop a .als file on it to open one.";
+  --renderer         how the window is drawn this time: wgpu or glow (OpenGL); the
+                     default is the one chosen in Options > Settings
+  --no-animations    turn the interface's animations off this time
+Without a project the window opens empty; drop a .als file on it to open one.
+Settings are kept in settings.txt in Loopwerk's folder of the user's app data.";
+
+/// The folder eframe keeps Loopwerk's window state in; the settings file lives beside it.
+const APP_ID: &str = "Loopwerk";
+const SETTINGS_FILE: &str = "settings.txt";
 
 #[derive(Debug, PartialEq)]
 enum Source {
@@ -30,7 +38,8 @@ enum Source {
 #[derive(Debug, PartialEq)]
 struct Args {
     source: Source,
-    renderer: eframe::Renderer,
+    /// Chosen on the command line for this run, over the saved setting.
+    renderer: Option<eframe::Renderer>,
     animations: bool,
 }
 
@@ -46,14 +55,28 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let mut app = App::new();
+    let (settings, settings_warnings) = load_settings();
+    let renderer = args.renderer.unwrap_or(match settings.graphics {
+        Graphics::Gpu => eframe::Renderer::Wgpu,
+        Graphics::OpenGl => eframe::Renderer::Glow,
+    });
+    let graphics_now = match renderer {
+        eframe::Renderer::Glow => Graphics::OpenGl,
+        eframe::Renderer::Wgpu => Graphics::Gpu,
+    };
+    let mut window = Window { app: App::new(), graphics_now, audio_output: None };
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
-            let (session, warnings) = with_audio(Session::new(loopwerk_ui::demo::demo_project()), &AudioPool::new());
-            app.set_session(session, &warnings);
+            let session = Session::new(loopwerk_ui::demo::demo_project());
+            let (session, warnings, output) = with_audio(session, &AudioPool::new());
+            window.audio_output = output;
+            window.app.set_session(session, &warnings);
         }
-        Source::Als(path) => open(&mut app, &path),
+        Source::Als(path) => window.open(&path),
+    }
+    if let Some(warning) = settings_warnings.first() {
+        window.app.set_status(Status::Hint(warning.clone()));
     }
 
     let options = eframe::NativeOptions {
@@ -62,17 +85,21 @@ fn main() -> ExitCode {
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([640.0, 400.0])
             .with_drag_and_drop(true),
-        renderer: args.renderer,
+        renderer,
         ..Default::default()
     };
     let animations = args.animations;
     let result = eframe::run_native(
-        "Loopwerk",
+        APP_ID,
         options,
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
-            App::set_animations(&cc.egui_ctx, animations);
-            Ok(Box::new(Window { app }))
+            window.app.set_settings(&cc.egui_ctx, settings);
+            if !animations {
+                App::set_animations(&cc.egui_ctx, false);
+            }
+            window.share_about();
+            Ok(Box::new(window))
         }),
     );
     match result {
@@ -86,7 +113,7 @@ fn main() -> ExitCode {
 
 /// `Ok(None)` asks for the usage text.
 fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
-    let mut parsed = Args { source: Source::Nothing, renderer: eframe::Renderer::Wgpu, animations: true };
+    let mut parsed = Args { source: Source::Nothing, renderer: None, animations: true };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let source = match arg.as_str() {
@@ -98,8 +125,8 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
             }
             "--renderer" => {
                 parsed.renderer = match it.next().map(String::as_str) {
-                    Some("wgpu") => eframe::Renderer::Wgpu,
-                    Some("glow") => eframe::Renderer::Glow,
+                    Some("wgpu") => Some(eframe::Renderer::Wgpu),
+                    Some("glow") => Some(eframe::Renderer::Glow),
                     other => return Err(format!("--renderer takes wgpu or glow, not {other:?}")),
                 };
                 continue;
@@ -117,41 +144,81 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
 
 struct Window {
     app: App,
+    graphics_now: Graphics,
+    audio_output: Option<String>,
 }
 
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
         if let Some(path) = self.app.take_open_request() {
-            open(&mut self.app, &path);
+            self.open(&path);
+        }
+        if let Some(settings) = self.app.take_changed_settings()
+            && let Err(e) = save_settings(&settings)
+        {
+            self.app.set_status(Status::Error(e));
         }
     }
 }
 
-/// Opens a Live Set: imports it, decodes its audio and starts playing it, stopped.
-fn open(app: &mut App, path: &Path) {
-    match Session::open(path) {
-        Ok((session, mut warnings)) => {
-            let folder = path.parent().unwrap_or(Path::new("."));
-            let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
-            warnings.extend(audio_warnings);
-            let (session, output_warnings) = with_audio(session, &audio);
-            warnings.extend(output_warnings);
-            app.set_session(session, &warnings);
+impl Window {
+    /// Opens a Live Set: imports it, decodes its audio and starts playing it, stopped.
+    fn open(&mut self, path: &Path) {
+        match Session::open(path) {
+            Ok((session, mut warnings)) => {
+                let folder = path.parent().unwrap_or(Path::new("."));
+                let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
+                warnings.extend(audio_warnings);
+                let (session, output_warnings, output) = with_audio(session, &audio);
+                warnings.extend(output_warnings);
+                self.audio_output = output;
+                self.app.set_session(session, &warnings);
+                self.share_about();
+            }
+            Err(e) => self.app.set_status(Status::Error(e.0)),
         }
-        Err(e) => app.set_status(Status::Error(e.0)),
+    }
+
+    /// Tells the Settings page what is in use.
+    fn share_about(&mut self) {
+        self.app.set_about(About { audio_output: self.audio_output.clone(), graphics_now: Some(self.graphics_now) });
     }
 }
 
 /// Connects the default audio output to `session`; without one the project still opens.
-fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>) {
+/// Returns the session, warnings and a description of the output.
+fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>, Option<String>) {
     match loopwerk_output::open_player(session.project(), audio) {
-        Ok((player, _device)) => {
+        Ok((player, device)) => {
             session.attach_player(player);
-            (session, Vec::new())
+            (session, Vec::new(), Some(device))
         }
-        Err(e) => (session, vec![format!("no audio output: {e}")]),
+        Err(e) => (session, vec![format!("no audio output: {e}")], None),
     }
+}
+
+fn settings_path() -> Option<PathBuf> {
+    eframe::storage_dir(APP_ID).map(|dir| dir.join(SETTINGS_FILE))
+}
+
+/// The saved settings, or the defaults when there are none yet.
+fn load_settings() -> (Settings, Vec<String>) {
+    match settings_path().map(std::fs::read_to_string) {
+        Some(Ok(text)) => Settings::from_text(&text),
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
+            (Settings::default(), vec![format!("could not read the settings: {e}")])
+        }
+        _ => (Settings::default(), Vec::new()),
+    }
+}
+
+fn save_settings(settings: &Settings) -> Result<(), String> {
+    let path = settings_path().ok_or("there is no folder to keep the settings in")?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("could not save the settings: {e}"))?;
+    }
+    std::fs::write(&path, settings.to_text()).map_err(|e| format!("could not save the settings: {e}"))
 }
 
 #[cfg(test)]
@@ -175,7 +242,7 @@ mod tests {
     #[test]
     fn renderer_and_animations_can_be_chosen() {
         let args = parse(&["--demo", "--renderer", "glow", "--no-animations"]).ok().flatten();
-        assert_eq!(args.as_ref().map(|a| a.renderer), Some(eframe::Renderer::Glow));
+        assert_eq!(args.as_ref().map(|a| a.renderer), Some(Some(eframe::Renderer::Glow)));
         assert_eq!(args.map(|a| a.animations), Some(false));
         assert!(parse(&["--renderer", "metal"]).is_err());
         assert!(parse(&["--renderer"]).is_err());
