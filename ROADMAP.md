@@ -7,7 +7,7 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M0 | **Foundation:** workspace, GPL-3.0-or-later, clean-room rules, DAW-neutral model | done |
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `loopwerk-cli play` | done (verified on Windows) |
-| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP and edits heard while playing work; more commands and a native project format to come |
+| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Loopwerk's own format (`.locr`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
@@ -196,7 +196,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
-- Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
+- Commands so far: `commands.list`, `project.info`, `project.save`, `project.tracks`, `project.clips`,
   `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `track.group`, `track.ungroup`, `track.move`, `track.rename`,
   `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`, `clip.setGain`, `clip.setFades`, `clip.copy`, `clip.cut`, `clip.paste`,
   `edit.undo`, `edit.redo`; for the transport `transport.play`, `transport.stop`,
@@ -215,8 +215,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
   as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
-- Still to do: more commands (notes, clips, sends, tracks), a native project format so edits can
-  be saved, MCP resources.
+- Projects are saved in Loopwerk's own format, `.locr` (versioned JSON, plug-in state included,
+  audio referred to by path): `project.save { path?, copy? }`; `.locr` files open in the app,
+  `loopwerk-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
+  [spec](docs/spec/locr-format.md)).
+- Still to do: more commands (notes, clips, sends, tracks), MCP resources, asking before closing
+  a project with unsaved changes.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -288,6 +292,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   beginning ([spec](docs/spec/arrangement-editing.md)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
+- **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
+  (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
+  as `.locr` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
+  Save as template writes a copy to the templates folder. The tab and window title mark unsaved
+  changes with a dot.
 - A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
   left: General, Interface (with Theme, Arrangement and Detail area under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or

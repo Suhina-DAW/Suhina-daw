@@ -77,6 +77,10 @@ pub struct Settings {
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
     /// without `.json`.
     pub theme: String,
+    /// Where new projects are saved and templates are kept; empty for the defaults the app gives
+    /// (`App::set_default_folders`).
+    pub projects_folder: String,
+    pub templates_folder: String,
 }
 
 impl Default for Settings {
@@ -91,6 +95,8 @@ impl Default for Settings {
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
             theme: crate::theme::BUILT_IN.into(),
+            projects_folder: String::new(),
+            templates_folder: String::new(),
         }
     }
 }
@@ -117,11 +123,13 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
             self.theme,
+            self.projects_folder,
+            self.templates_folder,
             stop = self.stop.param(),
         )
     }
@@ -149,6 +157,8 @@ impl Settings {
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
                 ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
+                ("projects_folder", folder) => settings.projects_folder = folder.to_string(),
+                ("templates_folder", folder) => settings.templates_folder = folder.to_string(),
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
                 ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
@@ -187,6 +197,8 @@ mod tests {
             stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
             theme: "Night blue".into(),
+            projects_folder: "C:/Music/Songs = mine".into(),
+            templates_folder: "/home/me/templates".into(),
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());

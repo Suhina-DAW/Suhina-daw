@@ -125,7 +125,9 @@ workspace forbids.
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
-   the chain was compensated for.
+   the chain was compensated for. `project.save` asks every running plug-in for its state as it
+   is then and writes that, with the last state of stopped ones
+   ([ADR 0010](0010-project-files.md)).
 6. **`unsafe` only in two crates.** `crates/ipc` (shared memory and block sync, linked into the
    engine) and `crates/plugin-host` (the plug-in host process) may use `unsafe`; every other
    crate stays `forbid`. Both offer safe APIs, keep `unsafe` blocks small, explain each one in a

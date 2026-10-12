@@ -10,6 +10,7 @@ rust-version.workspace = true
 loopwerk-model.workspace = true
 loopwerk-engine.workspace = true
 loopwerk-als.workspace = true
+loopwerk-locr.workspace = true
 loopwerk-plugins.workspace = true
 loopwerk-device-api.workspace = true
 loopwerk-device-registry.workspace = true

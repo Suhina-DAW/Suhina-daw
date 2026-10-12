@@ -4,7 +4,7 @@
 //! project and the engine's monitor to draw them.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
@@ -17,6 +17,7 @@ use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
+use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
@@ -47,6 +48,14 @@ pub enum OpenAs {
     NewTab,
     /// In place of the active project, which is closed.
     Replace,
+}
+
+/// A new project the user asked for, for the app to make and open in a new tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewProject {
+    Blank,
+    /// An untitled project made from this template file.
+    Template(PathBuf),
 }
 
 /// A finished plug-in scan: the library with its new catalog, and how many files were read and
@@ -133,6 +142,20 @@ pub struct App {
     about: About,
     /// The themes to pick from; the settings say which is in use.
     themes: Themes,
+    /// The project dialog (File › New or open) while it shows, and what it lists.
+    project_dialog: Option<DialogState>,
+    project_lists: Lists,
+    /// The dialog opened and its lists should be read again, by the app.
+    lists_wanted: bool,
+    /// The name and folder asked for when a project is saved under a new name or as a template.
+    save_prompt: Option<SavePrompt>,
+    new_request: Option<NewProject>,
+    /// A project file saved since the app last asked, for its recent list.
+    saved_path: Option<PathBuf>,
+    /// Where projects are saved and templates kept when the settings leave them empty.
+    default_folders: (PathBuf, PathBuf),
+    /// The window's title as last set: the active project, marked when it has unsaved changes.
+    window_title: String,
 }
 
 impl Default for App {
@@ -177,6 +200,14 @@ impl App {
             plugin_dialog_hidden: false,
             about: About::default(),
             themes: Themes::default(),
+            project_dialog: None,
+            project_lists: Lists::default(),
+            lists_wanted: false,
+            save_prompt: None,
+            new_request: None,
+            saved_path: None,
+            default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
+            window_title: String::new(),
         }
     }
 
@@ -378,6 +409,142 @@ impl App {
             self.settings.theme = id.to_string();
             self.settings_changed = true;
             theme::set_palette(ctx, self.themes.palette(id));
+        }
+    }
+
+    /// Where projects are saved and templates kept when the settings leave them empty.
+    pub fn set_default_folders(&mut self, projects: PathBuf, templates: PathBuf) {
+        self.default_folders = (projects, templates);
+    }
+
+    /// The folder new projects are saved in: the setting, or the default.
+    pub fn projects_folder(&self) -> PathBuf {
+        match self.settings.projects_folder.trim() {
+            "" => self.default_folders.0.clone(),
+            folder => PathBuf::from(folder),
+        }
+    }
+
+    /// The folder templates are kept in: the setting, or the default.
+    pub fn templates_folder(&self) -> PathBuf {
+        match self.settings.templates_folder.trim() {
+            "" => self.default_folders.1.clone(),
+            folder => PathBuf::from(folder),
+        }
+    }
+
+    /// Shows the project dialog; `open` puts the keys in its path field (File › Open).
+    pub fn open_project_dialog(&mut self, open: bool) {
+        self.settings_open = false;
+        self.save_prompt = None;
+        self.project_dialog = Some(DialogState { path: String::new(), focus_path: open });
+        self.lists_wanted = true;
+    }
+
+    pub fn project_dialog_open(&self) -> bool {
+        self.project_dialog.is_some()
+    }
+
+    /// The templates folder to list, once each time the project dialog opens, for the app to
+    /// read it and the recent projects and hand them back with [`App::set_project_lists`].
+    pub fn take_lists_wanted(&mut self) -> Option<PathBuf> {
+        std::mem::take(&mut self.lists_wanted).then(|| self.templates_folder())
+    }
+
+    /// The recent projects and the templates the project dialog lists.
+    pub fn set_project_lists(&mut self, recent: Vec<PathBuf>, templates: Vec<PathBuf>) {
+        self.project_lists =
+            Lists { recent, templates, templates_folder: self.templates_folder().display().to_string() };
+    }
+
+    /// A new project the user asked for, for the app to make and open in a new tab.
+    pub fn take_new_request(&mut self) -> Option<NewProject> {
+        self.new_request.take()
+    }
+
+    /// A project file saved since the app last asked, for the recent projects.
+    pub fn take_saved_path(&mut self) -> Option<PathBuf> {
+        self.saved_path.take()
+    }
+
+    /// Saves the active project: to its own `.locr` file, or, the first time and when `ask`, to a
+    /// name and folder the user gives.
+    fn save_active(&mut self, ask: bool) {
+        let Some(id) = self.projects.active() else { return };
+        let Some(session) = self.projects.get(id) else { return };
+        let own_file = session
+            .source()
+            .filter(|s| s.extension().is_some_and(|e| e.eq_ignore_ascii_case("locr")))
+            .map(Path::to_path_buf);
+        match own_file {
+            Some(path) if !ask => self.save_to(&path, false),
+            own => {
+                let folder =
+                    own.as_deref().and_then(Path::parent).map_or_else(|| self.projects_folder(), Path::to_path_buf);
+                let name = self.projects.name(id).unwrap_or("Untitled").to_string();
+                self.save_prompt =
+                    Some(SavePrompt { template: false, name, folder: folder.display().to_string(), focus: true });
+            }
+        }
+    }
+
+    /// Asks for a name to save the active project as a template under.
+    fn save_template(&mut self) {
+        let Some(id) = self.projects.active() else { return };
+        let name = self.projects.name(id).unwrap_or("Template").to_string();
+        let folder = self.templates_folder().display().to_string();
+        self.save_prompt = Some(SavePrompt { template: true, name, folder, focus: true });
+    }
+
+    /// Runs `project.save` on the active project; a template is a copy.
+    fn save_to(&mut self, path: &Path, template: bool) {
+        let params = json!({ "path": path.display().to_string(), "copy": template });
+        match self.projects.execute("project.save", &params) {
+            Ok(saved) => {
+                let written = saved["path"].as_str().map_or_else(|| path.to_path_buf(), PathBuf::from);
+                let what = if template { "Saved the template" } else { "Saved" };
+                self.status = Status::Done(format!("{what} {}", written.display()));
+                if !template {
+                    self.saved_path = Some(written);
+                }
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
+    /// The project dialog and the save prompt, over the window, and what was chosen in them.
+    fn project_dialogs(&mut self, ui: &Ui, window: Rect) {
+        if let Some(mut state) = self.project_dialog.take() {
+            match project_dialog::show(ui, window, &mut state, &self.project_lists) {
+                Some(Choice::Open(path)) => self.request_open(path),
+                Some(Choice::NewBlank) => self.new_request = Some(NewProject::Blank),
+                Some(Choice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
+                Some(Choice::Close) => {}
+                None => self.project_dialog = Some(state),
+            }
+        }
+        if let Some(mut prompt) = self.save_prompt.take() {
+            match project_dialog::show_save(ui, window, &mut prompt) {
+                Some(SaveChoice::Save(path)) => self.save_to(&path, prompt.template),
+                Some(SaveChoice::Cancel) => {}
+                None => self.save_prompt = Some(prompt),
+            }
+        }
+    }
+
+    /// The window's title: the active project, with a dot while it has unsaved changes.
+    fn update_title(&mut self, ctx: &egui::Context) {
+        let title = match self.projects.active() {
+            Some(id) => {
+                let name = self.projects.name(id).unwrap_or("Untitled");
+                let unsaved = self.projects.get(id).is_some_and(Session::has_unsaved_changes);
+                format!("{name}{} - Loopwerk", if unsaved { " •" } else { "" })
+            }
+            None => "Loopwerk".to_string(),
+        };
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
         }
     }
 
@@ -595,6 +762,8 @@ impl App {
         });
 
         self.plugin_dialog(ui, window);
+        self.project_dialogs(ui, window);
+        self.update_title(ui.ctx());
         for action in &actions {
             self.run(action);
         }
@@ -690,7 +859,10 @@ impl App {
         let mut x = bar.left();
         for id in self.projects.ids() {
             let name = self.projects.name(id).unwrap_or("Untitled").to_string();
-            let galley = widgets::fitted(&painter, &name, theme::ui_font(theme::TEXT), theme::text_primary(), 180.0);
+            // A dot after the name while the project has unsaved changes.
+            let unsaved = self.projects.get(id).is_some_and(Session::has_unsaved_changes);
+            let shown = if unsaved { format!("{name} •") } else { name.clone() };
+            let galley = widgets::fitted(&painter, &shown, theme::ui_font(theme::TEXT), theme::text_primary(), 180.0);
             let width = galley.size().x + PAD * 2.0 + 16.0;
             let tab = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(width, bar.height()));
             x = tab.right() + 1.0;
@@ -865,6 +1037,8 @@ impl App {
             self.read_plugins();
         }
         let themes = self.themes.view(&self.settings.theme);
+        self.about.projects_default = self.default_folders.0.display().to_string();
+        self.about.templates_default = self.default_folders.1.display().to_string();
         let sources =
             Sources { about: &self.about, plugins: &mut self.plugins, themes: &themes, keymap: &mut self.keymap };
         let outcome = settings_view::show(ui, &mut self.settings, sources, &mut self.page);
@@ -901,6 +1075,32 @@ impl App {
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::text_secondary());
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
+                if ui.add(egui::Button::new("New or open…").shortcut_text(keys("file.new"))).clicked() {
+                    self.open_project_dialog(false);
+                }
+                if ui.add(egui::Button::new("Open…").shortcut_text(keys("file.open"))).clicked() {
+                    self.open_project_dialog(true);
+                }
+                ui.separator();
+                if ui.add_enabled(has_project, egui::Button::new("Save").shortcut_text(keys("file.save"))).clicked() {
+                    self.save_active(false);
+                }
+                if ui
+                    .add_enabled(has_project, egui::Button::new("Save as…").shortcut_text(keys("file.saveAs")))
+                    .clicked()
+                {
+                    self.save_active(true);
+                }
+                if ui
+                    .add_enabled(
+                        has_project,
+                        egui::Button::new("Save as template…").shortcut_text(keys("file.saveTemplate")),
+                    )
+                    .clicked()
+                {
+                    self.save_template();
+                }
+                ui.separator();
                 if ui.button("Quit").clicked() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -972,11 +1172,11 @@ impl App {
         for path in dropped {
             if is(&path, "json") || is(&path, "zip") {
                 self.themes.import(path);
-            } else if is(&path, "als") && !opened {
+            } else if (is(&path, "als") || is(&path, "locr")) && !opened {
                 opened = true;
                 self.request_open(path);
             } else {
-                let what = "is not a Live Set (.als), a theme (.json) or a zip of themes";
+                let what = "is not a project (.locr), a Live Set (.als), a theme (.json) or a zip of themes";
                 self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
@@ -985,7 +1185,8 @@ impl App {
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        if ui.ctx().egui_wants_keyboard_input() || (self.settings_open && self.page.capture.is_some()) {
+        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some();
+        if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
         let pressed = ui.input_mut(|i| self.keymap.pressed(i));
@@ -1000,7 +1201,12 @@ impl App {
         let has_project = !self.projects.is_empty();
         match action {
             "settings.open" => self.settings_open = !self.settings_open,
+            "file.new" => self.open_project_dialog(false),
+            "file.open" => self.open_project_dialog(true),
             _ if !has_project => {}
+            "file.save" => self.save_active(false),
+            "file.saveAs" => self.save_active(true),
+            "file.saveTemplate" => self.save_template(),
             "view.toggle" => {
                 self.shown = match self.shown {
                     View::Session => View::Arrangement,

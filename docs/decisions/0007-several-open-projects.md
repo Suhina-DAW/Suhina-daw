@@ -44,6 +44,9 @@ the layer that owns sessions.
 
 ## Consequences
 
+- A tab shows its project's file name; a project saved under a new name (`project.save` with a
+  path, not a copy) is shown by it from then on.
+
 - The MCP server holds `Projects`: `project_open` adds a project and makes it active, and with
   `--audio` a switch starts the new project playing.
 - A switch with audio reloads the new project's audio files and opens a new output stream, so

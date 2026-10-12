@@ -58,6 +58,7 @@ crates/
   engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
            and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
+  locr     L1 Loopwerk's own project file (.locr, versioned JSON): reads and writes the model (ADR 0010)
   media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool
   session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002) and the
            attached player

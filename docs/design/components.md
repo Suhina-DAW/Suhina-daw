@@ -15,6 +15,7 @@ covers:
   - crates/ui/src/themes.rs
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/project_dialog.rs
 ---
 
 # Components
@@ -74,8 +75,8 @@ the view with the detail area, status bar.
 
 | Region | Size |
 |---|---|
-| Menu bar | 20 px, `panel.background`, items 14 px apart in `text.secondary`: File, Edit, View, Projects, Options; Create, Playback, Navigate and Help (planned) |
-| Tab row | 22 px, `window.background`, shown while two or more projects are open (ADR 0007): one tab per project, name and a 12 px × to close; the active tab `panel.background` with `text.primary`, others `text.secondary`; Ctrl+Tab and Ctrl+Shift+Tab move between them |
+| Menu bar | 20 px, `panel.background`, items 14 px apart in `text.secondary`: File (New or open…, Open…, Save, Save as…, Save as template…, Quit), Edit, View, Projects, Options; Create, Playback, Navigate and Help (planned) |
+| Tab row | 22 px, `window.background`, shown while two or more projects are open (ADR 0007): one tab per project, name (with " •" while it has unsaved changes, as the window title has) and a 12 px × to close; the active tab `panel.background` with `text.primary`, others `text.secondary`; Ctrl+Tab and Ctrl+Shift+Tab move between them |
 | Control bar | 28 px, `panel.background`, a 1 px `border` under it. Left, 6 px apart: tempo (56 × 20 value field, `control.background`, 11 px mono right-aligned, dragged up or down), time signature (40 px, 11 px mono `text.secondary`, "4 / 4"), launch quantisation (64 px dropdown, 11 px mono). Centre: play and stop (28 × 20 each, 1 px apart), the position (64 × 20 on `window.background`, 11 px mono, "bar.beat.sixteenth"). Right: the view switch. (planned): metronome, record, loop, CPU |
 | Transport button | 28 × 20, `control.background`; play shows `control.activeBackground` while playing, its glyph in `accent`; stop is an 8 × 8 square in `text.primary`; record (planned) a 1.5 px red ring |
 | View switch | Text only, 11 px, right-aligned, 12 px apart: "Session", "Arrangement"; the current one `text.primary` with a 1 px underline, the other `text.secondary` |
@@ -235,6 +236,7 @@ read-only setting (Output) shows its value as the note.
 | Page | Setting | Values |
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
+| General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Loopwerk/Projects` and `…/Templates`, shown as the hint |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | Interface | Animations | On (default), Off |
 | Interface › Arrangement | Track headers | Left, Right (default) |
@@ -269,6 +271,26 @@ the `plugins.*` commands.
 
 The app keeps them in `settings.txt` (`key = value` lines) in its app-data folder, the theme in
 use as `theme = <id>`; unknown lines are skipped with a warning in the status bar.
+
+## Project dialog and save prompt
+
+File › New or open (Ctrl+T) and Open (Ctrl+O, the path field takes the keys) show a dialog over
+the window, as the plug-in loading dialog: the window dimmed with `window.background` at 60 %,
+a 620 × 380 px panel, `panel.background` with a 1 px `border.strong` border, a 20 px
+`control.background` title "New or open a project" with Close on the right. Escape closes it;
+shortcuts wait while it shows.
+
+| Part | Spec |
+|---|---|
+| New (left half) | "New" heading (10 px `text.hint` over a `border` hairline); a 20 px row "New blank project" with "4 tracks, 2 returns, 8 scenes" on the right; "From a template" and the templates folder's `.locr` and `.als` files by name, 20 px rows that scroll, "Loopwerk project" or "Live Set" on the right; "No templates yet: File › Save as template" when there are none; the folder at the bottom in 10 px `text.hint` |
+| Open (right half) | A path field (hint "Path to a .locr or .als file"; Enter opens; quotes around a pasted path are dropped) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
+| Rows | Hover `panel.hoverBackground`; name 11 px `text.primary`, note 10 px `text.hint` |
+
+A new project opens in a new tab. Save (Ctrl+S) writes the project's own `.locr` file; the first
+time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name and Folder fields
+(the projects folder, the project's own folder, or the templates folder), the file that will be
+written under them (in the recording red when it is there already and will be replaced), Cancel
+and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
 
 ## Device panel
 

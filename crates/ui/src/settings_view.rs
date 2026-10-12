@@ -20,6 +20,8 @@ const SUB_INDENT: f32 = 12.0;
 const LABEL_WIDTH: f32 = 180.0;
 const SETTING_ROW: f32 = 34.0;
 const SEGMENT: f32 = 15.0;
+/// A folder field on the right of its row; empty shows the default folder.
+const FOLDER_FIELD: f32 = 300.0;
 /// Themes shown before their list scrolls.
 const THEME_ROWS: usize = 8;
 
@@ -30,6 +32,10 @@ pub struct About {
     pub audio_output: Option<String>,
     /// How the window is drawn right now.
     pub graphics_now: Option<Graphics>,
+    /// The folders projects are saved in and templates kept in when the settings leave them
+    /// empty.
+    pub projects_default: String,
+    pub templates_default: String,
 }
 
 /// The plug-in library as the page shows it, read through the `plugins.*` commands.
@@ -248,6 +254,42 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.on_open = choice;
                 outcome.changed = true;
             }
+            let folders = [
+                (
+                    "Projects folder",
+                    "Where a new project is saved first",
+                    &mut settings.projects_folder,
+                    &about.projects_default,
+                ),
+                (
+                    "Templates folder",
+                    "Projects listed under New › From a template, and where Save as template puts one",
+                    &mut settings.templates_folder,
+                    &about.templates_default,
+                ),
+            ];
+            for (name, note, value, default) in folders {
+                let r = row(&mut y);
+                // The note is cut where the field starts.
+                let left =
+                    Rect::from_min_size(r.min, Vec2::new(r.width() - FOLDER_FIELD - 8.0 + LABEL_WIDTH, r.height()));
+                label(&painter, left, name, note);
+                let field = Rect::from_min_size(
+                    Pos2::new(r.right() - FOLDER_FIELD, r.top()),
+                    Vec2::new(FOLDER_FIELD, SEGMENT + 2.0),
+                );
+                let edit = ui.put(
+                    field,
+                    egui::TextEdit::singleline(value)
+                        .hint_text(default.as_str())
+                        .font(theme::ui_font(theme::TEXT_SMALL)),
+                );
+                edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name));
+                if edit.changed() {
+                    outcome.changed = true;
+                }
+            }
+            y += 8.0;
             section(&mut y, "Transport");
             let r = row(&mut y);
             label(

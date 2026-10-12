@@ -4,6 +4,7 @@
 // Release builds on Windows start without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod recent;
 mod theme_files;
 
 use std::collections::HashMap;
@@ -16,17 +17,18 @@ use loopwerk_ui::keymap::Keymap;
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
 use loopwerk_ui::themes::FileAction;
-use loopwerk_ui::{App, OpenAs, Status};
+use loopwerk_ui::{App, NewProject, OpenAs, Status};
 
 const USAGE: &str = "\
-usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
+usage: loopwerk [<project.locr> | <project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
 
-  <project.als>      a Live Set to import and open
+  <project.locr>     a Loopwerk project to open, or a Live Set (.als) to import
   --demo             open a small built-in project
   --renderer         how the window is drawn this time: wgpu or glow (OpenGL); the
                      default is the one chosen in Options > Settings
   --no-animations    turn the interface's animations off this time
-Without a project the window opens empty; drop a .als file on it to open one.
+Without a project the window opens empty; Ctrl+T makes a new one or opens one, and a
+.locr or .als file dropped on it opens.
 Settings are kept in settings.txt, the keys in keymap.json and themes in themes/<name>.json,
 in Loopwerk's folder of the user's app data.";
 
@@ -35,6 +37,7 @@ const APP_ID: &str = "Loopwerk";
 const SETTINGS_FILE: &str = "settings.txt";
 const KEYMAP_FILE: &str = "keymap.json";
 const THEMES_FOLDER: &str = "themes";
+const RECENT_FILE: &str = "recent.txt";
 
 #[derive(Debug, PartialEq)]
 enum Source {
@@ -77,7 +80,11 @@ fn main() -> ExitCode {
     let mut themes = theme_files::ThemeFiles::new(eframe::storage_dir(APP_ID).map(|d| d.join(THEMES_FOLDER)));
     let (theme_list, theme_warnings) = themes.read_all();
     settings_warnings.extend(theme_warnings);
-    let mut window = Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new(), themes };
+    let recent = recent::Recent::load(eframe::storage_dir(APP_ID).map(|d| d.join(RECENT_FILE)));
+    let mut window =
+        Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new(), themes, recent };
+    let (projects, templates) = default_folders();
+    window.app.set_default_folders(projects, templates);
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
@@ -167,6 +174,8 @@ struct Window {
     /// Each open project's decoded audio, kept so a project made active again can play.
     pools: HashMap<ProjectId, AudioPool>,
     themes: theme_files::ThemeFiles,
+    /// The projects opened and saved lately, for the project dialog.
+    recent: recent::Recent,
 }
 
 impl eframe::App for Window {
@@ -174,6 +183,15 @@ impl eframe::App for Window {
         self.app.ui(ui);
         if let Some((path, how)) = self.app.take_open_request() {
             self.open(&path, how);
+        }
+        if let Some(new) = self.app.take_new_request() {
+            self.new_project(new);
+        }
+        if let Some(path) = self.app.take_saved_path() {
+            self.remember(&path);
+        }
+        if let Some(folder) = self.app.take_lists_wanted() {
+            self.app.set_project_lists(self.recent.existing(), recent::templates(&folder));
         }
         for closed in self.app.take_closed() {
             self.pools.remove(&closed);
@@ -213,23 +231,48 @@ impl Window {
     /// audio and starts playing it, stopped.
     fn open(&mut self, path: &Path, how: OpenAs) {
         match Session::open(path) {
-            Ok((session, mut warnings)) => {
-                let folder = path.parent().unwrap_or(Path::new("."));
-                let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
-                warnings.extend(audio_warnings);
-                let (session, output_warnings, output) = with_audio(session, &audio);
-                warnings.extend(output_warnings);
-                self.audio_output = output;
-                if let Some(id) = self.app.open_project(session, &warnings, how) {
-                    self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
-                    self.pools.insert(id, audio);
-                }
-                for closed in self.app.take_closed() {
-                    self.pools.remove(&closed);
-                }
-                self.share_about();
+            Ok((session, warnings)) => {
+                self.show_session(session, warnings, how);
+                self.remember(path);
             }
             Err(e) => self.app.set_status(Status::Error(e.0)),
+        }
+    }
+
+    /// Makes a new project, blank or from a template, and opens it in a new tab.
+    fn new_project(&mut self, new: NewProject) {
+        let made = match new {
+            NewProject::Blank => Ok((Session::new(loopwerk_session::blank_project()), Vec::new())),
+            NewProject::Template(path) => Session::from_template(&path),
+        };
+        match made {
+            Ok((session, warnings)) => self.show_session(session, warnings, OpenAs::NewTab),
+            Err(e) => self.app.set_status(Status::Error(e.0)),
+        }
+    }
+
+    /// Decodes a session's audio, starts it playing (stopped) and shows it.
+    fn show_session(&mut self, session: Session, mut warnings: Vec<String>, how: OpenAs) {
+        let folder = session.audio_folder().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), &folder);
+        warnings.extend(audio_warnings);
+        let (session, output_warnings, output) = with_audio(session, &audio);
+        warnings.extend(output_warnings);
+        self.audio_output = output;
+        if let Some(id) = self.app.open_project(session, &warnings, how) {
+            self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
+            self.pools.insert(id, audio);
+        }
+        for closed in self.app.take_closed() {
+            self.pools.remove(&closed);
+        }
+        self.share_about();
+    }
+
+    /// Puts a project opened or saved first among the recent ones.
+    fn remember(&mut self, path: &Path) {
+        if let Err(e) = self.recent.add(path) {
+            self.app.set_status(Status::Error(e));
         }
     }
 
@@ -304,7 +347,11 @@ impl Window {
 
     /// Tells the Settings page what is in use.
     fn share_about(&mut self) {
-        self.app.set_about(About { audio_output: self.audio_output.clone(), graphics_now: Some(self.graphics_now) });
+        self.app.set_about(About {
+            audio_output: self.audio_output.clone(),
+            graphics_now: Some(self.graphics_now),
+            ..Default::default()
+        });
     }
 }
 
@@ -312,6 +359,15 @@ impl Window {
 fn saved(path: &Path, what: &str) -> String {
     let _shown = theme_files::reveal(path, true);
     format!("{what} {}", path.display())
+}
+
+/// Where projects are saved and templates kept until the settings say otherwise: `Loopwerk`
+/// in the user's documents folder.
+fn default_folders() -> (PathBuf, PathBuf) {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+    let documents = home.map(|h| h.join("Documents")).unwrap_or_default();
+    let base = documents.join("Loopwerk");
+    (base.join("Projects"), base.join("Templates"))
 }
 
 /// Connects the default audio output to `session`; without one the project still opens.

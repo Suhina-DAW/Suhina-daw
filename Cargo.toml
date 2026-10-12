@@ -13,6 +13,7 @@ rust-version = "1.95"
 loopwerk-model = { path = "crates/model" }
 loopwerk-engine = { path = "crates/engine" }
 loopwerk-als = { path = "crates/als" }
+loopwerk-locr = { path = "crates/locr" }
 loopwerk-session = { path = "crates/session" }
 loopwerk-automation = { path = "crates/automation" }
 loopwerk-media = { path = "crates/media" }
@@ -34,6 +35,7 @@ loopwerk-ui = { path = "crates/ui" }
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }  # MIT OR Apache-2.0
+base64 = "0.22"  # MIT OR Apache-2.0
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }  # MIT
 roxmltree = "0.21"  # MIT OR Apache-2.0
 cpal = "0.18"  # Apache-2.0

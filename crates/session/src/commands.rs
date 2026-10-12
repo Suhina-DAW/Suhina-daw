@@ -135,6 +135,20 @@ static COMMANDS: &[CommandSpec] = &[
         run: list,
     },
     CommandSpec {
+        id: "project.save",
+        label: "Save the project as a Loopwerk project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
+        params: &[
+            optional("path", ParamType::Text, "file to save to; .locr is added when missing"),
+            optional(
+                "copy",
+                ParamType::Bool,
+                "true writes a copy (a template, a backup) and the project stays with its own file",
+            ),
+        ],
+        kind: CommandKind::Read,
+        run: save,
+    },
+    CommandSpec {
         id: "project.info",
         label: "Summarise the open project: tempo, time signature, counts of tracks, scenes and clips, undo state",
         params: &[],
@@ -554,12 +568,33 @@ fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     ))
 }
 
+fn save(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let copy = match params.get("copy") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err("copy must be true or false".into()),
+    };
+    let path = match params.get("path") {
+        Some(Value::String(path)) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
+        Some(Value::String(_)) | None | Some(Value::Null) => match session.source() {
+            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION)) => {
+                source.to_path_buf()
+            }
+            _ => return Err("the project has no .locr file yet; give a path to save it to".into()),
+        },
+        Some(_) => return Err("path must be text".into()),
+    };
+    let written = session.save(&path, copy)?;
+    Ok(json!({ "path": written.display().to_string(), "copy": copy }))
+}
+
 fn info(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     let p = session.project();
     let arrangement_clips: usize = p.arrangement.lanes.iter().map(|l| l.clips.len()).sum();
     let launcher_clips = p.launcher.columns.iter().flat_map(|c| &c.slots).filter(|s| s.clip.is_some()).count();
     Ok(json!({
         "source": session.source().map(|s| s.display().to_string()),
+        "unsaved_changes": session.has_unsaved_changes(),
         "tempo_bpm": p.transport.tempo_bpm,
         "time_signature": format!("{}/{}", p.transport.time_signature.numerator, p.transport.time_signature.denominator),
         "tracks": p.tracks.len(),

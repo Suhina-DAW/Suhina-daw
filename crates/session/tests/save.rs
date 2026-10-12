@@ -1,0 +1,88 @@
+//! Saving a project as a Loopwerk project (.locr) and opening it again.
+
+use loopwerk_session::{Projects, Session, blank_project};
+use serde_json::json;
+
+fn folder(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("loopwerk-save-{name}-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn a_saved_project_opens_as_it_was() {
+    let dir = folder("round-trip");
+    let mut session = Session::new(blank_project());
+    session.execute("track.setVolume", &json!({ "track": "1 MIDI", "db": -6.0 })).unwrap_or_default();
+    assert!(session.has_unsaved_changes());
+    // Without a path there is nowhere to save it yet.
+    assert!(session.execute("project.save", &json!({})).is_err());
+
+    let saved = session.execute("project.save", &json!({ "path": dir.join("song").display().to_string() }));
+    let path = dir.join("song.locr");
+    assert_eq!(saved.ok().and_then(|v| v["path"].as_str().map(String::from)), Some(path.display().to_string()));
+    assert_eq!(session.source(), Some(path.as_path()));
+    assert!(!session.has_unsaved_changes());
+
+    let (opened, warnings) = Session::open(&path).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warnings.is_empty());
+    assert_eq!(opened.project(), session.project());
+    assert_eq!(opened.audio_folder(), Some(dir.as_path()));
+
+    // Saved again to the same file, without a path.
+    session.execute("edit.undo", &json!({})).unwrap_or_default();
+    assert!(session.has_unsaved_changes());
+    assert!(session.execute("project.save", &json!({})).is_ok());
+    assert!(!session.has_unsaved_changes());
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_copy_leaves_the_project_with_its_own_file() {
+    let dir = folder("copy");
+    let mut session = Session::new(blank_project());
+    session
+        .execute("project.save", &json!({ "path": dir.join("song.locr").display().to_string() }))
+        .unwrap_or_default();
+    session.execute("track.setMute", &json!({ "track": "2 MIDI", "mute": true })).unwrap_or_default();
+    let copy = dir.join("templates").join("Live set.locr");
+    let result = session.execute("project.save", &json!({ "path": copy.display().to_string(), "copy": true }));
+    assert_eq!(result.ok().map(|v| v["copy"].clone()), Some(json!(true)));
+    assert!(copy.is_file());
+    assert_eq!(session.source(), Some(dir.join("song.locr").as_path()));
+    assert!(session.has_unsaved_changes(), "a copy is not the project saved");
+
+    // A project made from the template is untitled and the same.
+    let (made, _) = Session::from_template(&copy).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(made.source(), None);
+    assert_eq!(made.project(), session.project());
+    assert!(!made.has_unsaved_changes());
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_project_saved_under_a_new_name_is_shown_by_it() {
+    let dir = folder("name");
+    let mut projects = Projects::new();
+    let id = projects.add(Session::new(blank_project()), None).unwrap_or_else(|e| panic!("{e}"));
+    let path = dir.join("Night drive.locr");
+    projects.execute("project.save", &json!({ "path": path.display().to_string() })).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(projects.name(id), Some("Night drive"));
+    let copy = dir.join("other.locr");
+    projects.execute("project.save", &json!({ "path": copy.display().to_string(), "copy": true })).unwrap_or_default();
+    assert_eq!(projects.name(id), Some("Night drive"));
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn what_cannot_be_saved_or_opened_is_an_error() {
+    let dir = folder("errors");
+    let mut session = Session::new(blank_project());
+    assert!(session.execute("project.save", &json!({ "path": 3 })).is_err());
+    assert!(session.execute("project.save", &json!({ "path": "x.locr", "copy": "yes" })).is_err());
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let bad = dir.join("bad.locr");
+    std::fs::write(&bad, "{ \"format\": \"locr\", \"version\": 99, \"project\": {} }").unwrap_or_default();
+    assert!(Session::open(&bad).is_err());
+    let _clean = std::fs::remove_dir_all(&dir);
+}

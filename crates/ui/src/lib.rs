@@ -11,6 +11,7 @@ pub mod keymap;
 pub mod loading_dialog;
 pub mod menus;
 pub mod motion;
+pub mod project_dialog;
 pub mod session_view;
 pub mod settings;
 pub mod settings_view;
@@ -20,4 +21,4 @@ pub mod timeline;
 pub mod waveform;
 pub mod widgets;
 
-pub use app::{App, OpenAs, Status, View};
+pub use app::{App, NewProject, OpenAs, Status, View};

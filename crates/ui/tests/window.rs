@@ -471,6 +471,53 @@ fn tab_only_switches_the_view() {
 }
 
 #[test]
+fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
+    let dir = std::env::temp_dir().join(format!("loopwerk-ui-save-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let mut app = demo_app();
+    app.set_default_folders(dir.join("Projects"), dir.join("Templates"));
+    let mut harness = window(app);
+
+    // Ctrl+T: the dialog, which asks for its lists; a blank project is handed out to be made.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::T);
+    harness.run();
+    assert!(harness.state().project_dialog_open());
+    assert_eq!(harness.state_mut().take_lists_wanted(), Some(dir.join("Templates")));
+    harness.get_by_label("New blank project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_new_request(), Some(loopwerk_ui::NewProject::Blank));
+    assert!(!harness.state().project_dialog_open());
+
+    // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    harness.run();
+    harness.get_by_label("Name").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.get_by_label("Name").type_text("Night drive");
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.run();
+    let saved = dir.join("Projects").join("Night drive.locr");
+    assert!(saved.is_file(), "{:?}", harness.state().status());
+    assert_eq!(harness.state_mut().take_saved_path(), Some(saved.clone()));
+    let session = harness.state().session();
+    assert_eq!(session.and_then(|s| s.source()), Some(saved.as_path()));
+
+    // Saved again without asking; a template is a copy in the templates folder.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    harness.run();
+    assert!(harness.query_by_label("Name").is_none(), "asked again");
+    harness.state_mut().do_action("file.saveTemplate", &mut Vec::new());
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.run();
+    assert!(dir.join("Templates").join("Night drive.locr").is_file());
+    assert_eq!(harness.state().session().and_then(|s| s.source()), Some(saved.as_path()));
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn solo_is_exclusive_unless_ctrl_is_held() {
     let mut harness = window(demo_app());
     let solos = |h: &Harness<'static, App>| {
@@ -997,6 +1044,28 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.state_mut().set_project_lists(
+        vec!["C:/Music/Loopwerk/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Loopwerk/Templates/Beat starter.locr".into(), "C:/Music/Loopwerk/Templates/Live rig.als".into()],
+    );
+    harness.state_mut().open_project_dialog(false);
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("project-dialog.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.state_mut().do_action("file.saveAs", &mut Vec::new());
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("save-prompt.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
     harness.get_by_label("Settings page: Theme").click();
     harness.run();
     harness.remove_cursor();

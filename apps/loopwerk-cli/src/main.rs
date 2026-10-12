@@ -50,7 +50,7 @@ commands:
             its window is closed, then --save writes the state it has to a file
 
 options:
-  <project.als>      a Live Set to import
+  <project.als>      a Live Set to import, or a Loopwerk project (.locr) to open
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
@@ -219,7 +219,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
     }
     Ok(Args {
-        source: source.ok_or(format!("missing project: give a .als file or --demo\n\n{USAGE}"))?,
+        source: source.ok_or(format!("missing project: give a .locr or .als file, or --demo\n\n{USAGE}"))?,
         output,
         scene,
         launcher,
@@ -234,17 +234,18 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
     let (project, audio) = match &args.source {
         Source::Demo => (demo_project(), AudioPool::new()),
         Source::Als(path) => {
-            let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            // A Loopwerk project (.locr) or a Live Set to import.
+            let (session, warnings) = loopwerk_session::Session::open(path).map_err(|e| e.0)?;
             let folder = path.parent().unwrap_or(std::path::Path::new("."));
             let started = std::time::Instant::now();
-            let (audio, audio_warnings) = loopwerk_media::load_project_audio(&import.project, folder);
-            for warning in import.warnings.iter().chain(&audio_warnings) {
+            let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
+            for warning in warnings.iter().chain(&audio_warnings) {
                 eprintln!("warning: {warning}");
             }
             if !audio.files.is_empty() {
                 eprintln!("audio: {} files decoded in {:.1} s", audio.files.len(), started.elapsed().as_secs_f64());
             }
-            (import.project, audio)
+            (session.project().clone(), audio)
         }
     };
     let mut project = match args.scene {

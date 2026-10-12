@@ -290,6 +290,21 @@ impl Rack {
         self.env.as_deref()
     }
 
+    /// The state of every plug-in device as it is now, by key: read from the running ones, or
+    /// the last state of one that stopped. A plug-in that does not answer keeps its last state.
+    pub(crate) fn current_states(&mut self) -> HashMap<u64, SavedState> {
+        let mut states = self.kept.clone();
+        for (key, instance) in &mut self.instances {
+            if let Some(control) = instance.control.as_mut()
+                && control.health() == Health::Running
+                && let Ok(state) = control.save_state()
+            {
+                states.insert(*key, state);
+            }
+        }
+        states
+    }
+
     /// Stops every plug-in, keeping each one's last state for when it starts again.
     pub fn stop_all(&mut self) {
         for (key, instance) in self.instances.drain() {

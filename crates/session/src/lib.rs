@@ -2,6 +2,7 @@
 //! goes through a command (see `docs/decisions/0002-commands.md`), so the CLI, the MCP server and
 //! later the UI all drive the project the same way.
 
+mod blank;
 mod commands;
 mod devices;
 mod plugins;
@@ -15,6 +16,7 @@ use loopwerk_engine::{Controller, LauncherMonitor};
 use loopwerk_model::Project;
 use serde_json::Value;
 
+pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
@@ -116,6 +118,14 @@ pub struct ParamEdit {
 pub struct Session {
     project: Project,
     source: Option<PathBuf>,
+    /// The folder the project's relative audio paths start from: the folder of the file it was
+    /// opened from (a template's, for a project made from one). It stays when the project is
+    /// saved elsewhere, because the decoded audio is kept under those paths; saving writes them
+    /// relative to the new file.
+    audio_folder: Option<PathBuf>,
+    /// Counts changes to the project (edits, undo, redo), and the count when it was last saved.
+    changes: u64,
+    saved_at: u64,
     undo: Vec<Project>,
     redo: Vec<Project>,
     player: Option<Player>,
@@ -132,6 +142,9 @@ impl Session {
         Self {
             project,
             source: None,
+            audio_folder: None,
+            changes: 0,
+            saved_at: 0,
             undo: Vec::new(),
             redo: Vec::new(),
             player: None,
@@ -201,12 +214,89 @@ impl Session {
         })
     }
 
-    /// Opens a Live Set. Returns the session and the importer's warnings.
+    /// Opens a project: a Loopwerk project (`.locr`) or a Live Set to import (`.als`). Returns
+    /// the session and the importer's warnings.
     pub fn open(path: &Path) -> Result<(Self, Vec<String>), CommandError> {
-        let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut session = Self::new(import.project);
+        let is_locr = path.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION));
+        let (project, warnings) = if is_locr {
+            let project = loopwerk_locr::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            (project, Vec::new())
+        } else {
+            let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            (import.project, import.warnings)
+        };
+        let mut session = Self::new(project);
         session.source = Some(path.to_path_buf());
-        Ok((session, import.warnings))
+        session.audio_folder = path.parent().map(Path::to_path_buf);
+        Ok((session, warnings))
+    }
+
+    /// A new, untitled project made from the template file `path` (any project Loopwerk opens).
+    /// Its audio is still found where the template's is.
+    pub fn from_template(path: &Path) -> Result<(Self, Vec<String>), CommandError> {
+        let (mut session, warnings) = Self::open(path)?;
+        session.source = None;
+        Ok((session, warnings))
+    }
+
+    /// The folder the project's relative audio paths start from, as the audio is loaded.
+    pub fn audio_folder(&self) -> Option<&Path> {
+        self.audio_folder.as_deref()
+    }
+
+    /// Whether the project changed since it was opened or last saved.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.changes != self.saved_at
+    }
+
+    /// Saves the project as a Loopwerk project at `path` (`.locr` is added when it is missing),
+    /// with the running plug-ins' state as it is now and audio paths written relative to the new
+    /// file. The session then belongs to that file, unless `copy` (a template, a backup), which
+    /// leaves the session as it was. Returns the path written.
+    pub fn save(&mut self, path: &Path, copy: bool) -> Result<PathBuf, CommandError> {
+        let mut path = path.to_path_buf();
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION)) {
+            let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+            if name.is_empty() {
+                return Err("give the project a file name".into());
+            }
+            name.push(".");
+            name.push(loopwerk_locr::EXTENSION);
+            path.set_file_name(name);
+        }
+        let mut project = self.project.clone();
+        let states = self.plugins.current_states();
+        for device in loopwerk_engine::plugin_devices(&project) {
+            let Some(state) = states.get(&device.key) else { continue };
+            let slot = project
+                .channels
+                .iter_mut()
+                .find(|c| c.id == device.channel)
+                .and_then(|c| c.devices.get_mut(device.position));
+            if let Some(slot) = slot {
+                slot.state = Some(state.data.clone());
+                slot.extensions.0.retain(|e| e.key != "Vst3ControllerState");
+                if let Some(controller) = &state.controller {
+                    slot.extensions.0.push(loopwerk_model::Extension {
+                        format: "vst3".into(),
+                        key: "Vst3ControllerState".into(),
+                        data: controller.clone(),
+                    });
+                }
+            }
+        }
+        let from = match &self.audio_folder {
+            Some(folder) => folder.clone(),
+            None => std::env::current_dir().unwrap_or_default(),
+        };
+        let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+        loopwerk_locr::rebase_audio(&mut project, &from, &to);
+        loopwerk_locr::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
+        if !copy {
+            self.source = Some(path.clone());
+            self.saved_at = self.changes;
+        }
+        Ok(path)
     }
 
     pub fn project(&self) -> &Project {
@@ -291,6 +381,7 @@ impl Session {
     }
 
     fn push_undo(&mut self, before: Project) {
+        self.changes = self.changes.wrapping_add(1);
         if self.undo.len() >= MAX_UNDO {
             self.undo.remove(0);
         }
@@ -301,12 +392,14 @@ impl Session {
     fn undo(&mut self) -> bool {
         let Some(previous) = self.undo.pop() else { return false };
         self.redo.push(std::mem::replace(&mut self.project, previous));
+        self.changes = self.changes.wrapping_add(1);
         true
     }
 
     fn redo(&mut self) -> bool {
         let Some(next) = self.redo.pop() else { return false };
         self.undo.push(std::mem::replace(&mut self.project, next));
+        self.changes = self.changes.wrapping_add(1);
         true
     }
 }

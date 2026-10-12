@@ -28,6 +28,7 @@ are changing (*Code and its documents*).
 | [0007: Several open projects](decisions/0007-several-open-projects.md) | decision | current | tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId | Several projects open at once like tabs, one active; where commands go, which project plays, and what is left for later |
 | [0008: Patch devices](decisions/0008-patch-devices.md) | decision | draft | Pure Data, Pd, plugdata, libpd, patch, patch device, community devices, Max for Live, Max device, amxd, scripting devices, collect and save | Proposed way for the community to build devices as Pure Data patches (plugdata, libpd) with access to commands, and how imported Max devices are kept |
 | [0009: egui for the UI; familiar workflow, Loopwerk's own look](decisions/0009-ui-toolkit-and-look.md) | decision | current | UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton | Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Loopwerk's own look |
+| [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) | decision | current | project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects | Loopwerk's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects |
 | [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Loopwerk's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
@@ -36,6 +37,7 @@ are changing (*Code and its documents*).
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
+| [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
@@ -52,6 +54,7 @@ Change this code, and check these documents.
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/loopwerk-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `apps/loopwerk/src/main.rs` | [Architecture](architecture.md) |
+| `apps/loopwerk/src/recent.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -72,11 +75,14 @@ Change this code, and check these documents.
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/locr` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
+| `crates/locr/src/lib.rs` | [The .locr project file](spec/locr-format.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/session/src/blank.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
@@ -91,6 +97,7 @@ Change this code, and check these documents.
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
+| `crates/ui/src/project_dialog.rs` | [Components](design/components.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |

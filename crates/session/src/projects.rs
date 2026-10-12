@@ -238,8 +238,18 @@ impl Projects {
         }
         // A command may need a plug-in that has started meanwhile, or add one.
         self.poll_plugins();
+        let target = project.or(self.active);
         let result = self.session_mut(project)?.execute(id, params);
         self.poll_plugins();
+        // A project saved under a new name is shown by it.
+        if id == "project.save"
+            && let Ok(saved) = &result
+            && saved.get("copy") == Some(&Value::Bool(false))
+            && let Some(open) = self.open.iter_mut().find(|o| Some(o.id) == target)
+            && let Some(stem) = open.session.source().and_then(|s| s.file_stem())
+        {
+            open.name = stem.to_string_lossy().into_owned();
+        }
         result
     }
 
