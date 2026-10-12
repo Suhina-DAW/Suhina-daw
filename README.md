@@ -30,7 +30,9 @@ How a release is made: [`docs/releasing.md`](docs/releasing.md).
 ## Try it
 
 ```sh
-# Open a Live Set in the desktop app and launch its clips and scenes with the mouse
+# Open a Live Set in the desktop app and launch its clips and scenes with the mouse; the
+# plug-in host is built first, since the app runs plug-ins in it (scan in Settings › Plug-ins)
+cargo build --release -p loopwerk-plugin-host
 cargo run --release -p loopwerk -- path/to/set.als
 
 # Play a Live Set on the default audio device (release builds play heavy sets smoothly)

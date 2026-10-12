@@ -15,6 +15,7 @@ use crate::arrangement_view::{self, ArrangementViewState};
 use crate::detail_view;
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
+use crate::loading_dialog;
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, OnOpen, Settings, Side};
@@ -127,6 +128,8 @@ pub struct App {
     settings_changed: bool,
     /// The Settings page is showing instead of the view.
     settings_open: bool,
+    /// The plug-in loading dialog was sent to the background for the project shown now.
+    plugin_dialog_hidden: bool,
     about: About,
     /// The themes to pick from; the settings say which is in use.
     themes: Themes,
@@ -171,6 +174,7 @@ impl App {
             settings: Settings::default(),
             settings_changed: false,
             settings_open: false,
+            plugin_dialog_hidden: false,
             about: About::default(),
             themes: Themes::default(),
         }
@@ -224,6 +228,7 @@ impl App {
             }
         };
         self.restore(id, Stash::default());
+        self.plugin_dialog_hidden = false;
         Some(id)
     }
 
@@ -474,8 +479,26 @@ impl App {
         }
     }
 
+    /// While the active project's plug-ins start, a dialog over the window says how far they
+    /// have got, until it is sent to the background or nothing is loading any more.
+    fn plugin_dialog(&mut self, ui: &Ui, window: Rect) {
+        if self.plugin_dialog_hidden || self.settings_open {
+            return;
+        }
+        let Some(id) = self.projects.active() else { return };
+        let Some(progress) = self.projects.get(id).map(Session::plugin_progress) else { return };
+        if progress.loading.is_empty() {
+            return;
+        }
+        let name = self.projects.name(id).unwrap_or("the project").to_string();
+        if loading_dialog::show(ui, window, &name, &progress) {
+            self.plugin_dialog_hidden = true;
+        }
+    }
+
     /// Draws the window into `ui` and runs what the user asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
+        let window = ui.max_rect();
         let mut actions = Vec::new();
         self.follow_active();
         self.poll_scan(ui.ctx());
@@ -558,6 +581,7 @@ impl App {
             drop_overlay(ui, view_area);
         });
 
+        self.plugin_dialog(ui, window);
         for action in &actions {
             self.run(action);
         }

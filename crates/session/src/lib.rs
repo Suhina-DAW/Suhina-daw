@@ -18,7 +18,9 @@ use serde_json::Value;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
-pub use rack::{Hosted, OfflinePlugins, PluginEnv, PluginReport, PluginStatus, is_instrument, start_offline};
+pub use rack::{
+    Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, is_instrument, start_offline,
+};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -164,6 +166,11 @@ impl Session {
     /// hear about.
     pub fn sync_plugins(&mut self) -> Vec<String> {
         self.plugins.sync(&self.project, self.player.as_mut())
+    }
+
+    /// How far the project's plug-ins have got with starting (all zero while it does not play).
+    pub fn plugin_progress(&self) -> PluginProgress {
+        self.plugins.progress()
     }
 
     /// Waits up to `timeout` until none of the project's plug-ins is still starting.

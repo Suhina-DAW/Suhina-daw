@@ -124,6 +124,20 @@ pub struct PluginReport {
     pub state_refused: Option<String>,
 }
 
+/// How far a project's plug-ins have got with starting, for a dialog while they load.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginProgress {
+    /// Plug-ins that are installed and should run.
+    pub total: usize,
+    pub ready: usize,
+    /// The names of those still starting.
+    pub loading: Vec<String>,
+    /// Plug-in devices with no installed plug-in.
+    pub missing: usize,
+    /// The names of those that could not start or crashed.
+    pub failed: Vec<String>,
+}
+
 /// The audio half of a hosted plug-in, as the engine runs it: real-time safe.
 pub struct Hosted {
     audio: PluginAudio,
@@ -262,7 +276,13 @@ impl Default for Rack {
 }
 
 impl Rack {
+    /// What plug-ins are started with. A new one (after a scan, or another hosting choice)
+    /// makes the plug-ins that were not found, or could not start, be looked for again.
     pub fn set_env(&mut self, env: std::sync::Arc<PluginEnv>) {
+        if self.env.as_ref().is_some_and(|old| std::sync::Arc::ptr_eq(old, &env)) {
+            return;
+        }
+        self.instances.retain(|_, i| !matches!(i.status, PluginStatus::Missing | PluginStatus::Failed(_)));
         self.env = Some(env);
     }
 
@@ -294,6 +314,24 @@ impl Rack {
             editor_open,
             state_refused: instance.state_refused.clone(),
         })
+    }
+
+    /// How far the plug-ins have got with starting.
+    pub fn progress(&self) -> PluginProgress {
+        let mut progress = PluginProgress::default();
+        let name = |i: &Instance| i.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
+        for instance in self.instances.values() {
+            match &instance.status {
+                PluginStatus::Missing => progress.missing += 1,
+                PluginStatus::Running => progress.ready += 1,
+                PluginStatus::Loading => progress.loading.push(name(instance)),
+                PluginStatus::Crashed(_) | PluginStatus::Failed(_) => progress.failed.push(name(instance)),
+            }
+        }
+        progress.total = self.instances.len() - progress.missing;
+        progress.loading.sort();
+        progress.failed.sort();
+        progress
     }
 
     /// The slots the engine's graphs are built with.
@@ -388,13 +426,7 @@ impl Rack {
             spawn_start(self.sender.clone(), found.key, generation, launch, state);
         }
         if !missing.is_empty() {
-            notices.push(format!(
-                "{} plug-in{} not installed, kept with {} settings: {}",
-                missing.len(),
-                if missing.len() == 1 { " is" } else { "s are" },
-                if missing.len() == 1 { "its" } else { "their" },
-                missing.join(", ")
-            ));
+            notices.push(missing_notice(&env, &missing));
         }
         changed |= self.receive(player, &mut notices);
         self.watch(&mut notices);
@@ -535,6 +567,31 @@ impl Rack {
     }
 }
 
+/// What the status bar says about plug-ins that were not found: why, when the catalog is empty
+/// (no scan yet, or the host to scan with is missing), else which.
+fn missing_notice(env: &PluginEnv, missing: &[String]) -> String {
+    if env.catalog.plugins().next().is_none() {
+        if !env.host.exists() {
+            return format!(
+                "{} plug-ins cannot be looked for: the plug-in host {} is missing",
+                missing.len(),
+                env.host.display()
+            );
+        }
+        return format!(
+            "{} plug-ins cannot be found yet: no plug-in scan has run (Settings › Plug-ins › Scan)",
+            missing.len()
+        );
+    }
+    format!(
+        "{} plug-in{} not installed, kept with {} settings: {}",
+        missing.len(),
+        if missing.len() == 1 { " is" } else { "s are" },
+        if missing.len() == 1 { "its" } else { "their" },
+        missing.join(", ")
+    )
+}
+
 /// Starts a plug-in on a thread of its own and sends the result.
 fn spawn_start(sender: Sender<Started>, key: u64, generation: u64, launch: Launch, state: Option<SavedState>) {
     let fallback = sender.clone();
@@ -639,6 +696,40 @@ pub fn device_kind(plugin: &PluginInfo) -> DeviceKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_counts_each_state() {
+        let mut rack = Rack::default();
+        let instance = |status: PluginStatus, name: &str| Instance {
+            status,
+            plugin: Some((name.to_string(), "V".into(), "same")),
+            info: PluginSlotInfo::default(),
+            control: None,
+            generation: 0,
+            state_refused: None,
+        };
+        rack.instances.insert(1, instance(PluginStatus::Running, "A"));
+        rack.instances.insert(2, instance(PluginStatus::Loading, "C"));
+        rack.instances.insert(3, instance(PluginStatus::Loading, "B"));
+        rack.instances.insert(4, instance(PluginStatus::Missing, "D"));
+        rack.instances.insert(5, instance(PluginStatus::Failed("no".into()), "E"));
+        assert_eq!(
+            rack.progress(),
+            PluginProgress {
+                total: 4,
+                ready: 1,
+                loading: vec!["B".into(), "C".into()],
+                missing: 1,
+                failed: vec!["E".into()]
+            }
+        );
+        // A new catalog looks for the missing and failed ones again.
+        rack.set_env(std::sync::Arc::new(PluginEnv::new(Catalog::new(), PathBuf::from("host"))));
+        rack.set_env(std::sync::Arc::new(PluginEnv::new(Catalog::new(), PathBuf::from("host"))));
+        assert_eq!(rack.progress().missing, 0);
+        assert!(rack.progress().failed.is_empty());
+        assert_eq!(rack.progress().total, 3);
+    }
 
     #[test]
     fn notes_become_the_hosts_events() {

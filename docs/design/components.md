@@ -277,6 +277,18 @@ use as `theme = <id>`; unknown lines are skipped with a warning in the status ba
 | No parameters | Another DAW's device: "Kept so the chain keeps its shape"; a built-in device without parameters: "No parameters" (10 px `text.tertiary`) |
 | Stacked | In a column, each device is as tall as its parameters (20 px header, 6 px padding, 16 px a parameter; a plug-in as tall as its state row and button), 1 px apart |
 
+## Plug-in loading dialog
+
+Shown over the window while the active project's plug-ins start (`crates/ui/src/loading_dialog.rs`),
+until none is loading or it is sent to the background; a project opened next shows it again.
+
+| Part | Spec |
+|---|---|
+| Behind | The window dimmed with `surface.0` at 60 %; clicks there do nothing |
+| Panel | 360 px wide, centred, `surface.1`, 1 px `line.strong` border; 20 px `surface.2` title "Loading plug-ins · <project>" in 11 px `text.primary` |
+| Progress | A 4 px bar, `surface.2`, filled with `accent` for the share ready; under it 16 px rows in 10 px: "N of M ready, K not installed" `text.secondary`, "Loading <name>" `text.tertiary` (six, then "and N more"), "Could not start <name>" `recording` |
+| Button | 150 × 18 px, bottom right, as the device panel's: "Continue in the background"; Escape does the same. The project plays meanwhile |
+
 ## Clip properties
 
 The detail area for a selected arrangement clip: a 196 px `surface.1` column with the clip's name

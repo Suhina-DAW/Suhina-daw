@@ -261,6 +261,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   version for a VST2 plug-in too) and started with the settings the project saved; instruments
   play their track's notes, effects process their track. Missing ones are named in the status
   bar and keep their settings untouched.
+- While an opened project's plug-ins start, a dialog shows how many are ready and which are
+  still loading or could not start; it can be sent to the background, and the project plays
+  meanwhile. A scan finds plug-ins that were missing without opening the project again.
 - Tracks are lined up for the latency of their devices and plug-ins.
 - The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
   editor, Close editor or Restart; the same commands work from the CLI and MCP.
