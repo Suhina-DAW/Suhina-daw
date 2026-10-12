@@ -733,6 +733,7 @@ dependencies = [
  "loopwerk-ipc",
  "loopwerk-plugins",
  "vst3",
+ "windows-sys",
 ]
 
 [[package]]

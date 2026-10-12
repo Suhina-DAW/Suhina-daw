@@ -310,6 +310,51 @@ fn an_offline_run_plays_notes_at_their_frames() {
     assert_eq!(total, 0.75);
 }
 
+/// Asks the editor's window to close, as the user does with its close button.
+#[cfg(windows)]
+fn close_editor_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
+    let class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
+    // SAFETY: a class name that outlives the call; any title.
+    let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    assert!(!window.is_null(), "no editor window");
+    // SAFETY: a window found just now; WM_CLOSE carries no pointers.
+    unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
+}
+
+#[cfg(not(windows))]
+fn close_editor_window() {}
+
+#[test]
+fn an_editor_opens_in_a_window_and_closes() {
+    let (mut plugin, mut audio) = start("test:vst3");
+    let opened = plugin.open_editor();
+    if cfg!(windows) {
+        assert_eq!(opened.unwrap(), (300, 200));
+        assert!(plugin.editor_open());
+        // Opening it again gives the same editor; audio keeps flowing.
+        assert_eq!(plugin.open_editor().unwrap(), (300, 200));
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
+        plugin.close_editor().unwrap();
+        assert!(!plugin.editor_open());
+        // And it opens again after being closed; when the user closes its window, the host
+        // says so unasked.
+        assert_eq!(plugin.open_editor().unwrap(), (300, 200));
+        close_editor_window();
+        let deadline = Instant::now() + PATIENT;
+        while plugin.editor_open() {
+            assert!(Instant::now() < deadline, "the closed window was not reported");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    } else {
+        assert!(matches!(opened, Err(PluginError::Host(_))), "{opened:?}");
+    }
+    // A plug-in without an editor says so.
+    let (mut plain, _audio) = start("test:clap");
+    assert!(matches!(plain.open_editor(), Err(PluginError::Host(_))));
+    plain.close_editor().unwrap();
+}
+
 #[test]
 fn parameters_are_listed_set_and_kept_over_a_restart() {
     for spec in ["test:clap", "test:vst3"] {

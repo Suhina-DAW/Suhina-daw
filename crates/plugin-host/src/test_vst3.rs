@@ -7,7 +7,8 @@
 //! keeps whatever state it is given, and has one parameter, the gain (id 0), which the
 //! processor follows when a block brings a change. It has an event input too: a note-on adds
 //! its velocity to the first output channel at its frame, and its controller maps MIDI
-//! controller 7 to the gain (`IMidiMapping`). Modelled on the `vst3` crate's gain
+//! controller 7 to the gain (`IMidiMapping`). Its editor is an empty 300 × 200 view that
+//! accepts a native window and does nothing in it. Modelled on the `vst3` crate's gain
 //! example (MIT/Apache-2.0).
 
 use std::ffi::{c_char, c_void};
@@ -334,7 +335,7 @@ impl IEditControllerTrait for Controller {
     }
 
     unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {
-        std::ptr::null_mut()
+        ComWrapper::new(View).to_com_ptr::<IPlugView>().map_or(std::ptr::null_mut(), |view| view.into_raw())
     }
 }
 
@@ -407,6 +408,66 @@ impl IMidiMappingTrait for Controller {
         }
         // SAFETY: the host passes an id to fill.
         unsafe { *id = GAIN_PARAMETER };
+        kResultOk
+    }
+}
+
+/// An editor that shows nothing.
+struct View;
+
+impl Class for View {
+    type Interfaces = (IPlugView,);
+}
+
+impl IPlugViewTrait for View {
+    unsafe fn isPlatformTypeSupported(&self, _platform: FIDString) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn attached(&self, parent: *mut c_void, _platform: FIDString) -> tresult {
+        if parent.is_null() { kInvalidArgument } else { kResultOk }
+    }
+
+    unsafe fn removed(&self) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn onWheel(&self, _distance: f32) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn onKeyDown(&self, _key: char16, _code: int16, _modifiers: int16) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn onKeyUp(&self, _key: char16, _code: int16, _modifiers: int16) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn getSize(&self, size: *mut ViewRect) -> tresult {
+        // SAFETY: the host passes a rectangle to fill.
+        let Some(size) = (unsafe { size.as_mut() }) else { return kInvalidArgument };
+        *size = ViewRect { left: 0, top: 0, right: 300, bottom: 200 };
+        kResultOk
+    }
+
+    unsafe fn onSize(&self, _size: *mut ViewRect) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn onFocus(&self, _state: TBool) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn setFrame(&self, _frame: *mut IPlugFrame) -> tresult {
+        kResultOk
+    }
+
+    unsafe fn canResize(&self) -> tresult {
+        kResultFalse
+    }
+
+    unsafe fn checkSizeConstraint(&self, _rect: *mut ViewRect) -> tresult {
         kResultOk
     }
 }

@@ -2,13 +2,15 @@
 //! object per line over a local socket. Audio does not go here; it goes through `loopwerk-ipc`.
 //!
 //! Every message has an `op`. Engine to host: `hello`, `load`, `ping`, `get_state`,
-//! `set_state`, `get_params`, `set_param`, `quit`. Host to engine: `hello`, `loaded`, `pong`,
-//! `state`, `params`, `param`, `error`.
+//! `set_state`, `get_params`, `set_param`, `open_editor`, `close_editor`, `quit`. Host to
+//! engine: `hello`, `loaded`, `pong`, `state`, `params`, `param`, `editor_opened`,
+//! `editor_closed`, `error`. `editor_closed` also comes unasked, when the user closes the
+//! editor's window.
 
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 3;
+pub const VERSION: u64 = 4;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -109,6 +111,15 @@ pub enum Message {
     Param {
         param: ParamInfo,
     },
+    /// Open the plug-in's editor in a window of its own; answered with `EditorOpened` and the
+    /// size of its inside.
+    OpenEditor,
+    EditorOpened {
+        width: u32,
+        height: u32,
+    },
+    CloseEditor,
+    EditorClosed,
     Error {
         message: String,
     },
@@ -140,6 +151,10 @@ impl Message {
             }
             Self::SetParam { id, value } => json!({ "op": "set_param", "id": id, "value": value }),
             Self::Param { param } => json!({ "op": "param", "param": param.to_json() }),
+            Self::OpenEditor => json!({ "op": "open_editor" }),
+            Self::EditorOpened { width, height } => json!({ "op": "editor_opened", "width": width, "height": height }),
+            Self::CloseEditor => json!({ "op": "close_editor" }),
+            Self::EditorClosed => json!({ "op": "editor_closed" }),
             Self::Quit => json!({ "op": "quit" }),
         };
         value.to_string()
@@ -186,6 +201,13 @@ impl Message {
                 value: value.get("value").and_then(Value::as_f64).filter(|v| v.is_finite())?,
             },
             "param" => Self::Param { param: ParamInfo::from_json(value.get("param")?)? },
+            "open_editor" => Self::OpenEditor,
+            "editor_opened" => Self::EditorOpened {
+                width: u32::try_from(number("width")?).ok()?,
+                height: u32::try_from(number("height")?).ok()?,
+            },
+            "close_editor" => Self::CloseEditor,
+            "editor_closed" => Self::EditorClosed,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -244,6 +266,10 @@ mod tests {
             Message::Params { params: Vec::new() },
             Message::SetParam { id: 7, value: -0.5 },
             Message::Param { param: gain() },
+            Message::OpenEditor,
+            Message::EditorOpened { width: 800, height: 600 },
+            Message::CloseEditor,
+            Message::EditorClosed,
             Message::Error { message: "no such plug-in: \"x\"\n".into() },
             Message::Quit,
         ];
@@ -275,6 +301,7 @@ mod tests {
             r#"{"op":"set_param","id":-1,"value":0.5}"#,
             r#"{"op":"params","params":[{"id":1}]}"#,
             r#"{"op":"param"}"#,
+            r#"{"op":"editor_opened","width":800}"#,
         ] {
             assert_eq!(Message::decode(line), None, "{line}");
         }

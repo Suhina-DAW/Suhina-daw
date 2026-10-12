@@ -459,6 +459,9 @@ pub(crate) struct Vst3Plugin {
     separate_controller: bool,
     /// Parameter values for the processor's next block.
     pending: Pending,
+    /// The plug-in's name, for its editor's window.
+    name: String,
+    editor: Option<crate::vst3_editor::Editor>,
     component: ComPtr<IComponent>,
     _handler: ComWrapper<ComponentHandler>,
     _host: ComWrapper<HostApplication>,
@@ -476,10 +479,11 @@ impl Vst3Plugin {
     pub(crate) fn load(spec: &str, served: Served, sample_rate: f64) -> Result<Self, String> {
         let (module, wanted) = open(spec)?;
         let classes = module.audio_classes()?;
-        let cid = match wanted {
-            Some(wanted) => classes.iter().find(|(cid, _)| *cid == wanted).map(|(cid, _)| *cid),
-            None => classes.first().map(|(cid, _)| *cid),
+        let (cid, name) = match wanted {
+            Some(wanted) => classes.iter().find(|(cid, _)| *cid == wanted),
+            None => classes.first(),
         }
+        .map(|(cid, info)| (*cid, info.name.clone()))
         .ok_or_else(|| format!("no audio plug-in in {spec:?}"))?;
 
         let component = module.create::<IComponent>(&cid).ok_or("could not make the plug-in's component")?;
@@ -512,6 +516,8 @@ impl Vst3Plugin {
             controller,
             separate_controller,
             pending: Pending::default(),
+            name,
+            editor: None,
             component,
             _handler: handler,
             _host: host,
@@ -681,6 +687,33 @@ impl Vst3Plugin {
         Ok(())
     }
 
+    /// Opens the plug-in's editor (or returns the size of the one open).
+    pub(crate) fn open_editor(&mut self) -> Result<crate::window::Size, String> {
+        if let Some(editor) = &self.editor {
+            return Ok(editor.size());
+        }
+        let controller = self.controller.as_ref().ok_or("the plug-in has no editor")?;
+        let editor = crate::vst3_editor::Editor::open(controller, &self.name)?;
+        let size = editor.size();
+        self.editor = Some(editor);
+        Ok(size)
+    }
+
+    pub(crate) fn close_editor(&mut self) {
+        if let Some(editor) = self.editor.take() {
+            editor.close();
+        }
+    }
+
+    /// Keeps the editor in step with its window; returns whether the user closed it.
+    pub(crate) fn editor_tick(&mut self) -> bool {
+        let closed = self.editor.as_mut().is_some_and(crate::vst3_editor::Editor::tick);
+        if closed {
+            self.close_editor();
+        }
+        closed
+    }
+
     /// The controller's parameters, values normalized (0 to 1).
     pub(crate) fn params(&self) -> Vec<ParamInfo> {
         let Some(controller) = &self.controller else { return Vec::new() };
@@ -784,6 +817,7 @@ impl Vst3Plugin {
 
 impl Drop for Vst3Plugin {
     fn drop(&mut self) {
+        self.close_editor();
         self.stop.store(true, Ordering::Release);
         if let Some(audio) = self.audio.take() {
             let _ = audio.join();

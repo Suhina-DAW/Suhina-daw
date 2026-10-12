@@ -14,8 +14,10 @@ mod processors;
 mod test_clap;
 mod test_vst3;
 mod vst3;
+mod vst3_editor;
 mod vst3_events;
 mod vst3_params;
+mod window;
 
 use std::io::Write;
 use std::sync::Arc;
@@ -122,6 +124,31 @@ impl Loaded {
         }
     }
 
+    fn open_editor(&mut self) -> Result<window::Size, String> {
+        match self {
+            Self::Clap(plugin) => plugin.open_editor(),
+            Self::Vst3(plugin) => plugin.open_editor(),
+            Self::Test { .. } => Err("the plug-in has no editor".into()),
+        }
+    }
+
+    fn close_editor(&mut self) {
+        match self {
+            Self::Clap(plugin) => plugin.close_editor(),
+            Self::Vst3(plugin) => plugin.close_editor(),
+            Self::Test { .. } => {}
+        }
+    }
+
+    /// Keeps an open editor in step with its window; whether the user closed it.
+    fn editor_tick(&mut self) -> bool {
+        match self {
+            Self::Clap(plugin) => plugin.editor_tick(),
+            Self::Vst3(plugin) => plugin.editor_tick(),
+            Self::Test { .. } => false,
+        }
+    }
+
     fn params(&mut self) -> Result<Vec<ParamInfo>, String> {
         match self {
             Self::Clap(plugin) => Ok(plugin.params()),
@@ -198,20 +225,31 @@ fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     Ok(Loaded::Test { processor, stop, audio })
 }
 
+/// Writes one message to the engine.
+fn send(writer: &mut impl Write, message: &Message) -> std::io::Result<()> {
+    let mut out = message.encode();
+    out.push('\n');
+    writer.write_all(out.as_bytes())?;
+    writer.flush()
+}
+
 fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = loopwerk_plugins::connect(address)?;
     let mut writer = stream.try_clone()?;
     let messages = loopwerk_plugins::read_lines(stream);
     let mut loaded: Option<Loaded> = None;
     loop {
+        // Between messages: the plug-in's main-thread callbacks and its editor's window.
+        window::pump();
+        if let Some(loaded) = &mut loaded {
+            loaded.tick();
+            if loaded.editor_tick() {
+                send(&mut writer, &Message::EditorClosed)?;
+            }
+        }
         let message = match messages.recv_timeout(TICK) {
             Ok(message) => message,
-            Err(RecvTimeoutError::Timeout) => {
-                if let Some(loaded) = &mut loaded {
-                    loaded.tick();
-                }
-                continue;
-            }
+            Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         };
         let reply = match message {
@@ -228,6 +266,17 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
             }
             Message::Load { .. } => Message::Error { message: "a plug-in is already loaded".into() },
             Message::Ping { id } => Message::Pong { id },
+            Message::OpenEditor => match loaded.as_mut().map(Loaded::open_editor) {
+                Some(Ok(size)) => Message::EditorOpened { width: size.width, height: size.height },
+                Some(Err(message)) => Message::Error { message },
+                None => Message::Error { message: "no plug-in loaded".into() },
+            },
+            Message::CloseEditor => {
+                if let Some(loaded) = &mut loaded {
+                    loaded.close_editor();
+                }
+                Message::EditorClosed
+            }
             Message::GetParams => match loaded.as_mut().map(Loaded::params) {
                 Some(Ok(params)) => Message::Params { params },
                 Some(Err(message)) => Message::Error { message },

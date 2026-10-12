@@ -16,9 +16,17 @@ interprocess = "2.4"  # 0BSD OR Apache-2.0
 clack-host = { version = "0.2", features = ["clack-plugin"] }  # MIT OR Apache-2.0
 # The test plug-in built into the host (`test:clap`).
 clack-plugin = "0.2"  # MIT OR Apache-2.0
-clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "audio-ports", "latency", "log", "params", "state"] }  # MIT OR Apache-2.0
+clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", "audio-ports", "gui", "latency", "log", "params", "state"] }  # MIT OR Apache-2.0
 vst3 = "0.3"  # MIT OR Apache-2.0; bindings generated from the VST 3 SDK (MIT)
 libloading = "0.8"  # ISC
+
+[target.'cfg(windows)'.dependencies]
+# The window a plug-in's editor is attached to.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }  # MIT OR Apache-2.0
+
+[target.'cfg(windows)'.dev-dependencies]
+# Closing an editor's window from a test, as a user would.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }  # MIT OR Apache-2.0
 
 # The workspace lints, except that this crate may use `unsafe` to load plug-ins (ADR 0006). It
 # cannot inherit them with `workspace = true` and change one, so they are repeated here; keep

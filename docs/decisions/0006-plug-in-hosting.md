@@ -180,6 +180,14 @@ workspace forbids.
    folders and the catalog are kept as JSON in Loopwerk's settings folder.
 10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,
     floating on Wayland and macOS, which have no public way to embed another process's window.
+    *Built on Windows:* the host opens a top-level window of its own on its main thread
+    (`crates/plugin-host/src/window.rs`, Win32) and attaches the plug-in's view to it (VST3
+    `IPlugView` with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps
+    its messages in the main loop between control messages, and tells the engine unasked when
+    the user closes it (`editor_closed`, protocol version 4). Until Loopwerk has a window of its
+    own, the editor's window is a top-level one rather than embedded in Loopwerk's. Checked with
+    Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand. X11 and
+    the floating cases come later.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple
     silicon, Windows plug-ins on Linux through Wine.
 12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which
@@ -215,7 +223,7 @@ workspace forbids.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
-  engine's track chain together with built-in devices (LOOP-35); editors.
+  engine's track chain together with built-in devices (LOOP-35); editors (Windows done).
 
 ## Sources
 

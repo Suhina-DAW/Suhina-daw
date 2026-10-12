@@ -20,6 +20,7 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
        loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -41,7 +42,8 @@ commands:
             first clip) for --seconds (default 16), and `-` as input means silence; --state
             gives the plug-in a saved state from a file first (its own, or a VST2 .fxb/.fxp);
             plugin params lists a plug-in's parameters with their values, params-device with
-            the settings a project saved
+            the settings a project saved; plugin edit opens a plug-in's editor and waits until
+            its window is closed, then --save writes the state it has to a file
 
 options:
   <project.als>      a Live Set to import
@@ -228,6 +230,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
        loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
        loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 {USAGE}"
         )
@@ -247,6 +250,16 @@ fn plugin(args: &[String]) -> Result<(), String> {
             let Some(name) = words.next() else { return Err(usage()) };
             let spec = plugin_spec(&mut library, name)?;
             return print_params(&library, spec, None);
+        }
+        Some("edit") => {
+            let Some(name) = words.next() else { return Err(usage()) };
+            let spec = plugin_spec(&mut library, name)?;
+            return edit_plugin(&library, spec, None, words);
+        }
+        Some("edit-device") => {
+            let (Some(project), Some(device)) = (words.next(), words.next()) else { return Err(usage()) };
+            let (_, _, spec, state) = project_device(&mut library, project, device)?;
+            return edit_plugin(&library, spec, state, words);
         }
         Some("params-device") => {
             let (Some(project), Some(device)) = (words.next(), words.next()) else { return Err(usage()) };
@@ -453,6 +466,70 @@ fn project_device(
     );
     let spec = found.plugin.spec();
     Ok((session, channel_id, spec, state))
+}
+
+/// Starts the plug-in `spec` with `state`, opens its editor and waits until its window is
+/// closed (or `--close-after` seconds pass); with `--save <file>`, writes the state it has then
+/// (a VST3 controller's own state next to it, in `<file>.controller`).
+fn edit_plugin<'a>(
+    library: &loopwerk_plugins::library::Library,
+    spec: String,
+    state: Option<loopwerk_plugins::SavedState>,
+    mut words: impl Iterator<Item = &'a str>,
+) -> Result<(), String> {
+    let mut save: Option<String> = None;
+    let mut close_after: Option<std::time::Duration> = None;
+    while let Some(word) = words.next() {
+        match word {
+            "--save" => save = Some(words.next().ok_or("--save needs a file")?.to_string()),
+            "--close-after" => {
+                let seconds = words
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .filter(|s| s.is_finite() && (0.0..=86_400.0).contains(s))
+                    .ok_or("--close-after needs seconds")?;
+                close_after = Some(std::time::Duration::from_secs_f64(seconds));
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+    let launch = loopwerk_plugins::Launch {
+        host: library.host().to_path_buf(),
+        plugin: spec,
+        channels: 2,
+        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        sample_rate: 48_000.0,
+        timeout: std::time::Duration::from_secs(30),
+    };
+    let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
+    if let Some(state) = state
+        && let Err(e) = plugin.load_state(state)
+    {
+        eprintln!("warning: the plug-in did not take the saved settings ({e}); it opens with its defaults");
+    }
+    let (width, height) = plugin.open_editor().map_err(|e| e.to_string())?;
+    eprintln!("editor open ({width} × {height}); close its window to finish");
+    let started = std::time::Instant::now();
+    while plugin.editor_open() {
+        if plugin.health() != loopwerk_plugins::Health::Running {
+            return Err("the plug-in stopped while its editor was open".into());
+        }
+        if close_after.is_some_and(|after| started.elapsed() >= after) {
+            plugin.close_editor().map_err(|e| e.to_string())?;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if let Some(file) = save {
+        let state = plugin.save_state().map_err(|e| e.to_string())?;
+        std::fs::write(&file, &state.data).map_err(|e| format!("{file}: {e}"))?;
+        if let Some(controller) = &state.controller {
+            let other = format!("{file}.controller");
+            std::fs::write(&other, controller).map_err(|e| format!("{other}: {e}"))?;
+        }
+        eprintln!("saved the plug-in's state to {file} ({} bytes)", state.data.len());
+    }
+    Ok(())
 }
 
 /// Starts the plug-in `spec`, gives it `state`, and prints its parameters as JSON.

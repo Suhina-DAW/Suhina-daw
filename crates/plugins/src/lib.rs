@@ -159,6 +159,8 @@ pub struct Plugin {
     /// Parameters set since the state was last read or loaded, in order; set again after a
     /// restart, on top of that state.
     params_since: Vec<(u32, f64)>,
+    /// Whether the plug-in's editor window is open.
+    editor_open: bool,
 }
 
 impl Plugin {
@@ -201,6 +203,7 @@ impl Plugin {
             next_ping: 0,
             last_state: None,
             params_since: Vec::new(),
+            editor_open: false,
         };
         plugin.send(&Message::Hello { version: VERSION })?;
         match plugin.reply("hello", |m| matches!(m, Message::Hello { .. }))? {
@@ -288,6 +291,42 @@ impl Plugin {
         Ok(param)
     }
 
+    /// Opens the plug-in's editor in a window of its own (in the host process) and returns the
+    /// size of its inside. Opening an open editor just returns its size.
+    pub fn open_editor(&mut self) -> Result<(u32, u32), PluginError> {
+        self.send(&Message::OpenEditor)?;
+        match self.reply("open_editor", |m| matches!(m, Message::EditorOpened { .. }))? {
+            Message::EditorOpened { width, height } => {
+                self.editor_open = true;
+                Ok((width, height))
+            }
+            _ => Err(PluginError::Protocol("expected the editor".into())),
+        }
+    }
+
+    /// Closes the plug-in's editor, if it is open.
+    pub fn close_editor(&mut self) -> Result<(), PluginError> {
+        self.send(&Message::CloseEditor)?;
+        self.reply("close_editor", |m| matches!(m, Message::EditorClosed))?;
+        self.editor_open = false;
+        Ok(())
+    }
+
+    /// Whether the editor is open: the user may have closed its window since it was opened.
+    pub fn editor_open(&mut self) -> bool {
+        while let Ok(message) = self.replies.try_recv() {
+            self.note(&message);
+        }
+        self.editor_open
+    }
+
+    /// Takes in what a message the host sent unasked says.
+    fn note(&mut self, message: &Message) {
+        if matches!(message, Message::EditorClosed) {
+            self.editor_open = false;
+        }
+    }
+
     /// Ends the current host process, whatever its state, and starts a new one with the same
     /// plug-in and its last saved state. Returns the new audio half, which replaces the old one.
     pub fn restart(&mut self) -> Result<PluginAudio, PluginError> {
@@ -320,7 +359,7 @@ impl Plugin {
             match self.replies.recv_timeout(left) {
                 Ok(Message::Error { message }) => return Err(PluginError::Host(message)),
                 Ok(message) if wanted(&message) => return Ok(message),
-                Ok(_) => {}
+                Ok(other) => self.note(&other),
                 Err(RecvTimeoutError::Timeout) => return Err(PluginError::Timeout(what)),
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(PluginError::Protocol("the host closed the control connection".into()));

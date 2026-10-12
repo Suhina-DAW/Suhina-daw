@@ -19,6 +19,7 @@ use std::thread;
 use std::time::Duration;
 
 use clack_extensions::audio_ports::PluginAudioPorts;
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui};
 use clack_extensions::latency::{HostLatency, HostLatencyImpl, PluginLatency};
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
 use clack_extensions::params::{ParamInfoBuffer, ParamInfoFlags, PluginParams};
@@ -42,7 +43,46 @@ pub(crate) struct Shared {
     latency: OnceLock<Option<PluginLatency>>,
     audio_ports: OnceLock<Option<PluginAudioPorts>>,
     params: OnceLock<Option<PluginParams>>,
+    gui: OnceLock<Option<PluginGui>>,
+    /// A size the plug-in asked its editor's window to have (from any thread).
+    gui_resize: Mutex<Option<GuiSize>>,
+    /// The plug-in said its editor is gone.
+    gui_closed: AtomicBool,
 }
+
+impl HostGuiImpl for Shared {
+    fn resize_hints_changed(&self) {}
+
+    fn request_resize(&self, new_size: GuiSize) -> Result<(), HostError> {
+        if let Ok(mut wanted) = self.gui_resize.lock() {
+            *wanted = Some(new_size);
+        }
+        Ok(())
+    }
+
+    fn request_show(&self) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    fn request_hide(&self) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    fn closed(&self, _was_destroyed: bool) {
+        self.gui_closed.store(true, Ordering::Release);
+    }
+}
+
+/// An open editor: the window the plug-in's view is in.
+struct ClapEditor {
+    window: crate::window::Window,
+    size: crate::window::Size,
+    resizable: bool,
+}
+
+/// How the editor is embedded on this system.
+const GUI: GuiConfiguration<'static> =
+    GuiConfiguration { api_type: if cfg!(windows) { GuiApiType::WIN32 } else { GuiApiType::X11 }, is_floating: false };
 
 /// Parameter values waiting for the next block: id and plain value.
 type PendingParams = Arc<Mutex<Vec<(u32, f64)>>>;
@@ -55,6 +95,7 @@ impl<'a> SharedHandler<'a> for Shared {
         let _ = self.latency.set(instance.get_extension());
         let _ = self.audio_ports.set(instance.get_extension());
         let _ = self.params.set(instance.get_extension());
+        let _ = self.gui.set(instance.get_extension());
     }
 
     fn request_restart(&self) {}
@@ -90,7 +131,7 @@ impl HostHandlers for Host {
     type AudioProcessor<'a> = ();
 
     fn declare_extensions(builder: &mut HostExtensions<Self>, _shared: &Self::Shared<'_>) {
-        builder.register::<HostLog>().register::<HostState>().register::<HostLatency>();
+        builder.register::<HostLog>().register::<HostState>().register::<HostLatency>().register::<HostGui>();
     }
 }
 
@@ -101,6 +142,9 @@ pub(crate) struct ClapPlugin {
     stop: Arc<AtomicBool>,
     latency: u32,
     pending: PendingParams,
+    editor: Option<ClapEditor>,
+    /// The plug-in's name, for its editor's window.
+    name: String,
 }
 
 /// The entry `spec` names: a CLAP file, or the built-in test plug-in. Also returns the plug-in
@@ -164,6 +208,9 @@ impl ClapPlugin {
             latency: OnceLock::new(),
             audio_ports: OnceLock::new(),
             params: OnceLock::new(),
+            gui: OnceLock::new(),
+            gui_resize: Mutex::new(None),
+            gui_closed: AtomicBool::new(false),
         };
         let mut instance =
             PluginInstance::<Host>::new(shared, |_| MainThread, &entry, &id, &info).map_err(|e| e.to_string())?;
@@ -190,7 +237,8 @@ impl ClapPlugin {
             .name("plug-in audio".into())
             .spawn(move || serve(stopped, served, has_input, audio_pending, &audio_stop))
             .map_err(|e| e.to_string())?;
-        Ok(Self { instance, audio: Some(audio), stop, latency, pending })
+        let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
+        Ok(Self { instance, audio: Some(audio), stop, latency, pending, editor: None, name })
     }
 
     pub(crate) fn latency(&self) -> u32 {
@@ -214,6 +262,88 @@ impl ClapPlugin {
     pub(crate) fn set_state(&mut self, data: &[u8]) -> Result<(), String> {
         let state = self.state_extension()?;
         state.load(&self.instance.plugin_handle(), &mut std::io::Cursor::new(data)).map_err(|e| e.to_string())
+    }
+
+    fn gui_extension(&self) -> Option<PluginGui> {
+        self.instance.access_shared_handler(|s| s.gui.get().copied().flatten())
+    }
+
+    /// Opens the plug-in's editor (or returns the size of the one open).
+    pub(crate) fn open_editor(&mut self) -> Result<crate::window::Size, String> {
+        if let Some(editor) = &self.editor {
+            return Ok(editor.size);
+        }
+        let gui = self.gui_extension().ok_or("the plug-in has no editor")?;
+        self.instance.access_shared_handler(|s| s.gui_closed.store(false, Ordering::Release));
+        let handle = self.instance.plugin_handle();
+        if !gui.is_api_supported(&handle, GUI) {
+            return Err("the plug-in's editor does not run on this system".into());
+        }
+        gui.create(&handle, GUI).map_err(|_| "the plug-in's editor did not open")?;
+        let size = gui
+            .get_size(&handle)
+            .map(|s| crate::window::Size { width: s.width.clamp(1, 16_384), height: s.height.clamp(1, 16_384) })
+            .unwrap_or(crate::window::Size { width: 800, height: 600 });
+        let resizable = gui.can_resize(&handle);
+        let window = match crate::window::Window::open(&self.name, size, resizable) {
+            Ok(window) => window,
+            Err(e) => {
+                gui.destroy(&handle);
+                return Err(e);
+            }
+        };
+        // SAFETY: the window stays open until the editor is destroyed in `close_editor`.
+        let parent = unsafe { clack_extensions::gui::Window::from_win32_hwnd(window.handle()) };
+        // SAFETY: as above.
+        if unsafe { gui.set_parent(&handle, parent) }.is_err() {
+            gui.destroy(&handle);
+            return Err("the plug-in's editor did not open".into());
+        }
+        let _ = gui.show(&handle);
+        self.editor = Some(ClapEditor { window, size, resizable });
+        Ok(size)
+    }
+
+    pub(crate) fn close_editor(&mut self) {
+        let Some(editor) = self.editor.take() else { return };
+        if let Some(gui) = self.gui_extension() {
+            let handle = self.instance.plugin_handle();
+            let _ = gui.hide(&handle);
+            gui.destroy(&handle);
+        }
+        drop(editor.window);
+    }
+
+    /// Keeps the editor in step with its window; returns whether it was closed.
+    pub(crate) fn editor_tick(&mut self) -> bool {
+        if self.editor.is_none() {
+            return false;
+        }
+        let gui = self.gui_extension();
+        let wanted = self.instance.access_shared_handler(|s| s.gui_resize.lock().ok().and_then(|mut w| w.take()));
+        let handle = self.instance.plugin_handle();
+        let Some(editor) = &mut self.editor else { return false };
+        if let Some(size) = wanted {
+            let size = crate::window::Size { width: size.width.clamp(1, 16_384), height: size.height.clamp(1, 16_384) };
+            crate::window::resize(size);
+            editor.size = size;
+        } else if editor.resizable {
+            let now = crate::window::client_size();
+            if now != editor.size && now.width > 0 && now.height > 0 {
+                if let Some(gui) = gui {
+                    let asked = GuiSize { width: now.width, height: now.height };
+                    let fitted = gui.adjust_size(&handle, asked).unwrap_or(asked);
+                    let _ = gui.set_size(&handle, fitted);
+                }
+                editor.size = now;
+            }
+        }
+        let gone = self.instance.access_shared_handler(|s| s.gui_closed.swap(false, Ordering::AcqRel));
+        let closed = crate::window::take_close_request() || gone;
+        if closed {
+            self.close_editor();
+        }
+        closed
     }
 
     fn params_extension(&self) -> Option<PluginParams> {
@@ -267,6 +397,7 @@ impl ClapPlugin {
 
 impl Drop for ClapPlugin {
     fn drop(&mut self) {
+        self.close_editor();
         self.stop.store(true, Ordering::Release);
         if let Some(audio) = self.audio.take()
             && let Ok(stopped) = audio.join()
