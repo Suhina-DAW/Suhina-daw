@@ -348,5 +348,10 @@ fn a_plug_in_instrument_is_released_when_the_transport_stops() {
     assert!(peak(&blocks(&mut renderer, 10, 480)) > 0.1);
     renderer.handle(crate::LaunchCommand::Stop);
     assert_eq!(peak(&blocks(&mut renderer, 10, 480)[960..]), 0.0);
-    assert!(seen.lock().unwrap().iter().any(|(_, e)| *e == NoteEvent::AllNotesOff));
+    // Each held key is released on its own before the all-notes-off, for instruments that
+    // ignore it.
+    let seen = seen.lock().unwrap();
+    let off = seen.iter().position(|(_, e)| matches!(e, NoteEvent::Off { key: 60, .. }));
+    let all = seen.iter().position(|(_, e)| *e == NoteEvent::AllNotesOff);
+    assert!(off.is_some() && all.is_some() && off < all, "{seen:?}");
 }

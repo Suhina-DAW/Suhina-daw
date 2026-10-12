@@ -146,6 +146,9 @@ pub struct Hosted {
     input: Vec<f32>,
     output: Vec<f32>,
     events: Vec<Event>,
+    /// Releases from blocks that were not sent (the host still busy with an earlier one),
+    /// sent at the start of the next block that is, so no note is left hanging.
+    carried: Vec<Event>,
 }
 
 impl Hosted {
@@ -155,7 +158,28 @@ impl Hosted {
             input: vec![0.0; MAX_BLOCK_FRAMES * 2],
             output: vec![0.0; MAX_BLOCK_FRAMES * 2],
             events: Vec::with_capacity(MAX_EVENTS),
+            carried: Vec::with_capacity(MAX_EVENTS),
         }
+    }
+}
+
+/// Keeps the releases among `events` in `carried`, within its capacity. Never allocates.
+fn carry_releases(events: &[Event], carried: &mut Vec<Event>) {
+    let room = carried.capacity();
+    for event in events.iter().filter(|e| releases(e)) {
+        if carried.len() < room {
+            carried.push(*event);
+        }
+    }
+}
+
+/// Whether `event` lets go of something (a note, the sustain pedal, all notes), so it must
+/// not be lost with a block that was not sent.
+fn releases(event: &Event) -> bool {
+    match event.kind {
+        EventKind::NoteOff { .. } => true,
+        EventKind::Controller { number, .. } => number == SUSTAIN || number == ALL_NOTES_OFF,
+        _ => false,
     }
 }
 
@@ -196,14 +220,23 @@ impl PluginProcessor for Hosted {
         };
         input.copy_from_slice(buffer);
         self.events.clear();
+        // What earlier blocks could not send goes first.
+        self.events.extend(self.carried.drain(..).map(|e| Event { frame: 0, ..e }));
         for &(frame, event) in events {
             push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
         }
-        if self.audio.process_with_events(input, &self.events, output, timeout) == loopwerk_plugins::Outcome::Done {
-            buffer.copy_from_slice(output);
-            true
-        } else {
-            false
+        match self.audio.process_with_events(input, &self.events, output, timeout) {
+            loopwerk_plugins::Outcome::Done => {
+                buffer.copy_from_slice(output);
+                true
+            }
+            // Sent, but late: the host still gets its events.
+            loopwerk_plugins::Outcome::Missed => false,
+            // Not sent: its releases wait for the next block; new notes are dropped.
+            loopwerk_plugins::Outcome::Busy => {
+                carry_releases(&self.events, &mut self.carried);
+                false
+            }
         }
     }
 }
@@ -658,7 +691,15 @@ impl Rack {
             return Err("the plug-in is not installed; there is nothing to restart".into());
         }
         let Some(control) = instance.control.take() else {
-            return Err("the plug-in is still starting".into());
+            return match instance.status {
+                // It never started: start it again from scratch, as when the project opened.
+                PluginStatus::Failed(_) | PluginStatus::Crashed(_) => {
+                    self.instances.remove(&key);
+                    Ok(())
+                }
+                PluginStatus::Loading => Err("the plug-in is still starting".into()),
+                _ => Err("the plug-in is busy; try again in a moment".into()),
+            };
         };
         self.next_generation += 1;
         instance.generation = self.next_generation;
@@ -893,6 +934,22 @@ mod tests {
         assert_eq!(rack.progress().missing, 0);
         assert!(rack.progress().failed.is_empty());
         assert_eq!(rack.progress().total, 3);
+    }
+
+    #[test]
+    fn releases_of_a_block_not_sent_are_kept_for_the_next() {
+        let events = [
+            Event::note_on(1, 0, 60, 1.0),
+            Event::note_off(2, 0, 61, 0.5),
+            Event { frame: 3, note: -1, kind: EventKind::Controller { channel: 0, number: SUSTAIN, value: 0.0 } },
+            Event { frame: 3, note: -1, kind: EventKind::Controller { channel: 0, number: 1, value: 0.3 } },
+        ];
+        let mut carried = Vec::with_capacity(2);
+        carry_releases(&events, &mut carried);
+        assert_eq!(carried, [events[1], events[2]]);
+        // Never past the room made for them.
+        carry_releases(&events, &mut carried);
+        assert_eq!(carried.len(), 2);
     }
 
     #[test]

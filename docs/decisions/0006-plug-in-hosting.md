@@ -164,7 +164,9 @@ workspace forbids.
    whose class id is derived from the VST2 id by the SDK's convention (`VST`, the 4-byte id, the
    first nine bytes of the name in lower case; the name part is not compared, as a project keeps
    the name its host showed); the same name once build words (`x64`, `64bit`) and a leading
-   vendor name are set aside; and last the nearest newer version of the same name (`Serum` →
+   vendor name are set aside, or the name without its number when the installed plug-in's
+   version starts with that number (`Nexus 5` is reFX's VST3 `Nexus` 5.2.17, whose class id
+   follows no convention); and last the nearest newer version of the same name (`Serum` →
    `Serum 2`, `Pro-Q 2` → `Pro-Q 3`). Only the first three promise that the state carries over;
    for the last two the state is handed over and the plug-in decides, and the result says
    which (`keeps_state`). Vendors declare their own older builds rather than older products:
@@ -291,8 +293,12 @@ workspace forbids.
   one after another over the whole block rather than piece by piece. The block's plug-ins wait
   together until 60 % of the block's playing time has passed (decision 4); a slot that misses
   leaves the sound as it was (an effect) or silent (an instrument) and counts the miss, and the
-  next block goes on. Offline (`Renderer::set_offline`, every `render_*` function, the CLI's
-  and MCP's WAV renders) each block waits up to 10 s, through the same `process`.
+  next block goes on. A block that is not sent at all (the host still busy with the one
+  before) keeps its releases (note-offs, the sustain pedal, all notes off) for the next block
+  that is, so no note is left hanging; stopping releases each held key on its own before the
+  all-notes-off, which many plug-ins ignore. Offline (`Renderer::set_offline`, every
+  `render_*` function, the CLI's and MCP's WAV renders) each block waits up to 10 s, through
+  the same `process`.
   Each plug-in device has a key made from its channel, its plug-in and how many of the same
   plug-in come before it on that channel, so it keeps its running plug-in when devices are
   added, removed or moved around it; its processor reaches the audio thread as a message
@@ -306,9 +312,11 @@ workspace forbids.
   removed does for an undo. A plug-in that is not installed is *missing*: no slot, the sound
   passes, its state stays in the project untouched and is saved back as it was; the status bar
   names it. Every 30 s the session reads each running plug-in's state, so a restart after a
-  crash gets back what was set in its editor (decision 5); it does not go into the project
-  yet, which has no save. Crashes and hangs are noticed within 250 ms and shown on the
-  device; `device.restart` starts it again.
+  crash gets back what was set in its editor (decision 5); saving the project
+  (`project.save`) reads each one's state then and writes it into the project, so a reopened
+  project, or a plug-in started again from scratch, gets the same settings. Crashes and hangs are noticed within 250 ms and shown on the
+  device; `device.restart` starts it again (one that could not start at all is started from
+  scratch with the project's state).
 - **Latency** is compensated: every track is heard as late as the one whose devices (built-in
   and plug-ins, as each reports) delay it most, up to 2 s, through delay lines made with the
   graph. A plug-in's latency is known once it has started, which builds a new graph. The

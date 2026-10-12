@@ -401,3 +401,28 @@ fn an_editor_is_owned_by_the_engines_window() {
     unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
     owner_thread.join().unwrap();
 }
+
+#[test]
+fn a_plug_in_that_could_not_start_starts_again_on_restart() {
+    // In the catalog, but the host cannot load it.
+    let mut catalog = catalog();
+    let path = PathBuf::from("test:no-such-plugin");
+    let info = PluginInfo {
+        path: path.clone(),
+        id: "broken".into(),
+        name: "Broken".into(),
+        vendor: "Loopwerk".into(),
+        version: "1".into(),
+        features: vec!["audio-effect".into()],
+        replaces: Vec::new(),
+    };
+    catalog.insert(path, vec![info]);
+    let p = project(8.0, false, vec![plugin_device("broken")]);
+    let (mut session, mut renderer) = session(p, false);
+    session.set_plugin_env(Arc::new(PluginEnv::new(catalog, host())));
+    until(&mut session, &mut renderer, "failing", |s| s["status"] == "failed");
+    session.execute("device.restart", &json!({ "track": 1, "device": 0 })).unwrap();
+    let status = session.execute("device.plugin", &json!({ "track": 1, "device": 0 })).unwrap();
+    assert_eq!(status["status"], "stopped", "removed, to be started again");
+    until(&mut session, &mut renderer, "failing again", |s| s["status"] == "failed");
+}

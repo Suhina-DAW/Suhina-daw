@@ -11,7 +11,8 @@
 //!    VST 3 SDK's documented convention for a VST3 version that stands in for a VST2 one.
 //! 4. [`How::SameName`]: a VST3 plug-in with the same name once build words (`x64`, `64bit`)
 //!    and a leading vendor name are set aside, so `FabFilter Pro-Q 3 x64` finds `Pro-Q 3` by
-//!    FabFilter.
+//!    FabFilter; or one whose name lacks the saved name's number but whose version starts with
+//!    it (`Nexus 5` finds `Nexus` version 5.2.17).
 //! 5. [`How::NewerVersion`]: the same name with a higher version number (`Serum` finds
 //!    `Serum 2`, `Pro-Q 2` finds `Pro-Q 3`); the nearest newer version is taken.
 //!
@@ -132,6 +133,12 @@ fn versioned(words: &[String]) -> (Vec<String>, u32) {
     (words.to_vec(), 1)
 }
 
+/// The first number of a version (`5` of `5.2.17`).
+fn major_version(version: &str) -> Option<u32> {
+    let digits: String = version.trim().chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
 impl Catalog {
     fn vst3_plugins(&self) -> impl Iterator<Item = &PluginInfo> {
         self.plugins().filter(|p| p.format() == "vst3")
@@ -182,6 +189,18 @@ impl Catalog {
         if let Some(plugin) = self.vst3_plugins().find(|p| same(p)) {
             return Some(Match { plugin, how: How::SameName });
         }
+        // The number in the saved name is the installed one's version: `Nexus 5` is `Nexus`
+        // 5.x.
+        let numbered = |p: &PluginInfo| {
+            let saved = product_words(name, &p.vendor);
+            let (base, number) = versioned(&saved);
+            base.len() < saved.len()
+                && base == product_words(&p.name, &p.vendor)
+                && major_version(&p.version) == Some(number)
+        };
+        if let Some(plugin) = self.vst3_plugins().find(|p| numbered(p)) {
+            return Some(Match { plugin, how: How::SameName });
+        }
         self.vst3_plugins()
             .filter_map(|p| {
                 let (base, old) = versioned(&product_words(name, &p.vendor));
@@ -216,6 +235,8 @@ mod tests {
             entry("/vst3/Warmer.vst3", vst3("32ECDB19D0894B24AF976000F5D58DD7", "PSP VintageWarmer", "PSPaudioware.com", &[])),
             entry("/vst3/Warmer2.vst3", vst3("32ECDB21D0894B26AF976002F5D58DD9", "PSP VintageWarmer2", "PSPaudioware.com", &[])),
             entry("/clap/thing.clap", json!({ "id": "com.example.thing", "name": "Thing", "vendor": "Example" })),
+            entry("/vst3/Nexus.vst3", json!({ "id": "ABCDEF019182FAEB726546584E455855", "name": "Nexus", "vendor": "reFX",
+                "version": "5.2.17", "features": ["Instrument"], "replaces": [] })),
         ]})
         .to_string();
         Catalog::from_json(&text)
@@ -223,6 +244,17 @@ mod tests {
 
     fn found(m: Option<Match<'_>>) -> Option<(&str, How)> {
         m.map(|m| (m.plugin.name.as_str(), m.how))
+    }
+
+    #[test]
+    fn a_number_in_the_saved_name_is_the_installed_ones_version() {
+        // Nexus 5's VST3 is called Nexus, with a class id of its own; its version says 5.
+        assert_eq!(found(catalog().match_vst2(0x4E78_7335, "Nexus 5")), Some(("Nexus", How::SameName)));
+        assert_eq!(found(catalog().match_vst2(0x4E78_7335, "reFX Nexus 5 x64")), Some(("Nexus", How::SameName)));
+        assert_eq!(found(catalog().match_vst2(0x4E78_7334, "Nexus 4")), None);
+        assert_eq!(major_version("5.2.17"), Some(5));
+        assert_eq!(major_version(" 12"), Some(12));
+        assert_eq!(major_version("beta"), None);
     }
 
     #[test]
