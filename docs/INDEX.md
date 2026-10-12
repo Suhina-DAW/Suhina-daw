@@ -107,6 +107,7 @@ Change this code, and check these documents.
 | `crates/session/src/rack.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
+| `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |

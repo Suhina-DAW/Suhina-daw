@@ -34,6 +34,7 @@ loopwerk-device-registry = { path = "crates/device-registry" }
 loopwerk-stretch = { path = "crates/stretch" }
 loopwerk-output = { path = "crates/output" }
 loopwerk-ui = { path = "crates/ui" }
+loopwerk-soundmap = { path = "crates/soundmap" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0

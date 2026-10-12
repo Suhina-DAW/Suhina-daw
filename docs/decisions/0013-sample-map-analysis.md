@@ -4,6 +4,8 @@ read_when: sample map, soundmap crate, audio features, MFCC, spectral centroid, 
 type: decision
 status: current
 last_verified: 2026-10-12
+covers:
+  - crates/soundmap/**
 ---
 
 # 0013: The sample map: features, layout and cache
@@ -43,49 +45,58 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
    - pitch: the median fundamental of the voiced frames in semitones and the share of voiced
      frames, by a YIN-style estimate (2).
 
-   Times are in log seconds, so short sounds are told apart. Every feature has a golden test
-   against values computed once with librosa (ISC) and written into the test. The feature
-   list has a version; a cache entry of another version is analysed again.
+   Times are in log seconds, so short sounds are told apart; frequencies in log2 Hz. Each
+   feature is tested on signals whose answer is known (a sine's pitch and centroid, noise's
+   flatness and zero crossings, a short hit's length, the same result for mono and stereo and
+   across sample rates). The feature list has a version; a cache entry of another version is
+   analysed again.
 3. **Distances** are Euclidean over features standardised across the scope (each one to mean 0,
    deviation 1), with the four groups (MFCC, spectral shape, envelope, pitch) weighted equally
    regardless of how many numbers they hold.
-4. **Layout:** PCA down to 20 dimensions, then Barnes-Hut t-SNE (perplexity 30, or a third of
-   the item count when that is smaller; 1 000 iterations), seeded from a hash of the scope's
-   item list so the same scope gives the same map. The result is scaled to fit 0–1. Scopes
-   over 20 000 items run t-SNE on a seeded sample of 20 000; each other item goes at the mean
-   position of its 5 nearest neighbours (by features) in the sample. Layouts are computed on
-   the analysis threads and cached in memory and on disk by scope hash.
-5. **Grid:** the cloud's positions are assigned to grid cells by linear assignment (squared
-   distance from point to cell centre, Jonker-Volgenant) for up to 2 500 items. Larger grids
-   are made by recursive splitting (the RasterFairy method): the cloud and the grid are both
-   cut in two along the longer axis, with the same item count on each side, until the parts
-   are small enough to assign exactly.
-6. **Neighbours:** a k-d tree over the standardised features answers "similar items"; a 2D
-   k-d tree over the layout answers "which point is under the pointer" and the arrow keys.
+4. **Layout:** PCA down to 20 dimensions (the covariance matrix's eigenvectors by Jacobi
+   rotations, each with a fixed sign), then Barnes-Hut t-SNE (θ 0.5, perplexity 30, or a third
+   of the item count when that is smaller; 1 000 iterations), started from the first two
+   principal components with a little jitter seeded from the scope's paths. Scopes under 16
+   items use the first two components alone. The result is scaled to fit 0–1, keeping its
+   aspect. t-SNE sums in parallel, so two runs can differ in the last digits; therefore a
+   layout is kept, in memory and in `layout-<hash>.bin` beside the caches (the 32 newest), by a
+   hash of the scope's items with their sizes and times: a scope opens with the map it had, and
+   changes only when its items do. Measured on one machine: 1 000 items in 0.5 s, 10 000 in
+   4.5 s, 50 000 in 18 s.
+5. **Grid:** recursive splitting (the RasterFairy method): the cells are cut in two along the
+   longer side and the points, sorted along the same axis, are shared between the halves in
+   proportion to their cells, until a part holds at most 256 items. Each part's points are
+   stretched over its cells and assigned exactly by the Hungarian method (least total squared
+   distance from point to cell centre). 50 000 items take about a second.
+6. **Neighbours:** "similar items" is a linear scan over the standardised features (under 2 ms
+   for 50 000 items); no tree is needed at these sizes. Finding the point under the pointer is
+   the view's job.
 7. **Kinds** come from words in names (the spec's table). An item without one takes the kind
    most of its 7 nearest neighbours have, when 4 or more agree. No trained model in this
    version.
 8. **Cache** in `<settings>/library/features-<hash>.bin` beside the library's index, one file
-   per folder: a version header, then per file its path below the folder, size, modification
-   time, feature version and features (32-bit floats). An entry whose size or time no longer
+   per folder: a version header with the feature version, then per file its path below the
+   folder, size, modification time and either its length in seconds and its features (32-bit
+   floats) or the reason it could not be analysed. The layout shows only files no longer than
+   the length limit, so changing the limit needs no new analysis. An entry whose size or time no longer
    matches the library's index is analysed again. Written to a file beside it and moved over
    it, as the index is. A file that does not parse is ignored and the folder analysed again.
 9. **Threads:** analysis runs on a pool of half the cores (at least one), started by
    `Library::start`'s caller as indexing is, so tests and the CLI never analyse a user's
-   folders unasked. A file larger than 256 MiB or longer than the map's length limit is
-   skipped without decoding past its header.
-10. **Crates**, all GPL-compatible: `realfft` (MIT) for the transforms; `bhtsne` (MIT) for
-    t-SNE; `petal-decomposition` (Apache-2.0) for PCA; `kiddo` (MIT OR Apache-2.0) for k-d
-    trees; `lapjv` (MIT) for assignment. MFCC, the spectral features, YIN and the recursive
-    grid split are written in the crate (they are short, and owning them keeps the golden
-    tests meaningful). Each crate's use is wrapped so its panics cannot reach the caller
-    (inputs are checked first: no NaN, no empty scope, sizes within the limits).
+   folders unasked. A file larger than 256 MiB is not decoded. Caches are written after every
+   256 analysed files of a folder and when the queue empties.
+10. **Crates**, both MIT: `realfft` for the transforms and `bhtsne` for t-SNE. MFCC, the
+    spectral features, YIN, PCA, the grid split and the Hungarian method are written in the
+    crate: each is short, and owning them avoids pulling in a matrix library. `bhtsne` checks
+    its inputs with assertions, so its inputs are checked first (perplexity within the item
+    count, finite values) and the call is wrapped in `catch_unwind`; a failure falls back to the
+    first two principal components.
 
 ## Consequences
 
 - A library is analysed once; afterwards maps open from the cache in well under a second for
   ten thousand items, and only new or changed files are analysed.
-- Five new dependencies.
+- Two new dependencies.
 - The map is only as good as the features. Version 1 favours one-shots (drums, short hits);
   tonal material and loops will need more (chroma, tempo-aware windows) in a later version.
 - t-SNE keeps neighbourhoods but not global distances; the spec says so, and "similar" uses

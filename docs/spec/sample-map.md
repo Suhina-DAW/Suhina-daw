@@ -4,6 +4,8 @@ read_when: sample map, similarity, sound map, browse by sound, t-SNE, UMAP, poin
 type: spec
 status: planned
 last_verified: 2026-10-12
+covers:
+  - crates/soundmap/**
 ---
 
 # Sample map
@@ -92,13 +94,13 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
   item count allows.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
-- The same scope with the same items always gives the same layout (the method is seeded from
-  the scope), so a user can learn where things are. Adding a few files moves the map only a
-  little **(to decide:** whether new items are placed into the existing layout instead of
-  computing it again, until a Re-layout button is pressed**)**.
-- A scope with more than 20 000 items is laid out from 20 000 of them; each of the others is
-  placed beside its nearest neighbours. A scope with more than 100 000 items shows the first
-  100 000 and says so.
+- The same scope with the same items always opens with the same layout (layouts are kept),
+  so a user can learn where things are. Adding or changing files lays the scope out again
+  **(to decide:** whether new items are placed into the existing layout instead, until a
+  Re-layout button is pressed**)**.
+- A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items);
+  meanwhile the map shows "Arranging…" over the previous layout or an empty map. A scope with
+  more than 100 000 items shows the first 100 000 and says so.
 
 ## Kinds and colours
 
@@ -125,7 +127,8 @@ Every item has a kind. The kinds and the words in names that give them:
 | Other | anything else |
 
 - Names are split into words at spaces, punctuation, changes of case and between letters and
-  digits (`KickHard_02` → kick, hard, 02). The file name is read first, then its folders from the
+  digits (`KickHard_02` → kick, hard, 02); a word with a trailing *s* also counts as the word
+  without it (`Kicks`, `Hats`). The file name is read first, then its folders from the
   nearest up to the library folder; the first word that names a kind wins, and a more specific
   kind (Closed hat) wins over a general one (Hat) in the same name.
 - **Guessed kinds.** An item whose name gives no kind is given the kind most of its 7 nearest
@@ -225,9 +228,8 @@ Over MCP, `item` and `place` paths must be inside the server's read roots
 | Sample length in the map | 10 s by default, 1–60 s | not analysed, not shown |
 | Audio analysed per item | first 4 s | the rest is not read |
 | A file to analyse | 256 MiB | skipped with a reason |
-| Items laid out exactly | 20 000 | the others placed beside their neighbours |
 | Items in one map | 100 000 | the rest left out; the map says so |
-| Grid by exact assignment | 2 500 items | larger grids by recursive splitting (ADR 0013) |
+| Grid part assigned exactly | 256 items | larger grids split first (ADR 0013) |
 | `count` in `soundmap.similar` | 100 | cut |
 | Feature cache per folder | 64 MiB | not read; the folder is analysed again |
 
