@@ -369,3 +369,36 @@ fn clips_delete_and_duplicate() {
     assert_eq!(starts, [0.0, 8.0]);
     assert!(run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 5 })).is_err());
 }
+
+#[test]
+fn an_audio_clip_takes_a_gain_and_a_midi_clip_does_not() {
+    let mut p = project();
+    p.contents.push(ClipContent {
+        id: ContentId(9),
+        name: "Loop".into(),
+        length: 4.0,
+        lanes: vec![ContentLane {
+            target: None,
+            data: LaneData::Audio(AudioRegion {
+                file: "loop.wav".into(),
+                absolute_file: None,
+                sample_rate: None,
+                channels: None,
+                duration_seconds: None,
+                warped: false,
+                stretch: StretchMode::default(),
+                warp_markers: Vec::new(),
+                gain: 1.0,
+                transpose: 0.0,
+            }),
+        }],
+        extensions: Extensions::default(),
+    });
+    p.arrangement.lanes[0].clips[1].content = ContentId(9);
+    let mut session = Session::new(p);
+    run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 1, "db": -6 })).unwrap();
+    let LaneData::Audio(region) = &session.project().content(ContentId(9)).unwrap().lanes[0].data else { panic!() };
+    assert!((region.gain - 0.501).abs() < 1e-3);
+    assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 0, "db": 0 })).is_err());
+    assert!(run(&mut session, "clip.setGain", json!({ "track": "Bass", "index": 1, "db": 30 })).is_err());
+}

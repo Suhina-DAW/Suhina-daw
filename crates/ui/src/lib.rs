@@ -13,6 +13,7 @@ pub mod settings;
 pub mod settings_view;
 pub mod theme;
 pub mod timeline;
+pub mod waveform;
 pub mod widgets;
 
 pub use app::{App, Status, View};

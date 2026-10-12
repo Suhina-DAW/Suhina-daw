@@ -3,9 +3,12 @@
 //! like [`crate::grid`].
 
 use loopwerk_engine::LauncherMonitor;
+use std::sync::Arc;
+
 use loopwerk_engine::model::{ChannelRole, Clip, ClipContent, LaneData, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, TRACK_PALETTE, gain_to_db};
+use crate::waveform::Waveforms;
 
 /// Note marks drawn per clip at most; the rest are left out.
 const MAX_MARKS: usize = 4096;
@@ -18,6 +21,45 @@ pub struct NoteMark {
     pub key: u8,
 }
 
+/// How an audio clip reads its file: which file, and the file position at each clip beat.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioView {
+    /// The region's `file`, the key of the decoded audio and its waveform.
+    pub file: String,
+    /// Where the clip starts in its content, in beats, and its loop.
+    pub offset: f64,
+    pub loop_range: Option<(f64, f64)>,
+    /// Warp markers as (beat, seconds), sorted; with fewer than two, a fixed rate.
+    pub markers: Vec<(f64, f64)>,
+    pub seconds_per_beat: f64,
+    /// Clip beats per project beat (transpose on an unwarped clip).
+    pub rate: f64,
+    pub gain_db: f64,
+}
+
+impl AudioView {
+    /// The file position, in seconds, `elapsed` project beats after the clip starts, as the
+    /// engine plays it.
+    pub fn seconds(&self, elapsed: f64) -> f64 {
+        let mut beat = self.offset + elapsed * self.rate;
+        if let Some((start, end)) = self.loop_range
+            && beat >= end
+        {
+            beat = start + (beat - end).rem_euclid(end - start);
+        }
+        if self.markers.len() < 2 {
+            return beat * self.seconds_per_beat;
+        }
+        let last = self.markers.len() - 1;
+        let i = self.markers.iter().position(|(b, _)| *b > beat).unwrap_or(self.markers.len()).clamp(1, last);
+        match (self.markers.get(i - 1), self.markers.get(i)) {
+            (Some(&(b0, s0)), Some(&(b1, s1))) if b1 > b0 => s0 + (beat - b0) * (s1 - s0) / (b1 - b0),
+            (Some(&(_, s0)), _) => s0,
+            _ => 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipBox {
     /// Index on the track, as `clip.move` and `project.clips` count it.
@@ -27,6 +69,8 @@ pub struct ClipBox {
     pub name: String,
     pub enabled: bool,
     pub audio: bool,
+    /// For an audio clip, how to draw its waveform.
+    pub audio_view: Option<AudioView>,
     pub notes: Vec<NoteMark>,
     /// The sub-row the clip is drawn in, and how many the lane has: more than one where clips
     /// overlap (stacked), so each stays visible.
@@ -65,6 +109,8 @@ pub struct Timeline {
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
+    /// Waveforms of the project's audio files, set by the app once they are decoded.
+    pub waveforms: Arc<Waveforms>,
 }
 
 impl Timeline {
@@ -101,6 +147,7 @@ impl Timeline {
                                 enabled: clip.enabled,
                                 audio: content
                                     .is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)))),
+                                audio_view: content.and_then(|c| audio_view(c, clip, project.transport.tempo_bpm)),
                                 notes: content.map(|c| note_marks(c, clip)).unwrap_or_default(),
                                 row: 0,
                                 rows: 1,
@@ -133,7 +180,8 @@ impl Timeline {
         let end = lanes.iter().flat_map(|l| &l.clips).map(|c| c.start + c.length).fold(0.0, f64::max);
         let main_volume_db =
             project.channels.iter().find(|c| c.role == ChannelRole::Master).map(|c| gain_to_db(c.volume));
-        let mut timeline = Self { lanes, main_volume_db, end, bar_beats, running: false, beat: 0.0 };
+        let mut timeline =
+            Self { lanes, main_volume_db, end, bar_beats, running: false, beat: 0.0, waveforms: Arc::default() };
         timeline.follow(monitor);
         timeline
     }
@@ -144,6 +192,32 @@ impl Timeline {
         self.running = running;
         self.beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
     }
+}
+
+/// What an audio clip needs to draw its waveform: the engine's mapping from beats to the file.
+fn audio_view(content: &ClipContent, clip: &Clip, tempo_bpm: f64) -> Option<AudioView> {
+    let region = content.lanes.iter().find_map(|l| match &l.data {
+        LaneData::Audio(region) => Some(region),
+        LaneData::Notes(_) => None,
+    })?;
+    let mut markers: Vec<(f64, f64)> = region
+        .warp_markers
+        .iter()
+        .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
+        .map(|m| (m.time, m.audio_time))
+        .collect();
+    markers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    markers.dedup_by(|a, b| a.0 == b.0);
+    let rate = if region.warped { 1.0 } else { 2f64.powf(region.transpose / 12.0) };
+    Some(AudioView {
+        file: region.file.clone(),
+        offset: clip.offset,
+        loop_range: clip.loop_range.filter(|r| r.end > r.start).map(|r| (r.start, r.end)),
+        markers: if region.warped { markers } else { Vec::new() },
+        seconds_per_beat: if tempo_bpm > 0.0 { 60.0 / tempo_bpm } else { 0.5 },
+        rate: if rate.is_finite() && rate > 0.0 { rate } else { 1.0 },
+        gain_db: gain_to_db(region.gain),
+    })
 }
 
 /// Puts each clip in the first sub-row free where it starts; every clip learns the lane's count.
@@ -243,6 +317,27 @@ mod tests {
         assert_eq!(timeline.main_volume_db, Some(0.0));
         assert_eq!(timeline.lanes[0].clips[1].index, 1);
         assert_eq!(timeline.lanes[0].clips[1].name, "Beat B");
+    }
+
+    #[test]
+    fn audio_clips_map_beats_to_file_seconds_like_the_engine() {
+        let linear = AudioView {
+            file: "a.wav".into(),
+            offset: 1.0,
+            loop_range: Some((0.0, 4.0)),
+            markers: Vec::new(),
+            seconds_per_beat: 0.5,
+            rate: 1.0,
+            gain_db: 0.0,
+        };
+        assert_eq!(linear.seconds(0.0), 0.5);
+        assert_eq!(linear.seconds(2.0), 1.5);
+        // Past the loop end it starts the loop again.
+        assert_eq!(linear.seconds(3.5), 0.25);
+        let warped = AudioView { markers: vec![(0.0, 0.0), (4.0, 1.0)], loop_range: None, offset: 0.0, ..linear };
+        assert_eq!(warped.seconds(2.0), 0.5);
+        // Beyond the last marker the last segment carries on.
+        assert_eq!(warped.seconds(8.0), 2.0);
     }
 
     #[test]

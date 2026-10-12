@@ -13,6 +13,7 @@ use crate::menus::{self, TrackMenu};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
+use crate::waveform::Waveforms;
 use crate::widgets::{self, Action, Drag};
 
 /// Width of the track header column: the default and how far it can be dragged.
@@ -41,6 +42,7 @@ const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 400.0);
 /// Bars of empty timeline after the last clip.
 const TAIL_BARS: f64 = 16.0;
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
+const CLIP_GAIN_RANGE: (f64, f64) = (-70.0, 24.0);
 
 const PAN_BACKGROUND: Color32 = Color32::from_rgb(0x23, 0x22, 0x20);
 const PAN_CENTRE: Color32 = Color32::from_rgb(0x55, 0x52, 0x4C);
@@ -86,6 +88,8 @@ pub struct ArrangementViewState {
     selected: Option<(TrackId, usize)>,
     clip_drag: Option<ClipDrag>,
     value_drag: Option<(TrackId, Control, f64)>,
+    /// A clip gain being dragged, and its value so far.
+    gain_drag: Option<((TrackId, usize), f64)>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
@@ -106,6 +110,7 @@ impl Default for ArrangementViewState {
             selected: None,
             clip_drag: None,
             value_drag: None,
+            gain_drag: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
@@ -294,7 +299,19 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
-                let found = clip_box(ui, &painter, row, lane, clip, &x_of, bar_beats, &lane_at, state, actions);
+                let found = clip_box(
+                    ui,
+                    &painter,
+                    row,
+                    lane,
+                    clip,
+                    &x_of,
+                    bar_beats,
+                    &lane_at,
+                    &timeline.waveforms,
+                    state,
+                    actions,
+                );
                 ghost = ghost.or(found);
             }
         }
@@ -370,7 +387,19 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         let Some(row) = row_of(lane.track) else { continue };
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
-                let found = clip_box(ui, &painter, row, lane, clip, &x_of, bar_beats, &lane_at, state, actions);
+                let found = clip_box(
+                    ui,
+                    &painter,
+                    row,
+                    lane,
+                    clip,
+                    &x_of,
+                    bar_beats,
+                    &lane_at,
+                    &timeline.waveforms,
+                    state,
+                    actions,
+                );
                 ghost = ghost.or(found);
             }
         }
@@ -397,7 +426,17 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     {
         let rect = clip_rect(row.time, start, clip.length, &x_of);
         let lane_look = Lane { color: lane.color, mute: target.mute, ..target.clone() };
-        paint_clip(&painter.with_clip_rect(row.clip), rect, &lane_look, clip, start, &x_of, state.beat_width, true);
+        paint_clip(
+            &painter.with_clip_rect(row.clip),
+            rect,
+            &lane_look,
+            clip,
+            start,
+            &x_of,
+            state.beat_width,
+            &timeline.waveforms,
+            true,
+        );
     }
 
     // The header column's inner edge resizes it.
@@ -448,6 +487,7 @@ fn clip_box<'a>(
     x_of: &dyn Fn(f64) -> f32,
     bar_beats: f64,
     lane_at: &dyn Fn(Pos2) -> Option<TrackId>,
+    waveforms: &Waveforms,
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) -> Option<(&'a Lane, &'a ClipBox, f64)> {
@@ -506,20 +546,97 @@ fn clip_box<'a>(
         }
         // Drawn where it was dropped until the project has moved it.
         let rect = clip_rect(space, start, clip.length, x_of);
-        paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, true);
+        paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, waveforms, true);
         return None;
     }
 
-    match state.clip_drag {
+    // An audio clip big enough shows its gain, which a vertical drag changes.
+    let mut gain_paint = None;
+    if let Some(view) = &clip.audio_view
+        && state.clip_drag.is_none_or(|d| !mine(&d))
+    {
+        let rect = clip_rect(space, clip.start, clip.length, x_of);
+        let field = Rect::from_min_size(Pos2::new(rect.right() - 48.0, rect.top() + 3.0), Vec2::new(44.0, 12.0));
+        if rect.width() >= 80.0 && rect.height() >= 30.0 && field.intersects(row.clip) {
+            let shown = match state.gain_drag {
+                Some((k, v)) if k == key => v,
+                _ => view.gain_db,
+            };
+            let label = format!("Gain of {name} on {}", lane.name);
+            let response = widgets::value_area(
+                ui,
+                field.intersect(row.clip),
+                Id::new(("clip-gain", lane.track.0, clip.index)),
+                &label,
+                widgets::format_db(shown),
+            );
+            let mut preview = match state.gain_drag {
+                Some((k, v)) if k == key => Some(v),
+                _ => None,
+            };
+            let mut committed = None;
+            match widgets::drag_value(ui, &response, &mut preview, view.gain_db, 0.1, CLIP_GAIN_RANGE, 0.0) {
+                Drag::Moving(v) => state.gain_drag = Some((key, v)),
+                Drag::Done(v) => {
+                    state.gain_drag = None;
+                    committed = Some(v);
+                    let db = if v <= CLIP_GAIN_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+                    actions.push(Action::new(
+                        "clip.setGain",
+                        json!({ "track": lane.track.0, "index": clip.index, "db": db }),
+                    ));
+                }
+                Drag::None => {}
+            }
+            let shown = match state.gain_drag {
+                Some((k, v)) if k == key => v,
+                _ => committed.unwrap_or(view.gain_db),
+            };
+            gain_paint = Some((field, shown, widgets::hover(ui, &response)));
+        }
+    }
+
+    let result = match state.clip_drag {
         Some(drag) if mine(&drag) && drag.target != lane.track => Some((lane, clip, snapped(drag.start))),
         drag => {
             let start = drag.filter(mine).map_or(clip.start, |d| snapped(d.start));
             let rect = clip_rect(space, start, clip.length, x_of);
             let selected = state.selected == Some(key);
-            paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, selected);
+            paint_clip(
+                &painter.with_clip_rect(row.clip),
+                rect,
+                lane,
+                clip,
+                start,
+                x_of,
+                state.beat_width,
+                waveforms,
+                selected,
+            );
             None
         }
+    };
+    // The gain sits on top of the clip.
+    if let Some((field, db, hover)) = gain_paint {
+        let gain_painter = painter.with_clip_rect(row.clip);
+        let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
+        gain_painter.rect_filled(field, 0.0, fill);
+        let text = format!("{} dB", widgets::format_db(db));
+        let font = theme::mono_font(theme::TEXT_TINY);
+        widgets::text_in(
+            &gain_painter,
+            field.shrink2(Vec2::new(3.0, 0.0)),
+            Align2::RIGHT_CENTER,
+            &text,
+            font,
+            theme::TEXT_VALUE,
+        );
     }
+    result
+}
+
+fn view_rect(painter: &egui::Painter) -> Rect {
+    painter.clip_rect()
 }
 
 /// Draws a clip's body, colour strip, name and the marks of its notes (only those in view).
@@ -532,6 +649,7 @@ fn paint_clip(
     start: f64,
     x_of: &dyn Fn(f64) -> f32,
     beat_width: f32,
+    waveforms: &Waveforms,
     selected: bool,
 ) {
     let view = painter.clip_rect();
@@ -562,7 +680,27 @@ fn paint_clip(
         Pos2::new(rect.left(), rect.top() + if has_name && rect.height() >= 30.0 { 17.0 } else { 4.0 }),
         Pos2::new(rect.right(), rect.bottom() - 3.0),
     );
-    if clip.audio {
+    if let Some(view) = clip.audio_view.as_ref().filter(|_| marks.height() >= 4.0)
+        && let Some(peaks) = waveforms.get(&view.file)
+    {
+        // One line per pixel column in view: the range of the samples it covers, scaled by
+        // the clip's gain and kept inside the clip.
+        let gain = if view.gain_db.is_finite() { 10f32.powf(view.gain_db as f32 / 20.0) } else { 0.0 };
+        let (middle, half) = (marks.center().y, marks.height() / 2.0);
+        let from = rect.left().max(view_rect(painter).left()).floor();
+        let to = rect.right().min(view_rect(painter).right()).ceil();
+        let per_point = 1.0 / f64::from(beat_width);
+        let stroke = theme::hairline(dim(color));
+        let mut x = from;
+        while x < to {
+            let elapsed = f64::from(x - rect.left()) * per_point;
+            let (low, high) = peaks.range(view.seconds(elapsed), view.seconds(elapsed + per_point));
+            let top = middle - (high * gain).clamp(-1.0, 1.0) * half;
+            let bottom = (middle - (low * gain).clamp(-1.0, 1.0) * half).max(top + 1.0);
+            painter.vline(x + 0.5, egui::Rangef::new(top, bottom), stroke);
+            x += 1.0;
+        }
+    } else if clip.audio {
         painter.hline(marks.x_range(), marks.center().y.round() + 0.5, theme::hairline(dim(color)));
     } else if !clip.notes.is_empty() && marks.height() >= 4.0 {
         let low = clip.notes.iter().map(|n| n.key).min().unwrap_or(0);

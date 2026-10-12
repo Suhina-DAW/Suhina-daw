@@ -12,6 +12,7 @@ covers:
   - crates/ui/src/timeline.rs
   - crates/ui/src/motion.rs
   - crates/ui/src/settings_view.rs
+  - crates/ui/src/waveform.rs
 ---
 
 # Components
@@ -127,7 +128,7 @@ Animations are short and only show a change of state; with animations off (a set
 | Lanes | Overlapping (stacked) clips share the lane in sub-rows; separated by 1 px `line.strong`; empty area `surface.0`; default height 48 px, the lower edge of a header resizes it (20–400 px) |
 | Clip | `surface.2` body; 2 px top strip in the track colour; name 10 px `#C9C4BB` at 4/5 px; selected clip `surface.3` with 1 px `text.primary` inset |
 | MIDI marks | 2 px high lines in the track colour |
-| Audio marks | 1 px vertical lines in the track colour, centred |
+| Audio marks | The waveform: one 1 px vertical line per pixel column in the track colour, from the lowest to the highest sample it covers (the engine's beat-to-file mapping: offset, loop, warp markers), scaled by the clip gain; a centred line until the file is decoded. Clips at least 80 × 30 px show their gain at the top right (12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
 | Playhead | 1 px `accent` through all lanes |
 | Header column | A selected track's header is `surface.2`; right-click opens its menu (name field, colour swatches, group, ungroup, delete). 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
 

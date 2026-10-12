@@ -174,6 +174,7 @@ impl Window {
                 warnings.extend(output_warnings);
                 self.audio_output = output;
                 self.app.set_session(session, &warnings);
+                self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
                 self.share_about();
             }
             Err(e) => self.app.set_status(Status::Error(e.0)),

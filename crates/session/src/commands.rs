@@ -234,6 +234,17 @@ static COMMANDS: &[CommandSpec] = &[
         run: delete_clip,
     },
     CommandSpec {
+        id: "clip.setGain",
+        label: "Set an audio clip's gain (every clip that plays the same audio content follows)",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            param("db", ParamType::Decibels, "gain in dB, at most +24; \"-inf\" or below -150 is silence"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_clip_gain,
+    },
+    CommandSpec {
         id: "clip.duplicate",
         label: "Place a copy of an arrangement clip right after it, replacing what the copy covers",
         params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
@@ -715,6 +726,36 @@ fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), Command
         .filter(|i| *i < count)
         .ok_or_else(|| format!("clip index {index} does not exist; the track has {count} arrangement clips"))?;
     Ok((lane, index))
+}
+
+fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let db = number_or_neg_infinity(params, "db")?;
+    if db > 24.0 {
+        return Err(format!("db must be at most +24, got {db}").into());
+    }
+    let gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) };
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    let content = session
+        .project
+        .arrangement
+        .lanes
+        .get(lane)
+        .and_then(|l| l.clips.get(index))
+        .map(|c| c.content)
+        .ok_or("the clip is missing")?;
+    let content =
+        session.project.contents.iter_mut().find(|c| c.id == content).ok_or("the clip's content is missing")?;
+    let mut audio = false;
+    for lane in &mut content.lanes {
+        if let LaneData::Audio(region) = &mut lane.data {
+            region.gain = gain;
+            audio = true;
+        }
+    }
+    if !audio {
+        return Err("only an audio clip has a gain".into());
+    }
+    Ok(json!({ "gain_db": to_db(gain) }))
 }
 
 fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

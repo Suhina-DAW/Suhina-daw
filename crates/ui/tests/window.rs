@@ -356,7 +356,8 @@ fn menus_delete_a_track_and_duplicate_a_clip() {
     harness.run();
     assert!(!names(&harness).contains(&"Keys".to_string()));
 
-    let clips = |h: &Harness<'static, App>| h.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
+    let clips =
+        |h: &Harness<'static, App>| h.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
     let before = clips(&harness);
     harness.get_by_label("Clip Fill on Drums at bar 29").click_secondary();
     harness.run();
@@ -364,10 +365,9 @@ fn menus_delete_a_track_and_duplicate_a_clip() {
     harness.run();
     // The copy sits after Fill and shortens the clip it lands on, so there is one more clip.
     assert_eq!(clips(&harness), before + 1);
-    let fill_copies = harness
-        .state()
-        .session()
-        .map_or(0, |s| s.project().arrangement.lanes[0].clips.iter().filter(|c| c.start == 128.0 && c.length == 16.0).count());
+    let fill_copies = harness.state().session().map_or(0, |s| {
+        s.project().arrangement.lanes[0].clips.iter().filter(|c| c.start == 128.0 && c.length == 16.0).count()
+    });
     assert_eq!(fill_copies, 1, "the copy of Fill sits at bar 33");
 }
 
@@ -388,6 +388,100 @@ fn dragging_a_header_moves_the_track() {
     harness.drop_at(to);
     harness.run();
     assert_eq!(names(&harness)[..4], ["Vox", "Drums", "Bass", "Keys"]);
+}
+
+/// The demo project with an audio track, "Loop", whose clip plays `loop.wav` (two seconds of a
+/// tone that fades out), and the waveforms of that file.
+fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::waveform::Waveforms) {
+    use loopwerk_engine::model::*;
+    let mut project = demo_project();
+    project.tracks.push(Track {
+        id: TrackId(30),
+        name: "Loop".into(),
+        content: ContentKinds { notes: false, audio: true },
+        channel: Some(ChannelId(130)),
+        ..project.tracks[0].clone()
+    });
+    project.channels.push(Channel {
+        id: ChannelId(130),
+        name: "Loop".into(),
+        sends: Vec::new(),
+        ..project.channels[0].clone()
+    });
+    let region = AudioRegion {
+        file: "loop.wav".into(),
+        absolute_file: None,
+        sample_rate: Some(8000),
+        channels: Some(1),
+        duration_seconds: Some(2.0),
+        warped: true,
+        stretch: StretchMode::default(),
+        warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 4.0, audio_time: 2.0 }],
+        gain: 1.0,
+        transpose: 0.0,
+    };
+    project.contents.push(ClipContent {
+        id: ContentId(300),
+        name: "Loop".into(),
+        length: 4.0,
+        lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
+        extensions: Extensions::default(),
+    });
+    let clip = Clip {
+        content: ContentId(300),
+        start: 0.0,
+        length: 16.0,
+        offset: 0.0,
+        loop_range: Some(LoopRange { start: 0.0, end: 4.0 }),
+        enabled: true,
+        extensions: Extensions::default(),
+    };
+    project.arrangement.lanes.push(ArrangementLane {
+        name: "Loop".into(),
+        track: Some(TrackId(30)),
+        clips: vec![clip],
+    });
+    let samples: Vec<f32> = (0..16000).map(|i| (i as f32 * 0.3).sin() * (1.0 - i as f32 / 16000.0)).collect();
+    let mut pool = loopwerk_engine::AudioPool::new();
+    pool.files.insert(
+        "loop.wav".into(),
+        std::sync::Arc::new(loopwerk_engine::AudioData { sample_rate: 8000, channels: 1, samples }),
+    );
+    (project, loopwerk_ui::waveform::from_pool(&pool))
+}
+
+fn audio_app() -> App {
+    let (project, waveforms) = project_with_audio();
+    let mut app = App::new();
+    app.set_session(Session::new(project), &[]);
+    app.set_waveforms(waveforms);
+    app
+}
+
+#[test]
+fn dragging_an_audio_clips_gain_sets_it() {
+    let mut harness = window(audio_app());
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    let field = harness.get_by_label("Gain of Loop on Loop").rect().center();
+    harness.hover_at(field);
+    harness.run();
+    harness.drag_at(field);
+    harness.run();
+    harness.hover_at(field - egui::vec2(0.0, 15.0));
+    harness.run();
+    harness.hover_at(field - egui::vec2(0.0, 30.0));
+    harness.run();
+    harness.drop_at(field - egui::vec2(0.0, 30.0));
+    harness.run();
+    let gain = harness.state().session().and_then(|s| {
+        s.project().content(loopwerk_engine::model::ContentId(300)).and_then(|c| match &c.lanes[0].data {
+            loopwerk_engine::model::LaneData::Audio(region) => Some(region.gain),
+            loopwerk_engine::model::LaneData::Notes(_) => None,
+        })
+    });
+    // 30 points up at 0.1 dB a point: +3 dB.
+    assert!(gain.is_some_and(|g| (g - 1.4125).abs() < 1e-3), "{gain:?}");
 }
 
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
@@ -419,4 +513,18 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
+
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(2.0)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), audio_app());
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("arrangement-audio.png")).unwrap_or_else(|e| panic!("{e}"));
 }

@@ -64,6 +64,8 @@ pub struct App {
     revision: u64,
     /// The Arrangement view's data and the revision it was built from.
     timeline: Option<(u64, Timeline)>,
+    /// Waveforms of the open project's audio files.
+    waveforms: std::sync::Arc<crate::waveform::Waveforms>,
     settings: Settings,
     /// The settings changed and should be saved.
     settings_changed: bool,
@@ -92,6 +94,7 @@ impl App {
             open_request: None,
             revision: 0,
             timeline: None,
+            waveforms: std::sync::Arc::default(),
             settings: Settings::default(),
             settings_changed: false,
             settings_open: false,
@@ -117,6 +120,7 @@ impl App {
             self.status = Status::Hint(format!("Opened {name} without audio output; launching needs one"));
         }
         self.session = Some(session);
+        self.waveforms = std::sync::Arc::default();
         self.revision += 1;
         self.view = SessionViewState::default();
         let (headers_left, header_width) = (self.arrangement.headers_left, self.arrangement.header_width);
@@ -149,6 +153,12 @@ impl App {
         motion::set_enabled(ctx, settings.animations);
         self.arrangement.headers_left = settings.track_headers == Side::Left;
         self.settings = settings;
+    }
+
+    /// The waveforms of the open project's audio files, once they are decoded.
+    pub fn set_waveforms(&mut self, waveforms: crate::waveform::Waveforms) {
+        self.waveforms = std::sync::Arc::new(waveforms);
+        self.timeline = None;
     }
 
     pub fn settings(&self) -> &Settings {
@@ -247,7 +257,11 @@ impl App {
                                 timeline.follow(monitor);
                                 timeline
                             }
-                            _ => Timeline::build(session.project(), monitor),
+                            _ => {
+                                let mut timeline = Timeline::build(session.project(), monitor);
+                                timeline.waveforms = self.waveforms.clone();
+                                timeline
+                            }
                         };
                         arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
                         self.timeline = Some((self.revision, timeline));
