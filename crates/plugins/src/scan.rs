@@ -54,9 +54,15 @@ impl PluginInfo {
         if is_vst3(&self.path) { "vst3" } else { "clap" }
     }
 
-    /// How the host is asked to load it (`clap:<file>#<id>` or `vst3:<file>#<id>`).
+    /// How the host is asked to load it (`clap:<file>#<id>` or `vst3:<file>#<id>`). A
+    /// plug-in built into the host for tests has its name as its file (`test:vst3`) and is
+    /// loaded by it.
     pub fn spec(&self) -> String {
-        format!("{}:{}#{}", self.format(), self.path.display(), self.id)
+        let path = self.path.display().to_string();
+        if path.starts_with("test:") {
+            return path;
+        }
+        format!("{}:{}#{}", self.format(), path, self.id)
     }
 }
 
@@ -314,6 +320,13 @@ impl Catalog {
 
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// Adds the plug-ins `path` holds as if a scan had read them (plug-ins described some other
+    /// way, and tests with the host's own test plug-ins). Replaces what was known about `path`.
+    pub fn insert(&mut self, path: PathBuf, plugins: Vec<PluginInfo>) {
+        self.entries.retain(|e| e.path != path);
+        self.entries.push(Entry { path, modified: 0, size: 0, scanned: Scanned::Plugins(plugins) });
     }
 
     /// Every plug-in found, in file order.

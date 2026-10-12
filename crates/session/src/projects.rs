@@ -31,6 +31,9 @@ pub struct Projects {
     active: Option<ProjectId>,
     last_id: u32,
     library: Library,
+    /// What sessions start plug-ins with, made from the library when first needed and again
+    /// after a scan or a change of how plug-ins are hosted.
+    plugin_env: Option<std::sync::Arc<crate::PluginEnv>>,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -180,8 +183,37 @@ impl Projects {
         Self { library, ..Self::default() }
     }
 
+    /// The plug-in library. Taking it for changing counts as changing it: sessions get a new
+    /// catalog the next time they start a plug-in.
     pub fn library_mut(&mut self) -> &mut Library {
+        self.plugin_env = None;
         &mut self.library
+    }
+
+    /// What sessions start plug-ins with (ADR 0006): the catalog, the host executable and how
+    /// plug-ins share host processes.
+    pub fn plugin_env(&mut self) -> std::sync::Arc<crate::PluginEnv> {
+        if let Some(env) = &self.plugin_env {
+            return std::sync::Arc::clone(env);
+        }
+        let env = std::sync::Arc::new(crate::PluginEnv::from_library(&mut self.library));
+        self.plugin_env = Some(std::sync::Arc::clone(&env));
+        env
+    }
+
+    /// Keeps the active project's plug-ins in line with it (ADR 0006): starts new ones in the
+    /// background, takes in the ones that have started, notices crashes. Call it often from the
+    /// thread that owns the projects (the window calls it every frame); commands call it too.
+    /// Returns what the user should hear about.
+    pub fn poll_plugins(&mut self) -> Vec<String> {
+        let Some(active) = self.active else { return Vec::new() };
+        if self.get(active).is_none_or(|s| s.player().is_none()) {
+            return Vec::new();
+        }
+        let env = self.plugin_env();
+        let Some(session) = self.get_mut(active) else { return Vec::new() };
+        session.set_plugin_env(env);
+        session.sync_plugins()
     }
 
     /// Runs command `id`: a `projects.*` or `plugins.*` command on the open projects (and the
@@ -204,7 +236,11 @@ impl Projects {
             check_params(id, spec.params, params)?;
             return (spec.run)(self, params);
         }
-        self.session_mut(project)?.execute(id, params)
+        // A command may need a plug-in that has started meanwhile, or add one.
+        self.poll_plugins();
+        let result = self.session_mut(project)?.execute(id, params);
+        self.poll_plugins();
+        result
     }
 
     fn activate(&mut self, id: ProjectId) {

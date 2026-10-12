@@ -60,8 +60,21 @@ fn unit_name(unit: Unit) -> &'static str {
 
 /// The devices on a track, in order, with every parameter's value for built-in ones.
 pub(crate) fn track_devices(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let channel = channel_param(session, params)?;
-    Ok(Value::Array(channel.devices.iter().enumerate().map(|(index, d)| device_json(index, d)).collect()))
+    let track = track_id(&session.project, params)?;
+    let devices = channel_param(session, params)?.devices.clone();
+    Ok(Value::Array(
+        devices
+            .iter()
+            .enumerate()
+            .map(|(index, d)| {
+                let mut value = device_json(index, d);
+                if matches!(d.kind, DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. }) {
+                    value["plugin"] = plugin_json(session.plugin_report(track, index));
+                }
+                value
+            })
+            .collect(),
+    ))
 }
 
 fn device_json(index: usize, device: &Device) -> Value {
@@ -199,4 +212,98 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     // A playing engine takes this as a message, without a new graph.
     session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
     Ok(json!({ "device": index, "param": param, "value": value }))
+}
+
+/// The key of the plug-in device the `track` and `device` parameters name.
+fn plugin_key(session: &Session, params: &Value) -> Result<u64, CommandError> {
+    let track = track_id(&session.project, params)?;
+    let index = params
+        .get("device")
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("device must be a device index, from 0, as in track.devices")?;
+    crate::plugin_key_at(&session.project, track, index)
+        .ok_or_else(|| format!("device {index} on the track is not a plug-in").into())
+}
+
+/// Adds an installed plug-in from the catalog to a track.
+pub(crate) fn add_plugin(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let name = params.get("plugin").and_then(Value::as_str).ok_or("plugin must be a plug-in name, id or file")?;
+    let env = session.plugins.env().ok_or("no plug-in catalog is open; plugins.scan looks for installed ones")?;
+    let plugin = env
+        .catalog
+        .find(name)
+        .or_else(|| env.catalog.plugins().find(|p| p.spec() == name))
+        .ok_or_else(|| format!("no plug-in {name:?} in the catalog; plugins.list lists them"))?
+        .clone();
+    let instrument = crate::is_instrument(&plugin);
+    let channel = channel_param(session, params)?;
+    if channel.devices.len() >= MAX_DEVICES {
+        return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
+    }
+    let position = match params.get("position") {
+        None if instrument => 0,
+        None => channel.devices.len(),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= channel.devices.len())
+            .ok_or_else(|| format!("position must be from 0 to {}", channel.devices.len()))?,
+    };
+    if instrument && position != 0 {
+        return Err("an instrument goes first in a track's chain (position 0)".into());
+    }
+    let device = Device {
+        name: plugin.name.clone(),
+        kind: crate::rack::device_kind(&plugin),
+        enabled: true,
+        state: None,
+        params: Vec::new(),
+        extensions: Extensions::default(),
+    };
+    channel.devices.insert(position, device);
+    Ok(json!({
+        "device": position,
+        "name": plugin.name,
+        "vendor": plugin.vendor,
+        "format": plugin.format(),
+        "instrument": instrument,
+    }))
+}
+
+/// A plug-in device's state as JSON.
+pub(crate) fn plugin_json(report: Option<crate::PluginReport>) -> Value {
+    let Some(report) = report else { return json!({ "status": "stopped" }) };
+    json!({
+        "status": report.status.name(),
+        "reason": report.status.reason(),
+        "plugin": report.plugin.as_ref().map(|(name, vendor, how)| json!({ "name": name, "vendor": vendor, "found": how })),
+        "instrument": report.instrument,
+        "latency": report.latency,
+        "editor_open": report.editor_open,
+        "state_refused": report.state_refused,
+    })
+}
+
+pub(crate) fn plugin_status(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    Ok(plugin_json(session.plugins.report(key)))
+}
+
+pub(crate) fn open_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    let (width, height) = session.plugins.open_editor(key)?;
+    Ok(json!({ "editor_open": true, "width": width, "height": height }))
+}
+
+pub(crate) fn close_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    session.plugins.close_editor(key)?;
+    Ok(json!({ "editor_open": false }))
+}
+
+pub(crate) fn restart(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    session.plugins.restart(key)?;
+    Ok(json!({ "status": "loading" }))
 }

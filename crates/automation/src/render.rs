@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use loopwerk_engine::model::{Arrangement, ArrangementLane, Project};
-use loopwerk_engine::{AudioPool, Renderer, render_offline_with_audio};
-use loopwerk_session::{CommandKind, Player, Session, commands};
+use loopwerk_engine::{AudioPool, Plugins, Renderer, render_offline_with_plugins};
+use loopwerk_session::{CommandKind, OfflinePlugins, Player, PluginEnv, Session, commands, start_offline};
 use serde_json::{Value, json};
 
 /// Longest launch-script render, in seconds.
@@ -13,23 +13,38 @@ pub const MAX_SCRIPT_SECONDS: f64 = 600.0;
 pub const MAX_SCRIPT_STEPS: usize = 1024;
 
 /// What a render produced.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderSummary {
     pub seconds: f64,
     pub sample_rate: u32,
     /// Largest absolute sample value; above 1.0 means the file clips.
     pub peak: f32,
+    /// About the project's plug-ins: missing ones (passed through), ones that could not start
+    /// or did not take their saved settings.
+    pub plugins: Vec<String>,
 }
 
-/// Renders the project's arrangement, with the audio files in `audio`, to a 32-bit float stereo
-/// WAV file at `path`.
+/// The project's plug-ins started for a render with `plugins` (ADR 0006), or none.
+fn offline_plugins(project: &Project, plugins: Option<&PluginEnv>, sample_rate: u32) -> OfflinePlugins {
+    match plugins {
+        Some(env) => start_offline(project, env, sample_rate),
+        None => OfflinePlugins::none(),
+    }
+}
+
+/// Renders the project's arrangement, with the audio files in `audio` and its plug-ins found in
+/// `plugins` (none are run without it), to a 32-bit float stereo WAV file at `path`. Plug-ins
+/// run through the same engine as playback, each block waited for.
 pub fn render_wav(
     project: &Project,
     audio: &AudioPool,
     path: &Path,
     sample_rate: u32,
+    plugins: Option<&PluginEnv>,
 ) -> Result<RenderSummary, String> {
-    let samples = render_offline_with_audio(project, audio, sample_rate, 512).map_err(|e| e.to_string())?;
+    let mut started = offline_plugins(project, plugins, sample_rate);
+    let running = std::mem::take(&mut started.plugins);
+    let samples = render_offline_with_plugins(project, audio, sample_rate, 512, running).map_err(|e| e.to_string())?;
     let spec =
         hound::WavSpec { channels: 2, sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
     let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -41,6 +56,7 @@ pub fn render_wav(
         seconds: samples.len() as f64 / 2.0 / f64::from(sample_rate),
         sample_rate,
         peak: samples.iter().fold(0.0f32, |m, s| m.max(s.abs())),
+        plugins: started.notices,
     })
 }
 
@@ -64,6 +80,7 @@ pub fn render_launch_script(
     sample_rate: u32,
     steps: &[LaunchStep],
     seconds: f64,
+    plugins: Option<&PluginEnv>,
 ) -> Result<(RenderSummary, Vec<Value>), String> {
     if !(seconds.is_finite() && seconds > 0.0 && seconds <= MAX_SCRIPT_SECONDS) {
         return Err(format!("seconds must be more than 0 and at most {MAX_SCRIPT_SECONDS}, got {seconds}"));
@@ -85,7 +102,11 @@ pub fn render_launch_script(
     let mut steps: Vec<&LaunchStep> = steps.iter().collect();
     steps.sort_by(|a, b| a.at.total_cmp(&b.at));
 
-    let mut renderer = Renderer::stopped(project, audio, sample_rate).map_err(|e| e.to_string())?;
+    let mut started = offline_plugins(project, plugins, sample_rate);
+    let running: Plugins = std::mem::take(&mut started.plugins);
+    let mut renderer =
+        Renderer::stopped_with_plugins(project, audio, sample_rate, running).map_err(|e| e.to_string())?;
+    renderer.set_offline(true);
     let mut session = Session::new(project.clone());
     session.attach_player(Player::new(renderer.controller(), None));
 
@@ -120,7 +141,9 @@ pub fn render_launch_script(
         results.push(json!({ "at": step.at, "id": step.id, "ok": false, "error": "after the end of the render" }));
     }
     writer.finalize().map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok((RenderSummary { seconds: done as f64 / f64::from(sample_rate), sample_rate, peak }, results))
+    let summary =
+        RenderSummary { seconds: done as f64 / f64::from(sample_rate), sample_rate, peak, plugins: started.notices };
+    Ok((summary, results))
 }
 
 /// Replaces the arrangement with the clips of one launcher scene (0-based), each played once
@@ -250,7 +273,8 @@ mod tests {
             step(0.31, "launcher.state", json!({})),
             step(9.0, "transport.stop", json!({})),
         ];
-        let (summary, results) = render_launch_script(&project(), &AudioPool::new(), &path, SR, &steps, 3.0).unwrap();
+        let (summary, results) =
+            render_launch_script(&project(), &AudioPool::new(), &path, SR, &steps, 3.0, None).unwrap();
         assert!((summary.seconds - 3.0).abs() < 1e-9);
         assert!(summary.peak > 0.1);
         // Launched at once (the transport was stopped), so the bar starts at 0.1 s; the stop waits
@@ -272,7 +296,7 @@ mod tests {
     fn launch_scripts_take_only_transport_and_read_commands() {
         let path = temp_wav("bad");
         let run = |steps: &[LaunchStep], seconds: f64| {
-            render_launch_script(&project(), &AudioPool::new(), &path, SR, steps, seconds).map(|_| ())
+            render_launch_script(&project(), &AudioPool::new(), &path, SR, steps, seconds, None).map(|_| ())
         };
         assert!(run(&[step(0.0, "transport.setTempo", json!({ "bpm": 90 }))], 1.0).is_err());
         assert!(run(&[step(0.0, "edit.undo", json!({}))], 1.0).is_err());
@@ -284,7 +308,7 @@ mod tests {
         }
         // A failing command is reported in its step, not as a failed render.
         let steps = [step(0.0, "clip.launch", json!({ "track": "Drums", "scene": 5 }))];
-        let (_, results) = render_launch_script(&project(), &AudioPool::new(), &path, SR, &steps, 0.1).unwrap();
+        let (_, results) = render_launch_script(&project(), &AudioPool::new(), &path, SR, &steps, 0.1, None).unwrap();
         assert_eq!(results[0]["ok"], false);
         let _ = std::fs::remove_file(&path);
     }

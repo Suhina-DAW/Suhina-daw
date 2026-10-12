@@ -107,3 +107,76 @@ fn bad_device_edits_are_refused_and_change_nothing() {
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert!(run(&mut session, "edit.undo", json!({})).is_err());
 }
+
+/// A catalog with one installed effect and one instrument, as a scan would have found them.
+fn plugin_env() -> std::sync::Arc<loopwerk_session::PluginEnv> {
+    use loopwerk_plugins::scan::{Catalog, PluginInfo};
+    let mut catalog = Catalog::new();
+    let plugin = |file: &str, id: &str, name: &str, features: &[&str]| PluginInfo {
+        path: std::path::PathBuf::from(file),
+        id: id.into(),
+        name: name.into(),
+        vendor: "Vendor".into(),
+        version: "1.0".into(),
+        features: features.iter().map(|f| f.to_string()).collect(),
+        replaces: Vec::new(),
+    };
+    let verb = plugin("Verb.vst3", "ABCDEF0123456789ABCDEF0123456789", "Verb", &["Fx|Reverb"]);
+    let synth = plugin("Synth.clap", "com.vendor.synth", "Synth", &["instrument", "synthesizer"]);
+    catalog.insert(verb.path.clone(), vec![verb]);
+    catalog.insert(synth.path.clone(), vec![synth]);
+    std::sync::Arc::new(loopwerk_session::PluginEnv::new(catalog, "no-such-host".into()))
+}
+
+#[test]
+fn installed_plug_ins_are_added_from_the_catalog() {
+    let mut session = Session::new(project());
+    // Without a catalog there is nothing to add from.
+    let error = run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "Verb" })).unwrap_err();
+    assert!(error.contains("catalog"), "{error}");
+    session.set_plugin_env(plugin_env());
+    run(&mut session, "device.add", json!({ "track": 1, "id": "utility" })).unwrap();
+    let verb = run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "verb" })).unwrap();
+    assert_eq!(
+        (verb["device"].clone(), verb["format"].clone(), verb["instrument"].clone()),
+        (json!(1), json!("vst3"), json!(false))
+    );
+    // An instrument goes first, and only first.
+    let synth = run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "com.vendor.synth" })).unwrap();
+    assert_eq!(synth["device"], 0);
+    assert!(run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "Synth", "position": 2 })).is_err());
+    assert!(run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "Nothing" })).is_err());
+    let devices = &session.project().channels[0].devices;
+    assert_eq!(devices[0].kind, DeviceKind::Clap { id: "com.vendor.synth".into() });
+    assert_eq!(devices[2].kind, DeviceKind::Vst3 { id: "ABCDEF0123456789ABCDEF0123456789".into() });
+    // One undo step each.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].devices.len(), 2);
+}
+
+#[test]
+fn plug_in_commands_need_a_plug_in_and_a_playing_project() {
+    let mut session = Session::new(project());
+    session.set_plugin_env(plugin_env());
+    run(&mut session, "device.add", json!({ "track": 1, "id": "utility" })).unwrap();
+    run(&mut session, "device.addPlugin", json!({ "track": 1, "plugin": "Verb" })).unwrap();
+    let device = json!({ "track": 1, "device": 1 });
+    // Not playing: its plug-in does not run, and there is no editor to open.
+    assert_eq!(run(&mut session, "device.plugin", device.clone()).unwrap()["status"], "stopped");
+    let listed = run(&mut session, "track.devices", json!({ "track": 1 })).unwrap();
+    assert_eq!(listed[1]["plugin"]["status"], "stopped");
+    assert!(listed[0].get("plugin").is_none(), "a built-in device has no plug-in");
+    assert!(run(&mut session, "device.openEditor", device.clone()).is_err());
+    assert!(run(&mut session, "device.restart", device).is_err());
+    let built_in = run(&mut session, "device.openEditor", json!({ "track": 1, "device": 0 })).unwrap_err();
+    assert!(built_in.contains("not a plug-in"), "{built_in}");
+    let kinds: Vec<(&str, &str)> = loopwerk_session::commands()
+        .iter()
+        .filter(|c| c.id.starts_with("device.") && c.id.contains("Editor") || c.id == "device.restart")
+        .map(|c| (c.id, c.kind.name()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [("device.openEditor", "plugin"), ("device.closeEditor", "plugin"), ("device.restart", "plugin")]
+    );
+}

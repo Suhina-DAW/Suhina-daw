@@ -29,8 +29,8 @@ use interprocess::local_socket::{
     GenericFilePath, GenericNamespaced, ListenerNonblockingMode, ListenerOptions, Name, NameType, Stream, ToFsName,
     ToNsName,
 };
-pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS};
-use loopwerk_ipc::{IpcError, Link, Outcome};
+pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Outcome};
+use loopwerk_ipc::{IpcError, Link};
 
 pub use protocol::ParamInfo;
 use protocol::{MAX_LINE, Message, VERSION};
@@ -88,6 +88,8 @@ pub struct Launch {
     pub sample_rate: f64,
     /// How long to wait for the host to start, load the plug-in or answer a request.
     pub timeout: Duration,
+    /// Instances with the same group share a host process; `None` runs one of its own.
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

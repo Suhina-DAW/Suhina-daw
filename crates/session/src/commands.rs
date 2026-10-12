@@ -24,6 +24,9 @@ pub enum CommandKind {
     /// Scans for plug-ins or changes where scans look (ADR 0006); belongs to Loopwerk, not to
     /// one project. Runs on [`crate::Projects`].
     Plugins,
+    /// Acts on one of the project's running plug-ins (opens or closes its editor, restarts
+    /// it); never changes the project or its undo history.
+    Plugin,
 }
 
 impl CommandKind {
@@ -35,6 +38,7 @@ impl CommandKind {
             Self::Transport => "transport",
             Self::Projects => "projects",
             Self::Plugins => "plugins",
+            Self::Plugin => "plugin",
         }
     }
 }
@@ -462,6 +466,49 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: devices::set_param,
+    },
+    CommandSpec {
+        id: "device.addPlugin",
+        label: "Add an installed plug-in to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given. It starts while the project plays",
+        params: &[
+            TRACK,
+            param("plugin", ParamType::Text, "plug-in name, id or file, from plugins.list"),
+            optional(
+                "position",
+                ParamType::Integer,
+                "where in the chain, from 0 (default: last; an instrument is always first)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::add_plugin,
+    },
+    CommandSpec {
+        id: "device.plugin",
+        label: "Where a plug-in device stands: loading, running, missing, crashed or failed, the installed plug-in found for it, its latency, whether its editor is open",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Read,
+        run: devices::plugin_status,
+    },
+    CommandSpec {
+        id: "device.openEditor",
+        label: "Open a plug-in device's editor in a window of its own; changes there are heard at once",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::open_editor,
+    },
+    CommandSpec {
+        id: "device.closeEditor",
+        label: "Close a plug-in device's editor",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::close_editor,
+    },
+    CommandSpec {
+        id: "device.restart",
+        label: "Restart a plug-in device that crashed or stopped answering, in a fresh process with its last state",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::restart,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {

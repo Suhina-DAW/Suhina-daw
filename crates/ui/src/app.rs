@@ -428,11 +428,28 @@ impl App {
         }
     }
 
+    /// Keeps the active project's plug-ins in line with it (ADR 0006) and shows what the user
+    /// should hear about in the status bar. While the project has plug-ins, the window looks
+    /// again a few times a second, so one that starts or crashes is noticed without input.
+    fn poll_plugins(&mut self, ctx: &egui::Context) {
+        let notices = self.projects.poll_plugins();
+        if let Some(last) = notices.last() {
+            self.status = Status::Hint(last.clone());
+        }
+        if self
+            .session()
+            .is_some_and(|s| s.player().is_some() && !loopwerk_engine::plugin_devices(s.project()).is_empty())
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+
     /// Draws the window into `ui` and runs what the user asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         let mut actions = Vec::new();
         self.follow_active();
         self.poll_scan(ui.ctx());
+        self.poll_plugins(ui.ctx());
         self.dropped_files(ui);
         self.shortcuts(ui, &mut actions);
 
@@ -474,7 +491,8 @@ impl App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
             }
             let view_area = inner;
-            let inner = if grid.is_some() && self.detail_open { self.detail_area(ui, inner) } else { inner };
+            let inner =
+                if grid.is_some() && self.detail_open { self.detail_area(ui, inner, &mut actions) } else { inner };
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
@@ -522,7 +540,7 @@ impl App {
 
     /// Lays out the detail area beside or under the view in `area`, draws it with its splitter,
     /// and returns what is left for the view.
-    fn detail_area(&mut self, ui: &mut Ui, area: Rect) -> Rect {
+    fn detail_area(&mut self, ui: &mut Ui, area: Rect, actions: &mut Vec<Action>) -> Rect {
         let stacked = self.settings.device_layout == DeviceLayout::Stack;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
@@ -563,10 +581,35 @@ impl App {
             View::Session => (self.view.selected, None),
             View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
         };
-        let shown =
-            self.session().map_or(detail_view::Detail::Nothing, |s| detail_view::build(s.project(), track, clip));
+        // Where each plug-in on the shown track stands, read first: reading it needs the session
+        // itself, building the detail only the project.
+        let mut reports = std::collections::HashMap::new();
+        if let Some(shown_track) = clip.map(|(t, _)| t).or(track)
+            && let Ok(session) = self.projects.session_mut(None)
+        {
+            let devices = session
+                .project()
+                .tracks
+                .iter()
+                .find(|t| t.id == shown_track)
+                .and_then(|t| t.channel)
+                .and_then(|c| session.project().channels.iter().find(|ch| ch.id == c))
+                .map_or(0, |c| c.devices.len());
+            for index in 0..devices {
+                if let Some(report) = session.plugin_report(shown_track, index) {
+                    reports.insert((shown_track, index), report);
+                }
+            }
+        }
+        let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
+            detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
+        });
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
-            if stacked { detail_view::show_stack(ui, &shown) } else { detail_view::show_row(ui, &shown) }
+            if stacked {
+                detail_view::show_stack(ui, &shown, actions)
+            } else {
+                detail_view::show_row(ui, &shown, actions)
+            }
         });
         view
     }

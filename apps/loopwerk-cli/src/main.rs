@@ -332,7 +332,12 @@ fn fm_synth(args: &[String]) -> Result<(), String> {
 fn render(args: &Args) -> Result<(), String> {
     let path = args.output.as_ref().ok_or("missing --output")?;
     let (project, audio) = load_project(args)?;
-    let summary = render_wav(&project, &audio, path, args.sample_rate)?;
+    let mut library = loopwerk_plugins::library::Library::default();
+    let env = loopwerk_session::PluginEnv::from_library(&mut library);
+    let summary = render_wav(&project, &audio, path, args.sample_rate, Some(&env))?;
+    for notice in &summary.plugins {
+        eprintln!("plug-ins: {notice}");
+    }
     println!("wrote {} ({:.2} s, {} Hz)", path.display(), summary.seconds, summary.sample_rate);
     Ok(())
 }
@@ -449,6 +454,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     // An instrument's notes: its track's arrangement, from the bar asked for or the first clip.
     let events = match &device_source {
@@ -616,6 +622,7 @@ fn edit_plugin<'a>(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
@@ -661,6 +668,7 @@ fn print_params(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state

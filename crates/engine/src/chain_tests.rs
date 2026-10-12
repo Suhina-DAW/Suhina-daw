@@ -5,15 +5,15 @@ use loopwerk_model::*;
 
 use crate::{LaunchCommand, Renderer, render_launches, render_offline};
 
-const SR: u32 = 48_000;
+pub(crate) const SR: u32 = 48_000;
 /// Frames per beat at 120 bpm.
-const BEAT: usize = SR as usize / 2;
+pub(crate) const BEAT: usize = SR as usize / 2;
 
-fn note(time: f64, duration: f64, key: u8) -> Note {
+pub(crate) fn note(time: f64, duration: f64, key: u8) -> Note {
     Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
 }
 
-fn device(id: &str, params: &[(&str, f64)]) -> Device {
+pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
     Device {
         name: id.into(),
         kind: DeviceKind::Builtin(id.into()),
@@ -26,7 +26,7 @@ fn device(id: &str, params: &[(&str, f64)]) -> Device {
 
 /// One track playing `notes` from an arrangement clip of `length` beats and, in its launcher
 /// slot, a looping clip of the same notes; `devices` on its channel.
-fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
+pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
     let clip = |start: f64, looping: bool| Clip {
         content: ContentId(1),
         start,
@@ -80,15 +80,15 @@ fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
     }
 }
 
-fn left(out: &[f32]) -> Vec<f32> {
+pub(crate) fn left(out: &[f32]) -> Vec<f32> {
     out.as_chunks::<2>().0.iter().map(|[l, _]| *l).collect()
 }
 
-fn peak(out: &[f32]) -> f32 {
+pub(crate) fn peak(out: &[f32]) -> f32 {
     out.iter().fold(0.0, |m, s| m.max(s.abs()))
 }
 
-fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn max_diff(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
 }
 
@@ -100,7 +100,7 @@ fn frequency(signal: &[f32]) -> f64 {
     (crossings.len() - 1) as f64 * f64::from(SR) / (last - first) as f64
 }
 
-fn blocks(renderer: &mut Renderer, count: usize, frames: usize) -> Vec<f32> {
+pub(crate) fn blocks(renderer: &mut Renderer, count: usize, frames: usize) -> Vec<f32> {
     let mut out = Vec::new();
     let mut block = vec![0.0f32; frames * 2];
     for _ in 0..count {
@@ -239,4 +239,9 @@ fn hostile_notes_and_devices_do_not_break_a_render() {
     ];
     let out = render_offline(&project(notes, 1.0, devices), SR, 300).unwrap();
     assert!(out.iter().all(|s| s.is_finite() && s.abs() < 100.0));
+}
+
+/// A project with one empty track, for tests that only need its channel.
+pub(crate) fn empty_project() -> Project {
+    project(Vec::new(), 1.0, Vec::new())
 }

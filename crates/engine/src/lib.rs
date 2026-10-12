@@ -9,11 +9,16 @@ mod chain;
 mod chain_tests;
 mod launcher;
 mod metronome;
+mod plugin;
+#[cfg(test)]
+mod plugin_tests;
 mod stretch;
 mod swap;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ahead::AheadReader;
 pub use ahead::StretchWorker;
@@ -22,11 +27,16 @@ pub use audio::{AudioData, AudioPool};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
+pub use loopwerk_device_api::NoteEvent as DeviceEvent;
 use loopwerk_device_api::ProcessContext;
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use plugin::{DEADLINE_SHARE, Delay};
+pub use plugin::{OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, plugin_devices, plugin_key};
 use stretch::StretchVoice;
 
+/// The most frames a plug-in is asked to process at once: the size of a device chain's block.
+pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
 const MAX_VOICES: usize = 64;
 /// Audio clips that can play at once; more overlapping clips than this are skipped.
@@ -46,6 +56,8 @@ const ATTACK_SECONDS: f64 = 0.002;
 const MAX_RENDER_SECONDS: f64 = 60.0 * 60.0;
 /// Extra length of a render when tracks have devices, for instrument releases and effect tails.
 const CHAIN_TAIL_SECONDS: f64 = 2.0;
+/// Most delay latency compensation makes up for, in seconds.
+const MAX_LATENCY_SECONDS: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderError {
@@ -154,6 +166,10 @@ pub(crate) struct Graph {
     /// Every track's bus and the gains its sources are mixed at (muted tracks at zero), so
     /// sounding voices follow an edit to their track's mix.
     routes: Vec<(TrackId, u32, (f32, f32))>,
+    /// Latency compensation: the most delay any chain adds, in frames, and the delay of
+    /// everything that does not go through a chain (each chain delays itself up to it).
+    latency: u32,
+    direct_delay: Delay,
 }
 
 pub struct Renderer {
@@ -185,6 +201,10 @@ pub struct Renderer {
     metronome: metronome::Metronome,
     /// The frame of the current block being rendered, for events sent to device chains.
     block_frame: usize,
+    /// Rendering offline: plug-ins are waited for without a real-time deadline (ADR 0006).
+    offline: bool,
+    /// What is known about the project's plug-in devices, for the graphs built after edits.
+    plugin_info: HashMap<u64, PluginSlotInfo>,
 }
 
 impl Renderer {
@@ -195,7 +215,17 @@ impl Renderer {
 
     /// A renderer that also plays audio clips whose files are in `audio`.
     pub fn with_audio(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
-        let graph = Graph::build(project, audio, sample_rate)?;
+        Self::with_plugins(project, audio, sample_rate, Plugins::new())
+    }
+
+    /// A renderer whose plug-in devices run in the processors `plugins` holds (ADR 0006).
+    pub fn with_plugins(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        mut plugins: Plugins,
+    ) -> Result<Self, RenderError> {
+        let graph = Graph::build(project, audio, sample_rate, &mut plugins)?;
         graph.launcher.monitor.running.store(true, std::sync::atomic::Ordering::Relaxed);
         graph
             .launcher
@@ -222,13 +252,25 @@ impl Renderer {
             underruns_before: 0,
             metronome: metronome::Metronome::new(sample_rate),
             block_frame: 0,
+            offline: false,
+            plugin_info: plugins.info,
         })
     }
 
     /// A renderer whose transport is stopped: silent until it receives [`LaunchCommand::Play`]
     /// or a launch.
     pub fn stopped(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
-        let mut renderer = Self::with_audio(project, audio, sample_rate)?;
+        Self::stopped_with_plugins(project, audio, sample_rate, Plugins::new())
+    }
+
+    /// [`Renderer::stopped`] with plug-in devices running in `plugins`.
+    pub fn stopped_with_plugins(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        plugins: Plugins,
+    ) -> Result<Self, RenderError> {
+        let mut renderer = Self::with_plugins(project, audio, sample_rate, plugins)?;
         renderer.running = false;
         renderer.graph.launcher.monitor.running.store(false, std::sync::atomic::Ordering::Relaxed);
         Ok(renderer)
@@ -236,6 +278,18 @@ impl Renderer {
 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Renders offline from now on: plug-ins are waited for as long as they take (up to
+    /// [`OFFLINE_TIMEOUT`] a block) instead of until the block's real-time deadline.
+    pub fn set_offline(&mut self, offline: bool) {
+        self.offline = offline;
+    }
+
+    /// The delay latency compensation adds to everything, in frames: the most any track's
+    /// devices add.
+    pub fn latency(&self) -> u32 {
+        self.graph.latency
     }
 
     /// Length of the arrangement including release tails, in frames.
@@ -270,6 +324,7 @@ impl Renderer {
     /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
         self.receive_swap();
+        self.receive_plugins();
         let mut rest = out;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
@@ -301,10 +356,22 @@ impl Renderer {
         }
     }
 
+    /// When the plug-ins of a block of `frames` frames starting now must have answered: a share
+    /// of the block's playing time, so a late plug-in costs its own sound, not the device's
+    /// deadline. `None` offline.
+    fn deadline(&self, frames: usize) -> Option<Instant> {
+        if self.offline {
+            return None;
+        }
+        let seconds = frames as f64 / f64::from(self.sample_rate) * DEADLINE_SHARE;
+        Some(Instant::now() + Duration::from_secs_f64(seconds))
+    }
+
     fn process_chunk(&mut self, out: &mut [f32]) {
         let frames = out.len() / 2;
+        let deadline = if self.graph.chains.is_empty() { None } else { self.deadline(frames) };
         for chain in &mut self.graph.chains {
-            chain.begin(frames);
+            chain.begin(frames, deadline);
         }
         self.block_frame = 0;
         self.drain_commands();
@@ -389,6 +456,8 @@ impl Renderer {
         if running {
             self.mix_stretched(out, block_start);
         }
+        // What went straight to the output waits for the slowest chain (latency compensation).
+        self.graph.direct_delay.run(out);
         for chain in &mut self.graph.chains {
             chain.finish(out, frames, &context);
         }
@@ -561,7 +630,12 @@ pub(crate) fn route(project: &Project, chains: &[Chain], track: TrackId) -> Opti
 impl Graph {
     /// Builds the graph for `project`: validates it and prepares every event and voice. Allocates;
     /// call it off the audio thread.
-    pub(crate) fn build(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Box<Self>, RenderError> {
+    pub(crate) fn build(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        plugins: &mut Plugins,
+    ) -> Result<Box<Self>, RenderError> {
         if !(8_000..=384_000).contains(&sample_rate) {
             return Err(RenderError::InvalidSampleRate(sample_rate));
         }
@@ -581,14 +655,21 @@ impl Graph {
                 .and_then(|i| u32::try_from(i).ok())
                 .unwrap_or(NO_COLUMN)
         };
-        let chains: Vec<Chain> = project
+        let mut chains: Vec<Chain> = project
             .tracks
             .iter()
             .filter_map(|track| {
                 let gains = track_gains(project, track.id)?;
-                Chain::build(project, track.id, column_of(track.id), gains, sample_rate)
+                Chain::build(project, track.id, column_of(track.id), gains, sample_rate, plugins)
             })
             .collect();
+        // Latency compensation: every track is heard as late as the one whose devices delay it
+        // most, bounded so a plug-in that reports nonsense cannot take all memory.
+        let max_latency = sample_rate.saturating_mul(MAX_LATENCY_SECONDS);
+        let latency = chains.iter().map(|c| c.latency.min(max_latency)).max().unwrap_or(0);
+        for chain in &mut chains {
+            chain.delay = Delay::new((latency - chain.latency.min(max_latency)) as usize);
+        }
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
@@ -658,7 +739,7 @@ impl Graph {
             .unwrap_or(0)
             .max(notes_end);
         let tail = if chains.is_empty() { 0 } else { (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64 };
-        let length = if length > 0 { length + tail } else { 0 };
+        let length = if length > 0 { length + tail + u64::from(latency) } else { 0 };
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
             return Err(RenderError::TooLong { seconds });
@@ -681,6 +762,8 @@ impl Graph {
                 })
                 .collect(),
             chains,
+            latency,
+            direct_delay: Delay::new(latency as usize),
         }))
     }
 }
@@ -698,7 +781,20 @@ pub fn render_offline_with_audio(
     sample_rate: u32,
     block_frames: usize,
 ) -> Result<Vec<f32>, RenderError> {
-    let mut renderer = Renderer::with_audio(project, audio, sample_rate)?;
+    render_offline_with_plugins(project, audio, sample_rate, block_frames, Plugins::new())
+}
+
+/// Like [`render_offline_with_audio`], with plug-in devices running in `plugins`. The same
+/// `process` as playback, waiting for each plug-in instead of a real-time deadline.
+pub fn render_offline_with_plugins(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    block_frames: usize,
+    plugins: Plugins,
+) -> Result<Vec<f32>, RenderError> {
+    let mut renderer = Renderer::with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
     let total = usize::try_from(renderer.length())
         .ok()
         .and_then(|frames| frames.checked_mul(2))
@@ -720,10 +816,23 @@ pub fn render_launches(
     commands: &[(f64, LaunchCommand)],
     seconds: f64,
 ) -> Result<Vec<f32>, RenderError> {
+    render_launches_with_plugins(project, audio, sample_rate, commands, seconds, Plugins::new())
+}
+
+/// Like [`render_launches`], with plug-in devices running in `plugins`.
+pub fn render_launches_with_plugins(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    commands: &[(f64, LaunchCommand)],
+    seconds: f64,
+    plugins: Plugins,
+) -> Result<Vec<f32>, RenderError> {
     if !(seconds.is_finite() && seconds >= 0.0) || seconds > MAX_RENDER_SECONDS {
         return Err(RenderError::TooLong { seconds });
     }
-    let mut renderer = Renderer::stopped(project, audio, sample_rate)?;
+    let mut renderer = Renderer::stopped_with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
     let frame_of = |at: f64| (at.max(0.0) * f64::from(sample_rate)).round() as usize;
     let total = frame_of(seconds);
     let mut out = vec![0.0f32; total.saturating_mul(2)];

@@ -6,6 +6,7 @@ mod commands;
 mod devices;
 mod plugins;
 mod projects;
+mod rack;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,7 @@ use serde_json::Value;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
+pub use rack::{Hosted, OfflinePlugins, PluginEnv, PluginReport, PluginStatus, is_instrument, start_offline};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -76,6 +78,25 @@ impl Player {
     pub fn set_device_param(&mut self, change: ParamEdit) -> Result<(), CommandError> {
         self.controller.set_device_param(change.track, change.device, change.param, change.value).map_err(CommandError)
     }
+
+    /// The engine's sample rate.
+    pub fn sample_rate(&self) -> u32 {
+        self.controller.sample_rate()
+    }
+
+    /// What graphs built from now on know about the project's plug-in devices (ADR 0006).
+    pub fn set_plugin_info(&mut self, info: std::collections::HashMap<u64, loopwerk_engine::PluginSlotInfo>) {
+        self.controller.set_plugin_info(info);
+    }
+
+    /// Hands a running plug-in's audio half to the engine for the plug-in device `key`.
+    pub fn send_plugin(
+        &mut self,
+        key: u64,
+        processor: Box<dyn loopwerk_engine::PluginProcessor>,
+    ) -> Result<(), CommandError> {
+        self.controller.send_plugin(key, processor).map_err(CommandError)
+    }
 }
 
 /// An edit that is only a device parameter's new value, which a playing engine can take
@@ -100,6 +121,8 @@ pub struct Session {
     clipboard: Option<(loopwerk_model::Clip, loopwerk_model::ClipContent)>,
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
+    /// The project's plug-ins, running while it plays (ADR 0006).
+    pub(crate) plugins: rack::Rack,
 }
 
 impl Session {
@@ -112,6 +135,7 @@ impl Session {
             player: None,
             clipboard: None,
             param_edit: None,
+            plugins: rack::Rack::default(),
         }
     }
 
@@ -121,8 +145,40 @@ impl Session {
         self.player = Some(player);
     }
 
+    /// Disconnects the audio engine; the project's plug-ins stop (each keeps its last state for
+    /// when the project plays again).
     pub fn detach_player(&mut self) -> Option<Player> {
+        self.plugins.stop_all();
         self.player.take()
+    }
+
+    /// Lets the session start the project's plug-ins: the catalog to find them in and how to
+    /// host them (ADR 0006). Without it plug-in devices pass the sound through.
+    pub fn set_plugin_env(&mut self, env: std::sync::Arc<PluginEnv>) {
+        self.plugins.set_env(env);
+    }
+
+    /// Brings the project's running plug-ins in line with it (starts new ones in the
+    /// background, stops removed ones, takes in started ones, notices crashes). Call it often
+    /// from the session's thread, as the window does every frame. Returns what the user should
+    /// hear about.
+    pub fn sync_plugins(&mut self) -> Vec<String> {
+        self.plugins.sync(&self.project, self.player.as_mut())
+    }
+
+    /// Waits up to `timeout` until none of the project's plug-ins is still starting.
+    pub fn wait_for_plugins(&mut self, timeout: std::time::Duration) -> Vec<String> {
+        match self.player.as_mut() {
+            Some(player) => self.plugins.wait_started(&self.project, player, timeout),
+            None => Vec::new(),
+        }
+    }
+
+    /// What is known about the plug-in device at `device` among `track`'s channel's devices;
+    /// `None` for devices that are not plug-ins or while the project does not play.
+    pub fn plugin_report(&mut self, track: loopwerk_model::TrackId, device: usize) -> Option<PluginReport> {
+        let key = plugin_key_at(&self.project, track, device)?;
+        self.plugins.report(key)
     }
 
     pub fn player(&self) -> Option<&Player> {
@@ -177,9 +233,11 @@ impl Session {
             return Err(format!("{id}: unknown parameter {unknown:?}; expected {known:?}").into());
         }
         match spec.kind {
-            CommandKind::Read | CommandKind::Transport | CommandKind::Projects | CommandKind::Plugins => {
-                (spec.run)(self, params)
-            }
+            CommandKind::Read
+            | CommandKind::Transport
+            | CommandKind::Projects
+            | CommandKind::Plugins
+            | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
                 let value = (spec.run)(self, params)?;
                 self.update_player()?;
@@ -244,6 +302,15 @@ impl Session {
         self.undo.push(std::mem::replace(&mut self.project, next));
         true
     }
+}
+
+/// The key of the plug-in device at `device` among `track`'s channel's devices.
+pub(crate) fn plugin_key_at(project: &Project, track: loopwerk_model::TrackId, device: usize) -> Option<u64> {
+    let channel = project.tracks.iter().find(|t| t.id == track)?.channel?;
+    loopwerk_engine::plugin_devices(project)
+        .into_iter()
+        .find(|d| d.channel == channel && d.position == device)
+        .map(|d| d.key)
 }
 
 fn unknown_command(id: &str) -> CommandError {
