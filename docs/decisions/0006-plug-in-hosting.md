@@ -216,8 +216,13 @@ workspace forbids.
     its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11 window id);
     the host makes the editor's window owned by it (Win32 owner window, X11 `WM_TRANSIENT_FOR`).
     An owned window shares its input queue with the owner's thread on Windows, so the host
-    making one waits for Loopwerk's window thread; a host whose window thread hangs can be
-    ended like any other (decision 4). The host's main loop waits for its windows' messages
+    making one waits for Loopwerk's window thread; the session therefore opens and closes an
+    editor on a thread of its own and the command answers at once (`editor_open: "opening"`),
+    or both would wait for each other. More generally the window thread never waits for a host
+    process: `Plugin::health` and `editor_open` answer from what they last knew while the
+    process is busy (a sibling loading in a shared process takes seconds), and reading a
+    plug-in's state now and then, and stopping it, run on threads of their own. A host whose
+    window thread hangs can be ended like any other (decision 4). The host's main loop waits for its windows' messages
     (`MsgWaitForMultipleObjectsEx`, woken by the control messages' thread) rather than looking
     every 10 ms, which made editors such as Pro-Q 4 lag; on X11 it looks every millisecond while
     an editor is open.

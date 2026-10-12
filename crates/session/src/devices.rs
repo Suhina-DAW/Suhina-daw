@@ -292,8 +292,11 @@ pub(crate) fn plugin_status(session: &mut Session, params: &Value) -> Result<Val
 
 pub(crate) fn open_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let key = plugin_key(session, params)?;
-    let (width, height) = session.plugins.open_editor(key)?;
-    Ok(json!({ "editor_open": true, "width": width, "height": height }))
+    // Over the app's window the editor opens in the background; `device.plugin` says when.
+    Ok(match session.plugins.open_editor(key)? {
+        Some((width, height)) => json!({ "editor_open": true, "width": width, "height": height }),
+        None => json!({ "editor_open": "opening" }),
+    })
 }
 
 pub(crate) fn close_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

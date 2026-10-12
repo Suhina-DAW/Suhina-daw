@@ -5,6 +5,8 @@
 //! - `test:crash-after:<n>`: passes audio through, then exits the process in the middle of
 //!   block `n` (counting from 0) without answering.
 //! - `test:hang-after:<n>`: passes audio through, then stops answering in block `n`.
+//! - `test:slow-load:<ms>`: `test:gain` that takes `ms` milliseconds (at most 60 s) to load, like
+//!   a large plug-in.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -26,6 +28,9 @@ pub(crate) fn create(plugin: &str) -> Result<std::sync::Arc<dyn Processor>, Stri
         Ok(std::sync::Arc::new(Gain(AtomicU32::new(0.5f32.to_bits()))))
     } else if let Some(n) = after("test:crash-after:") {
         Ok(std::sync::Arc::new(Failing { after: n, blocks: AtomicU32::new(0), hang: false }))
+    } else if let Some(ms) = after("test:slow-load:") {
+        std::thread::sleep(Duration::from_millis(u64::from(ms.min(60_000))));
+        Ok(std::sync::Arc::new(Gain(AtomicU32::new(0.5f32.to_bits()))))
     } else if let Some(n) = after("test:hang-after:") {
         Ok(std::sync::Arc::new(Failing { after: n, blocks: AtomicU32::new(0), hang: true }))
     } else {

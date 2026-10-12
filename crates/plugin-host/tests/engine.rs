@@ -374,7 +374,13 @@ fn an_editor_is_owned_by_the_engines_window() {
     let (mut session, mut renderer) = session(p, false);
     session.set_editor_owner(Some(owner as u64));
     until(&mut session, &mut renderer, "starting", |s| s["status"] == "running");
-    session.execute("device.openEditor", &json!({ "track": 1, "device": 0 })).unwrap();
+    // The editor opens in the background: the session's thread (the app's window thread)
+    // must not wait for the host, which waits for the owner window while it makes the editor's.
+    let asked = std::time::Instant::now();
+    let opening = session.execute("device.openEditor", &json!({ "track": 1, "device": 0 })).unwrap();
+    assert_eq!(opening["editor_open"], "opening");
+    assert!(asked.elapsed() < Duration::from_millis(500), "{:?}", asked.elapsed());
+    until(&mut session, &mut renderer, "opening the editor", |s| s["editor_open"] == true);
     let editor_class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
     let mut found = false;
     let mut after = std::ptr::null_mut();
@@ -390,6 +396,7 @@ fn an_editor_is_owned_by_the_engines_window() {
     }
     assert!(found, "no editor window owned by the engine's window");
     session.execute("device.closeEditor", &json!({ "track": 1, "device": 0 })).unwrap();
+    until(&mut session, &mut renderer, "closing the editor", |s| s["editor_open"] == false);
     // SAFETY: a message without pointers to the owner's thread.
     unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
     owner_thread.join().unwrap();
