@@ -23,6 +23,26 @@ at least 0), on its own track or on `to_track`, which must take the clip's kind:
 to a track that plays notes, an audio clip to an audio track. A clip that moves to another track
 plays through that track's instrument and effects. The move is one undo step.
 
+## Duplicating and deleting
+
+`clip.duplicate {track, index}` places a copy right after the clip, replacing what the copy covers
+as a moved clip does; `clip.delete {track, index}` removes it. In the Arrangement view a clip's
+right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
+
+## Tracks
+
+| Command | Does |
+|---|---|
+| `track.group {tracks, name?}` | A new group track takes the place of the first track; the tracks (with what is inside them) follow it, play into it, and it plays where they played. They must all be in the same group, or in none. |
+| `track.ungroup {track}` | The group goes; its tracks stay where they were and play where the group played. |
+| `track.move {track, to}` | Moves a track, a group with everything inside it, to position `to` in the track order. |
+| `track.rename`, `track.setColor`, `track.delete` | Name (not empty), colour (`#rrggbb` or `none`), and deleting a track with its clips and slots; deleting a group ungroups it. |
+
+In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G groups the selection,
+dragging a header moves the track above the lane under the pointer (below it from its lower half),
+and a right-click opens the track's menu: name, colour, group, ungroup, delete. The Session view's
+column headers have the same menu.
+
 ## Over other clips
 
 The moved clip covers `[start, start + length)` on its lane. Every other clip on that lane:

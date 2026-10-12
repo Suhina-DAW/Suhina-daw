@@ -9,6 +9,7 @@ use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
 use crate::grid::ColumnKind;
+use crate::menus::{self, TrackMenu};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
@@ -85,6 +86,11 @@ pub struct ArrangementViewState {
     selected: Option<(TrackId, usize)>,
     clip_drag: Option<ClipDrag>,
     value_drag: Option<(TrackId, Control, f64)>,
+    /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
+    pub selected_tracks: Vec<TrackId>,
+    /// A track header being dragged to a new place, and where it was let go.
+    track_drag: Option<TrackId>,
+    track_drop: Option<(TrackId, f32)>,
 }
 
 impl Default for ArrangementViewState {
@@ -100,6 +106,9 @@ impl Default for ArrangementViewState {
             selected: None,
             clip_drag: None,
             value_drag: None,
+            selected_tracks: Vec::new(),
+            track_drag: None,
+            track_drop: None,
         }
     }
 }
@@ -294,6 +303,66 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
     }
 
+    // A track header let go over a lane moves the track (and a group's tracks) there: above the
+    // lane under the pointer, or below it from its lower half.
+    let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+    let target_of = |y: f32| {
+        let lane = tracks.iter().find(|l| row_of(l.track).is_some_and(|r| r.time.y_range().contains(y)))?;
+        let row = row_of(lane.track)?;
+        Some((*lane, y > row.time.center().y))
+    };
+    if let Some(dragged) = state.track_drag
+        && let Some(pointer) = ui.ctx().pointer_interact_pos()
+        && let Some((lane, below)) = target_of(pointer.y)
+        && let Some(row) = row_of(lane.track)
+    {
+        let y = if below { row.time.bottom() + 0.5 } else { row.time.top() - 0.5 };
+        if lane.track != dragged {
+            painter.with_clip_rect(lanes_area).hline(area.x_range(), y, egui::Stroke::new(2.0, theme::ACCENT));
+        }
+    }
+    if let Some((dragged, y)) = state.track_drop.take()
+        && let Some((lane, below)) = target_of(y)
+        && let Some(source) = tracks.iter().find(|l| l.track == dragged)
+        && lane.track != dragged
+    {
+        // The dragged track's block: it and the lanes nested under it.
+        let index = tracks.iter().position(|l| l.track == dragged).unwrap_or_default();
+        let block = 1 + tracks.iter().skip(index + 1).take_while(|l| l.depth > source.depth).count();
+        let mut to = lane.position + usize::from(below);
+        if lane.position > source.position {
+            to = to.saturating_sub(block);
+        }
+        if to != source.position {
+            actions.push(Action::new("track.move", json!({ "track": dragged.0, "to": to })));
+        }
+    }
+
+    // Keys: Delete removes the selected clip, Ctrl+D duplicates it, Ctrl+G groups the selected
+    // tracks.
+    if !ui.ctx().egui_wants_keyboard_input() {
+        let (delete, duplicate, group) = ui.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::D),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::G),
+            )
+        });
+        if let Some((track, index)) = state.selected {
+            if delete {
+                actions.push(Action::new("clip.delete", json!({ "track": track.0, "index": index })));
+                state.selected = None;
+            } else if duplicate {
+                actions.push(Action::new("clip.duplicate", json!({ "track": track.0, "index": index })));
+            }
+        }
+        if group && !state.selected_tracks.is_empty() {
+            let tracks: Vec<u32> = state.selected_tracks.iter().map(|t| t.0).collect();
+            actions.push(Action::new("track.group", json!({ "tracks": tracks })));
+            state.selected_tracks.clear();
+        }
+    }
+
     // Fixed rows: return tracks, then the main track, each a name and a volume.
     painter.hline(area.x_range(), fixed.top() - 0.5, theme::hairline(theme::LINE_STRONG));
     let fixed_painter = painter.with_clip_rect(fixed);
@@ -403,6 +472,7 @@ fn clip_box<'a>(
         .on_hover_cursor(egui::CursorIcon::Grab);
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+    response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, actions));
     if response.clicked() || response.drag_started() {
         state.selected = Some(key);
     }
@@ -581,7 +651,43 @@ fn track_header(
 ) {
     let id = Id::new(("arrangement-header", lane.track.0));
     let clip = rect.intersect(lanes_area);
-    painter.rect_filled(rect, 0.0, theme::SURFACE_1);
+
+    // The header itself: click selects (Ctrl adds), right-click opens the track's menu, a drag
+    // moves the track. Its controls, added after it, take their own clicks.
+    let body = ui.interact(clip, id.with("body"), Sense::click_and_drag());
+    body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Track {}", lane.name)));
+    if body.clicked() {
+        if ui.input(|i| i.modifiers.command) {
+            if let Some(at) = state.selected_tracks.iter().position(|t| *t == lane.track) {
+                state.selected_tracks.remove(at);
+            } else {
+                state.selected_tracks.push(lane.track);
+            }
+        } else {
+            state.selected_tracks = vec![lane.track];
+        }
+    }
+    if body.drag_started() {
+        state.track_drag = Some(lane.track);
+    }
+    if body.drag_stopped()
+        && let Some(dragged) = state.track_drag.take()
+        && let Some(pointer) = body.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
+    {
+        state.track_drop = Some((dragged, pointer.y));
+    }
+    let selection = state.selected_tracks.clone();
+    body.context_menu(|ui| {
+        let menu = TrackMenu {
+            track: lane.track,
+            name: &lane.name,
+            is_group: lane.kind == ColumnKind::Group,
+            selection: &selection,
+        };
+        menus::track_menu(ui, &menu, actions);
+    });
+    let selected = state.selected_tracks.contains(&lane.track);
+    painter.rect_filled(rect, 0.0, if selected { theme::SURFACE_2 } else { theme::SURFACE_1 });
     let inner = Rect::from_min_max(
         Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
         Pos2::new(rect.right() - PAD, rect.bottom() - HEADER_PAD_Y),

@@ -129,7 +129,7 @@ Animations are short and only show a change of state; with animations off (a set
 | MIDI marks | 2 px high lines in the track colour |
 | Audio marks | 1 px vertical lines in the track colour, centred |
 | Playhead | 1 px `accent` through all lanes |
-| Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
+| Header column | A selected track's header is `surface.2`; right-click opens its menu (name field, colour swatches, group, ungroup, delete). 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `surface.1`, 5 px top/bottom and 6 px side padding, 6 px between groups |
 
 ### Track header levels
 

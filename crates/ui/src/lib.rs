@@ -6,6 +6,7 @@ mod app;
 pub mod arrangement_view;
 pub mod demo;
 pub mod grid;
+pub mod menus;
 pub mod motion;
 pub mod session_view;
 pub mod settings;

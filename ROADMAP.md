@@ -190,7 +190,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
 - Commands so far: `commands.list`, `project.info`, `project.tracks`, `project.clips`,
-  `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `clip.move`,
+  `transport.setTempo`, `track.setVolume`, `track.setPan`, `track.setMute`, `track.setSolo`, `track.setOutput`, `track.group`, `track.ungroup`, `track.move`, `track.rename`,
+  `track.setColor`, `track.delete`, `clip.move`, `clip.duplicate`, `clip.delete`,
   `edit.undo`, `edit.redo`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder` (also as
@@ -266,5 +267,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).
+- Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
+  to move the track (a group moves with its tracks); right-click a header or a Session column for
+  name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Still to do: input routing and sends, waveforms, clip fades and gain, overlapping clips, the browser, detail area (devices, clip editor), menu bar and
   settings, project tabs, meters, solo and arm, the design's monospace font, installers.

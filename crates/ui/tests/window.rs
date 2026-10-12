@@ -191,7 +191,9 @@ fn drag_clip(harness: &mut Harness<'static, App>, label: &str, by: egui::Vec2) {
 #[test]
 fn a_dropped_clip_replaces_what_it_covers_unless_midi_stacking_is_on() {
     let starts = |h: &Harness<'static, App>| {
-        h.state().session().map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
     };
     // Beat B (bars 17-28) moves two bars later, over Fill (bars 29-32), which is shortened.
     let mut harness = arrangement_app();
@@ -326,6 +328,66 @@ fn a_tall_header_routes_its_track_into_a_group() {
     harness.get_by_label("Group").click();
     harness.run();
     assert_eq!(harness.state().actions, [Action::new("track.setOutput", json!({ "track": 2, "to": 20 }))]);
+}
+
+fn names(h: &Harness<'static, App>) -> Vec<String> {
+    h.state().session().map(|s| s.project().tracks.iter().map(|t| t.name.clone()).collect()).unwrap_or_default()
+}
+
+#[test]
+fn selected_tracks_group_with_ctrl_g() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.get_by_label("Track Bass").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    assert_eq!(names(&harness)[..3], ["Group", "Drums", "Bass"]);
+    assert!(harness.query_by_label("Track Group").is_some());
+}
+
+#[test]
+fn menus_delete_a_track_and_duplicate_a_clip() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    harness.get_by_label("Delete track").click();
+    harness.run();
+    assert!(!names(&harness).contains(&"Keys".to_string()));
+
+    let clips = |h: &Harness<'static, App>| h.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
+    let before = clips(&harness);
+    harness.get_by_label("Clip Fill on Drums at bar 29").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Duplicate").click();
+    harness.run();
+    // The copy sits after Fill and shortens the clip it lands on, so there is one more clip.
+    assert_eq!(clips(&harness), before + 1);
+    let fill_copies = harness
+        .state()
+        .session()
+        .map_or(0, |s| s.project().arrangement.lanes[0].clips.iter().filter(|c| c.start == 128.0 && c.length == 16.0).count());
+    assert_eq!(fill_copies, 1, "the copy of Fill sits at bar 33");
+}
+
+#[test]
+fn dragging_a_header_moves_the_track() {
+    let mut harness = arrangement_app();
+    let from = harness.get_by_label("Track Vox").rect().center();
+    // Three lanes up (49 points each), into the upper half of Drums.
+    let to = from - egui::vec2(0.0, 3.0 * 49.0 + 14.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from - egui::vec2(0.0, 40.0));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    assert_eq!(names(&harness)[..4], ["Vox", "Drums", "Bass", "Keys"]);
 }
 
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and

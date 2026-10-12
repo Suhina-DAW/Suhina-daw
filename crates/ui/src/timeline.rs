@@ -42,6 +42,8 @@ pub struct Lane {
     pub kind: ColumnKind,
     /// How many groups the track is inside.
     pub depth: usize,
+    /// The track's place in the project's track order, as `track.move` counts it.
+    pub position: usize,
     pub mute: bool,
     pub solo: bool,
     pub volume_db: f64,
@@ -114,6 +116,7 @@ impl Timeline {
                 color: track.color.unwrap_or(TRACK_PALETTE[position % TRACK_PALETTE.len()]),
                 kind,
                 depth: depth(project, track.parent),
+                position,
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),

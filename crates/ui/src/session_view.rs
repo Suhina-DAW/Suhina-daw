@@ -7,6 +7,7 @@ use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
+use crate::menus::{self, TrackMenu};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action, Drag};
@@ -163,7 +164,7 @@ fn draw_column(
     actions: &mut Vec<Action>,
 ) {
     let id = Id::new(("session-column", column.track.0));
-    column_header(painter, Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip), column);
+    column_header(ui, painter, Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip), column, actions);
     let body_clip = bands.body.intersect(clip);
     column_body(
         ui,
@@ -185,10 +186,23 @@ fn draw_column(
     painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::LINE_STRONG));
 }
 
-fn column_header(painter: &egui::Painter, rect: Rect, column: &Column) {
+fn column_header(ui: &Ui, painter: &egui::Painter, rect: Rect, column: &Column, actions: &mut Vec<Action>) {
     if rect.width() <= 0.0 {
         return;
     }
+    // Right-click opens the track's menu.
+    let response = ui.interact(rect, Id::new(("session-header", column.track.0)), Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Track {}", column.name)));
+    response.context_menu(|ui| {
+        let menu = TrackMenu {
+            track: column.track,
+            name: &column.name,
+            is_group: column.kind == ColumnKind::Group,
+            selection: &[],
+        };
+        menus::track_menu(ui, &menu, actions);
+    });
     painter.rect_filled(rect, 0.0, theme::SURFACE_2);
     let strip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
     painter.rect_filled(strip, 0.0, lane(rgb(column.color), column.mute));

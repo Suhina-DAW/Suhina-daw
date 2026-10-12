@@ -2,7 +2,7 @@
 //! [`COMMANDS`] with tests below.
 
 use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
-use loopwerk_model::{ArrangementLane, Channel, ChannelRole, Clip, LaneData, Project, Track, TrackId};
+use loopwerk_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
 use crate::{CommandError, Session};
@@ -52,6 +52,8 @@ pub enum ParamType {
     /// A number, or the string "-inf".
     Decibels,
     Text,
+    /// A list of tracks, each an id or a name.
+    Tracks,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +90,13 @@ impl<T> CommandSpec<T> {
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
         for p in self.params {
+            if p.ty == ParamType::Tracks {
+                let items = json!({ "type": ["integer", "string"] });
+                properties.insert(p.name.to_string(), json!({ "type": "array", "items": items, "description": p.doc }));
+                continue;
+            }
             let ty = match p.ty {
+                ParamType::Tracks => json!("array"),
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -172,6 +180,65 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[TRACK, param("mute", ParamType::Bool, "true mutes the track")],
         kind: CommandKind::Edit,
         run: set_mute,
+    },
+    CommandSpec {
+        id: "track.group",
+        label: "Put tracks into a new group track, which plays into where they played",
+        params: &[
+            param("tracks", ParamType::Tracks, "the tracks to group (ids or names), all in the same group or none"),
+            optional("name", ParamType::Text, "the group's name (\"Group\" if left out)"),
+        ],
+        kind: CommandKind::Edit,
+        run: group_tracks,
+    },
+    CommandSpec {
+        id: "track.ungroup",
+        label: "Dissolve a group track: its tracks stay, playing into where the group played",
+        params: &[TRACK],
+        kind: CommandKind::Edit,
+        run: ungroup_track,
+    },
+    CommandSpec {
+        id: "track.move",
+        label: "Move a track (a group with its tracks) to another place in the track order",
+        params: &[TRACK, param("to", ParamType::Integer, "its new position, from 0, in project.tracks order")],
+        kind: CommandKind::Edit,
+        run: move_track,
+    },
+    CommandSpec {
+        id: "track.rename",
+        label: "Rename a track",
+        params: &[TRACK, param("name", ParamType::Text, "the new name, not empty")],
+        kind: CommandKind::Edit,
+        run: rename_track,
+    },
+    CommandSpec {
+        id: "track.setColor",
+        label: "Set a track's colour",
+        params: &[TRACK, param("color", ParamType::Text, "\"#rrggbb\", or \"none\" for the default")],
+        kind: CommandKind::Edit,
+        run: set_color,
+    },
+    CommandSpec {
+        id: "track.delete",
+        label: "Delete a track with its clips; a deleted group's tracks stay",
+        params: &[TRACK],
+        kind: CommandKind::Edit,
+        run: delete_track,
+    },
+    CommandSpec {
+        id: "clip.delete",
+        label: "Delete an arrangement clip",
+        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        kind: CommandKind::Edit,
+        run: delete_clip,
+    },
+    CommandSpec {
+        id: "clip.duplicate",
+        label: "Place a copy of an arrangement clip right after it, replacing what the copy covers",
+        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        kind: CommandKind::Edit,
+        run: duplicate_clip,
     },
     CommandSpec {
         id: "track.setOutput",
@@ -436,6 +503,238 @@ fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError
     let mute = params.get("mute").and_then(Value::as_bool).ok_or("mute must be true or false")?;
     channel_param(session, params)?.mute = mute;
     Ok(json!({ "mute": mute }))
+}
+
+/// The ids in `params.tracks`, each resolved like a track parameter.
+fn track_list(p: &Project, params: &Value) -> Result<Vec<TrackId>, CommandError> {
+    let list = params.get("tracks").and_then(Value::as_array).ok_or("tracks must be a list of track ids or names")?;
+    let mut ids = Vec::new();
+    for value in list {
+        let id = track_at(p, &json!({ "track": value }), "track")?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        return Err("tracks must name at least one track".into());
+    }
+    Ok(ids)
+}
+
+fn channel_id_of(p: &Project, track: TrackId) -> Option<ChannelId> {
+    p.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel)
+}
+
+/// A track and every track inside it (for a group), in project order.
+fn with_descendants(p: &Project, track: TrackId) -> Vec<TrackId> {
+    let mut family = vec![track];
+    // Bounded by the track count, so a parent cycle in a malformed project cannot loop.
+    for _ in 0..p.tracks.len() {
+        let before = family.len();
+        for t in &p.tracks {
+            if t.parent.is_some_and(|parent| family.contains(&parent)) && !family.contains(&t.id) {
+                family.push(t.id);
+            }
+        }
+        if family.len() == before {
+            break;
+        }
+    }
+    p.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
+}
+
+fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let members = track_list(p, params)?;
+    let parents: Vec<Option<TrackId>> =
+        members.iter().map(|id| p.tracks.iter().find(|t| t.id == *id).and_then(|t| t.parent)).collect();
+    let parent = parents.first().copied().flatten();
+    if parents.iter().any(|x| *x != parent) {
+        return Err("the tracks to group must all be in the same group, or in none".into());
+    }
+    let name = match params.get("name") {
+        None => "Group".to_string(),
+        Some(v) => v.as_str().filter(|n| !n.trim().is_empty()).ok_or("name must be a text, not empty")?.to_string(),
+    };
+    let id = TrackId(p.tracks.iter().map(|t| t.id.0).max().unwrap_or(0) + 1);
+    let channel_id = ChannelId(p.channels.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    let output = parent.and_then(|t| channel_id_of(p, t));
+    p.channels.push(Channel {
+        id: channel_id,
+        name: name.clone(),
+        role: ChannelRole::Submix,
+        volume: 1.0,
+        pan: 0.0,
+        mute: false,
+        solo: false,
+        output,
+        sends: Vec::new(),
+        devices: Vec::new(),
+        extensions: Default::default(),
+    });
+    // The group takes the place of its first track; its tracks (with theirs) follow it.
+    let family: Vec<TrackId> = members.iter().flat_map(|m| with_descendants(p, *m)).collect();
+    let first = p.tracks.iter().position(|t| family.contains(&t.id)).unwrap_or(p.tracks.len());
+    let moved: Vec<Track> = p.tracks.iter().filter(|t| family.contains(&t.id)).cloned().collect();
+    p.tracks.retain(|t| !family.contains(&t.id));
+    let at = first.min(p.tracks.len());
+    let group = Track {
+        id,
+        name,
+        color: None,
+        content: Default::default(),
+        channel: Some(channel_id),
+        parent,
+        extensions: Default::default(),
+    };
+    p.tracks.splice(at..at, std::iter::once(group).chain(moved));
+    for track in p.tracks.iter_mut().filter(|t| members.contains(&t.id)) {
+        track.parent = Some(id);
+    }
+    let member_channels: Vec<ChannelId> = members.iter().filter_map(|m| channel_id_of(p, *m)).collect();
+    for channel in p.channels.iter_mut().filter(|c| member_channels.contains(&c.id)) {
+        channel.output = Some(channel_id);
+    }
+    Ok(json!({ "track": id.0 }))
+}
+
+fn ungroup_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let group = track_id(p, params)?;
+    let channel = channel_id_of(p, group).and_then(|id| p.channels.iter().find(|c| c.id == id));
+    let Some(channel) = channel.filter(|c| c.role == ChannelRole::Submix) else {
+        return Err("only a group track can be ungrouped".into());
+    };
+    let (group_channel, output) = (channel.id, channel.output);
+    let parent = p.tracks.iter().find(|t| t.id == group).and_then(|t| t.parent);
+    for track in p.tracks.iter_mut().filter(|t| t.parent == Some(group)) {
+        track.parent = parent;
+    }
+    for c in p.channels.iter_mut().filter(|c| c.output == Some(group_channel)) {
+        c.output = output;
+    }
+    remove_track(p, group, group_channel);
+    Ok(json!({ "ungrouped": group.0 }))
+}
+
+/// Removes a track, its channel, its lanes and slots, and every reference to them.
+fn remove_track(p: &mut Project, track: TrackId, channel: ChannelId) {
+    p.tracks.retain(|t| t.id != track);
+    p.channels.retain(|c| c.id != channel);
+    for c in &mut p.channels {
+        if c.output == Some(channel) {
+            c.output = None;
+        }
+        c.sends.retain(|s| s.target != channel);
+    }
+    p.arrangement.lanes.retain(|l| l.track != Some(track));
+    p.launcher.columns.retain(|c| c.track != track);
+    for content in &mut p.contents {
+        content.lanes.retain(|l| l.target != Some(track));
+    }
+}
+
+fn move_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let track = track_id(p, params)?;
+    let to = params.get("to").and_then(Value::as_u64).ok_or("to must be a whole number from 0")?;
+    let family = with_descendants(p, track);
+    let block: Vec<Track> = p.tracks.iter().filter(|t| family.contains(&t.id)).cloned().collect();
+    p.tracks.retain(|t| !family.contains(&t.id));
+    let at = usize::try_from(to).unwrap_or(usize::MAX).min(p.tracks.len());
+    p.tracks.splice(at..at, block);
+    Ok(json!({ "track": track.0, "position": at }))
+}
+
+fn rename_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let name = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
+    let name = name.ok_or("name must be a text, not empty")?.to_string();
+    let track = track_id(&session.project, params)?;
+    if let Some(t) = session.project.tracks.iter_mut().find(|t| t.id == track) {
+        t.name.clone_from(&name);
+    }
+    if let Some(channel) = channel_id_of(&session.project, track)
+        && let Some(c) = session.project.channels.iter_mut().find(|c| c.id == channel)
+    {
+        c.name.clone_from(&name);
+    }
+    Ok(json!({ "name": name }))
+}
+
+fn set_color(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let text = params.get("color").and_then(Value::as_str).ok_or("color must be \"#rrggbb\" or \"none\"")?;
+    let color = if text.eq_ignore_ascii_case("none") {
+        None
+    } else {
+        let hex = text.strip_prefix('#').filter(|h| h.len() == 6).ok_or("color must be \"#rrggbb\" or \"none\"")?;
+        let part = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (part(0), part(2), part(4)) {
+            (Some(r), Some(g), Some(b)) => Some(loopwerk_model::Rgb(r, g, b)),
+            _ => return Err("color must be \"#rrggbb\" or \"none\"".into()),
+        }
+    };
+    let track = track_id(&session.project, params)?;
+    if let Some(t) = session.project.tracks.iter_mut().find(|t| t.id == track) {
+        t.color = color;
+    }
+    Ok(json!({ "color": text }))
+}
+
+fn delete_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let track = track_id(&session.project, params)?;
+    let p = &session.project;
+    let is_group = channel_id_of(p, track)
+        .and_then(|id| p.channels.iter().find(|c| c.id == id))
+        .is_some_and(|c| c.role == ChannelRole::Submix);
+    if is_group {
+        ungroup_track(session, params)?;
+        return Ok(json!({ "deleted": track.0 }));
+    }
+    let channel = channel_id_of(&session.project, track);
+    let p = &mut session.project;
+    match channel {
+        Some(channel) => remove_track(p, track, channel),
+        None => {
+            p.tracks.retain(|t| t.id != track);
+            p.arrangement.lanes.retain(|l| l.track != Some(track));
+            p.launcher.columns.retain(|c| c.track != track);
+        }
+    }
+    Ok(json!({ "deleted": track.0 }))
+}
+
+/// The lane of `params.track` and the clip index in it, checked.
+fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), CommandError> {
+    let track = track_id(p, params)?;
+    let index = params.get("index").and_then(Value::as_u64).ok_or("index must be a whole number from project.clips")?;
+    let lane =
+        p.arrangement.lanes.iter().position(|l| l.track == Some(track)).ok_or("the track has no arrangement lane")?;
+    let count = p.arrangement.lanes.get(lane).map_or(0, |l| l.clips.len());
+    let index = usize::try_from(index)
+        .ok()
+        .filter(|i| *i < count)
+        .ok_or_else(|| format!("clip index {index} does not exist; the track has {count} arrangement clips"))?;
+    Ok((lane, index))
+}
+
+fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    if let Some(lane) = session.project.arrangement.lanes.get_mut(lane) {
+        lane.clips.remove(index);
+    }
+    Ok(json!({ "deleted": index }))
+}
+
+fn duplicate_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    let lane = session.project.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
+    let mut copy = lane.clips.get(index).cloned().ok_or("the clip is missing")?;
+    copy.start += copy.length;
+    make_room(&mut lane.clips, copy.start, copy.start + copy.length);
+    lane.clips.push(copy.clone());
+    lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+    let new_index = lane.clips.iter().position(|c| *c == copy).unwrap_or_default();
+    Ok(json!({ "index": new_index, "start": copy.start }))
 }
 
 fn set_output(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
