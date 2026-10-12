@@ -549,7 +549,7 @@ fn plan_clip(
                 }
             }
             LaneData::Audio(region) => {
-                let Some(data) = audio.files.get(&region.file) else { continue };
+                let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
                 // Placed at frame 0; a looping clip is given an endless length. Fades belong to
                 // arrangement clips; a launched clip has only the click guard.
                 let placed = loopwerk_model::Clip {
@@ -1337,6 +1337,7 @@ mod tests {
             warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 1.0 }],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let content = ClipContent {
             id: ContentId(1),
@@ -1377,6 +1378,7 @@ mod tests {
             warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 0.9 }],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let content = ClipContent {
             id: ContentId(1),

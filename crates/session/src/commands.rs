@@ -739,7 +739,7 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
     let (notes, audio) = content.map_or((0, None), |c| {
         c.lanes.iter().fold((0, None), |(n, a), lane| match &lane.data {
             LaneData::Notes(notes) => (n + notes.len(), a),
-            LaneData::Audio(region) => (n, Some(region.file.clone())),
+            LaneData::Audio(region) => (n, Some(region)),
         })
     });
     json!({
@@ -753,7 +753,8 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
         "fade_in": clip.fade_in,
         "fade_out": clip.fade_out,
         "notes": notes,
-        "audio_file": audio,
+        "audio_file": audio.map(|r| r.file.as_str()),
+        "audio_stream": audio.and_then(|r| r.stream),
     })
 }
 
@@ -830,7 +831,7 @@ fn with_descendants(p: &Project, track: TrackId) -> Vec<TrackId> {
     p.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
 }
 
-fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let p = &mut session.project;
     let members = track_list(p, params)?;
     let parents: Vec<Option<TrackId>> =

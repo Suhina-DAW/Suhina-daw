@@ -1,0 +1,154 @@
+//! Group buses (ADR 0004 › 10). A group track whose channel holds devices sums what plays into
+//! it and runs its devices over the sum, as a compressor on a group must. Every track that plays
+//! into a bus has a chain (one without devices when it has none), so its sound reaches the bus
+//! through a delay line and latency compensation lines up every path; the bus chains come after
+//! the chains that feed them, so in a block they run after them.
+//!
+//! A group without devices stays what it was: its volume and mute scale the tracks routed
+//! through it (`track_gains`), with no buffer of its own.
+
+use loopwerk_model::{ChannelId, ChannelRole, Project, TrackId};
+
+use crate::chain::Chain;
+use crate::plugin::{Delay, Plugins};
+use crate::{MAX_LATENCY_SECONDS, track_gains};
+
+/// The most channels a route is followed through, so a routing cycle cannot loop forever.
+const MAX_HOPS: usize = 64;
+
+/// The chains of `project`'s tracks, ordered so every bus comes after the chains that feed it,
+/// with their targets, gains and latency compensation set; and the latency every path is
+/// brought up to. Allocates: call it off the audio thread.
+pub(crate) fn build(
+    project: &Project,
+    sample_rate: u32,
+    plugins: &mut Plugins,
+    column_of: impl Fn(TrackId) -> u32,
+) -> (Vec<Chain>, u32) {
+    let mut chains: Vec<Chain> = project
+        .tracks
+        .iter()
+        .filter(|track| track_gains(project, track.id).is_some())
+        .filter_map(|track| Chain::build(project, track.id, column_of(track.id), (0.0, 0.0), sample_rate, plugins))
+        .collect();
+
+    // A bus: a track with a chain that some other channel plays into.
+    let channel_of = |track: TrackId| project.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel);
+    let feeds = |channel: ChannelId| project.channels.iter().any(|c| c.id != channel && c.output == Some(channel));
+    let buses: Vec<(TrackId, ChannelId)> =
+        chains.iter().filter_map(|c| channel_of(c.track).filter(|&ch| feeds(ch)).map(|ch| (c.track, ch))).collect();
+    // The buses a track's sound passes through after its own channel, nearest first.
+    let buses_after = |track: TrackId| -> Vec<(TrackId, ChannelId)> {
+        let mut out = Vec::new();
+        let mut visited = Vec::new();
+        let mut next =
+            channel_of(track).and_then(|ch| project.channels.iter().find(|c| c.id == ch)).and_then(|c| c.output);
+        while let Some(id) = next.take() {
+            if visited.len() > MAX_HOPS || visited.contains(&id) {
+                break;
+            }
+            visited.push(id);
+            if let Some(&bus) = buses.iter().find(|(_, ch)| *ch == id) {
+                out.push(bus);
+            }
+            next = project.channels.iter().find(|c| c.id == id).and_then(|c| c.output);
+        }
+        out
+    };
+
+    if !buses.is_empty() {
+        for track in &project.tracks {
+            if chains.iter().all(|c| c.track != track.id)
+                && !buses_after(track.id).is_empty()
+                && track_gains(project, track.id).is_some()
+            {
+                chains.push(Chain::passthrough(track.id, column_of(track.id)));
+            }
+        }
+        // Deepest first: a chain with more buses after it comes before them.
+        chains.sort_by_key(|c| std::cmp::Reverse(buses_after(c.track).len()));
+    }
+
+    let targets: Vec<Option<(usize, ChannelId)>> = chains
+        .iter()
+        .map(|c| {
+            let (bus, channel) = *buses_after(c.track).first()?;
+            Some((chains.iter().position(|o| o.track == bus)?, channel))
+        })
+        .collect();
+    for (chain, target) in chains.iter_mut().zip(&targets) {
+        let is_bus = buses.iter().any(|(t, _)| *t == chain.track);
+        // A group's pan does not apply (as for a group without devices); a track's does.
+        let post = gains_until(project, chain.track, target.map(|(_, ch)| ch), !is_bus).unwrap_or((0.0, 0.0));
+        chain.set_post(post);
+        chain.target = target.map(|(index, _)| index);
+    }
+
+    // Latency compensation. A chain's sources start without delay; a bus's input is the latest
+    // of the chains that feed it, each delayed to it; everything reaching the output is delayed
+    // to the latest path, bounded so a plug-in that reports nonsense cannot take all memory.
+    let max_latency = sample_rate.saturating_mul(MAX_LATENCY_SECONDS);
+    let mut arrive = vec![0u32; chains.len()];
+    let mut input = vec![0u32; chains.len()];
+    for i in 0..chains.len() {
+        let own = chains.get(i).map_or(0, |c| c.latency.min(max_latency));
+        let at = input.get(i).copied().unwrap_or(0).saturating_add(own).min(max_latency);
+        if let Some(slot) = arrive.get_mut(i) {
+            *slot = at;
+        }
+        if let Some(Some((target, _))) = targets.get(i)
+            && let Some(slot) = input.get_mut(*target)
+        {
+            *slot = (*slot).max(at);
+        }
+    }
+    let latency = (0..chains.len())
+        .filter(|&i| matches!(targets.get(i), Some(None)))
+        .map(|i| arrive.get(i).copied().unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    for (i, chain) in chains.iter_mut().enumerate() {
+        let to = match targets.get(i) {
+            Some(Some((target, _))) => input.get(*target).copied().unwrap_or(0),
+            _ => latency,
+        };
+        chain.delay = Delay::new(to.saturating_sub(arrive.get(i).copied().unwrap_or(0)) as usize);
+    }
+    (chains, latency)
+}
+
+/// A track's equal-power pan (when `pan`) and the volume of every channel from its own up to,
+/// not including, `until`; with `until` `None`, up to and including the master. `None` when the
+/// track is not heard. Scaled like `track_gains`, which this equals for `until` `None`.
+pub(crate) fn gains_until(
+    project: &Project,
+    track: TrackId,
+    until: Option<ChannelId>,
+    pan: bool,
+) -> Option<(f32, f32)> {
+    track_gains(project, track)?;
+    let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
+    let channel = project.channels.iter().find(|c| c.id == channel_id)?;
+    let gain = |c: &loopwerk_model::Channel| if c.volume.is_finite() { c.volume.max(0.0) } else { 0.0 };
+    let mut volume = 1.0;
+    let mut visited = Vec::new();
+    let mut next = Some(channel);
+    while let Some(c) = next.take() {
+        if Some(c.id) == until || visited.len() > MAX_HOPS || visited.contains(&c.id) {
+            break;
+        }
+        visited.push(c.id);
+        volume *= gain(c);
+        next = c.output.and_then(|id| project.channels.iter().find(|o| o.id == id));
+    }
+    if until.is_none()
+        && let Some(master) =
+            project.channels.iter().find(|c| c.role == ChannelRole::Master && !visited.contains(&c.id))
+    {
+        volume *= gain(master);
+    }
+    let pan = if pan && channel.pan.is_finite() { channel.pan.clamp(-1.0, 1.0) } else { 0.0 };
+    let angle = (pan + 1.0) * std::f64::consts::FRAC_PI_4;
+    let scale = volume * std::f64::consts::SQRT_2 * 0.25;
+    Some(((angle.cos() * scale) as f32, (angle.sin() * scale) as f32))
+}

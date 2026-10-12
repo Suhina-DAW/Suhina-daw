@@ -201,7 +201,16 @@ impl Session {
     /// Hands over a file decoded ahead (on another thread), so a command that uses `path` next
     /// (`clip.addFiles`, `preview.play`) need not decode it. Only the latest few are kept.
     pub fn provide_audio(&mut self, path: &Path, data: std::sync::Arc<loopwerk_engine::AudioData>) {
-        let key = files::absolute(path).display().to_string();
+        self.provide_key(files::absolute(path).display().to_string(), data);
+    }
+
+    /// Hands over one audio track of a Stems file decoded ahead (track 0 is the master), as
+    /// [`Session::provide_audio`] does for a sample.
+    pub fn provide_stream(&mut self, path: &Path, stream: u16, data: std::sync::Arc<loopwerk_engine::AudioData>) {
+        self.provide_key(loopwerk_model::stream_key(&files::absolute(path).display().to_string(), stream), data);
+    }
+
+    fn provide_key(&mut self, key: String, data: std::sync::Arc<loopwerk_engine::AudioData>) {
         self.decoded.retain(|(k, _)| *k != key);
         if self.decoded.len() >= MAX_DECODED {
             self.decoded.remove(0);
@@ -223,6 +232,44 @@ impl Session {
         self.audio.files.insert(key, std::sync::Arc::clone(&data));
         self.audio_changed = true;
         Ok(data)
+    }
+
+    /// Every audio track of the Stems file at `path` (absolute), the master first: from the
+    /// pool, from what was provided, or decoded now. Each joins the pool under its
+    /// [`loopwerk_model::stream_key`].
+    pub(crate) fn decoded_streams(
+        &mut self,
+        path: &Path,
+        tracks: usize,
+    ) -> Result<Vec<std::sync::Arc<loopwerk_engine::AudioData>>, String> {
+        let file = path.display().to_string();
+        let keys: Vec<String> =
+            (0..tracks).map(|n| loopwerk_model::stream_key(&file, u16::try_from(n).unwrap_or(u16::MAX))).collect();
+        let known: Vec<Option<std::sync::Arc<loopwerk_engine::AudioData>>> = keys
+            .iter()
+            .map(|key| {
+                self.audio
+                    .files
+                    .get(key)
+                    .or_else(|| self.decoded.iter().find(|(k, _)| k == key).map(|(_, d)| d))
+                    .map(std::sync::Arc::clone)
+            })
+            .collect();
+        let all: Vec<std::sync::Arc<loopwerk_engine::AudioData>> = if known.iter().all(Option::is_some) {
+            known.into_iter().flatten().collect()
+        } else {
+            loopwerk_media::stems::decode_streams(path)?.into_iter().map(std::sync::Arc::new).collect()
+        };
+        if all.len() != tracks {
+            return Err(format!("{} audio tracks where {tracks} were expected", all.len()));
+        }
+        for (key, data) in keys.into_iter().zip(&all) {
+            if let std::collections::hash_map::Entry::Vacant(slot) = self.audio.files.entry(key) {
+                slot.insert(std::sync::Arc::clone(data));
+                self.audio_changed = true;
+            }
+        }
+        Ok(all)
     }
 
     /// Decoded audio for a preview, which does not join the project's pool.

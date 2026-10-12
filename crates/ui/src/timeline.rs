@@ -24,7 +24,7 @@ pub struct NoteMark {
 /// How an audio clip reads its file: which file, and the file position at each clip beat.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioView {
-    /// The region's `file`, the key of the decoded audio and its waveform.
+    /// The region's pool key (`AudioRegion::pool_key`), the key of the decoded audio and its waveform.
     pub file: String,
     /// Where the clip starts in its content, in beats, and its loop.
     pub offset: f64,
@@ -228,7 +228,7 @@ fn audio_view(content: &ClipContent, clip: &Clip, tempo_bpm: f64) -> Option<Audi
     markers.dedup_by(|a, b| a.0 == b.0);
     let rate = if region.warped { 1.0 } else { 2f64.powf(region.transpose / 12.0) };
     Some(AudioView {
-        file: region.file.clone(),
+        file: region.pool_key().into_owned(),
         offset: clip.offset,
         loop_range: clip.loop_range.filter(|r| r.end > r.start).map(|r| (r.start, r.end)),
         markers: if region.warped { markers } else { Vec::new() },

@@ -677,6 +677,7 @@ fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::wavefo
         warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 4.0, audio_time: 2.0 }],
         gain: 1.0,
         transpose: 0.0,
+        stream: None,
     };
     project.contents.push(ClipContent {
         id: ContentId(300),

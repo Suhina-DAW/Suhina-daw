@@ -392,6 +392,7 @@ fn audio_project() -> Project {
                 warp_markers: Vec::new(),
                 gain: 1.0,
                 transpose: 0.0,
+                stream: None,
             }),
         }],
         extensions: Extensions::default(),

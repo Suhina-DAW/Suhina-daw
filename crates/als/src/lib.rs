@@ -603,6 +603,7 @@ impl Reader {
             warp_markers,
             gain: number(clip, &["SampleVolume"]).filter(|g| *g >= 0.0).unwrap_or(1.0),
             transpose: coarse + fine / 100.0,
+            stream: None,
         })
     }
 

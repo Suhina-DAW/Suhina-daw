@@ -230,6 +230,26 @@ pub struct AudioRegion {
     pub gain: f64,
     /// Pitch shift in semitones (fractions are cents / 100).
     pub transpose: f64,
+    /// Which audio track of a file with several plays: in a Stems file 0 is the master and 1, 2,
+    /// and so on the stems. `None` for an ordinary file (its first audio track).
+    pub stream: Option<u16>,
+}
+
+impl AudioRegion {
+    /// The key the region's decoded audio has in the engine's audio pool: the file, and for one
+    /// audio track of several, `#<stream>` after it. Always derived, never stored, so it follows
+    /// the file when saving rewrites its path.
+    pub fn pool_key(&self) -> std::borrow::Cow<'_, str> {
+        match self.stream {
+            None => std::borrow::Cow::Borrowed(&self.file),
+            Some(stream) => std::borrow::Cow::Owned(stream_key(&self.file, stream)),
+        }
+    }
+}
+
+/// The audio pool key of one audio track of a file with several (see [`AudioRegion::pool_key`]).
+pub fn stream_key(file: &str, stream: u16) -> String {
+    format!("{file}#{stream}")
 }
 
 /// The time-stretch algorithm for a warped audio region (ADR 0003). The names describe intent;

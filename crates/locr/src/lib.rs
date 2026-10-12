@@ -314,6 +314,7 @@ fn audio_value(a: &AudioRegion) -> Value {
         "warp_markers": a.warp_markers.iter().map(|m| json!({ "time": number(m.time), "audio_time": number(m.audio_time) })).collect::<Vec<_>>(),
         "gain": number(a.gain),
         "transpose": number(a.transpose),
+        "stream": a.stream,
     })
 }
 
@@ -734,6 +735,7 @@ fn read_audio(value: &Value, at: &str) -> Result<AudioRegion, LocrError> {
         warp_markers,
         gain: float_or(a, "gain", 1.0, at)?,
         transpose: float_or(a, "transpose", 0.0, at)?,
+        stream: optional_whole(a, "stream", at)?,
     })
 }
 

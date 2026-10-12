@@ -4,6 +4,9 @@
 
 mod ahead;
 mod audio;
+mod buses;
+#[cfg(test)]
+mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
@@ -63,7 +66,7 @@ const MAX_RENDER_SECONDS: f64 = 60.0 * 60.0;
 /// Extra length of a render when tracks have devices, for instrument releases and effect tails.
 const CHAIN_TAIL_SECONDS: f64 = 2.0;
 /// Most delay latency compensation makes up for, in seconds.
-const MAX_LATENCY_SECONDS: u32 = 2;
+pub(crate) const MAX_LATENCY_SECONDS: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderError {
@@ -474,8 +477,14 @@ impl Renderer {
         }
         // What went straight to the output waits for the slowest chain (latency compensation).
         self.graph.direct_delay.run(out);
-        for chain in &mut self.graph.chains {
-            chain.finish(out, frames, &context);
+        // In order, so a bus has every chain that plays into it before it runs.
+        for i in 0..self.graph.chains.len() {
+            let (done, later) = self.graph.chains.split_at_mut(i + 1);
+            let Some(chain) = done.last_mut() else { continue };
+            match chain.target.and_then(|t| t.checked_sub(i + 1)).and_then(|t| later.get_mut(t)) {
+                Some(bus) => chain.finish(bus.input(frames), frames, &context),
+                None => chain.finish(out, frames, &context),
+            }
         }
         // The preview comes after every track and the main channel's mix (ADR 0011).
         self.preview.finish(out, frames, &mut self.graph.chains);
@@ -672,21 +681,9 @@ impl Graph {
                 .and_then(|i| u32::try_from(i).ok())
                 .unwrap_or(NO_COLUMN)
         };
-        let mut chains: Vec<Chain> = project
-            .tracks
-            .iter()
-            .filter_map(|track| {
-                let gains = track_gains(project, track.id)?;
-                Chain::build(project, track.id, column_of(track.id), gains, sample_rate, plugins)
-            })
-            .collect();
-        // Latency compensation: every track is heard as late as the one whose devices delay it
-        // most, bounded so a plug-in that reports nonsense cannot take all memory.
-        let max_latency = sample_rate.saturating_mul(MAX_LATENCY_SECONDS);
-        let latency = chains.iter().map(|c| c.latency.min(max_latency)).max().unwrap_or(0);
-        for chain in &mut chains {
-            chain.delay = Delay::new((latency - chain.latency.min(max_latency)) as usize);
-        }
+        // Device chains, group buses and latency compensation: every track is heard as late as
+        // the path whose devices delay it most.
+        let (chains, latency) = buses::build(project, sample_rate, plugins, column_of);
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
@@ -707,7 +704,7 @@ impl Graph {
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
-                            let Some(data) = audio.files.get(&region.file) else { continue };
+                            let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                             // Warped clips are time-stretched as they play; the rest, and clips
                             // the stretcher cannot handle, are re-pitched.
@@ -877,7 +874,7 @@ pub fn render_launches_with_plugins(
 /// Solo: while any channel is soloed, a track sounds only if a channel on its way to the master
 /// is soloed (its own, or a group it plays into), or a soloed track plays into it (a group), or
 /// it is a return track, so effects stay audible.
-fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
+pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
     let pan = if channel.pan.is_finite() { channel.pan.clamp(-1.0, 1.0) } else { 0.0 };
@@ -1258,6 +1255,7 @@ mod tests {
             ],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let mut project =
             project_with(vec![ContentLane { target: None, data: LaneData::Audio(region) }], vec![clip(0.0, beats)], 1);

@@ -106,6 +106,19 @@ the device code should not have to change when it lands.
    apply; otherwise the new chain starts fresh and the old devices are freed with the old
    graph, off the audio thread. A render with chains is 2 s longer, for releases and tails.
 
+10. **A group with devices is a bus** (added 2026-10-12, with Stems files, whose mastering
+   compressor and limiter must act on the sum of the stems). When a group track's channel holds
+   devices, the tracks routed into it (at any depth) no longer reach the output on their own:
+   each gets a chain, one without devices when it has none, whose output goes into the group's
+   chain buffer at the track's pan and the volumes from its channel up to the group; the
+   group's devices run over the sum, and the volumes from the group to the master apply after
+   them (a group's pan does not apply, as before). Chains are ordered so a bus comes after
+   every chain that feeds it, and a block runs them in that order. Latency compensation follows
+   every path: a bus's input waits for the slowest chain feeding it, and the output for the
+   slowest path, so a track with a lookahead device inside a group with another still starts
+   with the rest (`crates/engine/src/buses.rs`). A group without devices stays a gain on the
+   tracks routed through it, with no buffer of its own.
+
 ## Not decided yet
 
 - **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
@@ -115,8 +128,9 @@ the device code should not have to change when it lands.
   values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
   parameter's value, which the project stores like any other (presets of other devices are not
   decided yet; [browser spec](../spec/browser.md)).
-- **Chains on group, return and master channels.** Latency compensation is built for track
-  chains: a device's `latency()` (the overdrive and vinyl distortion, 31 frames) delays every
+- **Chains on return and master channels, and sends into chains.** Latency compensation is
+  built for track and group chains (10 above): a device's `latency()` (the overdrive and vinyl
+  distortion, 31 frames; the limiter, its 1.5 ms lookahead) delays every
   other track to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences).
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.

@@ -29,10 +29,11 @@ the first device.
   the engine, they can later be split into their own repository or built as CLAP plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
 - **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
-  overdrive and the FM synth (the first instrument: the DX7-style engine ported from MSFA, with
-  DX7 voice files) exist and are tested on their own. The engine runs them in chains on tracks:
-  a track's sound goes through its devices before its fader, and an instrument first in the
-  chain plays the track's notes (LOOP-35); `device.*` commands add, remove, switch and set them.
+  overdrive, the compressor, the limiter and the FM synth (the first instrument: the DX7-style
+  engine ported from MSFA, with DX7 voice files) exist and are tested on their own. The engine
+  runs them in chains on tracks: a track's sound goes through its devices before its fader, and
+  an instrument first in the chain plays the track's notes (LOOP-35); `device.*` commands add,
+  remove, switch and set them.
   Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
@@ -88,7 +89,9 @@ placeholder):
 | EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | DSP done; import planned |
 | Vinyl Distortion | vinyl distortion | own, oversampled | DSP done; import planned |
 | Overdrive | overdrive | own, oversampled | DSP done; import planned |
-| Glue Compressor, Compressor | bus compressor, compressor | own, Airwindows (MIT) for reference | planned |
+| Compressor | compressor: stereo-linked, soft knee, side-chain high-pass, dry/wet | own | DSP done; import planned |
+| Glue Compressor | bus compressor | own, Airwindows (MIT) for reference | planned |
+| Limiter | limiter: brickwall, 1.5 ms lookahead | own | DSP done; import planned |
 | Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors | planned |
 | Delay, Echo | delays | own delay lines | planned |
 | Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
@@ -190,7 +193,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   writes a 32-bit float WAV. Both run the same engine code.
 - Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
   instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
-  master volume and mute apply. `--fm` on `play` and `render` puts the FM synth on every MIDI
+  master volume and mute apply. A group with devices is a bus: its devices run over the sum of
+  its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
   track, with a voice from a DX7 file; `loopwerk-cli fm-synth voices` lists a file's voices.
 
 ### M3 Commands and agents (in progress)
@@ -314,7 +318,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   through the engine (auto-play, or the play button; MIDI through the selected track's
   instrument), whether the project plays or not. Dragging samples and MIDI files onto a lane,
   a slot or the empty space after the tracks places them (`clip.addFiles`; one track, or one
-  each with Ctrl; a sample with a known tempo is warped), devices, DX7 presets and plug-ins onto
+  each with Ctrl; a sample with a known tempo is warped; a Stems file `.stem.mp4` becomes a group
+  of its stems and its muted master, with its mastering compressor and limiter on the group),
+  devices, DX7 presets and plug-ins onto
   a track or the empty space add them (`device.add`, `track.add`); Enter or a double-click adds
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),

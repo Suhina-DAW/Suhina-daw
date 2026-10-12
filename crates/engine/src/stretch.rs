@@ -367,6 +367,7 @@ mod tests {
             warp_markers: markers.iter().map(|&(time, audio_time)| WarpMarker { time, audio_time }).collect(),
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         }
     }
 

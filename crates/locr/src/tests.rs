@@ -135,6 +135,7 @@ fn everything() -> Project {
                         ],
                         gain: 0.8,
                         transpose: -1.5,
+                        stream: Some(3),
                     }),
                 }],
                 extensions: Extensions::default(),

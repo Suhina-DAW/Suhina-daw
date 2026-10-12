@@ -12,6 +12,10 @@
 //! with their frames and runs once per block, so the devices run one after another over the
 //! whole block, each split at the events, rather than piece by piece. The output is the same
 //! for built-in devices, which only ever see their own input.
+//!
+//! A group track whose channel holds devices is a bus (see `buses`): the chains of the tracks
+//! that play into it add their output to its buffer instead of the output, and its devices run
+//! over the sum.
 
 use std::time::Instant;
 
@@ -57,6 +61,9 @@ pub(crate) struct Chain {
     pub(crate) delay: Delay,
     /// The track's gains after the chain.
     post: (f32, f32),
+    /// The index of the bus chain this chain's output goes into, or `None` for the output. Bus
+    /// chains come after the chains that feed them, so they run after them in a block.
+    pub(crate) target: Option<usize>,
     buffer: Vec<f32>,
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
@@ -159,6 +166,7 @@ impl Chain {
             latency,
             delay: Delay::new(0),
             post: (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN),
+            target: None,
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
@@ -168,6 +176,44 @@ impl Chain {
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
         })
+    }
+
+    /// A chain without devices for a track that plays into a bus, so its sound reaches the bus
+    /// at its gains and with its share of latency compensation. Allocates.
+    pub(crate) fn passthrough(track: TrackId, column: u32) -> Self {
+        Self {
+            track,
+            column,
+            slots: Vec::new(),
+            positions: Vec::new(),
+            ids: Vec::new(),
+            params: Vec::new(),
+            instrument: false,
+            latency: 0,
+            delay: Delay::new(0),
+            post: (1.0, 1.0),
+            target: None,
+            buffer: vec![0.0; MAX_BLOCK * 2],
+            pending: Vec::new(),
+            span_events: Vec::new(),
+            deadline: None,
+            context: ProcessContext::default(),
+            done: 0,
+            held: [NOT_HELD; 128],
+            next_off: NOT_HELD,
+        }
+    }
+
+    /// Sets the gains applied after the devices: the track's gains up to where its sound goes.
+    pub(crate) fn set_post(&mut self, post: (f32, f32)) {
+        self.post = (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN);
+    }
+
+    /// The first `frames` frames of the buffer, for the chains that play into this bus to add
+    /// their output to.
+    pub(crate) fn input(&mut self, frames: usize) -> &mut [f32] {
+        let end = (frames.min(MAX_BLOCK) * 2).min(self.buffer.len());
+        self.buffer.get_mut(..end).unwrap_or_default()
     }
 
     /// Clears the buffer for a block of `frames` frames, whose plug-ins must answer by

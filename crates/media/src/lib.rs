@@ -3,6 +3,7 @@
 
 pub mod info;
 pub mod midi;
+pub mod stems;
 pub mod tempo;
 
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use symphonia::core::meta::MetadataOptions;
 
 /// Longest file we decode, so one huge or hostile file cannot exhaust memory (about 2.6 GiB of
 /// stereo f32 at 48 kHz).
-const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
+pub(crate) const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
 
 /// Loads every audio file the project uses. Same as [`decode_project_audio`].
 pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
@@ -32,19 +33,21 @@ pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, 
 /// path is tried. Files that cannot be found or decoded are reported in the returned warnings and
 /// left out.
 pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
-    // Each file once, with where to look for it.
-    let mut wanted: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    // Each file once (once more when a Stems file is played whole as well as by track), with
+    // where to look for it and whether all of its audio tracks are wanted.
+    let mut wanted: Vec<(String, Vec<PathBuf>, bool)> = Vec::new();
     for content in &project.contents {
         for lane in &content.lanes {
             let LaneData::Audio(region) = &lane.data else { continue };
-            if wanted.iter().any(|(file, _)| *file == region.file) {
+            let streams = region.stream.is_some();
+            if wanted.iter().any(|(file, _, s)| *file == region.file && *s == streams) {
                 continue;
             }
             let mut candidates = vec![project_dir.join(&region.file)];
             if let Some(absolute) = &region.absolute_file {
                 candidates.push(PathBuf::from(absolute));
             }
-            wanted.push((region.file.clone(), candidates));
+            wanted.push((region.file.clone(), candidates, streams));
         }
     }
 
@@ -56,12 +59,24 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
             .map(|_| {
                 scope.spawn(|| {
                     let mut done = Vec::new();
-                    while let Some((file, candidates)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        let result = match candidates.iter().find(|p| p.is_file()) {
-                            None => Err(format!("audio file {file} not found")),
-                            Some(path) => decode_file(path).map_err(|e| format!("audio file {}: {e}", path.display())),
+                    while let Some((file, candidates, streams)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let Some(path) = candidates.iter().find(|p| p.is_file()) else {
+                            done.push((file.clone(), Err(format!("audio file {file} not found"))));
+                            continue;
                         };
-                        done.push((file.clone(), result));
+                        let failed = |e: String| format!("audio file {}: {e}", path.display());
+                        if !*streams {
+                            done.push((file.clone(), decode_file(path).map_err(failed)));
+                            continue;
+                        }
+                        match stems::decode_streams(path) {
+                            Ok(all) => done.extend(
+                                all.into_iter()
+                                    .zip(0u16..)
+                                    .map(|(data, n)| (loopwerk_engine::model::stream_key(file, n), Ok(data))),
+                            ),
+                            Err(e) => done.push((file.clone(), Err(failed(e)))),
+                        }
                     }
                     done
                 })
@@ -182,6 +197,7 @@ mod tests {
                         warp_markers: Vec::new(),
                         gain: 1.0,
                         transpose: 0.0,
+                        stream: None,
                     }),
                 }],
                 extensions: Extensions::default(),
@@ -228,5 +244,37 @@ mod tests {
         let (pool, warnings) = load_project_audio(&project_with_audio("noise.wav", None), &dir.join("set"));
         assert!(pool.files.is_empty() && warnings.len() == 1, "{warnings:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stems_file_is_decoded_once_with_a_key_per_track() {
+        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("data");
+        let mut project = project_with_audio("tones-aac.stem.mp4", None);
+        let lane = project.contents[0].lanes[0].clone();
+        project.contents[0].lanes.clear();
+        // Stems 1 and 3, and the same file played whole (its first track, the master).
+        for stream in [Some(1), Some(3), None] {
+            let mut lane = lane.clone();
+            if let LaneData::Audio(region) = &mut lane.data {
+                region.stream = stream;
+            }
+            project.contents[0].lanes.push(lane);
+        }
+        let (pool, warnings) = load_project_audio(&project, &data);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let mut keys: Vec<_> = pool.files.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "tones-aac.stem.mp4",
+                "tones-aac.stem.mp4#0",
+                "tones-aac.stem.mp4#1",
+                "tones-aac.stem.mp4#2",
+                "tones-aac.stem.mp4#3",
+                "tones-aac.stem.mp4#4"
+            ]
+        );
+        assert_eq!(pool.files["tones-aac.stem.mp4#1"].frames(), 44_100);
     }
 }

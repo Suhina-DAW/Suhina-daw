@@ -50,7 +50,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 | device | `name`; `kind` `{ "type": "builtin", "id" }`, `clap`, `vst3` (32 hex digits), `vst2` (a whole number) or `foreign` `{ format, id }`; `enabled` (default true); `state` (base64, plug-ins); `params` `[{ id, value }]` (built-in devices). A VST3 controller's state is the extension `Vst3ControllerState` |
 | content | `id`; `name`; `length` (beats); `lanes`, each `{ target, notes }` or `{ target, audio }` (`target` a track for a shared pattern, else `null`) |
 | note | `time`, `duration` (beats); `key` 0–127; `velocity`, `release_velocity` 0–1; `channel` 0–15 |
-| audio | `file` (relative to the project file, `/` between folders); `absolute_file`; `sample_rate`, `channels`, `duration_seconds` (if known); `warped`; `stretch` `repitch`, `rhythmic`, `tonal`, `texture`, `smooth` or `high_quality`; `warp_markers` `[{ time, audio_time }]`; `gain` (linear); `transpose` (semitones) |
+| audio | `file` (relative to the project file, `/` between folders); `absolute_file`; `sample_rate`, `channels`, `duration_seconds` (if known); `warped`; `stretch` `repitch`, `rhythmic`, `tonal`, `texture`, `smooth` or `high_quality`; `warp_markers` `[{ time, audio_time }]`; `gain` (linear); `transpose` (semitones); `stream`: which audio track of a file with several plays (a Stems file: 0 the master, 1 and up the stems; missing or `null` for an ordinary file) |
 | arrangement lane | `name`; `track` or `null`; `clips` |
 | clip | `content`; `start`, `length`, `offset` (beats); `loop` `[start, end]` or `null`; `enabled`; `fade_in`, `fade_out` (beats) |
 | scene | `name`; `tempo_bpm` or `null` |

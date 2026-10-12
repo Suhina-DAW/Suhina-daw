@@ -151,6 +151,7 @@ fn audio_set_on_the_controller_is_heard_from_the_next_graph() {
         warp_markers: Vec::new(),
         gain: 1.0,
         transpose: 0.0,
+        stream: None,
     };
     let mut audio_project = project(Vec::new(), 2.0, Vec::new());
     audio_project.tracks[0].content = ContentKinds { notes: false, audio: true };

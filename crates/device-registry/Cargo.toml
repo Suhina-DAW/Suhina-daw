@@ -13,6 +13,8 @@ loopwerk-device-dj-eq.workspace = true
 loopwerk-device-vinyl-distortion.workspace = true
 loopwerk-device-overdrive.workspace = true
 loopwerk-device-fm-synth.workspace = true
+loopwerk-device-compressor.workspace = true
+loopwerk-device-limiter.workspace = true
 
 [lints]
 workspace = true

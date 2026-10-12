@@ -74,9 +74,11 @@ const BROWSER_HANDLE: f32 = 4.0;
 /// A drop whose samples are being decoded on another thread before its commands run.
 struct PendingDrop {
     commands: Vec<(&'static str, serde_json::Value)>,
-    decoded:
-        std::sync::mpsc::Receiver<Vec<(PathBuf, std::sync::Arc<loopwerk_engine::AudioData>, crate::waveform::Peaks)>>,
+    /// Each decoded file (a Stems file once per audio track, with its stream number).
+    decoded: std::sync::mpsc::Receiver<Vec<DecodedDrop>>,
 }
+
+type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<loopwerk_engine::AudioData>, crate::waveform::Peaks);
 
 /// A project's view state, kept while another project's tab is showing.
 #[derive(Default)]
@@ -1570,12 +1572,22 @@ impl App {
         let (send, decoded) = std::sync::mpsc::channel();
         let samples = plan.samples.clone();
         let started = std::thread::Builder::new().name("loopwerk-drop".into()).spawn(move || {
+            // A Stems file gives every audio track, each under its stream number.
             let done: Vec<_> = samples
                 .into_iter()
-                .filter_map(|path| {
-                    let data = loopwerk_media::decode_file(&path).ok()?;
-                    let peaks = crate::waveform::peaks(&data);
-                    Some((path, std::sync::Arc::new(data), peaks))
+                .flat_map(|path| {
+                    let decoded: Vec<(Option<u16>, loopwerk_media::AudioData)> =
+                        if loopwerk_media::stems::is_stems_path(&path) {
+                            loopwerk_media::stems::decode_streams(&path)
+                                .map(|all| all.into_iter().zip(0u16..).map(|(d, n)| (Some(n), d)).collect())
+                                .unwrap_or_default()
+                        } else {
+                            loopwerk_media::decode_file(&path).map(|d| vec![(None, d)]).unwrap_or_default()
+                        };
+                    decoded.into_iter().map(move |(stream, data)| {
+                        let peaks = crate::waveform::peaks(&data);
+                        (path.clone(), stream, std::sync::Arc::new(data), peaks)
+                    })
                 })
                 .collect();
             let _ = send.send(done);
@@ -1598,9 +1610,18 @@ impl App {
                 let Some(pending) = self.pending_drop.take() else { return };
                 let mut waveforms = (*self.waveforms).clone();
                 if let Ok(session) = self.projects.session_mut(None) {
-                    for (path, data, peaks) in decoded {
+                    for (path, stream, data, peaks) in decoded {
                         let key = std::path::absolute(&path).unwrap_or(path.clone()).display().to_string();
-                        session.provide_audio(&path, data);
+                        let key = match stream {
+                            Some(n) => {
+                                session.provide_stream(&path, n, data);
+                                loopwerk_engine::model::stream_key(&key, n)
+                            }
+                            None => {
+                                session.provide_audio(&path, data);
+                                key
+                            }
+                        };
                         waveforms.insert(key, std::sync::Arc::new(peaks));
                     }
                 }
