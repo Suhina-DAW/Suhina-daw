@@ -4,10 +4,15 @@ name: Generated docs
 # command registry) on main after every merge and commits them when they changed. Pull requests
 # leave both files alone, so two pull requests never conflict on them.
 #
-# The commit is pushed with a deploy key that the main ruleset lets bypass pull requests. Setup:
-# `ssh-keygen -t ed25519 -N "" -f docs-bot`, add docs-bot.pub under Settings › Deploy keys with
-# write access, docs-bot as the Actions secret DOCS_DEPLOY_KEY, and "Deploy keys" to the bypass
-# list of the main ruleset. Without the secret the files are generated but not pushed.
+# Two jobs, so the key that may push to main never shares a machine with code from the repository
+# or its dependencies (build scripts, proc macros): `generate` builds and writes the files with no
+# secrets; `publish` runs only git, copies exactly those two files and pushes them.
+#
+# The push uses a deploy key that the main ruleset lets bypass pull requests. Setup:
+# `ssh-keygen -t ed25519 -N "" -f docs-bot`; add docs-bot.pub under Settings › Deploy keys with
+# write access; create the environment `docs-bot` (Settings › Environments) limited to the `main`
+# branch, with docs-bot as its secret DOCS_DEPLOY_KEY; add "Deploy keys" to the bypass list of the
+# main ruleset. Without the secret the files are generated but not pushed.
 on:
   push:
     branches: [main]
@@ -30,33 +35,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
+          persist-credentials: false
       - name: Install ALSA headers (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: docs/commands.md
-        run: |
-          cargo run --quiet -p loopwerk-cli -- commands --markdown > "$RUNNER_TEMP/commands.md"
-          mv "$RUNNER_TEMP/commands.md" docs/commands.md
+        run: cargo run --quiet -p loopwerk-cli -- commands --markdown > docs/commands.md
       - name: docs/INDEX.md
         run: python3 scripts/docs.py index
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-docs
+          path: |
+            docs/INDEX.md
+            docs/commands.md
+          retention-days: 1
+
+  publish:
+    needs: generate
+    runs-on: ubuntu-latest
+    environment: docs-bot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-docs
+          path: ${{ runner.temp }}/generated
       - name: Commit and push when they changed
         env:
+          GENERATED: ${{ runner.temp }}/generated
           HAS_KEY: ${{ secrets.DOCS_DEPLOY_KEY != '' }}
         run: |
-          if git diff --quiet -- docs/INDEX.md docs/commands.md; then
+          for name in INDEX.md commands.md; do
+            source="$GENERATED/$name"
+            if [ ! -f "$source" ] || [ -L "$source" ]; then
+              echo "::error::$name is missing from the generated files or is not a regular file."
+              exit 1
+            fi
+            cp "$source" "docs/$name"
+          done
+          changed=$(git status --porcelain)
+          if [ -z "$changed" ]; then
             echo "Generated documentation is current."
             exit 0
           fi
-          git diff --stat -- docs/INDEX.md docs/commands.md
+          if printf '%s\n' "$changed" | grep -Ev '^ M docs/(INDEX|commands)\.md$|^\?\? docs/commands\.md$'; then
+            echo "::error::Only docs/INDEX.md and docs/commands.md may change (above: anything else)."
+            exit 1
+          fi
+          git diff --stat
           if [ "$HAS_KEY" != "true" ]; then
-            echo "::warning::DOCS_DEPLOY_KEY is not set, so the regenerated files are not pushed."
+            echo "::warning::DOCS_DEPLOY_KEY is not set in the docs-bot environment, so the files are not pushed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Docs: regenerate INDEX.md and commands.md" -- docs/INDEX.md docs/commands.md
+          git add docs/INDEX.md docs/commands.md
+          git commit -m "Docs: regenerate INDEX.md and commands.md"
           if ! git push origin HEAD:main; then
             echo "::notice::main moved on during this run; the run for the newer commit regenerates the files."
           fi
