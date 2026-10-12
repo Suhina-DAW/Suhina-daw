@@ -12,6 +12,12 @@ Apache-2.0, OFL, CC0, CC BY) and keep their license file next to them.
 |---|---|---|---|---|
 | _(none yet)_ | | | | |
 
+## Documentation
+
+| Path | Title | Author | Source | License |
+|---|---|---|---|---|
+| `docs/design/reference/session-minimal-v3.png`, `arrangement-minimal-v3.png` | Loopwerk Session and Arrangement design mockups (minimal v3) | Loopwerk contributors | Original work, exported from the project's design canvas | GPL-3.0-or-later |
+
 ## Test data (not committed, not shipped)
 
 `corpus/` is gitignored. Test projects are authored by Loopwerk contributors (see
