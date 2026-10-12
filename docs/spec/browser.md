@@ -48,6 +48,7 @@ project.
 | Kind | Extensions | Category |
 |---|---|---|
 | Sample | `.wav` `.aif` `.aiff` `.flac` `.mp3` `.ogg` `.oga` | Samples |
+| Stems file | `.stem.mp4` `.stem.m4a` (a master and its stems, [spec](stems-format.md)) | Samples |
 | MIDI file | `.mid` `.midi` | MIDI |
 | Preset | `.syx` (DX7 voice data: one voice, or a bank of 32; [spec](dx7-voice-format.md)) | Presets |
 | Project | `.locr`, `.als` | All only |
@@ -226,6 +227,16 @@ is its duration at the project's tempo when it is dropped.
 A MIDI file's notes keep their positions in beats (its tempo does not change the project's).
 A clip's length is the end of its last note rounded up to a whole bar (at least one bar).
 
+**A Stems file** becomes a group named after it, holding a track for the master (muted, so
+nothing sounds twice; unmute it to compare or to play the track whole) and one track per stem,
+named and coloured from the file. Each track gets a clip of its part from the dropped beat or
+in the dropped scene, all with the master's tempo, so the parts stay locked together. The file's
+mastering compressor and limiter go on the group, which runs them over the sum of the stems
+([ADR 0004](../decisions/0004-built-in-devices.md) › 10); switched off when the file has them
+off. Dropped on a group, the new group goes inside it, after its tracks; dropped on a track,
+after that track; elsewhere, after the regular tracks. Ctrl does not change this. Previewing a
+Stems file plays its master.
+
 **Unreadable files** (missing, damaged, too long, no notes) are left out; the others are still
 placed, and the status bar says which were skipped and why. When none can be placed nothing
 changes.
@@ -298,7 +309,7 @@ the CLI can do the same.
 | Command | Params | Does |
 |---|---|---|
 | `track.add` | `kind?` (`audio`, `midi`), `name?`, `after?`, `device?`, `preset?`, `voice?` | adds a track with its mixer channel, clip slots for every scene and an Arrangement lane, after track `after` or at the end of the regular tracks; with `device` (a built-in id or a plug-in from `plugins.list`) or `preset`, the device too, and `kind` follows from it |
-| `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?` | places samples and MIDI files as in *Files*: on `track` (or new tracks when it is missing), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track |
+| `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?` | places samples, MIDI files and Stems files as in *Files*: on `track` (or new tracks when it is missing; a Stems file's group goes into `track` when it is a group), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track; returns the clips, the new tracks, the Stems groups (`groups`) and what was `skipped` |
 | `device.add` | adds `preset?` and `voice?` (1–32) | the built-in device with a preset's values |
 
 **Preview** (Transport kind, on the active project's player): `preview.play {path, from?, track?}`

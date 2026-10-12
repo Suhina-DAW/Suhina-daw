@@ -831,7 +831,7 @@ fn with_descendants(p: &Project, track: TrackId) -> Vec<TrackId> {
     p.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
 }
 
-fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let p = &mut session.project;
     let members = track_list(p, params)?;
     let parents: Vec<Option<TrackId>> =

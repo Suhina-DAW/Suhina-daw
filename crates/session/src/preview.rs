@@ -32,7 +32,7 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
         Some(_) => Some(track_at(&session.project, params, "track")?),
     };
     match kind_of(&path) {
-        Some(FileKind::Sample) => {
+        Some(FileKind::Sample | FileKind::Stems) => {
             let data = session.preview_audio(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let seconds = data.frames() as f64 / f64::from(data.sample_rate.max(1));
             session.player_mut()?.controller_mut().preview_sample(data, from, gain).map_err(CommandError)?;

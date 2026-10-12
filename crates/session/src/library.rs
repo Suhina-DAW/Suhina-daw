@@ -262,8 +262,8 @@ impl Category {
     /// The kinds of file it shows (none for the device categories).
     pub fn file_kinds(self) -> &'static [FileKind] {
         match self {
-            Self::All => &[FileKind::Sample, FileKind::Midi, FileKind::Preset, FileKind::Project],
-            Self::Samples => &[FileKind::Sample],
+            Self::All => &[FileKind::Sample, FileKind::Stems, FileKind::Midi, FileKind::Preset, FileKind::Project],
+            Self::Samples => &[FileKind::Sample, FileKind::Stems],
             Self::Midi => &[FileKind::Midi],
             Self::Presets => &[FileKind::Preset],
             Self::Instruments | Self::Effects | Self::Plugins => &[],
@@ -524,7 +524,7 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut out = json!({ "kind": kind.name(), "name": name, "size": size });
     match kind {
-        FileKind::Sample => {
+        FileKind::Sample | FileKind::Stems => {
             let info = loopwerk_media::info::sample_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let mut tempo = info.tempo;
             if tempo.is_none() && info.duration_seconds.is_some_and(|d| d <= DETECT_SECONDS) {
@@ -541,6 +541,20 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
             out["bpm"] = json!(tempo.map(|t| t.bpm));
             out["bpm_from"] = json!(tempo.map(|t| t.source.name()));
             out["key"] = json!(info.key);
+            if kind == FileKind::Stems {
+                let stems = loopwerk_media::stems::read_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
+                out["stems"] = json!(stems
+                    .stems
+                    .iter()
+                    .map(|s| json!({ "name": s.name, "color": s.color.map(|[r, g, b]| format!("#{r:02x}{g:02x}{b:02x}")) }))
+                    .collect::<Vec<_>>());
+                out["mastering"] = json!(
+                    loopwerk_media::stems::mastering_devices(&stems)
+                        .iter()
+                        .map(|d| json!({ "device": d.id, "enabled": d.enabled }))
+                        .collect::<Vec<_>>()
+                );
+            }
         }
         FileKind::Midi => {
             let midi = loopwerk_media::midi::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -678,7 +692,7 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
                 }
                 let absolute = crate::files::absolute(Path::new(path));
                 let group = match loopwerk_media::info::kind_of(&absolute) {
-                    Some(FileKind::Sample) => Group::Samples,
+                    Some(FileKind::Sample | FileKind::Stems) => Group::Samples,
                     Some(FileKind::Midi) => Group::Midi,
                     _ => continue,
                 };

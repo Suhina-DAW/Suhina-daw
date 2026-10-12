@@ -6,6 +6,8 @@ status: draft
 last_verified: 2026-10-12
 covers:
   - crates/media/src/stems.rs
+  - crates/session/src/files.rs
+  - crates/session/tests/stems.rs
   - crates/media/tests/data/**
   - scripts/stems-fixture.py
 ---

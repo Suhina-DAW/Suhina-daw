@@ -96,13 +96,14 @@ Change this code, and check these documents.
 | `crates/session/src/blank.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
-| `crates/session/src/files.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
+| `crates/session/src/files.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/library.rs` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/src/rack.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |

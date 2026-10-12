@@ -122,7 +122,7 @@ impl Reader {
 fn read_info(path: &Path, whole: bool) -> FileInfo {
     let mut info = FileInfo::default();
     match loopwerk_media::info::kind_of(path) {
-        Some(FileKind::Sample) => {
+        Some(FileKind::Sample | FileKind::Stems) => {
             match loopwerk_media::info::sample_info(path) {
                 Ok(header) => {
                     info.seconds = header.duration_seconds;
@@ -252,7 +252,7 @@ fn item_kind(found: &Found) -> ItemKind {
 
 fn file_kind_item(kind: FileKind) -> ItemKind {
     match kind {
-        FileKind::Sample => ItemKind::Sample,
+        FileKind::Sample | FileKind::Stems => ItemKind::Sample,
         FileKind::Midi => ItemKind::Midi,
         FileKind::Preset => ItemKind::Preset,
         FileKind::Project => ItemKind::Project,

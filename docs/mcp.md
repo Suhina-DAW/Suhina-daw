@@ -64,7 +64,8 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new
-  tracks, one after another from a beat or down the clip slots from a scene; files that cannot be
+  tracks (a Stems file as a group of its master, muted, and its stems, with its mastering on the
+  group, [spec](spec/stems-format.md)), one after another from a beat or down the clip slots from a scene; files that cannot be
   read are listed in `skipped`. A sample whose tempo is known (metadata, name, detection) is
   warped to the project's tempo. Each is one undo step, and a playing engine hears an added
   sample from its next graph ([browser spec](spec/browser.md) › Files,

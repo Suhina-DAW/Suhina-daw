@@ -317,15 +317,19 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
         None | Some(Value::Null) => None,
         Some(_) => Some(track_at(&session.project, params, "track")?),
     };
-    let target_kind = match target {
+    // A Stems file may be dropped on a group (its tracks go into it); other files need a track
+    // that holds clips, or go on new tracks when the target is a group.
+    let stems_target = target;
+    let (target, target_kind) = match target {
         Some(t) => {
             let track = session.project.tracks.iter().find(|x| x.id == t).ok_or("the track is missing")?;
-            Some(
-                TrackKind::of(track)
-                    .ok_or_else(|| format!("track {:?} holds no clips (a group or a return)", track.name))?,
-            )
+            match TrackKind::of(track) {
+                Some(kind) => (Some(t), Some(kind)),
+                None if is_group(&session.project, t) => (None, None),
+                None => return Err(format!("track {:?} holds no clips (a return)", track.name).into()),
+            }
         }
-        None => None,
+        None => (None, None),
     };
 
     // Read every file; the ones that cannot be read are skipped with a reason.
@@ -333,7 +337,12 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
     let bar = bar_beats(&session.project);
     let mut sources: Vec<Source> = Vec::new();
     let mut skipped: Vec<Value> = Vec::new();
+    let mut stems_paths: Vec<String> = Vec::new();
     for path in paths.iter().take(MAX_FILES) {
+        if kind_of(Path::new(path)) == Some(FileKind::Stems) {
+            stems_paths.push(path.clone());
+            continue;
+        }
         match read_sources(session, Path::new(path), tempo, bar, stretch) {
             Ok(mut list) => sources.append(&mut list),
             Err(reason) => skipped.push(json!({ "path": path, "reason": reason })),
@@ -342,7 +351,7 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
     for path in paths.iter().skip(MAX_FILES) {
         skipped.push(json!({ "path": path, "reason": format!("more than {MAX_FILES} files in one go") }));
     }
-    if sources.is_empty() {
+    if sources.is_empty() && stems_paths.is_empty() {
         let reasons: Vec<String> = skipped
             .iter()
             .map(|s| format!("{}: {}", s["path"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or("")))
@@ -409,78 +418,106 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
     for (track, list) in groups {
         let mut at = start.unwrap_or(0.0);
         for (i, source) in list.into_iter().enumerate() {
-            let id =
-                ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?);
-            let length = source.length;
-            p.contents.push(ClipContent {
-                id,
-                name: source.name.clone(),
-                length,
-                lanes: vec![ContentLane { target: None, data: source.lane }],
-                extensions: Default::default(),
-            });
-            let mut clip = Clip {
-                content: id,
-                start: 0.0,
-                length,
-                offset: 0.0,
-                loop_range: None,
-                enabled: true,
-                fade_in: 0.0,
-                fade_out: 0.0,
-                extensions: Default::default(),
-            };
-            match scene {
-                Some(first) => {
-                    let row = first + i;
-                    if row >= MAX_SCENES {
-                        skipped.push(json!({ "path": source.name, "reason": format!("past scene {MAX_SCENES}") }));
-                        continue;
-                    }
-                    while p.launcher.scenes.len() <= row {
-                        p.launcher.scenes.push(Scene::default());
-                        for column in &mut p.launcher.columns {
-                            column.slots.push(Slot { clip: None, has_stop: true });
-                        }
-                    }
-                    if source.loops {
-                        clip.loop_range = Some(LoopRange { start: 0.0, end: length });
-                    }
-                    let column = p
-                        .launcher
-                        .columns
-                        .iter_mut()
-                        .find(|c| c.track == track)
-                        .ok_or("the track has no clip slots")?;
-                    let slot = column.slots.get_mut(row).ok_or("the slot is missing")?;
-                    slot.clip = Some(clip);
-                    placed.push(json!({ "track": track.0, "scene": row + 1, "name": source.name, "length": length }));
-                }
-                None => {
-                    clip.start = at;
-                    let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
-                        Some(lane) => lane,
-                        None => {
-                            let name =
-                                p.tracks.iter().find(|t| t.id == track).map(|t| t.name.clone()).unwrap_or_default();
-                            p.arrangement.lanes.push(ArrangementLane { name, track: Some(track), clips: Vec::new() });
-                            p.arrangement.lanes.len() - 1
-                        }
-                    };
-                    let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
-                    if !stack {
-                        make_room(&mut lane.clips, at, at + length);
-                    }
-                    lane.clips.push(clip);
-                    lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-                    placed.push(json!({ "track": track.0, "start": at, "name": source.name, "length": length }));
-                    at += length;
-                }
+            let row = scene.map(|first| first + i);
+            if row.is_some_and(|r| r >= MAX_SCENES) {
+                skipped.push(json!({ "path": source.name, "reason": format!("past scene {MAX_SCENES}") }));
+                continue;
             }
+            let length = source.length;
+            placed.push(place_clip(p, track, source, row, at, stack)?);
+            at += length;
         }
     }
+
+    // Stems files: a group of tracks each.
+    let mut stem_groups: Vec<u32> = Vec::new();
+    for path in stems_paths {
+        match place_stems(session, &path, stems_target, start, scene, stretch, stack) {
+            Ok(done) => {
+                new_tracks.extend(done.tracks.iter().copied());
+                stem_groups.push(done.group.0);
+                placed.extend(done.clips);
+            }
+            Err(reason) => skipped.push(json!({ "path": path, "reason": reason.0 })),
+        }
+    }
+    if placed.is_empty() {
+        let reasons: Vec<String> = skipped
+            .iter()
+            .map(|s| format!("{}: {}", s["path"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or("")))
+            .collect();
+        return Err(format!("nothing could be placed ({})", reasons.join("; ")).into());
+    }
     let tracks: Vec<u32> = new_tracks.iter().map(|t| t.0).collect();
-    Ok(json!({ "clips": placed, "tracks": tracks, "skipped": skipped }))
+    Ok(json!({ "clips": placed, "tracks": tracks, "groups": stem_groups, "skipped": skipped }))
+}
+
+/// Puts one source as a clip on `track`: in slot `row` of the Session, or at beat `at` in the
+/// Arrangement (replacing what it covers unless `stack`).
+fn place_clip(
+    p: &mut Project,
+    track: TrackId,
+    source: Source,
+    row: Option<usize>,
+    at: f64,
+    stack: bool,
+) -> Result<Value, CommandError> {
+    let id = ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?);
+    let length = source.length;
+    p.contents.push(ClipContent {
+        id,
+        name: source.name.clone(),
+        length,
+        lanes: vec![ContentLane { target: None, data: source.lane }],
+        extensions: Default::default(),
+    });
+    let mut clip = Clip {
+        content: id,
+        start: 0.0,
+        length,
+        offset: 0.0,
+        loop_range: None,
+        enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        extensions: Default::default(),
+    };
+    match row {
+        Some(row) => {
+            while p.launcher.scenes.len() <= row {
+                p.launcher.scenes.push(Scene::default());
+                for column in &mut p.launcher.columns {
+                    column.slots.push(Slot { clip: None, has_stop: true });
+                }
+            }
+            if source.loops {
+                clip.loop_range = Some(LoopRange { start: 0.0, end: length });
+            }
+            let column =
+                p.launcher.columns.iter_mut().find(|c| c.track == track).ok_or("the track has no clip slots")?;
+            let slot = column.slots.get_mut(row).ok_or("the slot is missing")?;
+            slot.clip = Some(clip);
+            Ok(json!({ "track": track.0, "scene": row + 1, "name": source.name, "length": length }))
+        }
+        None => {
+            clip.start = at;
+            let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
+                Some(lane) => lane,
+                None => {
+                    let name = p.tracks.iter().find(|t| t.id == track).map(|t| t.name.clone()).unwrap_or_default();
+                    p.arrangement.lanes.push(ArrangementLane { name, track: Some(track), clips: Vec::new() });
+                    p.arrangement.lanes.len() - 1
+                }
+            };
+            let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
+            if !stack {
+                make_room(&mut lane.clips, at, at + length);
+            }
+            lane.clips.push(clip);
+            lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+            Ok(json!({ "track": track.0, "start": at, "name": source.name, "length": length }))
+        }
+    }
 }
 
 fn stretch_mode(text: &str) -> Option<StretchMode> {
@@ -580,6 +617,7 @@ fn read_sources(
                 })
                 .collect())
         }
+        Some(FileKind::Stems) => Err("a Stems file becomes a group of tracks".into()),
         Some(FileKind::Preset) => Err("a preset goes on a track as a device".into()),
         Some(FileKind::Project) => Err("a project is opened, not placed".into()),
         None => Err("not a sample or a MIDI file".into()),
@@ -595,4 +633,162 @@ pub fn file_tempo(path: &Path, data: &AudioData) -> Option<Tempo> {
 /// `path` made absolute against the working folder, without touching the disk.
 pub(crate) fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Whether `track` is a group track.
+fn is_group(p: &Project, track: TrackId) -> bool {
+    p.tracks
+        .iter()
+        .find(|t| t.id == track)
+        .and_then(|t| t.channel)
+        .and_then(|c| p.channels.iter().find(|ch| ch.id == c))
+        .is_some_and(|c| c.role == ChannelRole::Submix)
+}
+
+/// What one Stems file became.
+struct StemsPlaced {
+    group: TrackId,
+    /// The group and its tracks.
+    tracks: Vec<TrackId>,
+    clips: Vec<Value>,
+}
+
+/// Places a Stems file (`docs/spec/stems-format.md`): a group named after the file holding a
+/// muted track for the master and one track per stem (named and coloured from the file), each
+/// with a clip of its audio track at `start` or in `scene`; the file's mastering compressor and
+/// limiter on the group, which sums the stems before them (ADR 0004 › 10). The group goes
+/// after `target`, or into it when it is a group, or at the end of the regular tracks. The file
+/// is read and decoded before the project changes.
+fn place_stems(
+    session: &mut Session,
+    path: &str,
+    target: Option<TrackId>,
+    start: Option<f64>,
+    scene: Option<usize>,
+    stretch: StretchMode,
+    stack: bool,
+) -> Result<StemsPlaced, CommandError> {
+    let absolute = absolute(Path::new(path));
+    if !absolute.is_file() {
+        return Err("not found".into());
+    }
+    let info = loopwerk_media::stems::read_info(&absolute)?;
+    let streams = session.decoded_streams(&absolute, info.tracks)?;
+    let master = streams.first().ok_or("no master track")?;
+    let name = file_stem(&absolute);
+    let name = name.strip_suffix(".stem").map(str::to_string).unwrap_or(name);
+    let key = absolute.display().to_string();
+    // One tempo for all, from the master: the stems stay locked together.
+    let tempo = session.project.transport.tempo_bpm;
+    let file_bpm = file_tempo(&absolute, master).map(|t| t.bpm).filter(|b| b.is_finite() && *b > 0.0);
+    let mut sources = Vec::with_capacity(streams.len());
+    for (n, data) in streams.iter().enumerate() {
+        let duration = data.frames() as f64 / f64::from(data.sample_rate.max(1));
+        let (warped, beats, markers) = match file_bpm {
+            Some(bpm) => {
+                let beats = duration * bpm / 60.0;
+                (
+                    true,
+                    beats,
+                    vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: beats, audio_time: duration }],
+                )
+            }
+            None => (false, duration * tempo / 60.0, Vec::new()),
+        };
+        if !(beats.is_finite() && beats > 0.0) {
+            return Err("its length in beats is not usable".into());
+        }
+        let stem = n.checked_sub(1).and_then(|i| info.stems.get(i));
+        let region = AudioRegion {
+            file: key.clone(),
+            absolute_file: Some(key.clone()),
+            sample_rate: Some(data.sample_rate),
+            channels: Some(data.channels),
+            duration_seconds: Some(duration),
+            warped,
+            stretch: if warped { stretch } else { StretchMode::default() },
+            warp_markers: markers,
+            gain: 1.0,
+            transpose: 0.0,
+            stream: Some(u16::try_from(n).map_err(|_| "too many tracks")?),
+        };
+        let clip_name = match stem {
+            Some(s) => format!("{name} – {}", s.name),
+            None => format!("{name} – Master"),
+        };
+        let track_name = stem.map_or_else(|| "Master".to_string(), |s| s.name.clone());
+        let color = stem.and_then(|s| s.color).map(|[r, g, b]| loopwerk_model::Rgb(r, g, b));
+        sources.push((
+            track_name,
+            color,
+            Source {
+                kind: TrackKind::Audio,
+                name: clip_name,
+                length: beats,
+                lane: LaneData::Audio(region),
+                loops: warped,
+            },
+        ));
+    }
+
+    // The tracks, after the target or at the end of a target group.
+    let p = &mut session.project;
+    let into = target.filter(|&t| is_group(p, t));
+    let mut after = match into {
+        Some(group) => Some(p.tracks.iter().rev().find(|t| within(p, t.id, group)).map_or(group, |t| t.id)),
+        None => target,
+    };
+    let mut tracks = Vec::with_capacity(sources.len());
+    for (track_name, color, _) in &sources {
+        let id = insert_track(p, TrackKind::Audio, track_name, after)?;
+        if let Some(group) = into {
+            let group_channel = p.tracks.iter().find(|t| t.id == group).and_then(|t| t.channel);
+            let channel = p.tracks.iter_mut().find(|t| t.id == id).and_then(|t| {
+                t.parent = Some(group);
+                t.channel
+            });
+            if let Some(c) = p.channels.iter_mut().find(|c| Some(c.id) == channel) {
+                c.output = group_channel;
+            }
+        }
+        if let Some(track) = p.tracks.iter_mut().find(|t| t.id == id) {
+            track.color = *color;
+        }
+        tracks.push(id);
+        after = Some(id);
+    }
+    // The master is there to compare with and to play whole; muted, so nothing sounds twice.
+    if let Some(channel) = tracks.first().and_then(|&m| p.tracks.iter().find(|t| t.id == m)).and_then(|t| t.channel)
+        && let Some(c) = p.channels.iter_mut().find(|c| c.id == channel)
+    {
+        c.mute = true;
+    }
+    let grouped = crate::commands::group_tracks(
+        session,
+        &json!({ "tracks": tracks.iter().map(|t| t.0).collect::<Vec<_>>(), "name": name }),
+    )?;
+    let group = TrackId(grouped["track"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("the group was not made")?);
+    let p = &mut session.project;
+    let group_channel = p.tracks.iter().find(|t| t.id == group).and_then(|t| t.channel);
+    if let Some(c) = p.channels.iter_mut().find(|c| Some(c.id) == group_channel) {
+        for setting in loopwerk_media::stems::mastering_devices(&info) {
+            let Some(device) = loopwerk_device_registry::info(setting.id) else { continue };
+            c.devices.push(loopwerk_model::Device {
+                name: device.name.to_string(),
+                kind: loopwerk_model::DeviceKind::Builtin(setting.id.to_string()),
+                enabled: setting.enabled,
+                state: None,
+                params: setting.params.iter().map(|(id, v)| loopwerk_model::DeviceParam::new(*id, *v)).collect(),
+                extensions: Default::default(),
+            });
+        }
+    }
+
+    let mut clips = Vec::with_capacity(sources.len());
+    for (&track, (_, _, source)) in tracks.iter().zip(sources) {
+        clips.push(place_clip(p, track, source, scene, start.unwrap_or(0.0), stack)?);
+    }
+    let mut all = vec![group];
+    all.extend(tracks);
+    Ok(StemsPlaced { group, tracks: all, clips })
 }

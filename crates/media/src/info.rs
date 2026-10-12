@@ -14,6 +14,8 @@ use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FileKind {
     Sample,
+    /// A Stems file: a master and its stems in one MP4 (`docs/spec/stems-format.md`).
+    Stems,
     Midi,
     Preset,
     Project,
@@ -24,6 +26,7 @@ impl FileKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Sample => "sample",
+            Self::Stems => "stems",
             Self::Midi => "midi",
             Self::Preset => "preset",
             Self::Project => "project",
@@ -32,12 +35,20 @@ impl FileKind {
 
     /// The kind [`FileKind::name`] gives `text`.
     pub fn parse(text: &str) -> Option<Self> {
-        [Self::Sample, Self::Midi, Self::Preset, Self::Project].into_iter().find(|k| k.name() == text)
+        [Self::Sample, Self::Stems, Self::Midi, Self::Preset, Self::Project].into_iter().find(|k| k.name() == text)
+    }
+
+    /// Whether it is audio that becomes audio clips (a sample, or a Stems file).
+    pub fn is_audio(self) -> bool {
+        matches!(self, Self::Sample | Self::Stems)
     }
 }
 
 /// The kind of the file at `path`, by its extension; `None` for files the browser does not list.
 pub fn kind_of(path: &Path) -> Option<FileKind> {
+    if crate::stems::is_stems_path(path) {
+        return Some(FileKind::Stems);
+    }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     match extension.as_str() {
         "wav" | "aif" | "aiff" | "flac" | "mp3" | "ogg" | "oga" => Some(FileKind::Sample),

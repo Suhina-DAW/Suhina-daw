@@ -315,7 +315,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   through the engine (auto-play, or the play button; MIDI through the selected track's
   instrument), whether the project plays or not. Dragging samples and MIDI files onto a lane,
   a slot or the empty space after the tracks places them (`clip.addFiles`; one track, or one
-  each with Ctrl; a sample with a known tempo is warped), devices, DX7 presets and plug-ins onto
+  each with Ctrl; a sample with a known tempo is warped; a Stems file `.stem.mp4` becomes a group
+  of its stems and its muted master, with its mastering compressor and limiter on the group),
+  devices, DX7 presets and plug-ins onto
   a track or the empty space add them (`device.add`, `track.add`); Enter or a double-click adds
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
