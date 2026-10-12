@@ -262,9 +262,14 @@ workspace forbids.
     desktop ships), through winit's `with_x11`, as other DAWs do: the hosts open editors as X11
     windows, and only an X11 window of Loopwerk's can own or embed them. Without `DISPLAY` the
     window is a Wayland one and editors open in windows of their own, unowned.
-    *Built on Windows:* the host opens a top-level window of its own on its main thread
-    (`crates/plugin-host/src/window.rs`, Win32), or for an embedded editor a clip and a view
-    window as children of Loopwerk's, and attaches the plug-in's view to it (VST3 `IPlugView`
+    *Built on Windows:* the host's main thread initialises OLE first (`OleInitialize`, and
+    so COM, apartment threaded), as a host's window thread is expected to: editors use it for
+    drag and drop, the clipboard and text services, and Serum 2 and Z3TA+ 2 crashed inside
+    `attached` without it (a null object from a COM call), found with the host under `cdb`
+    (`crates/plugin-host/tests/manual.rs` opens one installed plug-in's editor by hand, with
+    any program standing in for the host). The host opens a top-level window of its own on
+    its main thread (`crates/plugin-host/src/window.rs`, Win32), or for an embedded editor a
+    clip and a view window as children of Loopwerk's, and attaches the plug-in's view to it (VST3 `IPlugView`
     with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps its
     messages in the main loop between control messages, and tells the engine unasked when the
     user closes it (`editor_closed`, protocol version 4) or the plug-in resizes it

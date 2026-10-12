@@ -67,7 +67,21 @@ pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHan
     }
 }
 
+/// Sets the main thread up as a plug-in's editor expects a host's window thread to be: on
+/// Windows with OLE (and so COM, apartment threaded) initialised, which editors use for drag
+/// and drop, the clipboard and text services, and which some crash without (Serum 2, Z3TA+ 2:
+/// a null object from a COM call made before `OleInitialize`).
+fn prepare_main_thread() {
+    #[cfg(windows)]
+    {
+        // SAFETY: called once, on the main thread, before any window or plug-in; a null
+        // reserved argument as the function requires.
+        let _ = unsafe { windows_sys::Win32::System::Ole::OleInitialize(std::ptr::null_mut()) };
+    }
+}
+
 fn main() {
+    prepare_main_thread();
     let args: Vec<String> = std::env::args().collect();
     let address = match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("--control"), Some(address)) => address,
