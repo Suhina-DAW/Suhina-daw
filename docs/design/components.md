@@ -61,7 +61,10 @@ Animations are short and only show a change of state; with animations off (a set
 
 | Region | Size |
 |---|---|
-| Menu bar | 20 px high, items 14 px apart, `text.secondary`; File, Edit, View, Options so far |
+| Menu bar | 20 px high, items 14 px apart, `text.secondary`; File, Edit, View, Projects, Options so far |
+| Tab row | 22 px, `surface.0`, shown while two or more projects are open (ADR 0007): one tab per project, name and a 12 px × to close; the active tab `surface.1` with `text.primary`, others `text.secondary`; Ctrl+Tab and Ctrl+Shift+Tab move between them |
+| Open prompt | When a project is dropped while another is open and the setting says Ask: a 32 px row on `surface.1` above the view: "Open x:" In a new tab, In place of y, Cancel, Remember (which sets the setting) |
+| Drop overlay | While a project file is dragged over the window: `surface.0` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Control bar | 28 px high, three groups on `surface.1`: tempo and meter left, transport centre, status and view switch right |
 | Transport button | 28 × 20, `surface.2`; play shows `surface.3` while playing, glyph in `accent`; record glyph is a 1.5 px red ring |
 | View switch | Text only; current view `text.primary` with a 1 px underline |
@@ -177,6 +180,7 @@ restart (the renderer) says so in its note.
 | Section | Setting | Values |
 |---|---|---|
 | Interface | Animations | On (default), Off |
+| Projects | When opening a project | Ask (default), New tab, Replace |
 | Arrangement | Track headers | Left, Right (default) |
 | Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Graphics | Renderer | GPU (wgpu, default), OpenGL (glow) |

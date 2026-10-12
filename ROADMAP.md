@@ -272,5 +272,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
   gain, which a drag changes (`clip.setGain`).
-- Still to do: clip fades, input routing and sends, waveforms, clip fades and gain, overlapping clips, the browser, detail area (devices, clip editor), menu bar and
-  settings, project tabs, meters, solo and arm, the design's monospace font, installers.
+- Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
+  only the active one plays; opening one while another is open asks (new tab or replace, with
+  Remember and a setting). A project file dragged over the window darkens it.
+- Still to do: clip fades, input routing and sends, arm, meters, the browser, the detail area
+  (devices, clip editor), configurable shortcuts, the plug-ins section in Settings, the design's
+  monospace font, installers.

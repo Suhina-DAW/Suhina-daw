@@ -4,14 +4,15 @@
 // Release builds on Windows start without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use loopwerk_engine::AudioPool;
-use loopwerk_session::Session;
+use loopwerk_session::{ProjectId, Session};
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
-use loopwerk_ui::{App, Status};
+use loopwerk_ui::{App, OpenAs, Status};
 
 const USAGE: &str = "\
 usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
@@ -64,16 +65,18 @@ fn main() -> ExitCode {
         eframe::Renderer::Glow => Graphics::OpenGl,
         eframe::Renderer::Wgpu => Graphics::Gpu,
     };
-    let mut window = Window { app: App::new(), graphics_now, audio_output: None };
+    let mut window = Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new() };
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
             let session = Session::new(loopwerk_ui::demo::demo_project());
             let (session, warnings, output) = with_audio(session, &AudioPool::new());
             window.audio_output = output;
-            window.app.set_session(session, &warnings);
+            if let Some(id) = window.app.open_project(session, &warnings, OpenAs::NewTab) {
+                window.pools.insert(id, AudioPool::new());
+            }
         }
-        Source::Als(path) => window.open(&path),
+        Source::Als(path) => window.open(&path, OpenAs::NewTab),
     }
     if let Some(warning) = settings_warnings.first() {
         window.app.set_status(Status::Hint(warning.clone()));
@@ -146,13 +149,34 @@ struct Window {
     app: App,
     graphics_now: Graphics,
     audio_output: Option<String>,
+    /// Each open project's decoded audio, kept so a project made active again can play.
+    pools: HashMap<ProjectId, AudioPool>,
 }
 
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
-        if let Some(path) = self.app.take_open_request() {
-            self.open(&path);
+        if let Some((path, how)) = self.app.take_open_request() {
+            self.open(&path, how);
+        }
+        for closed in self.app.take_closed() {
+            self.pools.remove(&closed);
+        }
+        // Only the active project plays; one made active again gets an output.
+        if let Some(id) = self.app.take_player_request() {
+            let opened = match (self.app.projects().get(id), self.pools.get(&id)) {
+                (Some(session), Some(audio)) => Some(loopwerk_output::open_player(session.project(), audio)),
+                _ => None,
+            };
+            match opened {
+                Some(Ok((player, device))) => {
+                    self.app.attach_player(id, player);
+                    self.audio_output = Some(device);
+                }
+                Some(Err(e)) => self.app.set_status(Status::Error(format!("no audio output: {e}"))),
+                None => {}
+            }
+            self.share_about();
         }
         if let Some(settings) = self.app.take_changed_settings()
             && let Err(e) = save_settings(&settings)
@@ -163,8 +187,9 @@ impl eframe::App for Window {
 }
 
 impl Window {
-    /// Opens a Live Set: imports it, decodes its audio and starts playing it, stopped.
-    fn open(&mut self, path: &Path) {
+    /// Opens a Live Set in a new tab or in place of the active project: imports it, decodes its
+    /// audio and starts playing it, stopped.
+    fn open(&mut self, path: &Path, how: OpenAs) {
         match Session::open(path) {
             Ok((session, mut warnings)) => {
                 let folder = path.parent().unwrap_or(Path::new("."));
@@ -173,8 +198,13 @@ impl Window {
                 let (session, output_warnings, output) = with_audio(session, &audio);
                 warnings.extend(output_warnings);
                 self.audio_output = output;
-                self.app.set_session(session, &warnings);
-                self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
+                if let Some(id) = self.app.open_project(session, &warnings, how) {
+                    self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
+                    self.pools.insert(id, audio);
+                }
+                for closed in self.app.take_closed() {
+                    self.pools.remove(&closed);
+                }
                 self.share_about();
             }
             Err(e) => self.app.set_status(Status::Error(e.0)),

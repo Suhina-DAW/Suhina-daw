@@ -1,5 +1,5 @@
-//! The main window: control bar, the Session or Arrangement view and the status bar around an
-//! open session.
+//! The main window: tabs for the open projects (ADR 0007), the control bar, the Session or
+//! Arrangement view and the status bar around the active project.
 //! Every change goes through `Session::execute` (AGENTS.md rule 6); the window only reads the
 //! project and the engine's monitor to draw them.
 
@@ -8,14 +8,14 @@ use std::path::PathBuf;
 
 use egui::{Align2, Id, Key, KeyboardShortcut, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
-use loopwerk_session::{CommandKind, Session};
+use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
 use crate::grid::{Grid, SlotState};
 use crate::motion;
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{Settings, Side};
+use crate::settings::{OnOpen, Settings, Side};
 use crate::settings_view::{self, About};
 use crate::theme::{self, PAD};
 use crate::timeline::Timeline;
@@ -32,6 +32,32 @@ const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z);
 const REDO_Y: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
 const SETTINGS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma);
+const NEXT_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Tab);
+const PREVIOUS_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Tab);
+/// Height of the tab row, shown while two or more projects are open.
+const TABS: f32 = 22.0;
+/// How dark the window gets while a project file is dragged over it.
+const DROP_DIM: f32 = 0.45;
+
+/// How a project the user asked to open is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAs {
+    NewTab,
+    /// In place of the active project, which is closed.
+    Replace,
+}
+
+/// A project's view state, kept while another project's tab is showing.
+#[derive(Default)]
+struct Stash {
+    view: SessionViewState,
+    arrangement: Option<ArrangementViewState>,
+    quantization: Option<&'static str>,
+    launches: HashMap<TrackId, (usize, f64)>,
+    revision: u64,
+    timeline: Option<(u64, Timeline)>,
+    waveforms: std::sync::Arc<crate::waveform::Waveforms>,
+}
 
 /// The main view; Tab switches between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -50,7 +76,17 @@ pub enum Status {
 
 /// The window's state.
 pub struct App {
-    session: Option<Session>,
+    projects: Projects,
+    /// The project whose view state is in the fields below; others are in `stashes`.
+    shown_project: Option<ProjectId>,
+    stashes: HashMap<ProjectId, Stash>,
+    /// A dropped file waiting for the user to choose a new tab or replace.
+    open_prompt: Option<PathBuf>,
+    remember_choice: bool,
+    /// A project that became active and needs an audio output.
+    player_request: Option<ProjectId>,
+    /// Projects closed since the app last asked, so it can let go of their audio.
+    closed: Vec<ProjectId>,
     shown: View,
     view: SessionViewState,
     arrangement: ArrangementViewState,
@@ -59,7 +95,7 @@ pub struct App {
     /// Where each column's playing clip started, in beats, to show its progress.
     launches: HashMap<TrackId, (usize, f64)>,
     tempo_drag: Option<f64>,
-    open_request: Option<PathBuf>,
+    open_request: Option<(PathBuf, OpenAs)>,
     /// Counts changes to the project, so views derived from it are rebuilt only when it changed.
     revision: u64,
     /// The Arrangement view's data and the revision it was built from.
@@ -83,7 +119,13 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         Self {
-            session: None,
+            projects: Projects::new(),
+            shown_project: None,
+            stashes: HashMap::new(),
+            open_prompt: None,
+            remember_choice: false,
+            player_request: None,
+            closed: Vec::new(),
             shown: View::Session,
             view: SessionViewState::default(),
             arrangement: ArrangementViewState::default(),
@@ -102,8 +144,25 @@ impl App {
         }
     }
 
-    /// Shows `session`, replacing the one open before. `warnings` are what the importer skipped.
+    /// Shows `session`, replacing the active project. `warnings` are what the importer skipped.
     pub fn set_session(&mut self, session: Session, warnings: &[String]) {
+        self.open_project(session, warnings, OpenAs::Replace);
+    }
+
+    /// Opens `session` in a new tab or in place of the active project, and makes it active.
+    /// Returns its id, or `None` when no more projects can be open (the status bar says why).
+    pub fn open_project(&mut self, session: Session, warnings: &[String], how: OpenAs) -> Option<ProjectId> {
+        if how == OpenAs::Replace
+            && let Some(active) = self.projects.active()
+            && self.projects.close(active).is_ok()
+        {
+            self.stashes.remove(&active);
+            self.closed.push(active);
+            if self.shown_project == Some(active) {
+                self.shown_project = None;
+            }
+        }
+        self.stash_shown();
         let name = session
             .source()
             .and_then(|p| p.file_name())
@@ -119,20 +178,121 @@ impl App {
         if session.player().is_none() {
             self.status = Status::Hint(format!("Opened {name} without audio output; launching needs one"));
         }
-        self.session = Some(session);
-        self.waveforms = std::sync::Arc::default();
-        self.revision += 1;
-        self.view = SessionViewState::default();
-        let (headers_left, header_width) = (self.arrangement.headers_left, self.arrangement.header_width);
-        self.arrangement = ArrangementViewState::default();
-        self.arrangement.headers_left = headers_left;
-        self.arrangement.header_width = header_width;
-        self.launches.clear();
-        self.quantization = DEFAULT_QUANTIZATION;
+        let id = match self.projects.add(session, None) {
+            Ok(id) => id,
+            Err(e) => {
+                self.status = Status::Error(e.0);
+                return None;
+            }
+        };
+        self.restore(id, Stash::default());
+        Some(id)
     }
 
+    /// Puts the shown project's view state aside, under its id.
+    fn stash_shown(&mut self) {
+        let Some(id) = self.shown_project.take() else { return };
+        if self.projects.get(id).is_none() {
+            return;
+        }
+        let stash = Stash {
+            view: std::mem::take(&mut self.view),
+            arrangement: Some(std::mem::take(&mut self.arrangement)),
+            quantization: Some(self.quantization),
+            launches: std::mem::take(&mut self.launches),
+            revision: self.revision,
+            timeline: self.timeline.take(),
+            waveforms: std::mem::take(&mut self.waveforms),
+        };
+        self.stashes.insert(id, stash);
+    }
+
+    /// Shows project `id` with `stash` as its view state; the window's own preferences (the
+    /// header column's side and width) carry over.
+    fn restore(&mut self, id: ProjectId, stash: Stash) {
+        let (headers_left, header_width) = (self.arrangement.headers_left, self.arrangement.header_width);
+        self.view = stash.view;
+        self.arrangement = stash.arrangement.unwrap_or_default();
+        self.arrangement.headers_left = headers_left;
+        self.arrangement.header_width = header_width;
+        self.quantization = stash.quantization.unwrap_or(DEFAULT_QUANTIZATION);
+        self.launches = stash.launches;
+        self.revision = stash.revision.wrapping_add(1);
+        self.timeline = stash.timeline;
+        self.waveforms = stash.waveforms;
+        self.shown_project = Some(id);
+    }
+
+    /// Follows a change of the active project (a tab switched or closed): swaps the view state
+    /// and asks the app for an audio output when the newly active project has none.
+    fn follow_active(&mut self) {
+        let active = self.projects.active();
+        if active == self.shown_project {
+            return;
+        }
+        self.stash_shown();
+        for gone in self.stashes.keys().copied().filter(|id| self.projects.get(*id).is_none()).collect::<Vec<_>>() {
+            self.stashes.remove(&gone);
+        }
+        match active {
+            Some(id) => {
+                let stash = self.stashes.remove(&id).unwrap_or_default();
+                self.restore(id, stash);
+                if self.projects.get(id).is_some_and(|s| s.player().is_none()) {
+                    self.player_request = Some(id);
+                }
+            }
+            None => {
+                self.shown_project = None;
+                self.view = SessionViewState::default();
+                self.timeline = None;
+                self.launches.clear();
+            }
+        }
+    }
+
+    /// The open projects.
+    pub fn projects(&self) -> &Projects {
+        &self.projects
+    }
+
+    /// A project that became active and needs an audio output, once.
+    pub fn take_player_request(&mut self) -> Option<ProjectId> {
+        self.player_request.take()
+    }
+
+    /// Projects closed since the last call, so the app can let go of their audio.
+    pub fn take_closed(&mut self) -> Vec<ProjectId> {
+        std::mem::take(&mut self.closed)
+    }
+
+    /// Lets project `id` play through `player`.
+    pub fn attach_player(&mut self, id: ProjectId, player: loopwerk_session::Player) {
+        if let Some(session) = self.projects.get_mut(id) {
+            session.attach_player(player);
+        }
+        if self.shown_project == Some(id) {
+            self.quantization = DEFAULT_QUANTIZATION;
+        }
+    }
+
+    /// Asks to open `path`, as a dropped file does: at once when nothing is open or the
+    /// settings say how, otherwise after the user chose in the window.
+    pub fn request_open(&mut self, path: PathBuf) {
+        if self.projects.is_empty() {
+            self.open_request = Some((path, OpenAs::NewTab));
+            return;
+        }
+        match self.settings.on_open {
+            OnOpen::Ask => self.open_prompt = Some(path),
+            OnOpen::NewTab => self.open_request = Some((path, OpenAs::NewTab)),
+            OnOpen::Replace => self.open_request = Some((path, OpenAs::Replace)),
+        }
+    }
+
+    /// The active project's session.
     pub fn session(&self) -> Option<&Session> {
-        self.session.as_ref()
+        self.projects.active().and_then(|id| self.projects.get(id))
     }
 
     pub fn view(&self) -> View {
@@ -183,14 +343,20 @@ impl App {
         self.status = status;
     }
 
-    /// A file the user dropped on the window, for the app to open.
-    pub fn take_open_request(&mut self) -> Option<PathBuf> {
+    /// A project file the user asked to open, and how, for the app to open.
+    pub fn take_open_request(&mut self) -> Option<(PathBuf, OpenAs)> {
         self.open_request.take()
     }
 
     /// Runs one command and shows its outcome in the status bar.
     pub fn run(&mut self, action: &Action) {
-        let Some(session) = self.session.as_mut() else { return };
+        if action.id.starts_with("projects.") {
+            if let Err(e) = self.projects.execute(action.id, &action.params) {
+                self.status = Status::Error(e.0);
+            }
+            return;
+        }
+        let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
             Ok(_) => {
                 let changes_project = loopwerk_session::commands()
@@ -217,16 +383,23 @@ impl App {
     /// Draws the window into `ui` and runs what the user asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
         let mut actions = Vec::new();
+        self.follow_active();
         self.dropped_files(ui);
         self.shortcuts(ui, &mut actions);
 
-        let grid = self.session.as_ref().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
+        let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
             .frame(egui::Frame::NONE.fill(theme::SURFACE_1).inner_margin(egui::Margin::symmetric(4, 0)))
             .show(ui, |ui| self.menu_bar(ui, &mut actions));
+        if self.projects.len() >= 2 {
+            egui::Panel::top("tabs")
+                .exact_size(TABS)
+                .frame(egui::Frame::NONE.fill(theme::SURFACE_0))
+                .show(ui, |ui| self.tab_row(ui, &mut actions));
+        }
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
             .frame(egui::Frame::NONE.fill(theme::SURFACE_1))
@@ -243,10 +416,18 @@ impl App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.settings_page(ui));
                 return;
             }
+            let prompt_height = if self.open_prompt.is_some() { theme::ROW + 12.0 } else { 0.0 };
+            let (prompt, inner) = (
+                Rect::from_min_size(inner.min, Vec2::new(inner.width(), prompt_height)),
+                Rect::from_min_max(inner.min + Vec2::new(0.0, prompt_height), inner.max),
+            );
+            if self.open_prompt.is_some() {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
+            }
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                 (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
                 (Some(_), View::Arrangement) => {
-                    if let Some(session) = &self.session {
+                    if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                         self.arrangement.stack_audio = self.settings.sample_stacking;
                         self.arrangement.stack_midi = self.settings.midi_stacking;
                         let monitor = session.player().map(|p| p.monitor());
@@ -275,6 +456,7 @@ impl App {
                 }
                 (None, _) => empty(ui),
             });
+            drop_overlay(ui, inner);
         });
 
         for action in &actions {
@@ -284,6 +466,85 @@ impl App {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
             ui.ctx().request_repaint();
+        }
+    }
+
+    /// The tab row: one tab per open project, the active one lit; a tab's × closes it.
+    fn tab_row(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let bar = ui.max_rect();
+        ui.allocate_rect(bar, Sense::hover());
+        let painter = ui.painter_at(bar);
+        let active = self.projects.active();
+        let mut x = bar.left();
+        for id in self.projects.ids() {
+            let name = self.projects.name(id).unwrap_or("Untitled").to_string();
+            let galley = widgets::fitted(&painter, &name, theme::ui_font(theme::TEXT), theme::TEXT_PRIMARY, 180.0);
+            let width = galley.size().x + PAD * 2.0 + 16.0;
+            let tab = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(width, bar.height()));
+            x = tab.right() + 1.0;
+            let close = Rect::from_center_size(Pos2::new(tab.right() - PAD - 4.0, tab.center().y), Vec2::splat(12.0));
+            let response = widgets::button_area(ui, tab, Id::new(("tab", id.0)), format!("Tab {name}"));
+            let close_response = widgets::button_area(ui, close, Id::new(("close-tab", id.0)), format!("Close {name}"));
+            if close_response.clicked() || response.middle_clicked() {
+                actions.push(Action::new("projects.close", json!({ "project": id.0 })));
+            } else if response.clicked() && Some(id) != active {
+                actions.push(Action::new("projects.switch", json!({ "project": id.0 })));
+            }
+            let lit = motion::toward(ui.ctx(), response.id.with("active"), Some(id) == active, motion::VALUE);
+            let idle = motion::mix(theme::SURFACE_0, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response));
+            painter.rect_filled(tab, 0.0, motion::mix(idle, theme::SURFACE_1, lit));
+            let text = motion::mix(theme::TEXT_SECONDARY, theme::TEXT_PRIMARY, lit);
+            painter.galley(Pos2::new(tab.left() + PAD, tab.center().y - galley.size().y / 2.0), galley, text);
+            let cross = motion::mix(theme::TEXT_TERTIARY, theme::TEXT_PRIMARY, widgets::hover(ui, &close_response));
+            let c = close.center();
+            for (a, b) in [(Vec2::new(-3.0, -3.0), Vec2::new(3.0, 3.0)), (Vec2::new(-3.0, 3.0), Vec2::new(3.0, -3.0))] {
+                painter.line_segment([c + a, c + b], theme::hairline(cross));
+            }
+            painter.vline(tab.right() + 0.5, bar.y_range(), theme::hairline(theme::LINE));
+        }
+    }
+
+    /// The question asked when a project is dropped while another is open.
+    fn open_prompt_bar(&mut self, ui: &mut Ui) {
+        let Some(path) = self.open_prompt.clone() else { return };
+        let bar = ui.max_rect();
+        ui.painter().rect_filled(bar, 0.0, theme::SURFACE_1);
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().to_string());
+        let current = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
+        let mut choice = None;
+        let mut cancel = false;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(PAD, 6.0))), |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.label(egui::RichText::new(format!("Open {name}:")).color(theme::TEXT_PRIMARY));
+                if ui.button("In a new tab").clicked() {
+                    choice = Some(OpenAs::NewTab);
+                }
+                if ui.button(format!("In place of {current}")).clicked() {
+                    choice = Some(OpenAs::Replace);
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+                ui.checkbox(&mut self.remember_choice, "Remember");
+            });
+        });
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            cancel = true;
+        }
+        if let Some(how) = choice {
+            if self.remember_choice {
+                self.settings.on_open = match how {
+                    OpenAs::NewTab => OnOpen::NewTab,
+                    OpenAs::Replace => OnOpen::Replace,
+                };
+                self.settings_changed = true;
+            }
+            self.open_request = Some((path, how));
+            self.open_prompt = None;
+            self.remember_choice = false;
+        } else if cancel {
+            self.open_prompt = None;
+            self.remember_choice = false;
         }
     }
 
@@ -302,8 +563,9 @@ impl App {
 
     /// The menu bar: the same actions as the shortcuts and the views' controls.
     fn menu_bar(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
-        let has_project = self.session.is_some();
-        let (can_undo, can_redo) = self.session.as_ref().map_or((false, false), |s| (s.can_undo(), s.can_redo()));
+        let has_project = self.session().is_some();
+        let (can_undo, can_redo) = self.session().map_or((false, false), |s| (s.can_undo(), s.can_redo()));
+        let several = self.projects.len() >= 2;
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::TEXT_SECONDARY);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -329,6 +591,22 @@ impl App {
                     self.settings_open = false;
                 }
             });
+            ui.menu_button("Projects", |ui| {
+                if ui.add_enabled(several, egui::Button::new("Next project").shortcut_text("Ctrl+Tab")).clicked() {
+                    actions.push(Action::new("projects.next", json!({})));
+                }
+                if ui
+                    .add_enabled(several, egui::Button::new("Previous project").shortcut_text("Ctrl+Shift+Tab"))
+                    .clicked()
+                {
+                    actions.push(Action::new("projects.previous", json!({})));
+                }
+                if let Some(active) = self.projects.active()
+                    && ui.button("Close project").clicked()
+                {
+                    actions.push(Action::new("projects.close", json!({ "project": active.0 })));
+                }
+            });
             ui.menu_button("Options", |ui| {
                 if ui.add(egui::Button::new("Settings").shortcut_text("Ctrl+,")).clicked() {
                     self.settings_open = true;
@@ -343,7 +621,7 @@ impl App {
         });
         if let Some(path) = dropped.into_iter().next() {
             if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("als")) {
-                self.open_request = Some(path);
+                self.request_open(path);
             } else {
                 self.status = Status::Error(format!("{} is not a Live Set (.als)", path.display()));
             }
@@ -351,8 +629,14 @@ impl App {
     }
 
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        if self.session.is_none() || ui.ctx().egui_wants_keyboard_input() {
+        if self.projects.is_empty() || ui.ctx().egui_wants_keyboard_input() {
             return;
+        }
+        let (next, previous) = ui.input_mut(|i| (i.consume_shortcut(&NEXT_TAB), i.consume_shortcut(&PREVIOUS_TAB)));
+        if previous && self.projects.len() >= 2 {
+            actions.push(Action::new("projects.previous", json!({})));
+        } else if next && self.projects.len() >= 2 {
+            actions.push(Action::new("projects.next", json!({})));
         }
         if ui.input_mut(|i| i.consume_shortcut(&SETTINGS)) {
             self.settings_open = !self.settings_open;
@@ -370,7 +654,7 @@ impl App {
                 };
             }
             if i.consume_key(Modifiers::NONE, Key::Space) {
-                let running = self.session.as_ref().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
+                let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(Action::new(if running { "transport.stop" } else { "transport.play" }, json!({})));
             }
         });
@@ -444,7 +728,7 @@ impl App {
             theme::TEXT_PRIMARY,
         );
         x = tempo_rect.right() + PAD;
-        let session = self.session.as_ref();
+        let session = self.session();
         let signature = session.map(|s| s.project().transport.time_signature);
         let signature = signature.map_or_else(String::new, |ts| format!("{} / {}", ts.numerator, ts.denominator));
         let ts_rect = row(x, 40.0);
@@ -567,6 +851,25 @@ impl App {
             );
         }
     }
+}
+
+/// Darkens the view while a project file is dragged over the window, so it is clear the window
+/// takes the drop.
+fn drop_overlay(ui: &Ui, area: Rect) {
+    let hovering = ui.input(|i| {
+        i.raw
+            .hovered_files
+            .iter()
+            .any(|f| f.path.as_ref().is_none_or(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("als"))))
+    });
+    let shown = motion::toward(ui.ctx(), Id::new("drop-overlay"), hovering, motion::HOVER);
+    if shown <= 0.0 {
+        return;
+    }
+    let painter = ui.painter_at(area);
+    painter.rect_filled(area, 0.0, theme::SURFACE_0.gamma_multiply(DROP_DIM * shown));
+    let text = theme::TEXT_PRIMARY.gamma_multiply(shown);
+    painter.text(area.center(), Align2::CENTER_CENTER, "Drop to open", theme::ui_font(theme::TEXT + 2.0), text);
 }
 
 /// The window with no project open.

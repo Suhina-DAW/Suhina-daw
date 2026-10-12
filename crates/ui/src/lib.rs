@@ -16,4 +16,4 @@ pub mod timeline;
 pub mod waveform;
 pub mod widgets;
 
-pub use app::{App, Status, View};
+pub use app::{App, OpenAs, Status, View};

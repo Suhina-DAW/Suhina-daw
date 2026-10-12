@@ -9,6 +9,18 @@ pub enum Side {
     Right,
 }
 
+/// What opening a project does while another is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnOpen {
+    /// Ask each time, in the window.
+    #[default]
+    Ask,
+    /// Open it in a new tab.
+    NewTab,
+    /// Close the active project and open it in its place.
+    Replace,
+}
+
 /// How the window is drawn. Takes effect the next time the app starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Graphics {
@@ -28,6 +40,7 @@ pub struct Settings {
     pub sample_stacking: bool,
     /// MIDI clips moved over others stack instead of replacing them.
     pub midi_stacking: bool,
+    pub on_open: OnOpen,
 }
 
 impl Default for Settings {
@@ -38,6 +51,7 @@ impl Default for Settings {
             graphics: Graphics::Gpu,
             sample_stacking: false,
             midi_stacking: false,
+            on_open: OnOpen::Ask,
         }
     }
 }
@@ -54,8 +68,13 @@ impl Settings {
             Graphics::OpenGl => "glow",
         };
         let on = |b: bool| if b { "on" } else { "off" };
+        let on_open = match self.on_open {
+            OnOpen::Ask => "ask",
+            OnOpen::NewTab => "tab",
+            OnOpen::Replace => "replace",
+        };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -83,6 +102,9 @@ impl Settings {
                 ("midi_stacking", "on" | "off") => settings.midi_stacking = value == "on",
                 ("track_headers", "left") => settings.track_headers = Side::Left,
                 ("track_headers", "right") => settings.track_headers = Side::Right,
+                ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
+                ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
+                ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
                 _ => {
@@ -106,6 +128,7 @@ mod tests {
             graphics: Graphics::OpenGl,
             sample_stacking: true,
             midi_stacking: false,
+            on_open: OnOpen::Replace,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());

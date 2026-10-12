@@ -4,7 +4,7 @@
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::motion;
-use crate::settings::{Graphics, Settings, Side};
+use crate::settings::{Graphics, OnOpen, Settings, Side};
 use crate::theme::{self, PAD};
 use crate::widgets;
 
@@ -91,6 +91,18 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, about: &About) -> Outcome {
         segmented(ui, &painter, control_rect(r, 2), "Animations", &[("On", true), ("Off", false)], settings.animations)
     {
         settings.animations = on;
+        outcome.changed = true;
+    }
+    y += SECTION_GAP;
+
+    section(&mut y, "Projects");
+    let r = row(&mut y);
+    label(&painter, r, "When opening a project", "While another is open: ask, open it in a new tab, or replace it");
+    let options = [("Ask", OnOpen::Ask), ("New tab", OnOpen::NewTab), ("Replace", OnOpen::Replace)];
+    if let Some(choice) =
+        segmented(ui, &painter, control_rect(r, 3), "When opening a project", &options, settings.on_open)
+    {
+        settings.on_open = choice;
         outcome.changed = true;
     }
     y += SECTION_GAP;

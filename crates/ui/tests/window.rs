@@ -11,7 +11,7 @@ use loopwerk_ui::grid::Grid;
 use loopwerk_ui::session_view::{self, SessionViewState};
 use loopwerk_ui::timeline::Timeline;
 use loopwerk_ui::widgets::Action;
-use loopwerk_ui::{App, Status, View, theme};
+use loopwerk_ui::{App, OpenAs, Status, View, theme};
 use serde_json::json;
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
@@ -484,6 +484,62 @@ fn dragging_an_audio_clips_gain_sets_it() {
     assert!(gain.is_some_and(|g| (g - 1.4125).abs() < 1e-3), "{gain:?}");
 }
 
+fn two_projects() -> Harness<'static, App> {
+    let mut app = App::new();
+    app.open_project(Session::new(demo_project()), &[], OpenAs::NewTab);
+    app.open_project(Session::new(demo_project()), &[], OpenAs::NewTab);
+    window(app)
+}
+
+#[test]
+fn tabs_switch_keep_each_projects_edits_and_close() {
+    let mut harness = two_projects();
+    let ids = harness.state().projects().ids();
+    assert_eq!(harness.state().projects().active(), ids.get(1).copied());
+
+    // Turn a track off in the second project, then show the first: it is untouched.
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    harness.get_by_label("Tab Untitled 1").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().projects().active(), ids.first().copied());
+    assert_eq!(harness.state_mut().take_player_request(), ids.first().copied());
+    assert!(harness.query_by_label("Turn Bass off").is_some());
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Tab);
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().projects().active(), ids.get(1).copied());
+    assert!(harness.query_by_label("Turn Bass on").is_some());
+
+    harness.get_by_label("Close Untitled 2").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().projects().len(), 1);
+    assert!(harness.query_by_label("Tab Untitled 1").is_none(), "one project shows no tabs");
+}
+
+#[test]
+fn opening_while_a_project_is_open_asks_and_can_remember() {
+    let mut harness = window(demo_app());
+    harness.state_mut().request_open("other.als".into());
+    harness.run();
+    assert!(harness.state_mut().take_open_request().is_none());
+    harness.get_by_label("Remember").click();
+    harness.run();
+    harness.get_by_label("In a new tab").click();
+    harness.run();
+    let request = harness.state_mut().take_open_request();
+    assert_eq!(request, Some(("other.als".into(), OpenAs::NewTab)));
+    assert_eq!(harness.state().settings().on_open, loopwerk_ui::settings::OnOpen::NewTab);
+
+    // Remembered: the next one opens in a new tab without asking.
+    harness.state_mut().request_open("third.als".into());
+    harness.run();
+    assert_eq!(harness.state_mut().take_open_request(), Some(("third.als".into(), OpenAs::NewTab)));
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p loopwerk-ui -- --ignored`.
@@ -527,4 +583,10 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("arrangement-audio.png")).unwrap_or_else(|e| panic!("{e}"));
+
+    // A Live Set dragged over the window darkens it.
+    harness.input_mut().hovered_files.push(egui::HoveredFile { path: Some("set.als".into()), ..Default::default() });
+    harness.run_steps(12);
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("drop.png")).unwrap_or_else(|e| panic!("{e}"));
 }
