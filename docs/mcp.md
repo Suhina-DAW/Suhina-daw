@@ -27,7 +27,12 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
   `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
   (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` and `soundmap.info`
-  (`item`, a folder `place`).
+  (`item`, a folder `place`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  `to` file).
+- **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
+  find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
+  the project's folder, or a folder below the read root); `project.relinkFiles {files, to}`
+  points the clips at them, one undo step ([spec](spec/missing-files.md)).
 - **Several projects.** The server keeps every opened project with its own undo history, like
   tabs ([ADR 0007](decisions/0007-several-open-projects.md)). `project_open` adds one and makes
   it active; `projects.list`, `projects.switch`, `projects.next`, `projects.previous` and

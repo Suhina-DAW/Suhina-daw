@@ -3,6 +3,7 @@
 //! colour tags. It belongs to Loopwerk, not to one project; the session's `library.*` commands
 //! run on it.
 
+pub mod find;
 pub mod index;
 pub mod store;
 mod worker;
