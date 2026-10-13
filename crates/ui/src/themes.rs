@@ -48,7 +48,8 @@ pub struct Themes {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pending {
     Save(String),
-    Other(FileAction),
+    /// Boxed: a whole theme makes the action large.
+    Other(Box<FileAction>),
 }
 
 impl Default for Themes {
@@ -148,7 +149,7 @@ impl Themes {
                 entry.theme.name = name;
                 entry.id = new.clone();
                 if new != old {
-                    self.actions.push(Pending::Other(FileAction::Rename { from: old, to: new.clone() }));
+                    self.actions.push(Pending::Other(Box::new(FileAction::Rename { from: old, to: new.clone() })));
                 }
                 self.actions.push(Pending::Save(new.clone()));
                 (!same_id(&new, current)).then_some(new)
@@ -168,7 +169,7 @@ impl Themes {
 
     /// A theme file or zip dropped on the window, for the app to bring in.
     pub fn import(&mut self, path: PathBuf) {
-        self.actions.push(Pending::Other(FileAction::Import(path)));
+        self.actions.push(Pending::Other(Box::new(FileAction::Import(path))));
     }
 
     /// What the app should do with the theme files, in order, once.
@@ -181,7 +182,7 @@ impl Themes {
                     Some(theme) => FileAction::Save { id, theme: theme.clone() },
                     None => continue,
                 },
-                Pending::Other(action) => action,
+                Pending::Other(action) => *action,
             };
             if !actions.contains(&action) {
                 actions.push(action);
@@ -191,7 +192,7 @@ impl Themes {
     }
 
     fn file_action(&mut self, action: FileAction) -> Option<String> {
-        self.actions.push(Pending::Other(action));
+        self.actions.push(Pending::Other(Box::new(action)));
         None
     }
 
