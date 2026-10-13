@@ -1286,3 +1286,73 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     harness.run();
     assert!(harness.query_by_label("CPU load").is_none());
 }
+
+/// The label of the active project's Close button in the tab row.
+fn active_close_label(harness: &Harness<'static, App>) -> String {
+    let projects = harness.state().projects();
+    let name = projects.active().and_then(|id| projects.name(id)).unwrap_or_default();
+    format!("Close {name}")
+}
+
+/// Whether the window asked to close itself in its last frame.
+fn asked_to_close(harness: &Harness<'static, App>) -> bool {
+    harness.output().viewport_output.values().any(|v| v.commands.iter().any(|c| *c == egui::ViewportCommand::Close))
+}
+
+#[test]
+fn closing_or_quitting_with_unsaved_changes_asks_first() {
+    let dir = std::env::temp_dir().join(format!("suhina-ui-unsaved-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let mut app = demo_app();
+    app.set_default_folders(dir.join("Projects"), dir.join("Templates"));
+    app.open_project(Session::new(demo_project()), &[], OpenAs::NewTab);
+    let mut harness = window(app);
+    let open = |h: &Harness<'static, App>| h.state().projects().ids().len();
+    let unsaved = |h: &Harness<'static, App>| h.state().session().is_some_and(Session::has_unsaved_changes);
+    assert_eq!(open(&harness), 2);
+
+    // An edit in the second project; closing its tab asks first, and Cancel keeps it open.
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    assert!(unsaved(&harness));
+    let label = active_close_label(&harness);
+    harness.get_all_by_label(&label).last().map(|n| n.click());
+    harness.run();
+    assert!(harness.query_by_label("Don't save the changes").is_some());
+    harness.get_by_label("Cancel and keep the project open").click();
+    harness.run();
+    assert_eq!(open(&harness), 2);
+    assert!(harness.query_by_label("Don't save the changes").is_none());
+
+    // Don't save closes it.
+    let label = active_close_label(&harness);
+    harness.get_all_by_label(&label).last().map(|n| n.click());
+    harness.run();
+    harness.get_by_label("Don't save the changes").click();
+    harness.run();
+    assert_eq!(open(&harness), 1);
+
+    // A project without changes closes without asking; quitting with one that has them asks,
+    // and Save first asks for a name, saves, then lets the window close.
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    harness.run();
+    assert!(!asked_to_close(&harness));
+    assert!(harness.state().unsaved_prompt_open());
+    harness.get_by_label("Save the changes").click();
+    harness.run();
+    harness.get_by_label("Name").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.get_by_label("Name").type_text("Before quitting");
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.step();
+    harness.step();
+    let saved = dir.join("Projects").join("Before quitting.locr");
+    assert!(saved.is_file(), "{:?}", harness.state().status());
+    assert!(!unsaved(&harness));
+    assert!(!harness.state().unsaved_prompt_open());
+    let _clean = std::fs::remove_dir_all(&dir);
+}

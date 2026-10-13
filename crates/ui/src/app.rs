@@ -20,7 +20,7 @@ use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
-use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt};
+use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
@@ -107,6 +107,23 @@ pub enum Status {
     Error(String),
 }
 
+/// A project with unsaved changes the user is leaving, and what happens once they answered.
+#[derive(Debug, Clone, PartialEq)]
+struct Leaving {
+    project: ProjectId,
+    then: AfterLeaving,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum AfterLeaving {
+    /// Close its tab.
+    Close,
+    /// Open this file in its place.
+    Replace(PathBuf),
+    /// Quit; the projects already answered for are not asked about again.
+    Quit(Vec<ProjectId>),
+}
+
 /// The window's state.
 pub struct App {
     projects: Projects,
@@ -115,6 +132,15 @@ pub struct App {
     stashes: HashMap<ProjectId, Stash>,
     /// A dropped file waiting for the user to choose a new tab or replace.
     open_prompt: Option<PathBuf>,
+    /// A project with unsaved changes waiting for Save, Don't save or Cancel before it is closed,
+    /// replaced or the app quits.
+    unsaved_prompt: Option<Leaving>,
+    /// What to do once the project is saved, when Save in that question first asks for a name.
+    save_then: Option<Leaving>,
+    /// Every project with unsaved changes was answered for: the window may close.
+    quit_confirmed: bool,
+    /// Close the window on the next frame.
+    quit_now: bool,
     /// The active project's missing audio files, their bar and panel.
     missing: crate::missing_files::MissingFiles,
     remember_choice: bool,
@@ -195,6 +221,10 @@ impl App {
             shown_project: None,
             stashes: HashMap::new(),
             open_prompt: None,
+            unsaved_prompt: None,
+            save_then: None,
+            quit_confirmed: false,
+            quit_now: false,
             missing: crate::missing_files::MissingFiles::default(),
             remember_choice: false,
             player_request: None,
@@ -417,7 +447,88 @@ impl App {
         match self.settings.on_open {
             OnOpen::Ask => self.open_prompt = Some(path),
             OnOpen::NewTab => self.open_request = Some((path, OpenAs::NewTab)),
-            OnOpen::Replace => self.open_request = Some((path, OpenAs::Replace)),
+            OnOpen::Replace => self.open_as(path, OpenAs::Replace),
+        }
+    }
+
+    /// Opens `path` as asked; in place of a project with unsaved changes only after the user
+    /// answered whether to save them.
+    fn open_as(&mut self, path: PathBuf, how: OpenAs) {
+        match self.projects.active() {
+            Some(active) if how == OpenAs::Replace && self.unsaved(active) => {
+                self.unsaved_prompt = Some(Leaving { project: active, then: AfterLeaving::Replace(path) });
+            }
+            _ => self.open_request = Some((path, how)),
+        }
+    }
+
+    fn unsaved(&self, id: ProjectId) -> bool {
+        self.projects.get(id).is_some_and(Session::has_unsaved_changes)
+    }
+
+    /// The open projects with unsaved changes, in tab order.
+    fn unsaved_projects(&self) -> Vec<ProjectId> {
+        self.projects.ids().into_iter().filter(|id| self.unsaved(*id)).collect()
+    }
+
+    /// Whether the app is asking about unsaved changes, or for a name to save them under first.
+    pub fn unsaved_prompt_open(&self) -> bool {
+        self.unsaved_prompt.is_some() || self.save_then.is_some()
+    }
+
+    /// Before the window closes: when projects have unsaved changes, keeps it open and asks about
+    /// each, then closes it once every one was answered.
+    fn guard_quit(&mut self, ctx: &egui::Context) {
+        if self.quit_now {
+            self.quit_now = false;
+            self.quit_confirmed = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if !ctx.input(|i| i.viewport().close_requested()) || self.quit_confirmed {
+            return;
+        }
+        let Some(first) = self.unsaved_projects().first().copied() else { return };
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        if !self.unsaved_prompt_open() {
+            self.unsaved_prompt = Some(Leaving { project: first, then: AfterLeaving::Quit(Vec::new()) });
+        }
+    }
+
+    /// Saves the project being left, then leaves it; asks for a name first when it has no file
+    /// of its own yet.
+    fn save_and_leave(&mut self, leaving: Leaving) {
+        if self.projects.active() != Some(leaving.project) {
+            self.run(&Action::new("projects.switch", json!({ "project": leaving.project.0 })));
+        }
+        match self.own_file(leaving.project) {
+            Some(path) => {
+                if self.save_to(&path, false) {
+                    self.leave(leaving);
+                }
+            }
+            None => {
+                self.save_active(true);
+                self.save_then = Some(leaving);
+            }
+        }
+    }
+
+    /// Does what leaving the project was for, once its changes were saved or let go.
+    fn leave(&mut self, leaving: Leaving) {
+        match leaving.then {
+            AfterLeaving::Close => self.run(&Action::new("projects.close", json!({ "project": leaving.project.0 }))),
+            AfterLeaving::Replace(path) => self.open_request = Some((path, OpenAs::Replace)),
+            AfterLeaving::Quit(mut answered) => {
+                answered.push(leaving.project);
+                let next = self.unsaved_projects().into_iter().find(|id| !answered.contains(id));
+                match next {
+                    Some(project) => {
+                        self.unsaved_prompt = Some(Leaving { project, then: AfterLeaving::Quit(answered) });
+                    }
+                    None => self.quit_now = true,
+                }
+            }
         }
     }
 
@@ -528,13 +639,10 @@ impl App {
     /// name and folder the user gives.
     fn save_active(&mut self, ask: bool) {
         let Some(id) = self.projects.active() else { return };
-        let Some(session) = self.projects.get(id) else { return };
-        let own_file = session
-            .source()
-            .filter(|s| s.extension().is_some_and(|e| e.eq_ignore_ascii_case("locr")))
-            .map(Path::to_path_buf);
-        match own_file {
-            Some(path) if !ask => self.save_to(&path, false),
+        match self.own_file(id) {
+            Some(path) if !ask => {
+                self.save_to(&path, false);
+            }
             own => {
                 let folder =
                     own.as_deref().and_then(Path::parent).map_or_else(|| self.projects_folder(), Path::to_path_buf);
@@ -545,6 +653,15 @@ impl App {
         }
     }
 
+    /// The project's own `.locr` file, once it has been saved or was opened from one.
+    fn own_file(&self, id: ProjectId) -> Option<PathBuf> {
+        self.projects
+            .get(id)?
+            .source()
+            .filter(|s| s.extension().is_some_and(|e| e.eq_ignore_ascii_case("locr")))
+            .map(Path::to_path_buf)
+    }
+
     /// Asks for a name to save the active project as a template under.
     fn save_template(&mut self) {
         let Some(id) = self.projects.active() else { return };
@@ -553,8 +670,9 @@ impl App {
         self.save_prompt = Some(SavePrompt { template: true, name, folder, focus: true });
     }
 
-    /// Runs `project.save` on the active project; a template is a copy.
-    fn save_to(&mut self, path: &Path, template: bool) {
+    /// Runs `project.save` on the active project; a template is a copy. Returns whether it was
+    /// saved.
+    fn save_to(&mut self, path: &Path, template: bool) -> bool {
         let params = json!({ "path": path.display().to_string(), "copy": template });
         match self.projects.execute("project.save", &params) {
             Ok(saved) => {
@@ -564,8 +682,12 @@ impl App {
                 if !template {
                     self.saved_path = Some(written);
                 }
+                true
             }
-            Err(e) => self.status = Status::Error(e.0),
+            Err(e) => {
+                self.status = Status::Error(e.0);
+                false
+            }
         }
     }
 
@@ -586,9 +708,31 @@ impl App {
         }
         if let Some(mut prompt) = self.save_prompt.take() {
             match project_dialog::show_save(ui, window, &mut prompt) {
-                Some(SaveChoice::Save(path)) => self.save_to(&path, prompt.template),
-                Some(SaveChoice::Cancel) => {}
+                Some(SaveChoice::Save(path)) => {
+                    let saved = self.save_to(&path, prompt.template);
+                    if let Some(leaving) = self.save_then.take()
+                        && saved
+                    {
+                        self.leave(leaving);
+                    }
+                }
+                // Cancelling the name also cancels closing or quitting.
+                Some(SaveChoice::Cancel) => self.save_then = None,
                 None => self.save_prompt = Some(prompt),
+            }
+        }
+        if let Some(leaving) = self.unsaved_prompt.take() {
+            let name = self.projects.name(leaving.project).unwrap_or("Untitled").to_string();
+            let doing = match leaving.then {
+                AfterLeaving::Close => "closing it",
+                AfterLeaving::Replace(_) => "opening another project in its place",
+                AfterLeaving::Quit(_) => "quitting",
+            };
+            match project_dialog::show_unsaved(ui, window, &name, doing) {
+                Some(UnsavedChoice::Save) => self.save_and_leave(leaving),
+                Some(UnsavedChoice::DontSave) => self.leave(leaving),
+                Some(UnsavedChoice::Cancel) => {}
+                None => self.unsaved_prompt = Some(leaving),
             }
         }
     }
@@ -866,8 +1010,19 @@ impl App {
         self.project_dialogs(ui, window);
         self.update_title(ui.ctx());
         for action in &actions {
+            // Closing a project with unsaved changes asks first (Save, Don't save, Cancel).
+            let closing = (action.id == "projects.close")
+                .then(|| action.params["project"].as_u64().and_then(|n| u32::try_from(n).ok()).map(ProjectId))
+                .flatten();
+            if let Some(project) = closing
+                && self.unsaved(project)
+            {
+                self.unsaved_prompt = Some(Leaving { project, then: AfterLeaving::Close });
+                continue;
+            }
             self.run(action);
         }
+        self.guard_quit(ui.ctx());
         if grid.is_some_and(|g| {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
@@ -1047,7 +1202,7 @@ impl App {
                 };
                 self.settings_changed = true;
             }
-            self.open_request = Some((path, how));
+            self.open_as(path, how);
             self.open_prompt = None;
             self.remember_choice = false;
         } else if cancel {
@@ -1417,7 +1572,7 @@ impl App {
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some();
+        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }

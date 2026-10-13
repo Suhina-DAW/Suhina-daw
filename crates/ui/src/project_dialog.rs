@@ -1,7 +1,9 @@
 //! The project dialog (File › New or open, Ctrl+T): a new blank project, a new one from a
 //! template, or a project to open, typed as a path or picked from the recent ones. And the save
 //! prompt, which asks for a name and a folder when a project is saved for the first time, saved
-//! under another name, or saved as a template. Both are drawn over the window; Escape closes them.
+//! under another name, or saved as a template. And the question asked before a project with
+//! unsaved changes is closed, replaced or the app quits. All are drawn over the window; Escape
+//! closes them.
 
 use std::path::{Path, PathBuf};
 
@@ -223,6 +225,54 @@ fn draw_save(ui: &mut Ui, area: Rect, prompt: &mut SavePrompt) -> Option<SaveCho
     }
 }
 
+/// What the user answered when asked about a project's unsaved changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedChoice {
+    Save,
+    DontSave,
+    Cancel,
+}
+
+/// Asks whether to save `name`'s changes before `doing` ("closing it", "quitting"), over `area`.
+pub fn show_unsaved(ui: &Ui, area: Rect, name: &str, doing: &str) -> Option<UnsavedChoice> {
+    egui::Area::new(Id::new("unsaved-prompt"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(area.min)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_size(area.size());
+            draw_unsaved(ui, area, name, doing)
+        })
+        .inner
+}
+
+fn draw_unsaved(ui: &mut Ui, area: Rect, name: &str, doing: &str) -> Option<UnsavedChoice> {
+    let mut closed: Option<UnsavedChoice> = None;
+    let panel =
+        panel(ui, area, Vec2::new(SAVE_WIDTH, ROW + 2.0 * LINE + BUTTON.y + 3.0 * PAD), "Unsaved changes", &mut closed);
+    let painter = ui.painter_at(area);
+    let text = Rect::from_min_size(
+        Pos2::new(panel.left() + PAD, panel.top() + ROW + PAD),
+        Vec2::new(panel.width() - 2.0 * PAD, LINE),
+    );
+    let message = format!("Save the changes to {name} before {doing}?");
+    widgets::text_in(&painter, text, Align2::LEFT_CENTER, &message, theme::ui_font(theme::TEXT), theme::text_primary());
+    let save = Rect::from_min_size(Pos2::new(panel.right() - PAD - BUTTON.x, panel.bottom() - PAD - BUTTON.y), BUTTON);
+    let dont = Rect::from_min_size(Pos2::new(save.left() - 4.0 - BUTTON.x, save.top()), BUTTON);
+    let cancel = Rect::from_min_size(Pos2::new(dont.left() - 4.0 - BUTTON.x, save.top()), BUTTON);
+    if button(ui, &painter, save, "Save", "Save the changes") || ui.input(|i| i.key_pressed(Key::Enter)) {
+        return Some(UnsavedChoice::Save);
+    }
+    if button(ui, &painter, dont, "Don't save", "Don't save the changes") {
+        return Some(UnsavedChoice::DontSave);
+    }
+    if button(ui, &painter, cancel, "Cancel", "Cancel and keep the project open")
+        || ui.input(|i| i.key_pressed(Key::Escape))
+    {
+        return Some(UnsavedChoice::Cancel);
+    }
+    closed
+}
+
 /// A panel in the middle of `area` with a title row and a Close button, the area behind dimmed
 /// and its clicks swallowed. Returns the panel; `closed` is set when Close is clicked.
 fn panel<T: CloseChoice>(ui: &Ui, area: Rect, size: Vec2, title: &str, closed: &mut Option<T>) -> Rect {
@@ -271,6 +321,12 @@ impl CloseChoice for Choice {
 impl CloseChoice for SaveChoice {
     fn close() -> Self {
         SaveChoice::Cancel
+    }
+}
+
+impl CloseChoice for UnsavedChoice {
+    fn close() -> Self {
+        UnsavedChoice::Cancel
     }
 }
 

@@ -3,7 +3,7 @@ description: Suhina's own project file (.locr): versioned JSON of the model, wri
 read_when: project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/locr
   - crates/session/src/blank.rs
