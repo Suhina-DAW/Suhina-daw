@@ -68,6 +68,20 @@ Six operator groups of 21 bytes, **operator 6 first**, then the global bytes:
 The synth keeps one more byte after these, not part of any message: bit `n` set means operator
 `6 - n` plays (the DX7's operator on/off switches, which it does not store in a voice).
 
+## The default voice
+
+The FM synth's default voice (`Patch::default()`, also the `init` test voice) is our own neutral
+starting point: one plain sine at full level and nothing else.
+
+- **Every operator:** envelope rates 99, 99, 99, 99 and levels 99, 99, 99, 0; break point 39
+  (C3) with no scaling depth on either side and curve 0; no rate scaling, amplitude modulation
+  or velocity sensitivity; ratio mode, coarse 1, fine 0, detune 7 (none); output level 0.
+- **Operator 1** only: output level 99, so it alone sounds.
+- **Global:** pitch envelope rates 99 × 4 and levels 50 × 4 (no change); algorithm 1, feedback
+  0, oscillator key sync on; LFO speed 35, delay 0, no pitch or amplitude depth, LFO key sync on,
+  triangle; pitch modulation sensitivity 3; transpose 24 (none); name `INIT VOICE`; all six
+  operators switched on.
+
 ## A packed voice (128 bytes, in a bank)
 
 Per operator, 17 bytes, operator 6 first:
