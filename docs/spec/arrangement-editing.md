@@ -53,16 +53,18 @@ at most the clip's length; a project that breaks this does not validate
 negative length, fades together longer than the clip, a MIDI clip, and a call with neither.
 `project.clips` lists each clip's `fade_in` and `fade_out`.
 
-**The curve is linear in amplitude.** `beats` into a clip of `length` beats the clip's gain is
+**The curve is linear in amplitude.** On the frame `beats` into a clip of `length` beats, with
+`frame` the length of one frame in beats, the clip's gain is
 
 ```text
-fade_in_gain  = min(1, beats / fade_in)              (1 when fade_in is 0)
-fade_out_gain = min(1, (length - beats) / fade_out)  (1 when fade_out is 0)
+fade_in_gain  = min(1, beats / fade_in)                      (1 when fade_in is 0)
+fade_out_gain = min(1, (length - frame - beats) / fade_out)  (1 when fade_out is 0)
 gain          = fade_in_gain × fade_out_gain × click guard
 ```
 
-The click guard is the engine's 2 ms linear ramp at both ends of every audio clip; the fades
-multiply with it rather than replacing it. The engine works it out per frame from the clip's
+The fade-in counts the time before the frame and the fade-out the time after it, so the first and
+the last frame are both silent. The click guard is the engine's 2 ms linear ramp at both ends of
+every audio clip, counted the same way, and the fades multiply with it rather than replacing it. The engine works it out per frame from the clip's
 start and end in frames (`audio::Fades`), so fades are sample-accurate and the same in offline
 renders and real-time playback, unwarped (direct reader) or warped (time-stretched): the envelope
 is applied after the stretcher. A fade follows the tempo, since it is in beats. Fades belong to

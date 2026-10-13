@@ -119,8 +119,10 @@ impl Fades {
     }
 
     /// The gain `since_start` frames after the clip starts and `until_end` frames before it
-    /// ends, 0 … 1.
+    /// ends (the end is the frame after the last), 0 … 1. The ramps count the frames before and
+    /// after this one, so the first and the last frame are both 0.
     pub(crate) fn gain(&self, since_start: f64, until_end: f64) -> f32 {
+        let until_end = until_end - 1.0;
         let guard = (since_start / self.click).min(until_end / self.click);
         let fade_in = if self.fade_in > 0.0 { since_start / self.fade_in } else { 1.0 };
         let fade_out = if self.fade_out > 0.0 { until_end / self.fade_out } else { 1.0 };
@@ -334,7 +336,8 @@ mod tests {
         // Half-way into the fade-in; the guard is over after two frames.
         assert!((fades.gain(75.0, 125.0) - 0.5).abs() < 1e-6);
         assert!((fades.gain(1.0, 199.0) - 0.5 / 150.0).abs() < 1e-6, "guard and fade multiply");
-        assert_eq!(fades.gain(160.0, 40.0), 0.8);
+        assert!((fades.gain(160.0, 40.0) - 0.78).abs() < 1e-6, "39 frames after this one, of 50");
+        assert_eq!(fades.gain(100.0, 1.0), 0.0, "the last frame");
         assert_eq!(fades.gain(0.0, 200.0), 0.0);
         let c = Clip { fade_in: f64::NAN, fade_out: -1.0, ..clip(2.0, 0.0, None) };
         assert_eq!(Fades::new(&c, 100.0, 1000).gain(100.0, 100.0), 1.0, "bad fades are no fades");
