@@ -346,8 +346,9 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
 
 ## Not decided yet
 
-- Presets of the other built-in effects and instruments, and of plug-ins (a preset format of Suhina's own,
-  CLAP preset discovery, VST3 presets).
+- Loading presets of the other built-in effects and instruments (stock presets and their format:
+  [ADR 0014](../decisions/0014-stock-presets.md)), and presets of plug-ins (CLAP preset
+  discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
 - A system file dialog for adding a folder (ADR 0010 › Not decided yet).

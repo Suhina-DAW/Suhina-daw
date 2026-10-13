@@ -130,8 +130,8 @@ the device code should not have to change when it lands.
   that plays notes), `device.remove`, `device.setEnabled` and `device.setParam` (values stored
   limited to the parameter's range). `device.add {preset, voice?}` adds a device with a preset's
   values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
-  parameter's value, which the project stores like any other (presets of other devices are not
-  decided yet; [browser spec](../spec/browser.md)).
+  parameter's value, which the project stores like any other (stock presets for the other devices:
+  [ADR 0014](0014-stock-presets.md), their loader is not built yet).
 - **Chains on return and master channels, and sends into chains.** Latency compensation is
   built for track and group chains (10 above): a device's `latency()` (the overdrive and vinyl
   distortion, 31 frames; the limiter, its 1.5 ms lookahead) delays every
