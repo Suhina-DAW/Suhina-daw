@@ -1265,3 +1265,24 @@ fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
     assert_eq!(saved, Some(512));
     assert!(harness.query_by_label("Buffer size: 512 frames (10.7 ms)").is_some());
 }
+
+#[test]
+fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
+    // With an engine attached as its player, the control bar shows the load.
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    assert!(harness.query_by_label("CPU load 0.0%").is_some());
+
+    // Without one, there is nothing to measure and nothing shown.
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.run();
+    assert!(harness.query_by_label("CPU load").is_none());
+}
