@@ -28,10 +28,12 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Downloads
 
-Tagged versions build the headless command-line tool `suhina-cli` and the plug-in host
-`suhina-plugin-host` for Linux (x86_64), Windows (x64) and macOS (universal) and attach them to a
-GitHub Release. The host is the process plug-ins run in: keep it next to `suhina-cli`, which needs
-it to play or render a project with plug-ins. The binaries are not signed yet,
+To try the current state, download the **nightly**: a build of `main` made every night, not a
+release, so expect unfinished parts and bugs
+([nightly downloads](https://github.com/suhina-daw/suhina-daw/releases/tag/nightly)).
+It and tagged versions hold the desktop app `suhina`, the command-line tool `suhina-cli` and the
+plug-in host `suhina-plugin-host`, for Linux (x86_64), Windows (x64) and macOS (universal). The
+host is the process plug-ins run in: keep the three in one folder. The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
 
