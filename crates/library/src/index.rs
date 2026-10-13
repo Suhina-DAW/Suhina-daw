@@ -8,7 +8,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use loopwerk_media::info::{FileKind, kind_of};
+use suhina_media::info::{FileKind, kind_of};
 
 /// Files indexed per folder.
 pub const MAX_FILES: usize = 200_000;
@@ -18,7 +18,7 @@ pub const MAX_DEPTH: usize = 32;
 pub const MAX_NAME: usize = 1024;
 /// Largest index file read back.
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
-const HEADER: &str = "loopwerk-library-index 2";
+const HEADER: &str = "suhina-library-index 2";
 
 /// A file in the index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,7 +316,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("loopwerk-index-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-index-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn a_missing_folder_has_an_empty_index() {
-        let root = std::env::temp_dir().join("loopwerk-index-does-not-exist");
+        let root = std::env::temp_dir().join("suhina-index-does-not-exist");
         let mut index = FolderIndex::scan(&root);
         assert!(index.files.is_empty() && index.dirs.is_empty());
         assert!(!index.refresh(&root));

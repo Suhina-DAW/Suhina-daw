@@ -1,4 +1,4 @@
-use loopwerk_device_api::conformance::{self, test_signal};
+use suhina_device_api::conformance::{self, test_signal};
 
 use super::*;
 

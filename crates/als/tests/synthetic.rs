@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use loopwerk_als::{AlsError, read_gzip, read_xml};
-use loopwerk_model::{ChannelRole, LaneData};
+use suhina_als::{AlsError, read_gzip, read_xml};
+use suhina_model::{ChannelRole, LaneData};
 
 fn mixer(volume: &str, pan: &str, on: &str, sends: &[&str]) -> String {
     let sends: String = sends
@@ -201,7 +201,7 @@ fn hostile_values_do_not_panic() {
 
 #[test]
 fn reads_plugins_and_placeholders() {
-    use loopwerk_model::DeviceKind;
+    use suhina_model::DeviceKind;
     let devices = r#"
         <PluginDevice Id="0"><On><Manual Value="true"/></On><UserName Value=""/>
           <PluginDesc><VstPluginInfo Id="0">

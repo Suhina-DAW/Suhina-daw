@@ -2307,39 +2307,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "loopwerk"
+name = "suhina"
 version = "0.0.1"
 dependencies = [
  "eframe",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-output",
- "loopwerk-session",
- "loopwerk-ui",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-session",
+ "suhina-ui",
  "raw-window-handle",
  "winit",
  "zip",
 ]
 
 [[package]]
-name = "loopwerk-als"
+name = "suhina-als"
 version = "0.0.1"
 dependencies = [
  "flate2",
- "loopwerk-model",
+ "suhina-model",
  "roxmltree",
 ]
 
 [[package]]
-name = "loopwerk-automation"
+name = "suhina-automation"
 version = "0.0.1"
 dependencies = [
  "hound",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-session",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-session",
  "rmcp",
  "schemars",
  "serde",
@@ -2348,124 +2348,124 @@ dependencies = [
 ]
 
 [[package]]
-name = "loopwerk-cli"
+name = "suhina-cli"
 version = "0.0.1"
 dependencies = [
  "hound",
- "loopwerk-als",
- "loopwerk-automation",
- "loopwerk-device-api",
- "loopwerk-device-fm-synth",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-output",
- "loopwerk-plugins",
- "loopwerk-session",
+ "suhina-als",
+ "suhina-automation",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-plugins",
+ "suhina-session",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "loopwerk-device-api"
+name = "suhina-device-api"
 version = "0.0.1"
 
 [[package]]
-name = "loopwerk-device-auto-pan"
+name = "suhina-device-auto-pan"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-compressor"
+name = "suhina-device-compressor"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-dj-eq"
+name = "suhina-device-dj-eq"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-fm-synth"
+name = "suhina-device-fm-synth"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
+ "suhina-device-api",
 ]
 
 [[package]]
-name = "loopwerk-device-limiter"
+name = "suhina-device-limiter"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-overdrive"
+name = "suhina-device-overdrive"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-registry"
+name = "suhina-device-registry"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-device-auto-pan",
- "loopwerk-device-compressor",
- "loopwerk-device-dj-eq",
- "loopwerk-device-fm-synth",
- "loopwerk-device-limiter",
- "loopwerk-device-overdrive",
- "loopwerk-device-utility",
- "loopwerk-device-vinyl-distortion",
+ "suhina-device-api",
+ "suhina-device-auto-pan",
+ "suhina-device-compressor",
+ "suhina-device-dj-eq",
+ "suhina-device-fm-synth",
+ "suhina-device-limiter",
+ "suhina-device-overdrive",
+ "suhina-device-utility",
+ "suhina-device-vinyl-distortion",
 ]
 
 [[package]]
-name = "loopwerk-device-utility"
+name = "suhina-device-utility"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-device-vinyl-distortion"
+name = "suhina-device-vinyl-distortion"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
-name = "loopwerk-dsp"
+name = "suhina-dsp"
 version = "0.0.1"
 
 [[package]]
-name = "loopwerk-engine"
+name = "suhina-engine"
 version = "0.0.1"
 dependencies = [
- "loopwerk-device-api",
- "loopwerk-device-registry",
- "loopwerk-model",
- "loopwerk-stretch",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-model",
+ "suhina-stretch",
  "rtrb",
 ]
 
 [[package]]
-name = "loopwerk-ipc"
+name = "suhina-ipc"
 version = "0.0.1"
 dependencies = [
  "libc",
@@ -2474,56 +2474,56 @@ dependencies = [
 ]
 
 [[package]]
-name = "loopwerk-library"
+name = "suhina-library"
 version = "0.0.1"
 dependencies = [
- "loopwerk-media",
+ "suhina-media",
  "notify-debouncer-full",
  "serde_json",
 ]
 
 [[package]]
-name = "loopwerk-locr"
+name = "suhina-locr"
 version = "0.0.1"
 dependencies = [
  "base64",
- "loopwerk-model",
+ "suhina-model",
  "serde_json",
 ]
 
 [[package]]
-name = "loopwerk-media"
+name = "suhina-media"
 version = "0.0.1"
 dependencies = [
  "base64",
  "hound",
- "loopwerk-device-compressor",
- "loopwerk-device-limiter",
- "loopwerk-engine",
+ "suhina-device-compressor",
+ "suhina-device-limiter",
+ "suhina-engine",
  "serde_json",
  "symphonia",
 ]
 
 [[package]]
-name = "loopwerk-model"
+name = "suhina-model"
 version = "0.0.1"
 
 [[package]]
-name = "loopwerk-output"
+name = "suhina-output"
 version = "0.0.1"
 dependencies = [
  "audio_thread_priority",
  "cpal",
- "loopwerk-engine",
- "loopwerk-model",
- "loopwerk-session",
+ "suhina-engine",
+ "suhina-model",
+ "suhina-session",
  "rtrb",
  "thread-priority",
  "wasapi",
 ]
 
 [[package]]
-name = "loopwerk-plugin-host"
+name = "suhina-plugin-host"
 version = "0.0.1"
 dependencies = [
  "clack-extensions",
@@ -2532,11 +2532,11 @@ dependencies = [
  "interprocess",
  "libc",
  "libloading",
- "loopwerk-engine",
- "loopwerk-ipc",
- "loopwerk-model",
- "loopwerk-plugins",
- "loopwerk-session",
+ "suhina-engine",
+ "suhina-ipc",
+ "suhina-model",
+ "suhina-plugins",
+ "suhina-session",
  "serde_json",
  "thread-priority",
  "vst3",
@@ -2545,35 +2545,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "loopwerk-plugins"
+name = "suhina-plugins"
 version = "0.0.1"
 dependencies = [
  "interprocess",
  "json5",
- "loopwerk-ipc",
+ "suhina-ipc",
  "serde_json",
 ]
 
 [[package]]
-name = "loopwerk-session"
+name = "suhina-session"
 version = "0.0.1"
 dependencies = [
  "hound",
- "loopwerk-als",
- "loopwerk-device-api",
- "loopwerk-device-fm-synth",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-locr",
- "loopwerk-media",
- "loopwerk-model",
- "loopwerk-plugins",
+ "suhina-als",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-locr",
+ "suhina-media",
+ "suhina-model",
+ "suhina-plugins",
  "serde_json",
 ]
 
 [[package]]
-name = "loopwerk-stretch"
+name = "suhina-stretch"
 version = "0.0.1"
 dependencies = [
  "hound",
@@ -2581,19 +2581,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "loopwerk-ui"
+name = "suhina-ui"
 version = "0.0.1"
 dependencies = [
  "egui",
  "egui_kittest",
  "hound",
- "loopwerk-device-api",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-plugins",
- "loopwerk-session",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-plugins",
+ "suhina-session",
  "serde_json",
 ]
 

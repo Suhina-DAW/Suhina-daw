@@ -1,14 +1,14 @@
 //! The audio output a project plays on: which host (WASAPI, ASIO, ALSA…), device, sample rate
 //! and buffer size, and the `audio.*` commands that list, choose and report it. The session
-//! only describes the choice; the output layer (`loopwerk-output`) enumerates devices and opens
+//! only describes the choice; the output layer (`suhina-output`) enumerates devices and opens
 //! streams through [`AudioSystem`], which the app or the MCP server hands to [`Projects`]. Like
-//! the `plugins.*` commands they belong to Loopwerk, not to one project.
+//! the `plugins.*` commands they belong to Suhina, not to one project.
 
 use std::sync::Arc;
 
-use loopwerk_engine::AudioPool;
-use loopwerk_model::Project;
 use serde_json::{Value, json};
+use suhina_engine::AudioPool;
+use suhina_model::Project;
 
 use crate::commands::{CommandKind, CommandSpec, ParamType, optional};
 use crate::{CommandError, Player, Projects};
@@ -31,7 +31,7 @@ pub struct OutputChoice {
     pub sample_rate: Option<u32>,
     /// Frames per buffer; the engine renders in blocks of this size.
     pub buffer_frames: Option<u32>,
-    /// WASAPI only: take the device for Loopwerk alone (exclusive mode) when it allows it.
+    /// WASAPI only: take the device for Suhina alone (exclusive mode) when it allows it.
     /// Other programs are not heard on it meanwhile, so it is off unless asked for.
     pub exclusive: bool,
 }
@@ -223,7 +223,7 @@ static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
             optional("device", ParamType::Text, "an output device of that host, \"\" for its default"),
             optional("sample_rate", ParamType::Integer, "Hz, one the device lists; 0 for its default"),
             optional("buffer_frames", ParamType::Integer, "frames per buffer, 64 to 4096; 0 for the default"),
-            optional("exclusive", ParamType::Bool, "WASAPI: open the device for Loopwerk alone (default false)"),
+            optional("exclusive", ParamType::Bool, "WASAPI: open the device for Suhina alone (default false)"),
         ],
         kind: CommandKind::Audio,
         run: set_output,
@@ -244,7 +244,7 @@ pub fn audio_commands() -> &'static [CommandSpec<Projects>] {
 
 fn system(projects: &Projects) -> Result<Arc<dyn AudioSystem>, CommandError> {
     projects.audio_system().ok_or_else(|| {
-        CommandError("no audio output here; the desktop app has one, and loopwerk-cli mcp with --audio".into())
+        CommandError("no audio output here; the desktop app has one, and suhina-cli mcp with --audio".into())
     })
 }
 
@@ -325,7 +325,7 @@ impl Transport {
     /// while playing, the playhead (which then is where the next start carries on from, as
     /// after "stop here"), and the metronome.
     pub(crate) fn restore(self, player: &mut Player) -> Result<(), CommandError> {
-        use loopwerk_engine::LaunchCommand;
+        use suhina_engine::LaunchCommand;
         let beat = if self.running { self.beat } else { self.marker };
         if beat.is_finite() && beat > 0.0 {
             player.send(LaunchCommand::SetPosition { beat })?;

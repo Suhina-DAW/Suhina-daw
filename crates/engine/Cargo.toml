@@ -1,15 +1,15 @@
 [package]
-name = "loopwerk-engine"
+name = "suhina-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-loopwerk-model.workspace = true
-loopwerk-stretch.workspace = true
-loopwerk-device-api.workspace = true
-loopwerk-device-registry.workspace = true
+suhina-model.workspace = true
+suhina-stretch.workspace = true
+suhina-device-api.workspace = true
+suhina-device-registry.workspace = true
 rtrb.workspace = true
 
 [lints]

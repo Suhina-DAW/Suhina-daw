@@ -10,19 +10,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use loopwerk_engine::{AudioPool, Renderer, plugin_devices, render_offline, render_offline_with_plugins};
-use loopwerk_model::*;
-use loopwerk_plugins::scan::{Catalog, PluginInfo};
-use loopwerk_plugins::{Health, Launch, Plugin};
-use loopwerk_session::{Hosted, Player, PluginEnv, Session};
 use serde_json::json;
+use suhina_engine::{AudioPool, Renderer, plugin_devices, render_offline, render_offline_with_plugins};
+use suhina_model::*;
+use suhina_plugins::scan::{Catalog, PluginInfo};
+use suhina_plugins::{Health, Launch, Plugin};
+use suhina_session::{Hosted, Player, PluginEnv, Session};
 
 const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
 const PATIENT: Duration = Duration::from_secs(20);
 
 fn host() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_loopwerk-plugin-host"))
+    PathBuf::from(env!("CARGO_BIN_EXE_suhina-plugin-host"))
 }
 
 /// A catalog that holds the host's test plug-ins under their own names, each with the id
@@ -41,7 +41,7 @@ fn catalog() -> Catalog {
             path: path.clone(),
             id: name.into(),
             name: format!("Test {name}"),
-            vendor: "Loopwerk".into(),
+            vendor: "Suhina".into(),
             version: "1".into(),
             features: features.into_iter().map(String::from).collect(),
             replaces: Vec::new(),
@@ -130,7 +130,7 @@ fn max_diff(a: &[f32], b: &[f32]) -> f32 {
 #[test]
 fn an_offline_render_runs_a_projects_plug_in_effect() {
     let p = project(2.0, false, vec![plugin_device("gain")]);
-    let started = loopwerk_session::start_offline(&p, &env(), SR);
+    let started = suhina_session::start_offline(&p, &env(), SR);
     assert_eq!(started.running(), 1, "{:?}", started.notices);
     let wet = render_offline_with_plugins(&p, &AudioPool::new(), SR, 512, started.plugins).unwrap();
     // Without the plug-in (not installed) the sound passes; the test gain halves it. The chain
@@ -150,7 +150,7 @@ fn an_offline_render_plays_notes_on_a_plug_in_instrument() {
     let mut device = plugin_device("vst3");
     device.state = Some(1.0f32.to_le_bytes().to_vec());
     let p = project(2.0, true, vec![device]);
-    let started = loopwerk_session::start_offline(&p, &env(), SR);
+    let started = suhina_session::start_offline(&p, &env(), SR);
     assert!(started.notices.is_empty(), "{:?}", started.notices);
     let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 256, started.plugins).unwrap();
     let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
@@ -179,7 +179,7 @@ fn start(spec: &str) -> (Plugin, Hosted) {
         host: host(),
         plugin: spec.into(),
         channels: 2,
-        max_frames: loopwerk_engine::MAX_BLOCK_FRAMES as u32,
+        max_frames: suhina_engine::MAX_BLOCK_FRAMES as u32,
         sample_rate: f64::from(SR),
         timeout: PATIENT,
         group: None,
@@ -194,8 +194,8 @@ fn a_plug_in_that_crashes_or_hangs_leaves_the_engine_playing() {
         let p = project(8.0, false, vec![plugin_device("x")]);
         let key = plugin_devices(&p)[0].key;
         let (mut control, hosted) = start(spec);
-        let mut plugins = loopwerk_engine::Plugins::new();
-        plugins.insert(key, loopwerk_engine::PluginSlotInfo::default(), Box::new(hosted));
+        let mut plugins = suhina_engine::Plugins::new();
+        plugins.insert(key, suhina_engine::PluginSlotInfo::default(), Box::new(hosted));
         let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
         let mut controller = renderer.controller();
         // The same project without the plug-in, block for block: the effect passes the sound
@@ -383,7 +383,7 @@ fn an_editor_is_owned_by_the_engines_window() {
     assert_eq!(opening["editor_open"], "opening");
     assert!(asked.elapsed() < Duration::from_millis(500), "{:?}", asked.elapsed());
     until(&mut session, &mut renderer, "opening the editor", |s| s["editor_open"] == true);
-    let editor_class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
+    let editor_class: Vec<u16> = "SuhinaPluginEditor".encode_utf16().chain([0]).collect();
     let mut found = false;
     let mut after = std::ptr::null_mut();
     loop {
@@ -411,7 +411,7 @@ fn an_editor_is_owned_by_the_engines_window() {
 #[test]
 fn an_editor_embeds_in_the_engines_window_when_the_setting_says_so() {
     use common::{ParentWindow, soon};
-    use loopwerk_session::Placement;
+    use suhina_session::Placement;
     if !common::editors_open_here() {
         eprintln!("no display for editors; skipped");
         return;
@@ -455,7 +455,7 @@ fn a_plug_in_that_could_not_start_starts_again_on_restart() {
         path: path.clone(),
         id: "broken".into(),
         name: "Broken".into(),
-        vendor: "Loopwerk".into(),
+        vendor: "Suhina".into(),
         version: "1".into(),
         features: vec!["audio-effect".into()],
         replaces: Vec::new(),

@@ -1,6 +1,6 @@
 # Security Policy
 
-Loopwerk parses project files, audio files and plug-in state, hosts third-party plug-ins and
+Suhina parses project files, audio files and plug-in state, hosts third-party plug-ins and
 will expose CLI and MCP automation. Treat files, paths, plug-in data, automation requests and
 command parameters as potentially malicious.
 

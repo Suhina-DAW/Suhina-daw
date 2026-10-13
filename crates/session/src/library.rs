@@ -1,13 +1,13 @@
 //! Commands for the browser's library (`docs/spec/browser.md` › Commands, ADR 0012): the
 //! folders, searching them with the built-in devices and installed plug-ins, what a file is,
-//! pins, recent items and colour tags. They belong to Loopwerk, not to one project, so they run
+//! pins, recent items and colour tags. They belong to Suhina, not to one project, so they run
 //! on [`Projects`] like the `plugins.*` commands, and never change a project.
 
 use std::path::{Path, PathBuf};
 
-use loopwerk_device_api::Role;
-use loopwerk_library::{FileKind, Group, Item, Library, Query};
 use serde_json::{Value, json};
+use suhina_device_api::Role;
+use suhina_library::{FileKind, Group, Item, Library, Query};
 
 use crate::commands::{CommandKind, CommandSpec, Param, ParamType, optional, param};
 use crate::{CommandError, Projects};
@@ -312,7 +312,7 @@ fn describe(projects: &mut Projects, item: Item) -> Option<Found> {
             Some(Found { name, kind: kind.name(), detail: None, plugin: false, folder: None, item })
         }
         Item::Device(id) => {
-            let info = loopwerk_device_registry::info(id)?;
+            let info = suhina_device_registry::info(id)?;
             let kind = if info.role == Role::Instrument { "instrument" } else { "effect" };
             Some(Found { name: info.name.to_string(), kind, detail: None, plugin: false, folder: None, item })
         }
@@ -347,8 +347,8 @@ pub fn search_items(
     tags: &[String],
     limit: usize,
 ) -> Result<Vec<Found>, CommandError> {
-    let limit = if limit == 0 { loopwerk_library::MAX_RESULTS } else { limit.min(loopwerk_library::MAX_RESULTS) };
-    let words = loopwerk_library::words(text);
+    let limit = if limit == 0 { suhina_library::MAX_RESULTS } else { limit.min(suhina_library::MAX_RESULTS) };
+    let words = suhina_library::words(text);
     let tagged =
         |library: &mut Library, key: &str| tags.is_empty() || library.item_tags(key).iter().any(|t| tags.contains(t));
     // Pins and recent items are lists of keys, kept in their order.
@@ -370,7 +370,7 @@ pub fn search_items(
                 _ => String::new(),
             };
             if fits(&found, category)
-                && loopwerk_library::rank(&words, &found.name, &path).is_some()
+                && suhina_library::rank(&words, &found.name, &path).is_some()
                 && tagged(projects.file_library_mut(), &key)
             {
                 out.push(found);
@@ -385,7 +385,7 @@ pub fn search_items(
     let mut ranked: Vec<(u8, Found)> = Vec::new();
     // Built-in devices and plug-ins, unless a folder is the place.
     if within.is_none() {
-        for info in loopwerk_device_registry::DEVICES {
+        for info in suhina_device_registry::DEVICES {
             let kind = if info.role == Role::Instrument { "instrument" } else { "effect" };
             let found = Found {
                 item: Item::Device(info.id.to_string()),
@@ -395,7 +395,7 @@ pub fn search_items(
                 plugin: false,
                 folder: None,
             };
-            if let Some(rank) = loopwerk_library::rank(&words, info.name, info.id)
+            if let Some(rank) = suhina_library::rank(&words, info.name, info.id)
                 && fits(&found, category)
                 && tagged(projects.file_library_mut(), &found.item.key())
             {
@@ -414,7 +414,7 @@ pub fn search_items(
                 folder: None,
             };
             let haystack = format!("{} {}", plugin.vendor, plugin.format());
-            if let Some(rank) = loopwerk_library::rank(&words, &plugin.name, &haystack)
+            if let Some(rank) = suhina_library::rank(&words, &plugin.name, &haystack)
                 && fits(&found, category)
                 && tagged(projects.file_library_mut(), &found.item.key())
             {
@@ -428,7 +428,7 @@ pub fn search_items(
         let library = projects.file_library_mut();
         library.poll();
         for file in library.search(&query) {
-            let rank = loopwerk_library::rank(&words, file.name(), &file.rel).unwrap_or(3);
+            let rank = suhina_library::rank(&words, file.name(), &file.rel).unwrap_or(3);
             ranked.push((
                 rank,
                 Found {
@@ -443,9 +443,7 @@ pub fn search_items(
         }
     }
     ranked.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then(a.1.name.len().cmp(&b.1.name.len()))
-            .then(loopwerk_library::natural_cmp(&a.1.name, &b.1.name))
+        a.0.cmp(&b.0).then(a.1.name.len().cmp(&b.1.name.len())).then(suhina_library::natural_cmp(&a.1.name, &b.1.name))
     });
     ranked.truncate(limit);
     Ok(ranked.into_iter().map(|(_, f)| f).collect())
@@ -492,7 +490,7 @@ fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
     let tags = projects.file_library_mut().item_tags(&item.key());
     let mut out = match &item {
         Item::Device(id) => {
-            let info = loopwerk_device_registry::info(id).ok_or_else(|| format!("no built-in device {id:?}"))?;
+            let info = suhina_device_registry::info(id).ok_or_else(|| format!("no built-in device {id:?}"))?;
             json!({ "kind": if info.role == Role::Instrument { "instrument" } else { "effect" }, "name": info.name })
         }
         Item::Plugin(spec) => {
@@ -525,14 +523,12 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
     let mut out = json!({ "kind": kind.name(), "name": name, "size": size });
     match kind {
         FileKind::Sample | FileKind::Stems => {
-            let info = loopwerk_media::info::sample_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let info = suhina_media::info::sample_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let mut tempo = info.tempo;
             if tempo.is_none() && info.duration_seconds.is_some_and(|d| d <= DETECT_SECONDS) {
-                tempo = loopwerk_media::decode_file(path).ok().and_then(|data| {
-                    loopwerk_media::tempo::detect(&data).map(|bpm| loopwerk_media::info::Tempo {
-                        bpm,
-                        source: loopwerk_media::info::TempoSource::Detected,
-                    })
+                tempo = suhina_media::decode_file(path).ok().and_then(|data| {
+                    suhina_media::tempo::detect(&data)
+                        .map(|bpm| suhina_media::info::Tempo { bpm, source: suhina_media::info::TempoSource::Detected })
                 });
             }
             out["seconds"] = json!(info.duration_seconds);
@@ -542,14 +538,14 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
             out["bpm_from"] = json!(tempo.map(|t| t.source.name()));
             out["key"] = json!(info.key);
             if kind == FileKind::Stems {
-                let stems = loopwerk_media::stems::read_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
+                let stems = suhina_media::stems::read_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
                 out["stems"] = json!(stems
                     .stems
                     .iter()
                     .map(|s| json!({ "name": s.name, "color": s.color.map(|[r, g, b]| format!("#{r:02x}{g:02x}{b:02x}")) }))
                     .collect::<Vec<_>>());
                 out["mastering"] = json!(
-                    loopwerk_media::stems::mastering_devices(&stems)
+                    suhina_media::stems::mastering_devices(&stems)
                         .iter()
                         .map(|d| json!({ "device": d.id, "enabled": d.enabled }))
                         .collect::<Vec<_>>()
@@ -557,7 +553,7 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
             }
         }
         FileKind::Midi => {
-            let midi = loopwerk_media::midi::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let midi = suhina_media::midi::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let tracks: Vec<Value> = midi
                 .tracks
                 .iter()
@@ -569,7 +565,7 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
         FileKind::Preset => {
             let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let voices =
-                loopwerk_device_registry::preset_voices(&data).map_err(|e| format!("{}: {e}", path.display()))?;
+                suhina_device_registry::preset_voices(&data).map_err(|e| format!("{}: {e}", path.display()))?;
             out["device"] = json!("fm-synth");
             out["voices"] =
                 json!(voices.iter().map(|(n, name)| json!({ "voice": n, "name": name })).collect::<Vec<_>>());
@@ -668,7 +664,7 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
         let _ = library.record(group, &item);
     };
     let device = |record: &mut dyn FnMut(Group, String), id: &str| {
-        if let Some(info) = loopwerk_device_registry::info(id) {
+        if let Some(info) = suhina_device_registry::info(id) {
             let group = if info.role == Role::Instrument { Group::Instruments } else { Group::Effects };
             record(group, format!("device:{id}"));
         }
@@ -691,7 +687,7 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
                     continue;
                 }
                 let absolute = crate::files::absolute(Path::new(path));
-                let group = match loopwerk_media::info::kind_of(&absolute) {
+                let group = match suhina_media::info::kind_of(&absolute) {
                     Some(FileKind::Sample | FileKind::Stems) => Group::Samples,
                     Some(FileKind::Midi) => Group::Midi,
                     _ => continue,
@@ -703,7 +699,7 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
             if params.get("preset").is_some_and(|p| !p.is_null()) {
                 preset(&mut record, params);
             } else if let Some(id) = params.get("id").or_else(|| params.get("device")).and_then(Value::as_str) {
-                if loopwerk_device_registry::info(id).is_some() {
+                if suhina_device_registry::info(id).is_some() {
                     device(&mut record, id);
                 } else if id == params.get("device").and_then(Value::as_str).unwrap_or("") {
                     record(Group::Plugins, format!("plugin:{id}"));

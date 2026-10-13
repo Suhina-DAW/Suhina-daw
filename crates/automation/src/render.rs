@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use loopwerk_engine::model::{Arrangement, ArrangementLane, Project};
-use loopwerk_engine::{AudioPool, Plugins, Renderer, render_offline_with_plugins};
-use loopwerk_session::{CommandKind, OfflinePlugins, Player, PluginEnv, Session, commands, start_offline};
 use serde_json::{Value, json};
+use suhina_engine::model::{Arrangement, ArrangementLane, Project};
+use suhina_engine::{AudioPool, Plugins, Renderer, render_offline_with_plugins};
+use suhina_session::{CommandKind, OfflinePlugins, Player, PluginEnv, Session, commands, start_offline};
 
 /// Longest launch-script render, in seconds.
 pub const MAX_SCRIPT_SECONDS: f64 = 600.0;
@@ -170,7 +170,7 @@ pub fn scene_as_arrangement(project: &Project, scene: usize) -> Result<Project, 
 
 #[cfg(test)]
 mod tests {
-    use loopwerk_engine::model::*;
+    use suhina_engine::model::*;
 
     use super::*;
 
@@ -247,7 +247,7 @@ mod tests {
     }
 
     fn temp_wav(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("loopwerk-render-{name}-{}.wav", std::process::id()))
+        std::env::temp_dir().join(format!("suhina-render-{name}-{}.wav", std::process::id()))
     }
 
     /// Frames where sound starts after more than 100 silent frames, in the left channel.

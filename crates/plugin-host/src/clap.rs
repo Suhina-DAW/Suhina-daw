@@ -32,8 +32,8 @@ use clack_extensions::timer::{HostTimer, HostTimerImpl, PluginTimer, TimerId};
 use clack_host::events::Match;
 use clack_host::events::event_types::{MidiEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
 use clack_host::prelude::*;
-use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Served};
-use loopwerk_plugins::ParamInfo;
+use suhina_ipc::{Event, EventKind, MAX_EVENTS, Served};
+use suhina_plugins::ParamInfo;
 
 /// How long the audio thread waits for a block before checking whether it should stop.
 const POLL: Duration = Duration::from_millis(100);
@@ -236,7 +236,7 @@ pub(crate) struct ClapPlugin {
 /// id asked for, if any.
 fn entry(spec: &str) -> Result<(PluginEntry, Option<String>), String> {
     if spec == "test:clap" {
-        let entry = PluginEntry::load_from_clack::<crate::test_clap::Entry>(c"loopwerk-test-clap")
+        let entry = PluginEntry::load_from_clack::<crate::test_clap::Entry>(c"suhina-test-clap")
             .map_err(|e| format!("test plug-in: {e}"))?;
         return Ok((entry, None));
     }
@@ -253,13 +253,13 @@ fn entry(spec: &str) -> Result<(PluginEntry, Option<String>), String> {
 }
 
 /// The plug-ins the file `spec` names holds, without instantiating any (for scanning).
-pub(crate) fn describe(spec: &str) -> Result<Vec<loopwerk_plugins::scan::PluginInfo>, String> {
+pub(crate) fn describe(spec: &str) -> Result<Vec<suhina_plugins::scan::PluginInfo>, String> {
     let (entry, _) = entry(spec)?;
     let factory = entry.get_plugin_factory().ok_or("the file has no plug-in factory")?;
     let text = |c: Option<&std::ffi::CStr>| c.map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
     Ok(factory
         .plugin_descriptors()
-        .map(|d| loopwerk_plugins::scan::PluginInfo {
+        .map(|d| suhina_plugins::scan::PluginInfo {
             path: std::path::PathBuf::new(),
             id: text(d.id()),
             name: text(d.name()),
@@ -285,7 +285,7 @@ impl ClapPlugin {
         .ok_or_else(|| format!("no plug-in {} in {spec:?}", wanted.as_deref().unwrap_or("at all")))?;
 
         let info =
-            HostInfo::new("Loopwerk", "Loopwerk", "https://github.com/juhamikael/Loopwerk", env!("CARGO_PKG_VERSION"))
+            HostInfo::new("Suhina", "Suhina", "https://github.com/juhamikael/Loopwerk", env!("CARGO_PKG_VERSION"))
                 .map_err(|e| e.to_string())?;
         let shared = |_: &()| Shared {
             callback_requested: AtomicBool::new(false),

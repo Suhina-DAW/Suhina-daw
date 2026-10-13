@@ -1,6 +1,6 @@
 {
   "name": "Nord",
-  "description": "The Nord palette (MIT, nordtheme.com), mapped onto Loopwerk's tokens.",
+  "description": "The Nord palette (MIT, nordtheme.com), mapped onto Suhina's tokens.",
   "colors": {
     "window.background": "#2E3440",
     "panel.background": "#3B4252",

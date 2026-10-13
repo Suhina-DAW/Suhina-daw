@@ -7,10 +7,10 @@
 use std::path::PathBuf;
 
 use egui::{Align2, Color32, CursorIcon, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
-use loopwerk_engine::model::TrackId;
-use loopwerk_library::{FolderState, Group, Item};
-use loopwerk_session::{Category, Projects};
 use serde_json::json;
+use suhina_engine::model::TrackId;
+use suhina_library::{FolderState, Group, Item};
+use suhina_session::{Category, Projects};
 
 use crate::app::Status;
 use crate::browser::{BrowserState, Place, Row, duration_text};
@@ -58,7 +58,7 @@ pub struct Context<'a> {
 }
 
 fn icon_color(kind: ItemKind) -> Color32 {
-    let rgb = |c: loopwerk_engine::model::Rgb| Color32::from_rgb(c.0, c.1, c.2);
+    let rgb = |c: suhina_engine::model::Rgb| Color32::from_rgb(c.0, c.1, c.2);
     match kind {
         ItemKind::Midi => rgb(crate::grid::TRACK_PALETTE[1]),
         ItemKind::Sample => rgb(crate::grid::TRACK_PALETTE[2]),
@@ -701,7 +701,7 @@ fn click_row(state: &mut BrowserState, rows: &[Row], index: usize, modifiers: Mo
 fn row_menu(
     ui: &mut Ui,
     item: &BrowserItem,
-    tags: &[loopwerk_library::Tag],
+    tags: &[suhina_library::Tag],
     state: &mut BrowserState,
     projects: &mut Projects,
     out: &mut BrowserOut,
@@ -733,7 +733,7 @@ fn row_menu(
         let response = ui.add(egui::TextEdit::singleline(&mut name).hint_text("New tag…").desired_width(120.0));
         ui.ctx().data_mut(|d| d.insert_temp(id, name.clone()));
         if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !name.trim().is_empty() {
-            let palette = loopwerk_library::store::default_tags();
+            let palette = suhina_library::store::default_tags();
             let color =
                 palette.get(tags.len() % palette.len().max(1)).map_or("#8C8A85".to_string(), |t| t.color.clone());
             let name = name.trim().to_string();
@@ -871,7 +871,7 @@ fn preview_strip(
         facts.push(duration_text(seconds));
     }
     if let Some(tempo) = info.tempo {
-        let mark = if tempo.source == loopwerk_media::info::TempoSource::Detected { "~" } else { "" };
+        let mark = if tempo.source == suhina_media::info::TempoSource::Detected { "~" } else { "" };
         facts.push(format!("{mark}{} BPM", (tempo.bpm * 100.0).round() / 100.0));
     }
     if let Some(key) = &info.key {
@@ -1051,6 +1051,6 @@ pub fn resize_handle(ui: &Ui, handle: Rect, width: f32, left: bool) -> Option<f3
 }
 
 /// The active project's session.
-fn active(projects: &Projects) -> Option<&loopwerk_session::Session> {
+fn active(projects: &Projects) -> Option<&suhina_session::Session> {
     projects.active().and_then(|id| projects.get(id))
 }

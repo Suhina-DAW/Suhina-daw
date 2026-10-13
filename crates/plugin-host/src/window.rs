@@ -7,18 +7,18 @@
 //! (ADR 0006).
 //!
 //! An editor's window is owned by the engine's window when the engine names it
-//! ([`set_owner`]): it floats above Loopwerk, has no taskbar entry of its own and is minimised
+//! ([`set_owner`]): it floats above Suhina, has no taskbar entry of its own and is minimised
 //! with it (Win32 owner window; X11 `WM_TRANSIENT_FOR`).
 //!
 //! An embedded editor ([`Window::open_embedded`]) is instead a child inside the engine's
 //! window, where its device panel shows it: two windows, a *clip* the size of the panel's
 //! visible area (what falls outside it is cut off, so a scrolled editor does not paint over the
-//! rest of Loopwerk) and inside it the *view* the plug-in draws in, at the editor's full size.
+//! rest of Suhina) and inside it the *view* the plug-in draws in, at the editor's full size.
 //! The engine says where both go ([`place`]); until it does, the editor is hidden.
 
 use std::cell::Cell;
 
-pub(crate) use loopwerk_plugins::Placement;
+pub(crate) use suhina_plugins::Placement;
 
 thread_local! {
     static OWNER: Cell<Option<u64>> = const { Cell::new(None) };
@@ -128,7 +128,7 @@ mod imp {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    const CLASS: &str = "LoopwerkPluginEditor";
+    const CLASS: &str = "SuhinaPluginEditor";
 
     unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         let id = WindowId(hwnd as usize);
@@ -203,7 +203,7 @@ mod imp {
             // SAFETY: as in `register`.
             let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
             // The engine's window, if it still is one: the editor's is owned by it (not a child
-            // of it), so it floats above Loopwerk and goes with it.
+            // of it), so it floats above Suhina and goes with it.
             let owner = super::owner()
                 .and_then(|o| usize::try_from(o).ok())
                 .map(|o| o as HWND)
@@ -551,7 +551,7 @@ mod imp {
                         window,
                         AtomEnum::WM_CLASS,
                         AtomEnum::STRING,
-                        b"loopwerk-plugin-editor\0Loopwerk\0",
+                        b"suhina-plugin-editor\0Suhina\0",
                     )
                     .map_err(error)?;
                 if let Some(owner) = super::owner().and_then(|o| u32::try_from(o).ok()) {
@@ -629,7 +629,7 @@ mod imp {
                         window,
                         AtomEnum::WM_CLASS,
                         AtomEnum::STRING,
-                        b"loopwerk-plugin-editor\0Loopwerk\0",
+                        b"suhina-plugin-editor\0Suhina\0",
                     )
                     .map_err(error)?;
                 connection.map_window(window).map_err(error)?;

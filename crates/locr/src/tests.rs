@@ -183,7 +183,7 @@ fn an_empty_project_survives_a_round_trip() {
 
 #[test]
 fn files_are_written_and_read() {
-    let dir = std::env::temp_dir().join(format!("loopwerk-locr-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-locr-{}", std::process::id()));
     let path = dir.join("song.locr");
     assert_eq!(write_file(&path, &everything()), Ok(()));
     assert_eq!(read_file(&path), Ok(everything()));
@@ -249,7 +249,7 @@ fn numbers_that_are_not_finite_are_written_as_zero() {
 
 #[test]
 fn audio_paths_follow_a_project_saved_elsewhere() {
-    let base = std::env::temp_dir().join(format!("loopwerk-locr-rebase-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("suhina-locr-rebase-{}", std::process::id()));
     let samples = base.join("old").join("Samples");
     std::fs::create_dir_all(&samples).unwrap_or_default();
     std::fs::write(samples.join("loop.wav"), b"RIFF").unwrap_or_default();
@@ -268,7 +268,7 @@ fn audio_paths_follow_a_project_saved_elsewhere() {
 
 #[test]
 fn a_missing_audio_file_is_found_by_its_absolute_path() {
-    let base = std::env::temp_dir().join(format!("loopwerk-locr-absolute-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("suhina-locr-absolute-{}", std::process::id()));
     std::fs::create_dir_all(&base).unwrap_or_default();
     let file = base.join("kept.wav");
     std::fs::write(&file, b"RIFF").unwrap_or_default();
