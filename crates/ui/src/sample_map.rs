@@ -237,6 +237,20 @@ fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f
     }
 }
 
+/// The next item down (or up) the Show similar list from `from`: the list starts with `of`, the
+/// item it was shown for, then the similar ones nearest first. From outside the list, Down goes to
+/// the nearest similar one. `None` past either end.
+fn step_similar(of: usize, items: &[usize], from: Option<usize>, down: bool) -> Option<usize> {
+    let at = from.and_then(|f| std::iter::once(of).chain(items.iter().copied()).position(|i| i == f));
+    let list = |n: usize| if n == 0 { Some(of) } else { items.get(n - 1).copied() };
+    match (at, down) {
+        (Some(at), true) => list(at + 1),
+        (Some(at), false) => at.checked_sub(1).and_then(list),
+        (None, true) => items.first().copied(),
+        (None, false) => None,
+    }
+}
+
 /// The point nearest to `pointer` on screen, within `radius`.
 fn hit(screen: &[Pos2], pointer: Pos2, radius: f32) -> Option<usize> {
     screen
@@ -543,7 +557,8 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         (None, _) => {}
     }
 
-    // Keys: arrows step to the nearest point that way; Escape ends Show similar.
+    // Keys: arrows step to the nearest point that way, or with Show similar on, Up and Down step
+    // through its list; Escape ends Show similar.
     if response.contains_pointer() || response.has_focus() {
         let keys = [
             (Key::ArrowLeft, [-1.0, 0.0]),
@@ -554,9 +569,11 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         for (key, direction) in keys {
             if ui.input(|i| i.key_pressed(key)) {
                 let from = points.iter().position(|p| p.selected).or(view.previewed);
-                let next = match from {
-                    Some(from) => step(positions, from, direction),
-                    None => points.iter().position(|p| p.matches),
+                let vertical = matches!(key, Key::ArrowUp | Key::ArrowDown);
+                let next = match (view.similar.as_ref().filter(|_| vertical), from) {
+                    (Some((of, items)), from) => step_similar(*of, items, from, key == Key::ArrowDown),
+                    (None, Some(from)) => step(positions, from, direction),
+                    (None, None) => points.iter().position(|p| p.matches),
                 };
                 if let Some(next) = next {
                     events.push(MapEvent::Select { items: vec![next], add: false });
@@ -907,6 +924,69 @@ mod tests {
             "{:?}",
             harness.state().1
         );
+    }
+}
+
+#[cfg(test)]
+mod similar_keys {
+    use super::*;
+
+    #[test]
+    fn up_and_down_step_through_the_similar_list() {
+        let items = [7, 3, 12];
+        assert_eq!(step_similar(0, &items, None, true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(0), true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), true), Some(3));
+        assert_eq!(step_similar(0, &items, Some(12), true), None, "past the end");
+        assert_eq!(step_similar(0, &items, Some(3), false), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), false), Some(0), "back to the item it was shown for");
+        assert_eq!(step_similar(0, &items, Some(0), false), None);
+        assert_eq!(step_similar(0, &items, Some(5), true), Some(7), "from outside the list");
+    }
+
+    #[test]
+    fn down_with_show_similar_on_previews_the_next_similar_item() {
+        use egui_kittest::Harness;
+        let point = |x: f32, y: f32| MapPoint {
+            name: format!("{x},{y}"),
+            detail: String::new(),
+            position: [x, y],
+            kind: Kind::Kick,
+            guessed: false,
+            in_use: false,
+            selected: false,
+            matches: true,
+            preset: false,
+            pinned: false,
+            tags: Vec::new(),
+        };
+        // A row of points left to right: spatially, Down from point 0 has nowhere to go.
+        let points: Vec<MapPoint> = (0..6).map(|i| point(i as f32 / 5.0, 0.5)).collect();
+        let mut view = MapView::default();
+        view.show_similar(0, vec![4, 2]);
+        let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "6 samples", &[], events),
+            (view, Vec::<MapEvent>::new()),
+        );
+        harness.run();
+        let view = &harness.state().0;
+        let middle = view.area.center();
+        harness.hover_at(middle);
+        harness.run();
+        harness.state_mut().0.previewed = Some(0);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(4)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(2)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        // Right still steps on the map: from point 2 to its neighbour 3.
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(3)), "{:?}", harness.state().1);
     }
 }
 
