@@ -1,6 +1,6 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
 last_verified: 2026-10-13
@@ -15,6 +15,7 @@ covers:
   - crates/ui/src/menus.rs
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
+  - crates/project-file/src/lib.rs
 ---
 
 # Arrangement editing
@@ -110,9 +111,12 @@ horizontal drag sets the fade with its end on the grid (Alt held: free), up to t
 the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
 double-click on a handle removes that fade. A right-click on a handle opens a menu of the shapes,
 with the fade's shape checked; choosing one runs `clip.setFades`. A fade at least 21 px wide has a
-second, round **curve handle** on its line half-way through the fade: a vertical drag bends the
-curve (up for +, down for −; the clip's height is the whole range from −1 to +1), the line
-following live, and letting go runs `clip.setFades`; a double-click sets the curve back to 0. Measurements are in
+second, round **curve handle** on its line half-way through the fade. Dragging it up or down
+moves it with the pointer: the curve becomes the one whose line passes through the handle (up
+for +, down for −), until it reaches −1 or +1, the line following live, and letting go runs
+`clip.setFades`; a double-click sets the curve back to 0. The view draws the fades per pixel
+with `t` in beats (`length − beats` for the fade-out), without the one-frame term above, which
+is less than a pixel at any zoom. Measurements are in
 [components](../design/components.md) › Arrangement view.
 
 ## Start marker and loop

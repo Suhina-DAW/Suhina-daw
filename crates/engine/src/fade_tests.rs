@@ -222,6 +222,31 @@ fn every_fade_shape_and_curve_renders_as_the_spec_says() {
     }
 }
 
+/// The spec's numbers, written out rather than taken from the model: the level half-way through
+/// a one-beat fade-in, rendered offline, for each shape unbent and for the curve's ends.
+#[test]
+fn fades_render_the_specs_numbers_half_way() {
+    let (region, pool) = constant();
+    let full = f64::from(render_constant(0.0, 0.0, 512)[BEAT]);
+    for (shape, curve, half) in [
+        (FadeShape::Linear, 0.0, 0.5),
+        (FadeShape::EqualPower, 0.0, std::f64::consts::FRAC_1_SQRT_2),
+        (FadeShape::Fast, 0.0, 0.75),
+        (FadeShape::Slow, 0.0, 0.25),
+        (FadeShape::SCurve, 0.0, 0.5),
+        (FadeShape::Linear, 1.0, 0.840_896_415),
+        (FadeShape::Linear, -1.0, 0.0625),
+        (FadeShape::Slow, -1.0, 0.003_906_25),
+        (FadeShape::Fast, 1.0, 0.930_604_859),
+    ] {
+        let mut p = project(region.clone(), 2.0, 1.0, 0.0);
+        p.arrangement.lanes[0].clips[0].fade_in_curve = FadeCurve { shape, curve };
+        let out = left(&render_offline_with_audio(&p, &pool, SR, 512).unwrap());
+        let got = f64::from(out[BEAT / 2]) / full;
+        assert!((got - half).abs() < 1e-6, "{shape:?} at curve {curve}: {got}, the spec says {half}");
+    }
+}
+
 /// Linear and unbent is what fades were before shapes: the goldens hold.
 #[test]
 fn the_default_fade_is_the_linear_one() {

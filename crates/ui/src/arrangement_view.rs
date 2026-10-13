@@ -90,12 +90,14 @@ struct FadeDrag {
     raw: f64,
 }
 
-/// A fade's curve handle being dragged: the clip, which fade, and the curve so far.
+/// A fade's curve handle being dragged: the clip, which fade, the curve so far, and how far
+/// below the handle's centre the pointer took hold of it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct CurveDrag {
     key: (TrackId, usize),
     edge: FadeEdge,
     curve: f64,
+    grab: f32,
 }
 
 /// What a clip shows that a drag in progress changes before the project does: its gain and its
@@ -320,21 +322,25 @@ fn shape_label(shape: FadeShape) -> &'static str {
     }
 }
 
-/// A fade's curve after a vertical drag of `dy` points on a clip `height` points tall: up bends
-/// it towards +1, and the clip's height is the whole range from −1 to +1.
-fn dragged_curve(curve: f64, dy: f32, height: f32) -> f64 {
-    let moved = if height > 0.0 { f64::from(-dy / height) * 2.0 } else { 0.0 };
-    let curve = curve + moved;
-    if curve.is_finite() { curve.clamp(-1.0, 1.0) } else { 0.0 }
+/// The curve that puts a fade's curve handle at height `y` in the clip `rect`: the handle sits on
+/// the fade's line half-way through it, so it follows the pointer up and down until the curve
+/// reaches −1 or +1.
+fn curve_at(rect: Rect, shape: FadeShape, y: f32) -> f64 {
+    let (top, bottom) = (rect.top() + 2.0, rect.bottom());
+    let gain = if bottom > top { f64::from((bottom - y) / (bottom - top)) } else { f64::NAN };
+    FadeCurve::through(shape, gain)
 }
+
+/// Most points a fade's line is drawn with, however wide the fade is on screen.
+const FADE_LINE_POINTS: usize = 256;
 
 /// The points of a fade's line in the clip `rect`: from the silent bottom corner to full level
 /// at the top, following `curve`, from `from` to `to` (left to right; `to` is the silent end for
-/// a fade-out). Sampled every 2 points.
+/// a fade-out). Sampled every 2 points, at most [`FADE_LINE_POINTS`].
 fn fade_line(rect: Rect, edge: FadeEdge, from: f32, to: f32, curve: FadeCurve) -> Vec<Pos2> {
     let (top, bottom) = (rect.top() + 2.0, rect.bottom());
     let width = (to - from).max(0.0);
-    let steps = ((width / 2.0).ceil() as usize).max(1);
+    let steps = ((width / 2.0).ceil() as usize).clamp(1, FADE_LINE_POINTS - 1);
     (0..=steps)
         .map(|i| {
             let x = from + width * i as f32 / steps as f32;
@@ -1022,12 +1028,17 @@ fn clip_box<'a>(
                 done = Some(0.0);
             } else {
                 if response.drag_started_by(egui::PointerButton::Primary) {
-                    state.curve_drag = Some(CurveDrag { key, edge, curve: current_curve.curve });
+                    // Where the button went down, not where the drag was recognised: the handle
+                    // keeps its place under the pointer.
+                    let pressed = ui.input(|i| i.pointer.press_origin()).or(response.interact_pointer_pos());
+                    let grab = pressed.map_or(0.0, |p| p.y - center.y);
+                    state.curve_drag = Some(CurveDrag { key, edge, curve: current_curve.curve, grab });
                 }
                 if response.dragged_by(egui::PointerButton::Primary)
+                    && let Some(pointer) = response.interact_pointer_pos()
                     && let Some(drag) = state.curve_drag.as_mut().filter(|d| mine_curve(d))
                 {
-                    drag.curve = dragged_curve(drag.curve, response.drag_delta().y, rect.height());
+                    drag.curve = curve_at(rect, current_curve.shape, pointer.y - drag.grab);
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary)
                     && let Some(drag) = state.curve_drag.take_if(|d| mine_curve(d))
@@ -1577,7 +1588,7 @@ mod tests {
             Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0, fade_in_curve: linear, fade_out_curve: linear }
         );
         // A curve being dragged bends that fade only.
-        state.curve_drag = Some(CurveDrag { key, edge: FadeEdge::In, curve: 0.4 });
+        state.curve_drag = Some(CurveDrag { key, edge: FadeEdge::In, curve: 0.4, grab: 0.0 });
         assert_eq!(state.shown(key, &clip, Some(1.0)).fade_in_curve.curve, 0.4);
         assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out_curve.curve, 0.0);
         state.curve_drag = None;
@@ -1645,10 +1656,22 @@ mod tests {
         }
         assert_eq!(curve_handle(clip, FadeEdge::Out, 30.0, FadeCurve::default()).x, 165.0);
         // The clip's height is the whole range: half of it up is +1 from 0.
-        assert_eq!(dragged_curve(0.0, -21.0, 42.0), 1.0);
-        assert_eq!(dragged_curve(0.0, 10.5, 42.0), -0.5);
-        assert_eq!(dragged_curve(0.9, -100.0, 42.0), 1.0, "kept within -1 … +1");
-        assert_eq!(dragged_curve(0.0, f32::NAN, 42.0), 0.0);
+        // The handle follows the pointer: the curve set by a height puts the handle there.
+        for shape in FadeShape::ALL {
+            let unbent = curve_handle(clip, FadeEdge::In, 40.0, FadeCurve { shape, curve: 0.0 }).y;
+            for y in [unbent - 6.0, unbent - 1.0, unbent, unbent + 1.0, unbent + 6.0] {
+                let curve = FadeCurve { shape, curve: curve_at(clip, shape, y) };
+                if (-1.0..=1.0).contains(&curve.curve) && curve.curve.abs() < 0.999 {
+                    let at = curve_handle(clip, FadeEdge::In, 40.0, curve).y;
+                    assert!((at - y).abs() < 0.01, "{shape:?}: handle at {at}, pointer at {y}");
+                }
+            }
+            assert_eq!(curve_at(clip, shape, -500.0), 1.0, "{shape:?}: kept within -1 … +1");
+            assert_eq!(curve_at(clip, shape, 500.0), -1.0, "{shape:?}");
+        }
+        assert!(curve_at(clip, FadeShape::Linear, f32::NAN).is_finite());
+        // However wide the fade, its line has a bounded number of points.
+        assert!(fade_line(clip, FadeEdge::In, 100.0, 1_000_000.0, FadeCurve::default()).len() <= FADE_LINE_POINTS);
         assert_eq!(shape_label(FadeShape::SCurve), "S-curve");
     }
 

@@ -1182,6 +1182,9 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
         ..clip.clone()
     };
     if !changed.fades_valid() {
+        if !(changed.fade_in_curve.is_valid() && changed.fade_out_curve.is_valid()) {
+            return Err("the clip's fade curves are outside -1 to +1; set inCurve and outCurve".into());
+        }
         return Err(format!(
             "the fades ({} + {} beats) are longer than the clip ({} beats)",
             changed.fade_in, changed.fade_out, changed.length

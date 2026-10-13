@@ -370,6 +370,14 @@ impl FadeShape {
         Self::ALL.into_iter().find(|s| s.name() == name)
     }
 
+    /// The gain at `t` raised to `exponent` (a curve's [`FadeCurve::exponent`]), 0 … 1. Never
+    /// allocates; the audio thread calls it per frame inside a fade, with the exponent worked
+    /// out beforehand.
+    pub fn gain_bent(self, t: f64, exponent: f64) -> f64 {
+        let shaped = self.gain(t);
+        if exponent == 1.0 { shaped } else { shaped.powf(exponent) }
+    }
+
     /// The gain at `t` (0 at the silent end of the fade, 1 at full level), 0 … 1.
     pub fn gain(self, t: f64) -> f64 {
         let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
@@ -397,14 +405,33 @@ impl FadeCurve {
         (-1.0..=1.0).contains(&self.curve)
     }
 
-    /// The gain at `t` (0 at the silent end of the fade, 1 at full level), 0 … 1. Never
-    /// allocates; the audio thread calls it per frame.
+    /// The power the shape is raised to, `4^(−curve)`: 1 at curve 0 (and for a curve that is not
+    /// a number), ¼ … 4 otherwise. Worked out once per clip, not per frame.
+    pub fn exponent(&self) -> f64 {
+        if self.curve == 0.0 || !self.curve.is_finite() { 1.0 } else { 4f64.powf(-self.curve.clamp(-1.0, 1.0)) }
+    }
+
+    /// The gain at `t` (0 at the silent end of the fade, 1 at full level), 0 … 1.
     pub fn gain(&self, t: f64) -> f64 {
-        let shaped = self.shape.gain(t);
-        if self.curve == 0.0 || !self.curve.is_finite() {
-            return shaped;
+        self.shape.gain_bent(t, self.exponent())
+    }
+
+    /// The curve that puts the gain half-way through a fade of `shape` at `gain`: what a curve
+    /// handle dragged to that height sets. Within −1 … +1; 0 when `gain` is not a number.
+    pub fn through(shape: FadeShape, gain: f64) -> f64 {
+        let half = shape.gain(0.5);
+        if !gain.is_finite() {
+            return 0.0;
         }
-        shaped.powf(4f64.powf(-self.curve.clamp(-1.0, 1.0)))
+        if gain <= 0.0 {
+            return -1.0;
+        }
+        if gain >= 1.0 {
+            return 1.0;
+        }
+        // gain = half^(4^(−curve)), so 4^(−curve) = ln gain / ln half.
+        let curve = -((gain.ln() / half.ln()).ln() / 4f64.ln());
+        if curve.is_finite() { curve.clamp(-1.0, 1.0) } else { 0.0 }
     }
 }
 
@@ -481,7 +508,7 @@ pub enum ValidationError {
     MissingChannel(ChannelId),
     MissingContent(ContentId),
     /// The clip at this index on the arrangement lane at this index has fades that are negative,
-    /// not finite, or together longer than the clip.
+    /// not finite, or together longer than the clip, or a fade curve outside −1 … +1.
     BadFades {
         lane: usize,
         clip: usize,
@@ -498,7 +525,11 @@ impl fmt::Display for ValidationError {
             Self::MissingChannel(id) => write!(f, "channel {} does not exist", id.0),
             Self::MissingContent(id) => write!(f, "clip content {} does not exist", id.0),
             Self::BadFades { lane, clip } => {
-                write!(f, "clip {clip} on arrangement lane {lane} has fades that are negative or longer than the clip")
+                write!(
+                    f,
+                    "clip {clip} on arrangement lane {lane} has fades that are negative or longer than the clip, \
+                     or a fade curve outside -1 to +1"
+                )
             }
         }
     }
@@ -797,6 +828,15 @@ mod tests {
         assert_eq!(linear(0.0).gain(7.0), 1.0);
         assert_eq!(linear(f64::NAN).gain(0.5), 0.5);
         assert_eq!(FadeShape::from_name("wobbly"), None);
+        // The curve that puts the half-way gain at a height gives back that height.
+        for shape in FadeShape::ALL {
+            for curve in [-0.9, -0.3, 0.0, 0.4, 0.95] {
+                let gain = FadeCurve { shape, curve }.gain(0.5);
+                assert!((FadeCurve::through(shape, gain) - curve).abs() < 1e-9, "{shape:?} {curve}");
+            }
+            assert_eq!((FadeCurve::through(shape, 0.0), FadeCurve::through(shape, 1.0)), (-1.0, 1.0));
+            assert_eq!(FadeCurve::through(shape, f64::NAN), 0.0);
+        }
     }
 
     #[test]

@@ -880,11 +880,10 @@ fn a_fades_shape_is_picked_from_its_menu_and_its_curve_dragged() {
     harness.run();
     assert_eq!(loop_fade_in_curve(&harness), Some(FadeCurve { shape: FadeShape::EqualPower, curve: 0.0 }));
 
-    // Up by a quarter of the clip's height: +0.5.
+    // Down by 12 points: the handle follows the pointer, and the curve bends towards −.
     let handle = harness.get_by_label("Fade-in curve of Loop on Loop").rect();
-    let lane_height = harness.get_by_label("Clip Loop on Loop at bar 1").rect().height();
     let from = handle.center();
-    let to = from - egui::vec2(0.0, lane_height / 4.0);
+    let to = from + egui::vec2(0.0, 12.0);
     harness.hover_at(from);
     harness.run();
     harness.drag_at(from);
@@ -896,7 +895,9 @@ fn a_fades_shape_is_picked_from_its_menu_and_its_curve_dragged() {
     harness.drop_at(to);
     harness.run();
     let bent = loop_fade_in_curve(&harness).map(|c| c.curve).unwrap_or_default();
-    assert!((bent - 0.5).abs() < 0.05, "{bent}");
+    assert!(bent < -0.05 && bent > -1.0, "{bent}");
+    let now = harness.get_by_label("Fade-in curve of Loop on Loop").rect().center();
+    assert!((now.y - to.y).abs() < 1.0, "the handle is at {now:?}, the pointer let go at {to:?}");
     assert_eq!(loop_fade_in_curve(&harness).map(|c| c.shape), Some(FadeShape::EqualPower));
 
     // A double-click sets the curve back to 0 (half a second after the drag, as a person would).

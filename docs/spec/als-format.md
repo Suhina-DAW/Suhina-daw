@@ -290,8 +290,9 @@ These change without any musical edit:
 - Note probability and velocity deviation; MIDI CC and pitch-bend envelopes.
 - Warp modes (`WarpMode` codes).
 - Audio clip fades: where a set stores an arrangement clip's fade-in and fade-out, their unit
-  and curve. The model has them (`Clip::fade_in`, `Clip::fade_out`, in beats); the importer
-  leaves them at 0 until [corpus series 9](als-corpus.md#series-9-audio-fades) shows the format.
+  and curve. The model has them (`Clip::fade_in`, `Clip::fade_out`, in beats, and their shapes
+  and curves `Clip::fade_in_curve`, `Clip::fade_out_curve`); the importer leaves them at 0
+  (linear, unbent) until [corpus series 9](als-corpus.md#series-9-audio-fades) shows the format.
 - Return tracks added or removed; sends routed pre-fader; track output to another track.
 - Tempo and time-signature changes over time (automation with more than the default event).
 - CLAP plug-ins, Audio Units, racks.

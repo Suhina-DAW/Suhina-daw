@@ -61,7 +61,7 @@ Its key ideas:
      may target a specific track
    - **clips** that place a content from the pool on the arrangement or in a launcher slot, with
      their own start, length, offset and loop range, and (audio on the arrangement) a fade-in and
-     a fade-out in beats, each with a shape and a curve ([arrangement editing](../spec/arrangement-editing.md) › Fades)
+     a fade-out in beats ([arrangement editing](../spec/arrangement-editing.md) › Fades)
    - an **arrangement** of lanes, each optionally bound to a track
    - a **launcher**: scenes and per-track slot columns
 2. **Per-format extensions.** Every object carries an `Extensions` list where an importer keeps
@@ -73,7 +73,7 @@ Its key ideas:
    convert to and from the core. Adding a format never requires changing another format.
 
 Objects refer to each other by typed ids (`TrackId`, `ChannelId`, `ContentId`), not by pointers.
-`Project::validate` checks that every id resolves and that every arrangement clip's fades fit it (and their curves are within −1 … +1),
+`Project::validate` checks that every id resolves and that every arrangement clip's fades fit it,
 so a malformed import becomes an error instead of a crash.
 
 How each DAW maps onto the core:
@@ -94,6 +94,14 @@ defaults, and the device limits each value to its range when it loads it, so a p
 by an older or newer Suhina still opens. Plug-ins keep using `state`; placeholders have
 neither. Importers fill `params` when they map another DAW's device onto a Suhina device
 (first: Live's Utility, `docs/spec/als-format.md` › Devices).
+
+## Amendment: fade shapes and curves (2026-10-13)
+
+Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`): a
+`FadeShape` (linear, equal power, fast, slow, S-curve) and a curve from −1 to +1 that bends it.
+Linear with curve 0 is the default, so a project without them sounds as before. A curve outside
+−1 … +1 does not validate (`ValidationError::BadFades`). The formulas are in
+[arrangement editing](../spec/arrangement-editing.md) › Fades.
 
 ## Consequences
 
