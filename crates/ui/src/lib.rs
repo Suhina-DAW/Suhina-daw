@@ -17,6 +17,7 @@ pub mod missing_files;
 pub mod motion;
 pub mod project_dialog;
 pub mod sample_map;
+mod sample_map_crowd;
 pub mod sample_map_panel;
 pub mod session_view;
 pub mod settings;

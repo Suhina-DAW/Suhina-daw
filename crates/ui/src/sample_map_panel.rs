@@ -237,6 +237,7 @@ impl Panel {
             })
             .collect();
         self.flags_key = Some(key);
+        self.view.points_changed();
     }
 
     fn status(&self) -> String {

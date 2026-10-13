@@ -4,12 +4,11 @@
 
 use std::collections::HashSet;
 
-use egui::{
-    Align2, Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
-};
+use egui::{Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
 use suhina_soundmap::grid::Grid;
 use suhina_soundmap::kinds::Kind;
 
+use crate::sample_map_crowd::{self as crowd, Cluster};
 use crate::theme;
 
 /// How long the pointer rests on a point before it is previewed, so a fast sweep does not play
@@ -23,8 +22,6 @@ const TOOLTIP_WAVE: Vec2 = Vec2::new(220.0, 36.0);
 const HIT_RADIUS: f32 = 7.0;
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 64.0;
-/// A kind with fewer items than this in view gets no label.
-const LABEL_MIN_ITEMS: usize = 8;
 /// Above this zoom the kind labels fade out, as point names become readable.
 const LABEL_FADE_ZOOM: f32 = 6.0;
 const TOP_BAR: f32 = 24.0;
@@ -119,6 +116,50 @@ pub struct MapView {
     area: Rect,
     /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
     pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
+    /// Counts [`MapView::points_changed`], so what is worked out from the points is kept until
+    /// they change.
+    revision: u64,
+    cache: Cache,
+}
+
+/// The points the cache was worked out for: [`MapView::points_changed`]'s count, their number and
+/// address, the layout and the view's aspect (the grid's positions follow it).
+type PointsKey = (u64, usize, usize, Layout, u32);
+
+/// What the view works out from the points when they change, not every frame
+/// (docs/spec/sample-map.md › Many items).
+#[derive(Clone, Default)]
+struct Cache {
+    /// The points it was worked out for.
+    key: Option<PointsKey>,
+    /// Items per kind, for the legend, in the order of [`Kind::ALL`].
+    counts: Vec<(Kind, usize)>,
+    /// The clusters that get a label, largest first.
+    clusters: Vec<Cluster>,
+    /// The density raster last drawn and what it was drawn for.
+    density: Option<(DensityKey, egui::TextureHandle)>,
+}
+
+impl std::fmt::Debug for Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("key", &self.key)
+            .field("counts", &self.counts)
+            .field("clusters", &self.clusters.len())
+            .field("density", &self.density.as_ref().map(|(_, t)| t.id()))
+            .finish()
+    }
+}
+
+/// Everything the density raster depends on; it is drawn again only when one of these changes.
+#[derive(Debug, Clone, PartialEq)]
+struct DensityKey {
+    points: Option<PointsKey>,
+    rect: Rect,
+    scale: f32,
+    centre: [f32; 2],
+    legend: Vec<Kind>,
+    similar: Option<(usize, Vec<usize>)>,
 }
 
 impl Default for MapView {
@@ -136,12 +177,37 @@ impl Default for MapView {
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            revision: 0,
+            cache: Cache::default(),
             hover_waveform: None,
         }
     }
 }
 
 impl MapView {
+    /// The points given to [`show`] changed (their positions, kinds or flags): the legend's
+    /// counts, the clusters and the density are worked out again.
+    pub fn points_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Works out the counts and clusters again when the points changed.
+    fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]], aspect: f32) {
+        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect.to_bits()));
+        if self.cache.key == key {
+            return;
+        }
+        let mut counts: Vec<(Kind, usize)> = Kind::ALL.iter().map(|k| (*k, 0)).collect();
+        for point in points {
+            if let Some((_, n)) = counts.iter_mut().find(|(k, _)| *k == point.kind) {
+                *n += 1;
+            }
+        }
+        let items: Vec<([f32; 2], Kind)> =
+            points.iter().zip(positions).filter(|(p, _)| p.matches).map(|(p, q)| (*q, p.kind)).collect();
+        self.cache = Cache { key, counts, clusters: crowd::clusters(&items), density: None };
+    }
+
     /// The width over the height of where the points were drawn last frame; 1 before the first.
     pub fn aspect(&self) -> f32 {
         aspect_of(self.area)
@@ -281,29 +347,6 @@ fn step(positions: &[[f32; 2]], from: usize, direction: [f32; 2]) -> Option<usiz
         .map(|(i, _)| i)
 }
 
-/// For each kind with enough items, where its label goes: the item of that kind nearest to the
-/// kind's centre.
-fn label_spots(points: &[MapPoint], positions: &[[f32; 2]]) -> Vec<(Kind, [f32; 2])> {
-    let mut out = Vec::new();
-    for kind in Kind::ALL {
-        let mine: Vec<[f32; 2]> =
-            points.iter().zip(positions).filter(|(p, _)| p.kind == kind && p.matches).map(|(_, q)| *q).collect();
-        if mine.len() < LABEL_MIN_ITEMS || kind == Kind::Other && mine.len() < LABEL_MIN_ITEMS * 4 {
-            continue;
-        }
-        let n = mine.len() as f32;
-        let centre = [mine.iter().map(|p| p[0]).sum::<f32>() / n, mine.iter().map(|p| p[1]).sum::<f32>() / n];
-        if let Some(spot) = mine.iter().min_by(|a, b| {
-            let da = (a[0] - centre[0]).powi(2) + (a[1] - centre[1]).powi(2);
-            let db = (b[0] - centre[0]).powi(2) + (b[1] - centre[1]).powi(2);
-            da.total_cmp(&db)
-        }) {
-            out.push((kind, *spot));
-        }
-    }
-    out
-}
-
 /// A kind's colour: Suhina's muted palette, extended, with neighbouring kinds told apart.
 pub fn kind_colour(kind: Kind) -> Color32 {
     match kind {
@@ -349,12 +392,14 @@ pub fn show(
     });
 
     top_bar(ui, top, view, status, events);
-    let positions = positions(points, view.layout, grid, aspect_of(area));
+    let aspect = aspect_of(area);
+    let positions = positions(points, view.layout, grid, aspect);
+    view.refresh(points, &positions, aspect);
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
     }
-    legend(ui, bottom, view, points);
+    legend(ui, bottom, view);
 }
 
 fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &mut Vec<MapEvent>) {
@@ -590,7 +635,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     }
 
     draw_points(&painter, view, points, &screen, grid, transform, under);
-    draw_labels(&painter, view, points, positions, transform);
+    draw_labels(&painter, view, transform);
 
     if let Some(point) = under.and_then(|i| points.get(i)) {
         let kind =
@@ -622,28 +667,65 @@ fn cell_size(view: &MapView, grid: Option<&Grid>, transform: Transform) -> f32 {
     }
 }
 
+/// The points: one dot each, or the density raster with the points that must be seen one by one
+/// drawn on top when too many are in view (docs/spec/sample-map.md › Many items).
 fn draw_points(
     painter: &egui::Painter,
-    view: &MapView,
+    view: &mut MapView,
     points: &[MapPoint],
     screen: &[Pos2],
     grid: Option<&Grid>,
     transform: Transform,
     under: Option<usize>,
 ) {
-    let visible = painter.clip_rect().expand(8.0);
+    let area = painter.clip_rect();
+    let visible = area.expand(8.0);
     let cell = cell_size(view, grid, transform);
-    let radius = (2.0 * view.zoom.sqrt()).clamp(2.0, 6.0);
+    let in_view = screen.iter().filter(|p| area.contains(**p)).count();
+    let crowded = if cell > 0.0 { cell < crowd::BIN } else { in_view > crowd::DENSITY_ABOVE };
+    let legend = view.legend.clone();
+    let similar_of = view.similar.as_ref().map(|(of, _)| *of);
     let similar: HashSet<usize> = view.similar.as_ref().map(|(_, s)| s.iter().copied().collect()).unwrap_or_default();
     let dimmed = |i: usize, p: &MapPoint| {
         !p.matches
-            || !view.legend.is_empty() && !view.legend.contains(&p.kind)
-            || view.similar.is_some() && !similar.contains(&i) && view.similar.as_ref().is_some_and(|(of, _)| *of != i)
+            || !legend.is_empty() && !legend.contains(&p.kind)
+            || similar_of.is_some_and(|of| of != i) && !similar.contains(&i)
     };
+    if crowded {
+        let mut kinds: Vec<Kind> = legend.iter().copied().collect();
+        kinds.sort();
+        let key = DensityKey {
+            points: view.cache.key,
+            rect: area,
+            scale: transform.scale,
+            centre: transform.centre,
+            legend: kinds,
+            similar: view.similar.clone(),
+        };
+        if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
+            let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
+            let image = crowd::density(screen, colour, area);
+            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
+            view.cache.density = Some((key, handle));
+        }
+        if let Some((_, handle)) = view.cache.density.as_ref() {
+            let size = handle.size_vec2() * crowd::BIN;
+            let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+            painter.image(handle.id(), Rect::from_min_size(area.min, size), uv, Color32::WHITE);
+        }
+    }
+    let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
+    let cell = if crowded { 0.0 } else { cell };
     // Dimmed points first, so the others are drawn over them.
     for pass in [true, false] {
         for (i, (point, at)) in points.iter().zip(screen).enumerate() {
             if dimmed(i, point) != pass || !visible.contains(*at) {
+                continue;
+            }
+            let marked =
+                point.selected || point.in_use || similar.contains(&i) || view.previewed == Some(i) || under == Some(i);
+            // In the density view only the points that must be seen one by one are drawn.
+            if crowded && !marked {
                 continue;
             }
             let mut colour = kind_colour(point.kind);
@@ -652,6 +734,8 @@ fn draw_points(
             }
             if pass {
                 colour = colour.gamma_multiply(0.18);
+            } else if !marked {
+                colour = colour.gamma_multiply(opacity);
             }
             if cell > 0.0 {
                 let side = (cell - 1.0).max(1.0);
@@ -688,30 +772,32 @@ fn draw_points(
     }
 }
 
-fn draw_labels(
-    painter: &egui::Painter,
-    view: &MapView,
-    points: &[MapPoint],
-    positions: &[[f32; 2]],
-    transform: Transform,
-) {
+/// One label per cluster, sized by its count, placed largest first so none overlap
+/// (docs/spec/sample-map.md › Many items › Labels).
+fn draw_labels(painter: &egui::Painter, view: &MapView, transform: Transform) {
     let fade = ((LABEL_FADE_ZOOM - view.zoom) / 2.0).clamp(0.0, 1.0);
     if fade <= 0.0 {
         return;
     }
-    for (kind, spot) in label_spots(points, positions) {
-        let at = transform.to_screen(spot);
-        let colour = kind_colour(kind).gamma_multiply(fade);
-        let font = theme::ui_font(theme::TEXT * 1.6);
+    let clusters: Vec<&Cluster> =
+        view.cache.clusters.iter().filter(|c| view.legend.is_empty() || view.legend.contains(&c.kind)).collect();
+    let smallest = clusters.last().map_or(1, |c| c.count);
+    let galleys: Vec<_> = clusters
+        .iter()
+        .map(|c| {
+            let font = theme::ui_font(theme::TEXT * 1.6 * crowd::label_scale(c.count, smallest));
+            // Light text: a label sits on its own kind's colour, so that colour would not read.
+            painter.layout_no_wrap(c.kind.label().to_string(), font, theme::text_primary().gamma_multiply(fade))
+        })
+        .collect();
+    let sizes: Vec<(Pos2, Vec2)> =
+        clusters.iter().zip(&galleys).map(|(c, g)| (transform.to_screen(c.spot), g.size())).collect();
+    let shadow = theme::window_background().gamma_multiply(fade);
+    for (spot, galley) in crowd::place_labels(&sizes, painter.clip_rect()).into_iter().zip(galleys) {
+        let Some(spot) = spot else { continue };
         // A shadow keeps the label readable over the points.
-        painter.text(
-            at + Vec2::new(1.0, 1.0),
-            Align2::CENTER_CENTER,
-            kind.label(),
-            font.clone(),
-            theme::window_background().gamma_multiply(fade),
-        );
-        painter.text(at, Align2::CENTER_CENTER, kind.label(), font, colour);
+        painter.galley_with_override_text_color(spot.min + Vec2::new(1.0, 1.0), galley.clone(), shadow);
+        painter.galley(spot.min, galley, shadow);
     }
 }
 
@@ -746,15 +832,14 @@ fn similar_strip(ui: &mut Ui, rect: Rect, view: &mut MapView, points: &[MapPoint
     }
 }
 
-fn legend(ui: &mut Ui, rect: Rect, view: &mut MapView, points: &[MapPoint]) {
+fn legend(ui: &mut Ui, rect: Rect, view: &mut MapView) {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(theme::PAD, 1.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     let ctrl = child.input(|i| i.modifiers.command);
-    for kind in Kind::ALL {
-        let count = points.iter().filter(|p| p.kind == kind).count();
+    for (kind, count) in view.cache.counts.clone() {
         if count == 0 {
             continue;
         }
@@ -845,14 +930,24 @@ mod tests {
     }
 
     #[test]
-    fn labels_go_to_kinds_with_enough_items() {
+    fn the_legend_counts_and_the_clusters_follow_the_points() {
         let mut points: Vec<MapPoint> = (0..10).map(|i| point(0.1 + i as f32 * 0.01, 0.1, Kind::Kick)).collect();
         points.extend((0..3).map(|i| point(0.9, 0.9 + i as f32 * 0.01, Kind::Snare)));
         let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
-        let spots = label_spots(&points, &positions);
-        assert_eq!(spots.len(), 1);
-        assert_eq!(spots[0].0, Kind::Kick);
-        assert!((spots[0].1[0] - 0.145).abs() < 0.01);
+        let mut view = MapView::default();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.counts.contains(&(Kind::Kick, 10)) && view.cache.counts.contains(&(Kind::Snare, 3)));
+        // Only the kick cluster is large enough for a label.
+        assert_eq!(view.cache.clusters.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![Kind::Kick]);
+        // Kept until the points change.
+        for p in &mut points {
+            p.matches = false;
+        }
+        view.refresh(&points, &positions, 1.0);
+        assert_eq!(view.cache.clusters.len(), 1);
+        view.points_changed();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.clusters.is_empty());
     }
 
     #[test]
@@ -923,6 +1018,86 @@ mod tests {
             "{:?}",
             harness.state().1
         );
+    }
+}
+
+#[cfg(test)]
+mod many {
+    use super::*;
+
+    /// `n` points in clusters of the 17 kinds, from a fixed seed.
+    pub(super) fn points(n: usize) -> Vec<MapPoint> {
+        let mut state = 7u32;
+        let mut noise = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as f32 / u32::MAX as f32
+        };
+        (0..n)
+            .map(|i| {
+                let k = i % Kind::ALL.len();
+                let kind = Kind::ALL[k];
+                let centre = [0.15 + (k % 5) as f32 * 0.18, 0.15 + (k / 5) as f32 * 0.22];
+                MapPoint {
+                    name: format!("{} {i}", kind.label()),
+                    detail: String::new(),
+                    // Roughly Gaussian clouds (the sum of three uniform draws), as t-SNE makes them.
+                    position: [
+                        (centre[0] + (noise() + noise() + noise() - 1.5) * 0.06).clamp(0.0, 1.0),
+                        (centre[1] + (noise() + noise() + noise() - 1.5) * 0.07).clamp(0.0, 1.0),
+                    ],
+                    kind,
+                    guessed: false,
+                    in_use: i % 5_000 == 0,
+                    selected: i == 3,
+                    matches: true,
+                    preset: false,
+                    pinned: false,
+                    tags: Vec::new(),
+                }
+            })
+            .collect()
+    }
+
+    /// The slowest of `frames` frames (the view's work and tessellation) with the pointer moving
+    /// over the map and, when `pan`, the map moved every frame so the density is drawn anew.
+    fn slowest_frame(points: &[MapPoint], frames: usize, pan: bool) -> std::time::Duration {
+        let ctx = egui::Context::default();
+        let mut view = MapView::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let mut slowest = std::time::Duration::ZERO;
+        for frame in 0..frames + 2 {
+            let mut input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            input.events.push(egui::Event::PointerMoved(Pos2::new(300.0 + frame as f32 * 7.0, 400.0)));
+            if pan {
+                view.centre = [0.5 + frame as f32 * 0.001, 0.5];
+            }
+            let started = std::time::Instant::now();
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut events = Vec::new();
+                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+            });
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            // No renderer here takes the density texture.
+            output.textures_delta.clear();
+            // The first frames lay out the fonts and work out the clusters.
+            if frame >= 2 {
+                slowest = slowest.max(started.elapsed());
+            }
+        }
+        slowest
+    }
+
+    #[test]
+    fn a_map_of_200_000_points_draws_at_60_frames_a_second() {
+        let points = points(200_000);
+        let still = slowest_frame(&points, 10, false);
+        let panning = slowest_frame(&points, 10, true);
+        eprintln!("200 000 points: still {still:?}, panning {panning:?}");
+        // A frame at 60 Hz in an optimised build; unoptimised test builds get more room.
+        let budget = std::time::Duration::from_micros(if cfg!(debug_assertions) { 100_000 } else { 16_700 });
+        assert!(still < budget && panning < budget, "still {still:?}, panning {panning:?}");
     }
 }
 
@@ -1022,7 +1197,10 @@ mod look {
                 let mut p = MapPoint {
                     name: format!("{} {i}", kind.label()),
                     detail: String::new(),
-                    position: [centre[0] + noise() * 0.22, centre[1] + noise() * 0.22],
+                    position: [
+                        centre[0] + (noise() + noise() + noise()) * 0.07,
+                        centre[1] + (noise() + noise() + noise()) * 0.07,
+                    ],
                     kind: *kind,
                     guessed: i % 7 == 0,
                     in_use: i == 3 && k % 2 == 0,
@@ -1053,5 +1231,23 @@ mod look {
             let name = format!("../../target/sample-map-{layout:?}.png").to_lowercase();
             image.save(name).unwrap();
         }
+    }
+
+    /// Renders 200 000 points (the density view) to `target/sample-map-crowded.png`.
+    #[test]
+    #[ignore]
+    fn render_a_crowded_map() {
+        use egui_kittest::Harness;
+        let points = super::many::points(200_000);
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 640.0)).build_ui_state(
+            |ui, view: &mut MapView| {
+                crate::theme::install(ui.ctx());
+                let mut events = Vec::new();
+                show(ui, view, &points, None, "200 000 samples", &[], &mut events);
+            },
+            MapView::default(),
+        );
+        harness.run();
+        harness.render().unwrap().save("../../target/sample-map-crowded.png").unwrap();
     }
 }
