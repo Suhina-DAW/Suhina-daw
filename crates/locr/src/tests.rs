@@ -18,6 +18,8 @@ fn everything() -> Project {
         enabled: true,
         fade_in: 0.25,
         fade_out: 1.0,
+        fade_in_curve: FadeCurve { shape: FadeShape::SCurve, curve: -0.5 },
+        fade_out_curve: FadeCurve { shape: FadeShape::EqualPower, curve: 0.75 },
         extensions: Extensions::default(),
     };
     let channel = |id: u32, role: ChannelRole, output: Option<u32>| Channel {
@@ -226,9 +228,25 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": "long" } ] }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "loop": [3, 1] } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_shape": "wobbly" } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_out_shape": 3 } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_curve": 2 } ] } ] } }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
+}
+
+/// A clip written before fade shapes existed has linear, unbent fades, so it sounds the same.
+#[test]
+fn a_clip_without_fade_shapes_has_linear_fades() {
+    let project = from_json(
+        r#"{ "format": "locr", "version": 1, "project": { "contents": [ { "id": 1, "length": 4 } ],
+            "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in": 1, "fade_out": 1 } ] } ] } } }"#,
+    )
+    .unwrap();
+    let clip = &project.arrangement.lanes[0].clips[0];
+    assert_eq!((clip.fade_in_curve, clip.fade_out_curve), (FadeCurve::default(), FadeCurve::default()));
+    assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
 }
 
 #[test]

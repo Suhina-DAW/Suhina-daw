@@ -297,14 +297,22 @@ pub struct Clip {
     /// ([`Clip::fades_valid`]). Notes and launcher slots ignore them.
     pub fade_in: f64,
     pub fade_out: f64,
+    /// How the fade-in and the fade-out rise: a shape, bent by a curve. Linear and unbent by
+    /// default.
+    pub fade_in_curve: FadeCurve,
+    pub fade_out_curve: FadeCurve,
     pub extensions: Extensions,
 }
 
 impl Clip {
-    /// Whether the fades are finite, not negative and together no longer than the clip.
+    /// Whether the fades are finite, not negative and together no longer than the clip, and
+    /// their curves within −1 … +1.
     pub fn fades_valid(&self) -> bool {
         let fades = [self.fade_in, self.fade_out];
-        fades.iter().all(|f| f.is_finite() && *f >= 0.0) && self.fade_in + self.fade_out <= self.length + FADE_EPSILON
+        fades.iter().all(|f| f.is_finite() && *f >= 0.0)
+            && self.fade_in + self.fade_out <= self.length + FADE_EPSILON
+            && self.fade_in_curve.is_valid()
+            && self.fade_out_curve.is_valid()
     }
 
     /// Shortens the fades so they fit the clip, as when the clip itself is shortened. See
@@ -327,6 +335,78 @@ impl Clip {
 
 /// How much longer than the clip its fades may be together, for rounding in beat arithmetic.
 const FADE_EPSILON: f64 = 1e-9;
+
+/// The shape of a fade's gain over its length (`docs/spec/arrangement-editing.md` › Fades).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FadeShape {
+    /// `t`: a straight line in amplitude.
+    #[default]
+    Linear,
+    /// `sin(π t / 2)`: −3 dB half-way, so a fade-out and a fade-in over each other keep the power.
+    EqualPower,
+    /// `1 − (1 − t)²`: rises quickly, then levels off.
+    Fast,
+    /// `t²`: stays low, then rises.
+    Slow,
+    /// `t² (3 − 2t)`: flat at both ends.
+    SCurve,
+}
+
+impl FadeShape {
+    pub const ALL: [FadeShape; 5] = [Self::Linear, Self::EqualPower, Self::Fast, Self::Slow, Self::SCurve];
+
+    /// The name used in project files and commands.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::EqualPower => "equal_power",
+            Self::Fast => "fast",
+            Self::Slow => "slow",
+            Self::SCurve => "s_curve",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// The gain at `t` (0 at the silent end of the fade, 1 at full level), 0 … 1.
+    pub fn gain(self, t: f64) -> f64 {
+        let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+        match self {
+            Self::Linear => t,
+            Self::EqualPower => (t * std::f64::consts::FRAC_PI_2).sin(),
+            Self::Fast => 1.0 - (1.0 - t) * (1.0 - t),
+            Self::Slow => t * t,
+            Self::SCurve => t * t * (3.0 - 2.0 * t),
+        }
+    }
+}
+
+/// How one fade rises: a shape, bent by `curve` (−1 … +1, 0 the shape exactly). The gain is
+/// `shape(t)^(4^(−curve))`: + starts faster, − slower.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FadeCurve {
+    pub shape: FadeShape,
+    pub curve: f64,
+}
+
+impl FadeCurve {
+    /// Whether the curve is a number within −1 … +1.
+    pub fn is_valid(&self) -> bool {
+        (-1.0..=1.0).contains(&self.curve)
+    }
+
+    /// The gain at `t` (0 at the silent end of the fade, 1 at full level), 0 … 1. Never
+    /// allocates; the audio thread calls it per frame.
+    pub fn gain(&self, t: f64) -> f64 {
+        let shaped = self.shape.gain(t);
+        if self.curve == 0.0 || !self.curve.is_finite() {
+            return shaped;
+        }
+        shaped.powf(4f64.powf(-self.curve.clamp(-1.0, 1.0)))
+    }
+}
 
 /// Loop start and end inside the content, in beats.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -568,6 +648,8 @@ mod tests {
             enabled: true,
             fade_in: 0.0,
             fade_out: 0.0,
+            fade_in_curve: Default::default(),
+            fade_out_curve: Default::default(),
             extensions: Extensions::default(),
         }
     }
@@ -683,6 +765,40 @@ mod tests {
         assert!(errors.contains(&ValidationError::MissingContent(ContentId(3))));
     }
 
+    /// Each shape's gain at the ends and half-way, as the spec's table gives it, and how the
+    /// curve bends it (`docs/spec/arrangement-editing.md` › Fades).
+    #[test]
+    fn fade_shapes_and_curves_follow_the_spec() {
+        let half = [
+            (FadeShape::Linear, 0.5),
+            (FadeShape::EqualPower, std::f64::consts::FRAC_1_SQRT_2),
+            (FadeShape::Fast, 0.75),
+            (FadeShape::Slow, 0.25),
+            (FadeShape::SCurve, 0.5),
+        ];
+        for (shape, at_half) in half {
+            for curve in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+                let fade = FadeCurve { shape, curve };
+                let expected = at_half.powf(4f64.powf(-curve));
+                assert!((fade.gain(0.5) - expected).abs() < 1e-12, "{shape:?} {curve}: {}", fade.gain(0.5));
+                assert_eq!((fade.gain(0.0), fade.gain(1.0)), (0.0, 1.0), "{shape:?} {curve}");
+                // It rises the whole way.
+                let gains: Vec<f64> = (0..=100).map(|i| fade.gain(f64::from(i) / 100.0)).collect();
+                assert!(gains.windows(2).all(|w| w[1] >= w[0]), "{shape:?} {curve}");
+            }
+            assert_eq!(FadeShape::from_name(shape.name()), Some(shape));
+        }
+        // +1 starts faster than the shape, −1 slower.
+        let linear = |curve| FadeCurve { shape: FadeShape::Linear, curve };
+        assert!((linear(1.0).gain(0.5) - 0.5f64.powf(0.25)).abs() < 1e-12);
+        assert!((linear(-1.0).gain(0.5) - 0.0625).abs() < 1e-12);
+        // Hostile input stays within 0 … 1.
+        assert_eq!(linear(0.0).gain(f64::NAN), 0.0);
+        assert_eq!(linear(0.0).gain(7.0), 1.0);
+        assert_eq!(linear(f64::NAN).gain(0.5), 0.5);
+        assert_eq!(FadeShape::from_name("wobbly"), None);
+    }
+
     #[test]
     fn fades_must_be_non_negative_and_fit_the_clip() {
         let with = |fade_in: f64, fade_out: f64| Clip { fade_in, fade_out, ..clip(1, 0.0) };
@@ -692,6 +808,9 @@ mod tests {
         assert!(!with(0.0, f64::NAN).fades_valid());
         assert!(!with(f64::INFINITY, 0.0).fades_valid());
         assert!(!with(3.0, 1.5).fades_valid(), "4.5 beats of fades on a 4-beat clip");
+        let bent = |curve: f64| Clip { fade_out_curve: FadeCurve { shape: FadeShape::Slow, curve }, ..with(1.0, 1.0) };
+        assert!(bent(1.0).fades_valid() && bent(-1.0).fades_valid());
+        assert!(!bent(1.5).fades_valid() && !bent(f64::NAN).fades_valid(), "a curve outside -1 … +1");
 
         let content = ClipContent {
             id: ContentId(1),

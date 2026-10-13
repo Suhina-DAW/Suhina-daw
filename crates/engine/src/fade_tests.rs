@@ -28,6 +28,8 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
         enabled: true,
         fade_in,
         fade_out,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -181,6 +183,55 @@ fn a_fade_out_renders_like_its_golden_file() {
     assert_eq!(out[2 * BEAT - BEAT / 2 - 1], full);
     assert!(out[2 * BEAT - BEAT / 2 + 1] < full);
     assert_golden("fade-out", &out);
+}
+
+/// Every fade shape at curve −1, 0 and +1, rendered offline: the gain at the start, half-way and
+/// the end of a one-beat fade-in and fade-out is the spec's `s(t)^(4^(−curve))`
+/// (`docs/spec/arrangement-editing.md` › Fades).
+#[test]
+fn every_fade_shape_and_curve_renders_as_the_spec_says() {
+    let (region, pool) = constant();
+    let full = render_constant(0.0, 0.0, 512)[BEAT];
+    for shape in FadeShape::ALL {
+        for curve in [-1.0, 0.0, 1.0] {
+            let fade = FadeCurve { shape, curve };
+            let mut p = project(region.clone(), 2.0, 1.0, 1.0);
+            let clip = &mut p.arrangement.lanes[0].clips[0];
+            (clip.fade_in_curve, clip.fade_out_curve) = (fade, fade);
+            let out = left(&render_offline_with_audio(&p, &pool, SR, 512).unwrap());
+            assert_eq!(out.len(), 2 * BEAT);
+            // The fade-in's t is the frames before a frame over the fade's frames, the
+            // fade-out's the frames after it; the two meet in the middle of the clip.
+            let last = out.len() - 1;
+            let close = |frame: usize, t_in: f64| {
+                let t_out = (last - frame) as f64 / BEAT as f64;
+                let want = f64::from(full) * fade.gain(t_in.min(1.0)) * fade.gain(t_out.min(1.0));
+                let got = f64::from(out[frame]);
+                assert!((got - want).abs() < 1e-6, "{shape:?} {curve}: frame {frame} is {got}, expected {want}");
+            };
+            assert_eq!((out[0], out[last]), (0.0, 0.0), "{shape:?} {curve}");
+            close(BEAT / 2, 0.5);
+            close(BEAT, 1.0);
+            close(last - BEAT / 2, 1.5);
+            // Half-way through each fade, with the other fade not yet begun: s(½)^(4^(−curve)).
+            let half = f64::from(out[BEAT / 2]) / f64::from(full);
+            assert!((half - fade.gain(0.5)).abs() < 1e-6, "{shape:?} {curve}: {half}");
+            let half_out = f64::from(out[last - BEAT / 2]) / f64::from(full);
+            assert!((half_out - fade.gain(0.5)).abs() < 1e-6, "{shape:?} {curve}: {half_out}");
+        }
+    }
+}
+
+/// Linear and unbent is what fades were before shapes: the goldens hold.
+#[test]
+fn the_default_fade_is_the_linear_one() {
+    assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
+    let (region, pool) = constant();
+    let mut p = project(region, 2.0, 1.0, 0.5);
+    let plain = left(&render_offline_with_audio(&p, &pool, SR, 512).unwrap());
+    p.arrangement.lanes[0].clips[0].fade_in_curve = FadeCurve { shape: FadeShape::Linear, curve: 0.0 };
+    assert_eq!(left(&render_offline_with_audio(&p, &pool, SR, 512).unwrap()), plain);
+    assert_eq!(plain, render_constant(1.0, 0.5, 512));
 }
 
 #[test]

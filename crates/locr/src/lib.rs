@@ -19,9 +19,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, LaneData, Launcher,
-    LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId,
-    Transport, WarpMarker,
+    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
+    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
+    TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -328,6 +328,10 @@ fn clip_value(c: &Clip) -> Value {
         "enabled": c.enabled,
         "fade_in": number(c.fade_in),
         "fade_out": number(c.fade_out),
+        "fade_in_shape": c.fade_in_curve.shape.name(),
+        "fade_in_curve": number(c.fade_in_curve.curve),
+        "fade_out_shape": c.fade_out_curve.shape.name(),
+        "fade_out_curve": number(c.fade_out_curve.curve),
     });
     if let Some(map) = out.as_object_mut() {
         with_extensions(map, &c.extensions);
@@ -761,8 +765,28 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, LocrError> {
         enabled: flag(c, "enabled", true, at)?,
         fade_in: float_or(c, "fade_in", 0.0, at)?,
         fade_out: float_or(c, "fade_out", 0.0, at)?,
+        fade_in_curve: fade_curve(c, "fade_in", at)?,
+        fade_out_curve: fade_curve(c, "fade_out", at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files
+/// written before fade shapes).
+fn fade_curve(c: &Obj, fade: &str, at: &str) -> Result<FadeCurve, LocrError> {
+    let shape_key = format!("{fade}_shape");
+    let shape = match c.get(&shape_key) {
+        None | Some(Value::Null) => FadeShape::default(),
+        Some(Value::String(name)) => FadeShape::from_name(name)
+            .ok_or_else(|| LocrError(format!("{at}.{shape_key}: unknown fade shape {name:?}")))?,
+        Some(_) => return Err(format!("{at}.{shape_key}: expected a fade shape name").into()),
+    };
+    let curve_key = format!("{fade}_curve");
+    let curve = float_or(c, &curve_key, 0.0, at)?;
+    if !(-1.0..=1.0).contains(&curve) {
+        return Err(format!("{at}.{curve_key}: expected -1 to 1, got {curve}").into());
+    }
+    Ok(FadeCurve { shape, curve })
 }
 
 #[cfg(test)]

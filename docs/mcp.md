@@ -77,9 +77,10 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   project keeps its own file. `project.info` reports `unsaved_changes`. `project_open` opens
   `.locr` files as well as Live Sets.
 
-- **Clips.** `project.clips` lists each arrangement clip with its start, length and fades;
-  `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`, `clip.cut`, `clip.paste`,
-  `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats) edit them through
+- **Clips.** `project.clips` lists each arrangement clip with its start, length and fades
+  (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
+  `clip.cut`, `clip.paste`, `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats,
+  `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio

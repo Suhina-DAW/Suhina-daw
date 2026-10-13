@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::TrackId;
+use suhina_engine::model::{FadeCurve, FadeShape, TrackId};
 
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
@@ -49,6 +49,9 @@ const CLIP_GAIN_RANGE: (f64, f64) = (-70.0, 24.0);
 /// A fade handle: the square drawn at a clip's top corner, and the area that takes the pointer.
 const FADE_HANDLE: f32 = 7.0;
 const FADE_HANDLE_HIT: f32 = 11.0;
+/// A fade's curve handle: a round one half-way along the fade's line, on fades at least this wide.
+const CURVE_HANDLE: f32 = 7.0;
+const CURVE_HANDLE_MIN_FADE: f32 = 21.0;
 /// The gain field at an audio clip's top right, and how far it stays from the clip's right edge
 /// so the fade-out handle has room.
 const GAIN_FIELD: Vec2 = Vec2::new(44.0, 12.0);
@@ -87,6 +90,14 @@ struct FadeDrag {
     raw: f64,
 }
 
+/// A fade's curve handle being dragged: the clip, which fade, and the curve so far.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CurveDrag {
+    key: (TrackId, usize),
+    edge: FadeEdge,
+    curve: f64,
+}
+
 /// What a clip shows that a drag in progress changes before the project does: its gain and its
 /// fades.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,6 +105,8 @@ struct Shown {
     gain_db: f64,
     fade_in: f64,
     fade_out: f64,
+    fade_in_curve: FadeCurve,
+    fade_out_curve: FadeCurve,
 }
 
 impl Shown {
@@ -102,6 +115,15 @@ impl Shown {
             gain_db: clip.audio_view.as_ref().map_or(0.0, |v| v.gain_db),
             fade_in: clip.fade_in,
             fade_out: clip.fade_out,
+            fade_in_curve: clip.fade_in_curve,
+            fade_out_curve: clip.fade_out_curve,
+        }
+    }
+
+    fn curve(&self, edge: FadeEdge) -> FadeCurve {
+        match edge {
+            FadeEdge::In => self.fade_in_curve,
+            FadeEdge::Out => self.fade_out_curve,
         }
     }
 }
@@ -134,6 +156,7 @@ pub struct ArrangementViewState {
     /// A clip gain being dragged, and its value so far.
     gain_drag: Option<((TrackId, usize), f64)>,
     fade_drag: Option<FadeDrag>,
+    curve_drag: Option<CurveDrag>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
@@ -161,6 +184,7 @@ impl Default for ArrangementViewState {
             value_drag: None,
             gain_drag: None,
             fade_drag: None,
+            curve_drag: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
@@ -225,6 +249,12 @@ impl ArrangementViewState {
                 FadeEdge::Out => shown.fade_out = fade_length(drag.raw, FadeEdge::Out, clip, shown.fade_in, grid),
             }
         }
+        if let Some(drag) = self.curve_drag.filter(|d| d.key == key) {
+            match drag.edge {
+                FadeEdge::In => shown.fade_in_curve.curve = drag.curve,
+                FadeEdge::Out => shown.fade_out_curve.curve = drag.curve,
+            }
+        }
         shown
     }
 
@@ -270,12 +300,59 @@ fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Optio
     if snapped.is_finite() { snapped.clamp(0.0, room) } else { 0.0 }
 }
 
-/// The gain a clip's fades give `beats` into a clip `length` beats long: linear, 0 … 1
-/// (`docs/spec/arrangement-editing.md` › Fades).
-fn fade_gain(beats: f64, length: f64, fade_in: f64, fade_out: f64) -> f32 {
-    let fade_in = if fade_in > 0.0 { beats / fade_in } else { 1.0 };
-    let fade_out = if fade_out > 0.0 { (length - beats) / fade_out } else { 1.0 };
+/// The gain a clip's fades give `beats` into a clip `length` beats long, each fade following its
+/// shape and curve, 0 … 1 (`docs/spec/arrangement-editing.md` › Fades).
+fn fade_gain(beats: f64, length: f64, shown: &Shown) -> f32 {
+    let fade_in = if shown.fade_in > 0.0 { shown.fade_in_curve.gain(beats / shown.fade_in) } else { 1.0 };
+    let fade_out =
+        if shown.fade_out > 0.0 { shown.fade_out_curve.gain((length - beats) / shown.fade_out) } else { 1.0 };
     (fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
+}
+
+/// What a fade shape is called in its menu.
+fn shape_label(shape: FadeShape) -> &'static str {
+    match shape {
+        FadeShape::Linear => "Linear",
+        FadeShape::EqualPower => "Equal power",
+        FadeShape::Fast => "Fast",
+        FadeShape::Slow => "Slow",
+        FadeShape::SCurve => "S-curve",
+    }
+}
+
+/// A fade's curve after a vertical drag of `dy` points on a clip `height` points tall: up bends
+/// it towards +1, and the clip's height is the whole range from −1 to +1.
+fn dragged_curve(curve: f64, dy: f32, height: f32) -> f64 {
+    let moved = if height > 0.0 { f64::from(-dy / height) * 2.0 } else { 0.0 };
+    let curve = curve + moved;
+    if curve.is_finite() { curve.clamp(-1.0, 1.0) } else { 0.0 }
+}
+
+/// The points of a fade's line in the clip `rect`: from the silent bottom corner to full level
+/// at the top, following `curve`, from `from` to `to` (left to right; `to` is the silent end for
+/// a fade-out). Sampled every 2 points.
+fn fade_line(rect: Rect, edge: FadeEdge, from: f32, to: f32, curve: FadeCurve) -> Vec<Pos2> {
+    let (top, bottom) = (rect.top() + 2.0, rect.bottom());
+    let width = (to - from).max(0.0);
+    let steps = ((width / 2.0).ceil() as usize).max(1);
+    (0..=steps)
+        .map(|i| {
+            let x = from + width * i as f32 / steps as f32;
+            let along = if width > 0.0 { f64::from((x - from) / width) } else { 1.0 };
+            let t = if edge == FadeEdge::In { along } else { 1.0 - along };
+            Pos2::new(x, bottom - curve.gain(t) as f32 * (bottom - top))
+        })
+        .collect()
+}
+
+/// Where a fade's curve handle sits: on its line half-way through the fade.
+fn curve_handle(rect: Rect, edge: FadeEdge, fade: f32, curve: FadeCurve) -> Pos2 {
+    let (top, bottom) = (rect.top() + 2.0, rect.bottom());
+    let x = match edge {
+        FadeEdge::In => rect.left() + fade / 2.0,
+        FadeEdge::Out => rect.right() - fade / 2.0,
+    };
+    Pos2::new(x, bottom - curve.gain(0.5) as f32 * (bottom - top))
 }
 
 /// Where a volume sits on a field, 0 … 1, with 0 dB at 85 % (components › Value field).
@@ -833,11 +910,12 @@ fn clip_box<'a>(
 
     // Fade handles at the top corners of an audio clip, while it is hovered or selected: a
     // horizontal drag sets the fade (its end on the grid, free with Alt), a double-click
-    // removes it.
+    // removes it, a right-click chooses its shape.
     let mut handles = Vec::new();
+    let mut curves = Vec::new();
     let rect = clip_rect(space, clip.start, clip.length, x_of);
     let selected = state.selected == Some(key);
-    let fading = state.fade_drag.is_some_and(|d| d.key == key);
+    let fading = state.fade_drag.is_some_and(|d| d.key == key) || state.curve_drag.is_some_and(|d| d.key == key);
     let pointer_in = ui.ctx().pointer_hover_pos().is_some_and(|p| visible.contains(p));
     let fits = rect.width() >= 3.0 * FADE_HANDLE && rect.height() >= 2.0 * FADE_HANDLE;
     if clip.audio && fits && state.clip_drag.is_none_or(|d| !mine(&d)) && (pointer_in || selected || fading) {
@@ -900,7 +978,80 @@ fn clip_box<'a>(
                 FadeEdge::In => shown.fade_in = length,
                 FadeEdge::Out => shown.fade_out = length,
             }
+            // A right-click chooses the fade's shape.
+            let shape = shown.curve(edge).shape;
+            response.context_menu(|ui| {
+                for choice in FadeShape::ALL {
+                    if ui.radio(choice == shape, shape_label(choice)).clicked() {
+                        let param = if edge == FadeEdge::In { "inShape" } else { "outShape" };
+                        let mut params = json!({ "track": lane.track.0, "index": clip.index });
+                        params[param] = json!(choice.name());
+                        actions.push(Action::new("clip.setFades", params));
+                        ui.close();
+                    }
+                }
+            });
             handles.push((edge, widgets::hover(ui, &response)));
+
+            // The curve handle, half-way along a fade wide enough: a vertical drag bends the
+            // curve, a double-click sets it back to 0.
+            let fade_width = length as f32 * state.beat_width;
+            if fade_width < CURVE_HANDLE_MIN_FADE || state.fade_drag.is_some_and(|d| mine_fade(&d)) {
+                continue;
+            }
+            let current_curve = shown.curve(edge);
+            let center = curve_handle(rect, edge, fade_width, current_curve);
+            let hit = Rect::from_center_size(center, Vec2::splat(FADE_HANDLE_HIT)).intersect(row.clip);
+            if hit.width() <= 0.0 || hit.height() <= 0.0 {
+                continue;
+            }
+            let label = format!("{which} curve of {name} on {}", lane.name);
+            let id = Id::new(("clip-fade-curve", lane.track.0, clip.index, edge == FadeEdge::In));
+            let response =
+                ui.interact(hit, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            response.widget_info(|| {
+                let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, &label);
+                info.value = Some(current_curve.curve);
+                info
+            });
+            let mine_curve = |d: &CurveDrag| d.key == key && d.edge == edge;
+            let mut done = None;
+            if response.double_clicked() {
+                state.curve_drag = None;
+                done = Some(0.0);
+            } else {
+                if response.drag_started_by(egui::PointerButton::Primary) {
+                    state.curve_drag = Some(CurveDrag { key, edge, curve: current_curve.curve });
+                }
+                if response.dragged_by(egui::PointerButton::Primary)
+                    && let Some(drag) = state.curve_drag.as_mut().filter(|d| mine_curve(d))
+                {
+                    drag.curve = dragged_curve(drag.curve, response.drag_delta().y, rect.height());
+                }
+                if response.drag_stopped_by(egui::PointerButton::Primary)
+                    && let Some(drag) = state.curve_drag.take_if(|d| mine_curve(d))
+                {
+                    done = Some(drag.curve);
+                }
+            }
+            let stored = match edge {
+                FadeEdge::In => clip.fade_in_curve.curve,
+                FadeEdge::Out => clip.fade_out_curve.curve,
+            };
+            if let Some(v) = done {
+                let v = (v * 1000.0).round() / 1000.0;
+                if (v - stored).abs() > 1e-9 {
+                    let param = if edge == FadeEdge::In { "inCurve" } else { "outCurve" };
+                    let mut params = json!({ "track": lane.track.0, "index": clip.index });
+                    params[param] = json!(v);
+                    actions.push(Action::new("clip.setFades", params));
+                }
+                match edge {
+                    FadeEdge::In => shown.fade_in_curve.curve = v,
+                    FadeEdge::Out => shown.fade_out_curve.curve = v,
+                }
+            }
+            curves.push((edge, widgets::hover(ui, &response)));
         }
     }
 
@@ -948,6 +1099,12 @@ fn clip_box<'a>(
         let fill = motion::mix(theme::text_secondary(), theme::text_primary(), hover);
         handle_painter.rect_filled(handle, 0.0, fill);
         handle_painter.rect_stroke(handle, 0.0, theme::hairline(theme::window_background()), StrokeKind::Outside);
+    }
+    for (edge, hover) in curves {
+        let length = if edge == FadeEdge::In { shown.fade_in } else { shown.fade_out };
+        let center = curve_handle(rect, edge, length as f32 * state.beat_width, shown.curve(edge));
+        let fill = motion::mix(theme::text_secondary(), theme::text_primary(), hover);
+        handle_painter.circle(center, CURVE_HANDLE / 2.0, fill, theme::hairline(theme::window_background()));
     }
     result
 }
@@ -1024,7 +1181,7 @@ fn paint_clip(
         while x < to {
             let elapsed = f64::from(x - rect.left()) * per_point;
             let (low, high) = peaks.range(view.seconds(elapsed), view.seconds(elapsed + per_point));
-            let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, shown.fade_in, shown.fade_out);
+            let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, &shown);
             let top = middle - (high * gain).clamp(-1.0, 1.0) * half;
             let bottom = (middle - (low * gain).clamp(-1.0, 1.0) * half).max(top + 1.0);
             painter.vline(x + 0.5, egui::Rangef::new(top, bottom), stroke);
@@ -1048,17 +1205,16 @@ fn paint_clip(
         }
     }
     // A fade is a line over the waveform, from the clip's bottom corner to where it ends at
-    // the top.
+    // the top, following its shape and curve.
     if clip.audio {
         let fade_stroke = theme::hairline(dim(theme::text_secondary()));
-        let (top, bottom) = (rect.top() + 2.0, rect.bottom());
         if shown.fade_in > 0.0 {
             let end = (rect.left() + shown.fade_in as f32 * beat_width).min(rect.right());
-            painter.line_segment([Pos2::new(rect.left(), bottom), Pos2::new(end, top)], fade_stroke);
+            painter.line(fade_line(rect, FadeEdge::In, rect.left(), end, shown.fade_in_curve), fade_stroke);
         }
         if shown.fade_out > 0.0 {
             let from = (rect.right() - shown.fade_out as f32 * beat_width).max(rect.left());
-            painter.line_segment([Pos2::new(from, top), Pos2::new(rect.right(), bottom)], fade_stroke);
+            painter.line(fade_line(rect, FadeEdge::Out, from, rect.right(), shown.fade_out_curve), fade_stroke);
         }
     }
     if selected {
@@ -1410,7 +1566,16 @@ mod tests {
         let clip = audio_clip();
         let key = (TrackId(1), 0);
         let mut state = ArrangementViewState::default();
-        assert_eq!(state.shown(key, &clip, Some(1.0)), Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0 });
+        let linear = FadeCurve::default();
+        assert_eq!(
+            state.shown(key, &clip, Some(1.0)),
+            Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0, fade_in_curve: linear, fade_out_curve: linear }
+        );
+        // A curve being dragged bends that fade only.
+        state.curve_drag = Some(CurveDrag { key, edge: FadeEdge::In, curve: 0.4 });
+        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_in_curve.curve, 0.4);
+        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out_curve.curve, 0.0);
+        state.curve_drag = None;
         // The waveform is drawn with the gain being dragged, not the one in the project.
         state.gain_drag = Some((key, -12.0));
         assert_eq!(state.shown(key, &clip, Some(1.0)).gain_db, -12.0);
@@ -1444,9 +1609,42 @@ mod tests {
         assert_eq!(fade_handle(clip, FadeEdge::Out, 500.0).min.x, 100.0);
         assert_eq!(fade_handle(clip, FadeEdge::In, f32::NAN).min.x, 100.0);
         // Linear: half-way into the fade-in, half the level; full in between the fades.
-        assert_eq!(fade_gain(0.5, 8.0, 1.0, 2.0), 0.5);
-        assert_eq!(fade_gain(4.0, 8.0, 1.0, 2.0), 1.0);
-        assert_eq!(fade_gain(7.0, 8.0, 1.0, 2.0), 0.5);
+        let linear = FadeCurve::default();
+        let shown = Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 2.0, fade_in_curve: linear, fade_out_curve: linear };
+        assert_eq!(fade_gain(0.5, 8.0, &shown), 0.5);
+        assert_eq!(fade_gain(4.0, 8.0, &shown), 1.0);
+        assert_eq!(fade_gain(7.0, 8.0, &shown), 0.5);
+        // Other shapes and curves follow the spec's formula.
+        let slow = FadeCurve { shape: FadeShape::Slow, curve: 0.0 };
+        let shown = Shown { fade_in_curve: slow, fade_out_curve: FadeCurve { curve: 1.0, ..slow }, ..shown };
+        assert_eq!(fade_gain(0.5, 8.0, &shown), 0.25);
+        assert!((fade_gain(7.0, 8.0, &shown) - 0.25f32.powf(0.25)).abs() < 1e-6);
+    }
+
+    /// A fade's line runs from the silent bottom corner to full level at the top along its
+    /// shape, and the curve handle sits on it half-way; dragging up bends towards +1 (#197).
+    #[test]
+    fn fade_lines_and_curve_handles_follow_the_shape() {
+        let clip = Rect::from_min_size(Pos2::new(100.0, 10.0), Vec2::new(80.0, 42.0));
+        let (top, bottom) = (12.0, 52.0);
+        for shape in FadeShape::ALL {
+            let curve = FadeCurve { shape, curve: 0.0 };
+            let line = fade_line(clip, FadeEdge::In, 100.0, 140.0, curve);
+            assert_eq!(line.first().copied(), Some(Pos2::new(100.0, bottom)), "{shape:?}");
+            assert_eq!(line.last().copied(), Some(Pos2::new(140.0, top)), "{shape:?}");
+            let out = fade_line(clip, FadeEdge::Out, 150.0, 180.0, curve);
+            assert_eq!((out[0], out[out.len() - 1]), (Pos2::new(150.0, top), Pos2::new(180.0, bottom)), "{shape:?}");
+            let handle = curve_handle(clip, FadeEdge::In, 40.0, curve);
+            assert_eq!(handle.x, 120.0);
+            assert!((handle.y - (bottom - curve.gain(0.5) as f32 * 40.0)).abs() < 1e-4, "{shape:?}");
+        }
+        assert_eq!(curve_handle(clip, FadeEdge::Out, 30.0, FadeCurve::default()).x, 165.0);
+        // The clip's height is the whole range: half of it up is +1 from 0.
+        assert_eq!(dragged_curve(0.0, -21.0, 42.0), 1.0);
+        assert_eq!(dragged_curve(0.0, 10.5, 42.0), -0.5);
+        assert_eq!(dragged_curve(0.9, -100.0, 42.0), 1.0, "kept within -1 … +1");
+        assert_eq!(dragged_curve(0.0, f32::NAN, 42.0), 0.0);
+        assert_eq!(shape_label(FadeShape::SCurve), "S-curve");
     }
 
     #[test]

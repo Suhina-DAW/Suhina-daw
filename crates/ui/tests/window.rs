@@ -735,6 +735,8 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         enabled: true,
         fade_in: 0.0,
         fade_out: 0.0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -848,6 +850,68 @@ fn dragging_a_fade_handle_sets_the_fade_on_the_grid_and_a_double_click_removes_i
     }
     harness.run();
     assert_eq!(loop_fades(&harness), Some((0.0, 4.0)));
+}
+
+/// The Loop clip's fade-in shape and curve in the project.
+fn loop_fade_in_curve(harness: &Harness<'static, App>) -> Option<suhina_engine::model::FadeCurve> {
+    let session = harness.state().session()?;
+    let lane =
+        session.project().arrangement.lanes.iter().find(|l| l.track == Some(suhina_engine::model::TrackId(30)))?;
+    lane.clips.first().map(|clip| clip.fade_in_curve)
+}
+
+/// A right-click on a fade handle picks the shape; the curve handle on the fade's line bends it
+/// with a vertical drag and a double-click straightens it (#197).
+#[test]
+fn a_fades_shape_is_picked_from_its_menu_and_its_curve_dragged() {
+    use suhina_engine::model::{FadeCurve, FadeShape};
+    let mut harness = window_with_step(audio_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("Clip Loop on Loop at bar 1").click();
+    harness.run();
+    // A 4-beat fade-in, 32 points wide: wide enough for a curve handle.
+    drag_sideways(&mut harness, "Fade-in of Loop on Loop", 24.0);
+    assert_eq!(loop_fade_in_curve(&harness), Some(FadeCurve::default()));
+
+    harness.get_by_label("Fade-in of Loop on Loop").click_secondary();
+    harness.run();
+    harness.get_by_label("Equal power").click();
+    harness.run();
+    assert_eq!(loop_fade_in_curve(&harness), Some(FadeCurve { shape: FadeShape::EqualPower, curve: 0.0 }));
+
+    // Up by a quarter of the clip's height: +0.5.
+    let handle = harness.get_by_label("Fade-in curve of Loop on Loop").rect();
+    let lane_height = harness.get_by_label("Clip Loop on Loop at bar 1").rect().height();
+    let from = handle.center();
+    let to = from - egui::vec2(0.0, lane_height / 4.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from.lerp(to, 0.5));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    let bent = loop_fade_in_curve(&harness).map(|c| c.curve).unwrap_or_default();
+    assert!((bent - 0.5).abs() < 0.05, "{bent}");
+    assert_eq!(loop_fade_in_curve(&harness).map(|c| c.shape), Some(FadeShape::EqualPower));
+
+    // A double-click sets the curve back to 0 (half a second after the drag, as a person would).
+    let handle = harness.get_by_label("Fade-in curve of Loop on Loop").rect().center();
+    for _ in 0..30 {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(handle);
+        harness.drag_at(handle);
+        harness.drop_at(handle);
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(loop_fade_in_curve(&harness), Some(FadeCurve { shape: FadeShape::EqualPower, curve: 0.0 }));
 }
 
 fn two_projects() -> Harness<'static, App> {
