@@ -2,6 +2,7 @@
 //! goes through a command (see `docs/decisions/0002-commands.md`), so the CLI, the MCP server and
 //! later the UI all drive the project the same way.
 
+pub mod audio;
 mod blank;
 mod commands;
 mod devices;
@@ -19,6 +20,7 @@ use loopwerk_engine::{Controller, LauncherMonitor};
 use loopwerk_model::Project;
 use serde_json::Value;
 
+pub use audio::{AudioSystem, LiveOutput, OutputChoice, OutputInfo, audio_commands};
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
@@ -62,12 +64,33 @@ impl From<&str> for CommandError {
 /// and closed when the player is dropped.
 pub struct Player {
     controller: Controller,
-    _keep_alive: Option<Box<dyn std::any::Any + Send>>,
+    keep_alive: Option<Box<dyn std::any::Any + Send>>,
+    output: Option<std::sync::Arc<dyn LiveOutput>>,
 }
 
 impl Player {
     pub fn new(controller: Controller, keep_alive: Option<Box<dyn std::any::Any + Send>>) -> Self {
-        Self { controller, _keep_alive: keep_alive }
+        Self { controller, keep_alive, output: None }
+    }
+
+    /// A player whose output reports what it runs with (`audio.info`).
+    pub fn with_output(
+        controller: Controller,
+        keep_alive: Option<Box<dyn std::any::Any + Send>>,
+        output: std::sync::Arc<dyn LiveOutput>,
+    ) -> Self {
+        Self { controller, keep_alive, output: Some(output) }
+    }
+
+    /// What the output runs with now, when it says.
+    pub fn output_info(&self) -> Option<OutputInfo> {
+        self.output.as_ref().map(|o| o.info())
+    }
+
+    /// The controller and whatever keeps the output open, for the output layer to close it in
+    /// its own way (taking its plug-ins back) before opening another.
+    pub fn into_parts(self) -> (Controller, Option<Box<dyn std::any::Any + Send>>) {
+        (self.controller, self.keep_alive)
     }
 
     pub fn send(&mut self, command: loopwerk_engine::LaunchCommand) -> Result<(), CommandError> {
@@ -294,6 +317,33 @@ impl Session {
         self.audio_changed = false;
     }
 
+    /// Replaces the player with the one `open` makes from the old one, keeping the project's
+    /// plug-ins running (their processors move to the new engine when the output can carry
+    /// them over; otherwise they start again). Without a player, `open` gets `None`. On an
+    /// error the session has no player.
+    pub fn replace_player<E>(
+        &mut self,
+        open: impl FnOnce(&Project, &loopwerk_engine::AudioPool, Option<Player>) -> Result<Player, E>,
+    ) -> Result<(), E> {
+        let old = self.player.take();
+        match open(&self.project, &self.audio, old) {
+            Ok(player) => {
+                self.attach_player(player);
+                Ok(())
+            }
+            Err(e) => {
+                self.plugins.stop_all();
+                Err(e)
+            }
+        }
+    }
+
+    /// Stops the project's plug-ins so the next [`Session::sync_plugins`] starts them again
+    /// (each with its last state): for a new player that has none of them.
+    pub fn restart_plugins(&mut self) {
+        self.plugins.stop_all();
+    }
+
     /// Disconnects the audio engine; the project's plug-ins stop (each keeps its last state for
     /// when the project plays again).
     pub fn detach_player(&mut self) -> Option<Player> {
@@ -493,6 +543,7 @@ impl Session {
             | CommandKind::Projects
             | CommandKind::Plugins
             | CommandKind::Library
+            | CommandKind::Audio
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
                 let value = (spec.run)(self, params)?;

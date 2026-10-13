@@ -1,10 +1,16 @@
 [package]
 name = "loopwerk-output"
-description = "Plays a Loopwerk engine on the default audio output device"
+description = "Plays a Loopwerk engine on an audio output device: lists the hosts and devices, opens the one chosen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[features]
+# ASIO on Windows, through cpal's asio host. Building it compiles the Steinberg ASIO SDK
+# (GPL-3.0 since 2025, vendored in third_party/asiosdk) with a C++ compiler and generates its
+# bindings with bindgen, which needs libclang (README › Building).
+asio = ["cpal/asio"]
 
 [dependencies]
 loopwerk-engine.workspace = true
@@ -14,6 +20,13 @@ cpal.workspace = true
 rtrb.workspace = true
 # Real-time priority for the render thread.
 thread-priority = "3.1.1"  # MIT
+
+[target.'cfg(windows)'.dependencies]
+# WASAPI in exclusive mode, which cpal does not open.
+wasapi = "0.19"  # MIT
+
+[dev-dependencies]
+loopwerk-model.workspace = true
 
 [lints]
 workspace = true

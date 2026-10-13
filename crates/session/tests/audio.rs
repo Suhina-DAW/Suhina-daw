@@ -1,0 +1,225 @@
+//! The `audio.*` commands with a stand-in audio system: listing hosts, choosing an output,
+//! reopening the playing project on it with the transport where it was, and reporting what
+//! runs. Real devices are tested in `crates/output`.
+#![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
+
+use std::sync::{Arc, Mutex};
+
+use loopwerk_engine::{AudioPool, LaunchCommand, Renderer};
+use loopwerk_model::Project;
+use loopwerk_session::audio::{DeviceInfo, HostInfo, Opened};
+use loopwerk_session::{
+    AudioSystem, CommandKind, LiveOutput, OutputChoice, OutputInfo, Player, Projects, Session, audio_commands,
+};
+use serde_json::{Value, json};
+
+const SR: u32 = 48_000;
+
+/// Opens players on renderers it keeps, so a test can run them, and records each choice.
+#[derive(Default)]
+struct Stand {
+    renderers: Mutex<Vec<Renderer>>,
+    opened: Mutex<Vec<(OutputChoice, bool)>>,
+    /// The device that is "not there": choosing it falls back with a notice.
+    missing: Option<String>,
+}
+
+struct Live(OutputChoice);
+
+impl LiveOutput for Live {
+    fn info(&self) -> OutputInfo {
+        OutputInfo {
+            host: self.0.host.clone().unwrap_or_else(|| "Stand".into()),
+            device: self.0.device.clone().unwrap_or_else(|| "Default".into()),
+            sample_rate: self.0.sample_rate.unwrap_or(SR),
+            buffer_frames: self.0.buffer_frames.unwrap_or(512),
+            engine_block: self.0.buffer_frames.unwrap_or(1024),
+            latency_ms: 21.3,
+            underruns: 2,
+            ..OutputInfo::default()
+        }
+    }
+}
+
+impl AudioSystem for Stand {
+    fn hosts(&self) -> Vec<HostInfo> {
+        vec![HostInfo {
+            name: "Stand".into(),
+            default: true,
+            devices: vec![DeviceInfo {
+                name: "Default".into(),
+                default: true,
+                channels: 2,
+                sample_rates: vec![44_100, SR],
+                default_sample_rate: Some(SR),
+                buffer_sizes: vec![256, 512, 1024],
+                buffer_range: Some((256, 1024)),
+                exclusive: false,
+            }],
+            error: None,
+        }]
+    }
+
+    fn open(
+        &self,
+        project: &Project,
+        audio: &AudioPool,
+        choice: &OutputChoice,
+        previous: Option<Player>,
+    ) -> Result<Opened, String> {
+        let mut choice = choice.clone();
+        let mut notice = None;
+        if choice.device.is_some() && choice.device == self.missing {
+            notice = Some("the audio device is not there; the default output plays".to_string());
+            choice = OutputChoice::default();
+        }
+        self.opened.lock().unwrap().push((choice.clone(), previous.is_some()));
+        drop(previous);
+        let mut renderer = Renderer::stopped(project, audio, choice.sample_rate.unwrap_or(SR)).unwrap();
+        let player = Player::with_output(renderer.controller(), None, Arc::new(Live(choice)));
+        self.renderers.lock().unwrap().push(renderer);
+        Ok(Opened { player, notice, plugins_kept: true })
+    }
+}
+
+impl Stand {
+    /// Runs the newest renderer for a few blocks, as its audio thread would.
+    fn run_latest(&self) {
+        let mut renderers = self.renderers.lock().unwrap();
+        let renderer = renderers.last_mut().unwrap();
+        let mut block = vec![0.0f32; 512 * 2];
+        for _ in 0..4 {
+            renderer.process(&mut block);
+        }
+    }
+}
+
+fn project() -> Project {
+    loopwerk_session::blank_project()
+}
+
+fn run(projects: &mut Projects, id: &str, params: Value) -> Result<Value, String> {
+    projects.execute(id, &params).map_err(|e| e.0)
+}
+
+fn with_stand(missing: Option<&str>) -> (Projects, Arc<Stand>) {
+    let stand = Arc::new(Stand { missing: missing.map(String::from), ..Stand::default() });
+    let mut projects = Projects::new();
+    projects.set_audio_system(stand.clone());
+    (projects, stand)
+}
+
+#[test]
+fn audio_commands_are_listed_with_their_kind() {
+    let ids: Vec<&str> = audio_commands().iter().map(|c| c.id).collect();
+    assert_eq!(ids, ["audio.devices", "audio.setOutput", "audio.info"]);
+    assert!(audio_commands().iter().all(|c| c.kind == CommandKind::Audio));
+    let listed = loopwerk_session::all_commands();
+    assert!(listed.as_array().unwrap().iter().any(|c| c["id"] == "audio.setOutput"));
+}
+
+#[test]
+fn without_an_audio_system_the_commands_say_so() {
+    let mut projects = Projects::new();
+    let err = run(&mut projects, "audio.devices", json!({})).unwrap_err();
+    assert!(err.contains("no audio output"), "{err}");
+    // Info and choosing still work: the choice waits for an output.
+    assert_eq!(run(&mut projects, "audio.info", json!({})).unwrap()["playing"], json!(false));
+    let set = run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 256 })).unwrap();
+    assert_eq!(set["chosen"]["buffer_frames"], json!(256));
+    assert_eq!(projects.output_choice().buffer_frames, Some(256));
+}
+
+#[test]
+fn devices_list_the_hosts_and_the_choice() {
+    let (mut projects, _) = with_stand(None);
+    let listed = run(&mut projects, "audio.devices", json!({})).unwrap();
+    let device = &listed["hosts"][0]["devices"][0];
+    assert_eq!(device["name"], json!("Default"));
+    assert_eq!(device["buffer_sizes"], json!([256, 512, 1024]));
+    assert_eq!(device["buffer_range"], json!({ "min": 256, "max": 1024 }));
+    assert_eq!(listed["chosen"]["host"], Value::Null);
+    assert!(run(&mut projects, "audio.devices", json!({ "host": "x" })).is_err(), "it takes no parameters");
+}
+
+#[test]
+fn a_new_choice_reopens_the_playing_project_where_it_was() {
+    let (mut projects, stand) = with_stand(None);
+    projects.add(Session::new(project()), None).unwrap();
+    assert_eq!(projects.open_output(None).unwrap(), None);
+    stand.run_latest();
+
+    // Play from beat 4 with the metronome on.
+    {
+        let player = projects.session_mut(None).unwrap();
+        player.execute("transport.setPosition", &json!({ "beats": 4.0 })).unwrap();
+        player.execute("transport.play", &json!({})).unwrap();
+    }
+    stand.run_latest();
+    let before = projects.session_mut(None).unwrap().player().unwrap().monitor().beat();
+    assert!(before >= 4.0, "{before}");
+
+    let result = run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 256, "sample_rate": 44_100 })).unwrap();
+    assert_eq!(result["playing"], json!(true));
+    assert_eq!(result["engine_block"], json!(256));
+    assert_eq!(result["sample_rate"], json!(44_100));
+    assert_eq!(result["notice"], Value::Null);
+    let opened = stand.opened.lock().unwrap().clone();
+    assert_eq!(opened.len(), 2);
+    assert!(opened[1].1, "the old player was handed over to be closed");
+    assert_eq!(opened[1].0.buffer_frames, Some(256));
+
+    // The new engine plays on from where the old one was.
+    stand.run_latest();
+    let monitor_beat = projects.session_mut(None).unwrap().player().unwrap().monitor().beat();
+    let running = projects.session_mut(None).unwrap().player().unwrap().monitor().running();
+    assert!(running);
+    assert!(monitor_beat >= before, "{monitor_beat} < {before}");
+
+    let info = run(&mut projects, "audio.info", json!({})).unwrap();
+    assert_eq!(info["latency_ms"], json!(21.3));
+    assert_eq!(info["underruns"], json!(2));
+    assert_eq!(info["chosen"]["sample_rate"], json!(44_100));
+}
+
+#[test]
+fn a_stopped_project_keeps_its_marker_on_the_new_output() {
+    let (mut projects, stand) = with_stand(None);
+    projects.add(Session::new(project()), None).unwrap();
+    projects.open_output(None).unwrap();
+    projects.session_mut(None).unwrap().execute("transport.setPosition", &json!({ "beats": 8.0 })).unwrap();
+    stand.run_latest();
+    run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 512 })).unwrap();
+    stand.run_latest();
+    let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
+    assert!(!monitor.running());
+    assert_eq!(monitor.start_beat(), 8.0);
+}
+
+#[test]
+fn a_device_that_is_gone_falls_back_with_a_notice() {
+    let (mut projects, _) = with_stand(Some("Unplugged"));
+    projects.add(Session::new(project()), None).unwrap();
+    projects.open_output(None).unwrap();
+    let result = run(&mut projects, "audio.setOutput", json!({ "device": "Unplugged" })).unwrap();
+    assert!(result["notice"].as_str().unwrap().contains("not there"));
+    assert_eq!(result["device"], json!("Default"));
+    // The choice is kept, for when the device is back.
+    assert_eq!(projects.output_choice().device.as_deref(), Some("Unplugged"));
+}
+
+#[test]
+fn nothing_reopens_while_no_project_plays() {
+    let (mut projects, stand) = with_stand(None);
+    projects.add(Session::new(project()), None).unwrap();
+    run(&mut projects, "audio.setOutput", json!({ "exclusive": true })).unwrap();
+    assert!(stand.opened.lock().unwrap().is_empty());
+    assert!(run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 10 })).is_err());
+    assert!(projects.output_choice().exclusive);
+    // The next output opens as chosen.
+    projects.open_output(None).unwrap();
+    assert!(stand.opened.lock().unwrap()[0].0.exclusive);
+    // A transport command needs no reopen to reach the new player.
+    let mut player = projects.session_mut(None).unwrap().detach_player().unwrap();
+    player.send(LaunchCommand::Play).unwrap();
+}

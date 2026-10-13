@@ -41,6 +41,11 @@ pub struct Projects {
     /// The browser's library (ADR 0012); kept nowhere until one is given with
     /// [`Projects::set_file_library`].
     files: loopwerk_library::Library,
+    /// The system's audio devices, when this program plays out loud (the desktop app, the MCP
+    /// server with `--audio`).
+    audio: Option<std::sync::Arc<dyn crate::AudioSystem>>,
+    /// The output the user chose (`audio.setOutput`, the window's settings).
+    output_choice: crate::OutputChoice,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -91,6 +96,78 @@ pub fn project_commands() -> &'static [CommandSpec<Projects>] {
 impl Projects {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Lets the projects play out loud through `system`'s devices (`audio.*` commands,
+    /// [`Projects::open_output`]).
+    pub fn set_audio_system(&mut self, system: std::sync::Arc<dyn crate::AudioSystem>) {
+        self.audio = Some(system);
+    }
+
+    pub fn audio_system(&self) -> Option<std::sync::Arc<dyn crate::AudioSystem>> {
+        self.audio.clone()
+    }
+
+    pub fn output_choice(&self) -> &crate::OutputChoice {
+        &self.output_choice
+    }
+
+    /// Chooses the output players open on from now on; [`Projects::reopen_output`] moves the
+    /// playing one there.
+    pub fn set_output_choice(&mut self, choice: crate::OutputChoice) {
+        self.output_choice = choice;
+    }
+
+    /// Opens the chosen output for project `id` (the active one when `None`), with its
+    /// transport stopped. Returns a notice when the chosen device was not there and the default
+    /// plays instead.
+    pub fn open_output(&mut self, id: Option<ProjectId>) -> Result<Option<String>, CommandError> {
+        let system = self.audio.clone().ok_or("no audio output here")?;
+        let choice = self.output_choice.clone();
+        let session = self.session_mut(id)?;
+        let (mut notice, mut kept) = (None, false);
+        session
+            .replace_player(|project, audio, previous| {
+                system.open(project, audio, &choice, previous).map(|opened| {
+                    notice = opened.notice;
+                    kept = opened.plugins_kept;
+                    opened.player
+                })
+            })
+            .map_err(|e| CommandError(format!("no audio output: {e}")))?;
+        if !kept {
+            session.restart_plugins();
+        }
+        Ok(notice)
+    }
+
+    /// Moves the active project's output to the one chosen now, keeping the transport where
+    /// it is (the playhead, playing or stopped, and the metronome) and the plug-ins running.
+    /// Nothing happens while no project plays. Returns a notice as [`Projects::open_output`].
+    pub fn reopen_output(&mut self) -> Result<Option<String>, CommandError> {
+        let Some(system) = self.audio.clone() else { return Ok(None) };
+        let choice = self.output_choice.clone();
+        let Ok(session) = self.session_mut(None) else { return Ok(None) };
+        let Some(transport) = session.player().map(crate::audio::Transport::of) else { return Ok(None) };
+        let (mut notice, mut kept) = (None, false);
+        session
+            .replace_player(|project, audio, previous| {
+                system.open(project, audio, &choice, previous).map(|opened| {
+                    notice = opened.notice;
+                    kept = opened.plugins_kept;
+                    opened.player
+                })
+            })
+            .map_err(|e| CommandError(format!("no audio output: {e}")))?;
+        if !kept {
+            session.restart_plugins();
+        }
+        if let Some(player) = session.player_mut().ok() {
+            transport.restore(player)?;
+        }
+        // Plug-ins that could not carry over (a new sample rate) start again.
+        session.sync_plugins();
+        Ok(notice)
     }
 
     pub fn len(&self) -> usize {
@@ -262,8 +339,12 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) =
-            PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).find(|c| c.id == id)
+        if let Some(spec) = PROJECT_COMMANDS
+            .iter()
+            .chain(plugin_commands())
+            .chain(crate::library_commands())
+            .chain(crate::audio_commands())
+            .find(|c| c.id == id)
         {
             if project.is_some() {
                 return Err(format!("{id} does not run on one project; it takes no target project").into());
@@ -304,8 +385,12 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects =
-        PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).map(CommandSpec::describe);
+    let projects = PROJECT_COMMANDS
+        .iter()
+        .chain(plugin_commands())
+        .chain(crate::library_commands())
+        .chain(crate::audio_commands())
+        .map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 

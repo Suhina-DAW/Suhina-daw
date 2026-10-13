@@ -342,6 +342,45 @@ fn place(chains: &mut [crate::chain::Chain], key: u64, mut processor: Processor)
 
 /// Keeps `processor` until a graph with its slot takes over; one for the same plug-in that was
 /// already waiting goes back. Never allocates: the caller checked there is room.
+/// Takes every plug-in processor out of `graph`'s chains into `out`.
+fn take_from_graph(graph: &mut Graph, out: &mut HashMap<u64, Processor>) {
+    for chain in &mut graph.chains {
+        for slot in chain.plugin_slots() {
+            if let Some(processor) = slot.processor.take() {
+                out.insert(slot.key, processor);
+            }
+        }
+    }
+}
+
+impl SwapState {
+    /// Takes every processor the renderer holds into `out`: in the graph not taken back yet,
+    /// the `current` one, parked without a slot, in graphs waiting to be swapped in and still in
+    /// their queue. A device found twice keeps the newest, the one found last.
+    pub(crate) fn take_processors(&mut self, current: &mut Graph, out: &mut HashMap<u64, Processor>) {
+        if let Some(held) = self.held.as_mut() {
+            take_from_graph(held, out);
+        }
+        take_from_graph(current, out);
+        for (key, processor) in self.parked.drain(..) {
+            out.insert(key, processor);
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            take_from_graph(&mut pending.graph, out);
+        }
+        if let Some(incoming) = self.incoming.as_mut() {
+            while let Ok(mut swap) = incoming.pop() {
+                take_from_graph(&mut swap.graph, out);
+            }
+        }
+        if let Some(queue) = self.plugins.as_mut() {
+            while let Ok((key, processor)) = queue.pop() {
+                out.insert(key, processor);
+            }
+        }
+    }
+}
+
 fn park(parked: &mut Vec<(u64, Processor)>, retired: &mut Producer<Processor>, key: u64, processor: Processor) {
     if let Some(index) = parked.iter().position(|(k, _)| *k == key) {
         let (_, old) = parked.swap_remove(index);
