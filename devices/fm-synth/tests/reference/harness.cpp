@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
 // Reference renderer: plays the scenarios in scenarios.txt through the original MSFA engine
 // (as found in Dexed), with the same voice handling as Suhina's FM synth, and writes each
 // render as little-endian f32 (every `decimate`-th frame) for the port's golden tests.

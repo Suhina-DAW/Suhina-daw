@@ -1577,7 +1577,7 @@ mod tests {
         let launches = [(0.0, LaunchCommand::LaunchScene { scene: 0 })];
         let out = render_launches(&p, &audio, SR, &launches, 2.0).unwrap();
         // At half the tempo the direct reader plays the file at 0.9 x 0.5 = 0.45 times its speed:
-        // 198 Hz. (Keeping the pitch at another tempo needs real-time retargeting.)
+        // 198 Hz. (Keeping the pitch at another tempo needs real-time retargeting, LOOP-4.)
         let pitch = hz(&out, SR as usize / 5, 9 * SR as usize / 5);
         assert!((pitch - 198.0).abs() < 6.0, "{pitch} Hz");
     }
