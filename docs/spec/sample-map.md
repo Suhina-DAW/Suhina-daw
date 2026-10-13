@@ -288,4 +288,4 @@ are read for their ideas only.
 
 - Loops: tempo-synced preview of loops in the map, and a layout for longer files.
 - Placing new items into an existing layout instead of computing it again.
-- Building a drum rack or kit from a selection on the map.
+- Building a drum kit from a selection on the map.

@@ -37,71 +37,39 @@ the first device.
   Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Suhina device for the
-  most used ones. After import, the user sees which devices came in exactly, approximately or as
-  placeholders. No content from Live's library (presets, wavetables, samples, impulse responses).
+  most used ones. Which stored device lands in which Suhina device, and how each mapping is learnt
+  and tested: [`docs/spec/device-import.md`](docs/spec/device-import.md).
 - **Order:** utility (gain, width, mono, phase) and auto-pan first, to prove the device system;
   then three small devices users have asked for: a three-band DJ EQ with kills, vinyl distortion
   (tracing, pinch, crackle) and a pedal-style overdrive; then bus compressor, multiband dynamics with upward and downward compression, delays,
   algorithmic and convolution reverb, multi-stage saturation; then an FM synth (DSP core ported
   from Dexed/MSFA) and a wavetable synth (from Vital, under its own name).
 
-### How each device is built
+### The devices
 
-Every Suhina device follows the same path:
+Each one has its own name, parameter layout and look. Sources are candidates; each licence is
+checked when the work starts, and every ported file keeps its notices. **Done** means the device
+exists in `devices/`, passes its tests and runs in track chains.
 
-1. **Learn what the device does, not how it is coded.** From the vendor's published manual, from
-   listening, and from Live Sets we author ourselves, where we change one parameter at a time and
-   record in `docs/spec/` how it is stored (name, range, unit, curve). No binaries are opened.
-2. **Design our own device** that covers those features, with its own name, parameter layout
-   and look. It does not have to match one to one; it has to be able to take the imported
-   parameters.
-3. **Build the DSP** in `dsp` and the device crate, porting from open-source code where it helps.
-   The licence is checked before the first line is ported, and every ported file keeps its
-   notices.
-4. **Write the import mapping** in `crates/als`: each stored parameter maps to ours, with a
-   conversion where the units or curves differ. Parameters with no counterpart are kept and
-   listed, so a later version can use them.
-5. **Test** with golden renders of the device alone and of imported sets, compared against the
-   bounces we made in Live when authoring the sets. The goal is close, not identical.
-
-Example, the FM synth that Live's **Operator** imports into:
-
-- From the manual: four oscillators (operators), each with its own envelope, frequency ratio and
-  level; a set of algorithms that connect them; feedback; a filter, an LFO and a pitch envelope.
-- Our device: an FM synth whose operator, algorithm and envelope model is a superset of that, so
-  every Operator patch has a place to land. Its algorithms are our own table, with the ones
-  Operator needs among them.
-- DSP: operators, envelopes and feedback ported from MSFA (Apache-2.0), the engine inside Dexed;
-  filters and LFOs from our own `dsp` crate.
-- Import: a corpus series of Operator patches we make ourselves (one per algorithm, envelope
-  shapes, ratios, feedback), each saved as a set and bounced, so the mapping is tested against
-  real sound. Until the device exists, Operator comes in as a placeholder that keeps all its
-  parameters.
-
-Every device, planned the same way (sources are candidates; each licence is checked when the
-work starts). **DSP done** means the device exists in `devices/` and passes its tests, but the
-engine does not run it yet; **import** is whether a Live Set's device comes in as it (otherwise a
-placeholder):
-
-| Imports from Live | Suhina device | DSP from | Status |
-|---|---|---|---|
-| Utility, Auto Pan | utility, auto-pan | own | DSP done; import done for Utility, planned for Auto Pan |
-| EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | DSP done; import planned |
-| Vinyl Distortion | vinyl distortion | own, oversampled | DSP done; import planned |
-| Overdrive | overdrive | own, oversampled | DSP done; import planned |
-| Compressor | compressor: stereo-linked, soft knee, side-chain high-pass, dry/wet | own | DSP done; import planned |
-| Glue Compressor | bus compressor | own, Airwindows (MIT) for reference | planned |
-| Limiter | limiter: brickwall, 1.5 ms lookahead | own | DSP done; import planned |
-| Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors | planned |
-| Delay, Echo | delays | own delay lines | planned |
-| Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
-| Saturator, Roar | multi-stage saturation | own, oversampled | planned |
-| EQ Eight, Auto Filter | EQ, filter | own (`dsp` filters) | planned |
-| Operator | FM synth | MSFA (Apache-2.0) via Dexed | DX7-style engine done; Operator's algorithms, waveforms and filter, and import, planned |
-| Wavetable | wavetable synth | Vital (GPL-3.0), under its own name | planned |
-| Drift, Analog | subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
-| Simpler, Sampler, Drum Rack | sampler, drum rack | own | planned |
-| Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) | planned |
+| Suhina device | DSP from | Status |
+|---|---|---|
+| utility, auto-pan | own | done |
+| three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | done |
+| vinyl distortion | own, oversampled | done |
+| overdrive | own, oversampled | done |
+| compressor: stereo-linked, soft knee, side-chain high-pass, dry/wet | own | done |
+| bus compressor | own, Airwindows (MIT) for reference | planned |
+| limiter: brickwall, 1.5 ms lookahead | own | done |
+| multiband dynamics, upward and downward | own crossovers and detectors | planned |
+| delays | own delay lines | planned |
+| algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
+| multi-stage saturation | own, oversampled | planned |
+| EQ, filter | own (`dsp` filters) | planned |
+| FM synth | MSFA (Apache-2.0) via Dexed | DX7-style engine done; more algorithms, waveforms and a filter planned |
+| wavetable synth | Vital (GPL-3.0), under its own name | planned |
+| subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
+| sampler, drum sampler | own | planned |
+| physical-modelling synth | Mutable Instruments Rings and Elements (MIT) | planned |
 
 ## Audio to MIDI
 
@@ -109,14 +77,14 @@ Turning audio into something playable from MIDI, offline (not on the audio threa
 command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-midi.md).
 
 - **Slice to a new MIDI track.** Cut an audio clip into slices (at warp markers, transients,
-  bars or a note grid), put each slice on its own pad of a sampler or drum rack on a new MIDI
+  bars or a note grid), put each slice on its own pad of a sampler or drum sampler on a new MIDI
   track, and write a MIDI clip that plays the slices back in their original rhythm, warped
-  timing kept if asked. Needs the sampler and drum rack devices and an onset detector of our
+  timing kept if asked. Needs the sampler and drum sampler devices and an onset detector of our
   own. Slicing presets are our own.
 - **Convert to a new MIDI track:** four narrow detectors instead of one that tries to write
   every note of a mix, since each narrow task is far more reliable.
   - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
-    of a drum rack; more classes (toms, cymbals) later with a small model.
+    of a drum sampler; more classes (toms, cymbals) later with a small model.
   - *Bass:* one note at a time in the low register (about 30–300 Hz); pitch tracking limited to
     that range, note starts taken from transients.
   - *Melody:* one note at a time across the whole range; pitch tracking (own, pYIN-style) plus
@@ -134,7 +102,7 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
   checked first. Also offered on its own, as separating stems to new audio tracks.
 - **Dropping audio onto a MIDI track** asks which conversion to run (drums, bass, melody,
   chords), and writes the result where the audio was dropped.
-- **Order:** after the sampler and drum rack exist; slicing first (smallest), then drums, bass, melody and chords, then stem separation. An ADR comes
+- **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass, melody and chords, then stem separation. An ADR comes
   before the detectors.
 - **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
   can be compared note by note.
