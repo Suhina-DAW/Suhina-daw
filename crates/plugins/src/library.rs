@@ -75,7 +75,14 @@ pub fn group_for(hosting: Hosting, plugin: &PluginInfo) -> Option<String> {
 /// Suhina's settings folder: `%APPDATA%\Suhina` on Windows,
 /// `~/Library/Application Support/Suhina` on macOS, `$XDG_CONFIG_HOME/suhina` (or
 /// `~/.config/suhina`) elsewhere. `None` when the system says nothing about where.
+/// While only the folder from before the rename exists (copying it under the new name failed,
+/// say because security software stopped the write), that one, so the settings stay readable.
 pub fn settings_folder() -> Option<PathBuf> {
+    prefer_new(new_settings_folder(), old_settings_folder())
+}
+
+/// The settings folder under the program's current name, whether or not it exists yet.
+pub fn new_settings_folder() -> Option<PathBuf> {
     settings_folder_named("Suhina")
 }
 
@@ -93,6 +100,14 @@ fn settings_folder_named(name: &str) -> Option<PathBuf> {
     } else {
         let config = env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|p| p.join(".config")));
         config.map(|p| p.join(name.to_lowercase()))
+    }
+}
+
+/// `new`, or `old` while only `old` exists.
+pub fn prefer_new(new: Option<PathBuf>, old: Option<PathBuf>) -> Option<PathBuf> {
+    match (&new, &old) {
+        (Some(n), Some(o)) if !n.exists() && o.is_dir() => old,
+        _ => new,
     }
 }
 
@@ -377,7 +392,12 @@ mod tests {
         std::fs::write(old.join("plugins.json"), "changed").unwrap();
         assert_eq!(adopt_old_folder(Some(old.clone()), Some(new.clone())), None);
         assert_eq!(std::fs::read_to_string(new.join("plugins.json")).unwrap(), "{}");
-        assert_eq!(adopt_old_folder(None, Some(new)), None);
+        assert_eq!(adopt_old_folder(None, Some(new.clone())), None);
+        // Settings are read from the old folder only while the new one is missing.
+        assert_eq!(prefer_new(Some(new.clone()), Some(old.clone())), Some(new.clone()));
+        let missing = base.join("missing");
+        assert_eq!(prefer_new(Some(missing.clone()), Some(old.clone())), Some(old.clone()));
+        assert_eq!(prefer_new(Some(missing.clone()), Some(base.join("gone"))), Some(missing));
         let _ = std::fs::remove_dir_all(&base);
     }
 
