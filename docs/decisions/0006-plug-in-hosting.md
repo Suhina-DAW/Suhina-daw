@@ -128,9 +128,10 @@ workspace forbids.
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
-   *Built:* the host's audio threads and the desktop app's render thread take the highest
-   priority the system gives them (`thread-priority`: time-critical on Windows; on Linux the
-   normal priority until real-time rights are set up). The deadline is 60 % of a block's
+   *Built:* the host's audio threads and the desktop app's render thread join MMCSS "Pro Audio"
+   on Windows (`audio_thread_priority`; `thread-priority`'s highest, `THREAD_PRIORITY_HIGHEST`,
+   only where MMCSS refuses) and take the highest priority the system gives them elsewhere (on
+   Linux the normal priority until real-time rights are set up). The deadline is 60 % of a block's
    playing time for all of a block's plug-ins together, one after another, so it depends on
    the block: the audio output renders the engine in blocks of its own ahead of the device into a
    ring, rather than in the device's buffers, after a driver that gave 3 ms buffers left 25

@@ -55,6 +55,23 @@ pub fn sample_rates(ranges: &[(u32, u32)]) -> Vec<u32> {
     rates
 }
 
+/// The buffer sizes offered on `host`: WASAPI shared mode plays in the period Windows gives it,
+/// whatever is asked, so there the size is the engine's block alone and any size is offered;
+/// elsewhere the sizes the driver allows.
+pub fn offered_buffers(host: &str, range: Option<(u32, u32)>) -> Vec<u32> {
+    if host == "WASAPI" { allowed_buffers(None) } else { allowed_buffers(range) }
+}
+
+/// Fits a wanted buffer size to `host` and the driver's `range`: the frames the engine renders
+/// per block, and the size to ask the device for (none where the driver decides).
+pub fn fit_for_host(host: &str, wanted: u32, range: Option<(u32, u32)>) -> (u32, Option<u32>) {
+    if host == "WASAPI" {
+        return (wanted.clamp(MIN_BUFFER_FRAMES, MAX_BUFFER_FRAMES), None);
+    }
+    let fitted = fit_buffer(wanted, &allowed_buffers(range));
+    (fitted, range.map(|_| fitted))
+}
+
 /// Whether two names are the same, ignoring case and the space around them.
 pub fn same_name(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
@@ -78,7 +95,7 @@ pub fn list_hosts() -> Vec<HostInfo> {
         .map(|id| {
             let mut info = HostInfo { name: id.name().to_string(), default: id == default_host, ..HostInfo::default() };
             match cpal::host_from_id(id) {
-                Ok(host) => match list_devices(&host) {
+                Ok(host) => match list_devices(&host, id.name()) {
                     Ok(devices) => info.devices = devices,
                     Err(e) => info.error = Some(e),
                 },
@@ -95,7 +112,7 @@ pub fn list_hosts() -> Vec<HostInfo> {
         .collect()
 }
 
-fn list_devices(host: &cpal::Host) -> Result<Vec<DeviceInfo>, String> {
+fn list_devices(host: &cpal::Host, host_name: &str) -> Result<Vec<DeviceInfo>, String> {
     let default = host.default_output_device().map(|d| d.to_string());
     let devices = host.output_devices().map_err(|e| e.to_string())?;
     Ok(devices
@@ -116,7 +133,7 @@ fn list_devices(host: &cpal::Host) -> Result<Vec<DeviceInfo>, String> {
                 info.buffer_range = info.buffer_range.or_else(|| buffer_range(config.buffer_size()));
             }
             info.sample_rates = sample_rates(&ranges);
-            info.buffer_sizes = allowed_buffers(info.buffer_range);
+            info.buffer_sizes = offered_buffers(host_name, info.buffer_range);
             info.name = name;
             info
         })
@@ -150,6 +167,18 @@ mod tests {
         assert_eq!(fit_buffer(10, &allowed), 64);
         assert_eq!(fit_buffer(10, &[]), MIN_BUFFER_FRAMES);
         assert_eq!(fit_buffer(100_000, &[]), MAX_BUFFER_FRAMES);
+    }
+
+    #[test]
+    fn wasapi_shared_takes_any_size_for_the_engine_and_asks_the_device_for_none() {
+        // Windows plays shared WASAPI in its own period (480 frames here), whatever is asked.
+        assert_eq!(fit_for_host("WASAPI", 256, Some((480, 480))), (256, None));
+        assert_eq!(fit_for_host("WASAPI", 10_000, Some((480, 480))), (4096, None));
+        assert_eq!(offered_buffers("WASAPI", Some((480, 480))), BUFFER_SIZES.to_vec());
+        // A driver that sets its buffer (ASIO) gets the nearest size it allows.
+        assert_eq!(fit_for_host("ASIO", 300, Some((64, 2048))), (256, Some(256)));
+        assert_eq!(fit_for_host("ASIO", 300, None), (256, None));
+        assert_eq!(offered_buffers("ASIO", Some((256, 512))), vec![256, 512]);
     }
 
     #[test]

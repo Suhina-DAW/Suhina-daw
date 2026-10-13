@@ -365,13 +365,14 @@ impl Output {
             }
         }
         let range = devices::buffer_range(supported.buffer_size());
-        let buffer = choice.buffer_frames.map(|wanted| devices::fit_buffer(wanted, &devices::allowed_buffers(range)));
+        let fitted = choice.buffer_frames.map(|wanted| devices::fit_for_host(&host_name, wanted, range));
+        let buffer = fitted.map(|(block, _)| block);
         let format = supported.sample_format();
         let mut config: cpal::StreamConfig = supported.into();
         if config.channels == 0 {
             return Err(format!("audio output {device_name} reports no channels"));
         }
-        if let (Some(frames), Some(_)) = (buffer, range) {
+        if let Some((_, Some(frames))) = fitted {
             config.buffer_size = cpal::BufferSize::Fixed(frames);
         }
         let exclusive = host_name == "ASIO";
