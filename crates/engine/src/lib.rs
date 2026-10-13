@@ -12,6 +12,8 @@ mod chain;
 mod chain_tests;
 mod cpu;
 #[cfg(test)]
+mod fade_cost_tests;
+#[cfg(test)]
 mod fade_tests;
 mod launcher;
 mod metronome;
