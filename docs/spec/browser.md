@@ -225,7 +225,7 @@ Session, at its left in the Arrangement), which add an empty track of that kind.
 either works like a drop on the empty area.
 
 **Warping.** A sample whose tempo is known (see *Tempo and key*) is warped: it plays at the
-project's tempo, stretched with the stretch mode in Settings › General › Warp mode (Beats by
+project's tempo, stretched with the stretch mode in Settings › General › Warp mode (Rhythmic by
 default, the `rhythmic` stretch mode), and its length in beats comes from its own tempo. A
 sample without a known tempo is not warped: it plays at its own speed, and its length in beats
 is its duration at the project's tempo when it is dropped.
