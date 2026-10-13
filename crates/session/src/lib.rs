@@ -35,6 +35,7 @@ pub use rack::{
 pub use relink::{MAX_RELINK, search as find_candidates};
 pub use soundmap::{scope_files, sound_map_commands};
 pub use suhina_plugins::Placement;
+pub use suhina_project_file::{EXTENSION as PROJECT_EXTENSION, is_project_file};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -440,12 +441,11 @@ impl Session {
         })
     }
 
-    /// Opens a project: a Suhina project (`.locr`) or a Live Set to import (`.als`). Returns
-    /// the session and the importer's warnings.
+    /// Opens a project: a Suhina project (`.suhina`, or `.locr` from before October 2026) or a
+    /// Live Set to import (`.als`). Returns the session and the importer's warnings.
     pub fn open(path: &Path) -> Result<(Self, Vec<String>), CommandError> {
-        let is_locr = path.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION));
-        let (project, warnings) = if is_locr {
-            let project = suhina_locr::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (project, warnings) = if suhina_project_file::is_project_file(path) {
+            let project = suhina_project_file::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
             (project, Vec::new())
         } else {
             let import = suhina_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -475,19 +475,20 @@ impl Session {
         self.changes != self.saved_at
     }
 
-    /// Saves the project as a Suhina project at `path` (`.locr` is added when it is missing),
-    /// with the running plug-ins' state as it is now and audio paths written relative to the new
+    /// Saves the project as a Suhina project at `path` (`.suhina` is added when it has neither
+    /// `.suhina` nor `.locr`, so a project opened from a `.locr` file is saved back to it), with
+    /// the running plug-ins' state as it is now and audio paths written relative to the new
     /// file. The session then belongs to that file, unless `copy` (a template, a backup), which
     /// leaves the session as it was. Returns the path written.
     pub fn save(&mut self, path: &Path, copy: bool) -> Result<PathBuf, CommandError> {
         let mut path = path.to_path_buf();
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION)) {
+        if !suhina_project_file::is_project_file(&path) {
             let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             if name.is_empty() {
                 return Err("give the project a file name".into());
             }
             name.push(".");
-            name.push(suhina_locr::EXTENSION);
+            name.push(suhina_project_file::EXTENSION);
             path.set_file_name(name);
         }
         let mut project = self.project.clone();
@@ -516,8 +517,8 @@ impl Session {
             None => std::env::current_dir().unwrap_or_default(),
         };
         let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-        suhina_locr::rebase_audio(&mut project, &from, &to);
-        suhina_locr::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
+        suhina_project_file::rebase_audio(&mut project, &from, &to);
+        suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
         if !copy {
             self.source = Some(path.clone());
             self.saved_at = self.changes;
