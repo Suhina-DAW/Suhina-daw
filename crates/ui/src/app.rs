@@ -747,6 +747,8 @@ impl App {
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
+        let scale = if self.settings.waveform_db { crate::waveform::Scale::Db } else { crate::waveform::Scale::Linear };
+        crate::waveform::set_scale(ui.ctx(), scale);
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
@@ -1805,8 +1807,9 @@ impl App {
                             suhina_media::decode_file(&path).map(|d| vec![(None, d)]).unwrap_or_default()
                         };
                     decoded.into_iter().map(move |(stream, data)| {
+                        let data = std::sync::Arc::new(data);
                         let peaks = crate::waveform::peaks(&data);
-                        (path.clone(), stream, std::sync::Arc::new(data), peaks)
+                        (path.clone(), stream, data, peaks)
                     })
                 })
                 .collect();

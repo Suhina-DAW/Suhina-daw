@@ -333,6 +333,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
+  renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
+  when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
+  lanes in tall clips; the samples with dots when zoomed in past one sample per pixel; a linear
+  or dB scale (Settings › Interface › Arrangement).
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
   gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
 - Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades

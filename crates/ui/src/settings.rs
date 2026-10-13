@@ -171,6 +171,8 @@ pub struct Settings {
     pub map_grid: bool,
     pub map_hover_preview: bool,
     pub map_max_seconds: u32,
+    /// Waveforms in decibels, so quiet parts show; linear otherwise.
+    pub waveform_db: bool,
     /// The audio output (Settings › Audio, `audio.setOutput`): host and device by name, empty
     /// for the default; sample rate and buffer size, 0 for the device's own.
     pub audio_host: String,
@@ -209,6 +211,7 @@ impl Default for Settings {
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
+            waveform_db: false,
             audio_host: String::new(),
             audio_device: String::new(),
             audio_sample_rate: 0,
@@ -289,7 +292,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -310,6 +313,7 @@ impl Settings {
             on(self.audio_exclusive),
             self.zoom,
             map_layout = if self.map_grid { "grid" } else { "cloud" },
+            waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
@@ -368,6 +372,7 @@ impl Settings {
                 }
                 ("map_layout", "cloud" | "grid") => settings.map_grid = value == "grid",
                 ("map_hover_preview", "on" | "off") => settings.map_hover_preview = value == "on",
+                ("waveform_scale", "linear" | "db") => settings.waveform_db = value == "db",
                 ("map_max_seconds", seconds) if seconds.parse::<u32>().is_ok() => {
                     settings.map_max_seconds = seconds
                         .parse::<u32>()
@@ -440,6 +445,7 @@ mod tests {
             map_grid: true,
             map_hover_preview: false,
             map_max_seconds: 30,
+            waveform_db: true,
             audio_host: "ASIO".into(),
             audio_device: "Universal Audio Thunderbolt".into(),
             audio_sample_rate: 48_000,

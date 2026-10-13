@@ -19,6 +19,9 @@ use crate::settings::Settings;
 
 /// A scope is laid out again at most this often while its analysis goes on.
 const RELAYOUT_SECONDS: f64 = 2.0;
+/// How far the view's aspect ratio may drift from the grid's (as a fraction) before the grid is
+/// made again.
+const GRID_ASPECT_SLACK: f32 = 0.05;
 
 /// What a layout was made from, to know when it is out of date.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,14 +31,19 @@ struct ScopeKey {
     layout_key: u64,
 }
 
+/// A finished layout: the map, its grid and the view's aspect the grid was made for.
+type Laid = (Map, Grid, f32);
+
 /// The map's state in the window.
 pub struct Panel {
     pub view: MapView,
     map: Option<Map>,
     grid: Option<Grid>,
+    /// The view's aspect the grid was made for.
+    grid_aspect: f32,
     shown: Option<ScopeKey>,
     /// A layout being computed on a thread of its own.
-    job: Option<(ScopeKey, Receiver<(Map, Grid)>)>,
+    job: Option<(ScopeKey, Receiver<Laid>)>,
     last_layout: f64,
     points: Vec<MapPoint>,
     /// What the points' flags were made from: search, tags, selection, pins, project.
@@ -52,6 +60,7 @@ impl Default for Panel {
             view: MapView::default(),
             map: None,
             grid: None,
+            grid_aspect: 1.0,
             shown: None,
             job: None,
             last_layout: f64::NEG_INFINITY,
@@ -109,11 +118,12 @@ impl Panel {
         let analysed = projects.poll_sound_map();
         if let Some((key, receiver)) = &self.job {
             match receiver.try_recv() {
-                Ok((map, grid)) => {
+                Ok((map, grid, aspect)) => {
                     projects.sound_map_mut().keep(&map);
                     self.shown = Some(key.clone());
                     self.map = Some(map);
                     self.grid = Some(grid);
+                    self.grid_aspect = aspect;
                     self.flags_key = None;
                     self.job = None;
                 }
@@ -143,7 +153,8 @@ impl Panel {
         }
         if prepared.is_laid_out() {
             let map = prepared.compute();
-            self.grid = Some(map.grid(1.0));
+            self.grid_aspect = self.view.aspect();
+            self.grid = Some(map.grid(self.grid_aspect));
             self.map = Some(map);
             self.shown = Some(key);
             self.flags_key = None;
@@ -151,14 +162,28 @@ impl Panel {
         }
         let (sender, receiver) = channel();
         let ctx = ui.ctx().clone();
+        let aspect = self.view.aspect();
         let spawned = std::thread::Builder::new().name("soundmap-layout".into()).spawn(move || {
             let map = prepared.compute();
-            let grid = map.grid(1.0);
-            let _ = sender.send((map, grid));
+            let grid = map.grid(aspect);
+            let _ = sender.send((map, grid, aspect));
             ctx.request_repaint();
         });
         if spawned.is_ok() {
             self.job = Some((key, receiver));
+        }
+    }
+
+    /// Remakes the grid when the view's shape changed noticeably since it was made, so the grid
+    /// keeps the view's aspect ratio.
+    fn fit_grid(&mut self) {
+        let aspect = self.view.aspect();
+        if let Some(map) = &self.map
+            && self.grid.is_some()
+            && (aspect / self.grid_aspect - 1.0).abs() > GRID_ASPECT_SLACK
+        {
+            self.grid = Some(map.grid(aspect));
+            self.grid_aspect = aspect;
         }
     }
 
@@ -248,11 +273,19 @@ impl Panel {
         revision: u64,
     ) -> bool {
         self.refresh(ui, state, projects, settings);
+        self.fit_grid();
         self.update_points(state, projects, revision);
         self.view.layout = if settings.map_grid { Layout::Grid } else { Layout::Cloud };
         self.view.preview_on_hover = settings.map_hover_preview;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
+        // The waveform for the tooltip of the point the pointer rests on, read in the background.
+        let now = ui.input(|i| i.time);
+        let resting = self.view.resting(now);
+        self.view.hover_waveform = resting.and_then(|i| Some((i, state.waveform(&self.path(i)?)?)));
+        if resting.is_some() && self.view.hover_waveform.is_none() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
         let mut events = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             sample_map::show(ui, &mut self.view, &self.points, self.grid.as_ref(), &status, &tags, &mut events);

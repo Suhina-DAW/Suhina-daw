@@ -15,6 +15,10 @@ use crate::theme;
 /// How long the pointer rests on a point before it is previewed, so a fast sweep does not play
 /// everything it crosses.
 pub const HOVER_PREVIEW_SECONDS: f64 = 0.040;
+/// How long the pointer rests on a point before its tooltip reads the file for a waveform.
+pub const HOVER_WAVEFORM_SECONDS: f64 = 0.15;
+/// The size of the waveform in a point's tooltip.
+const TOOLTIP_WAVE: Vec2 = Vec2::new(220.0, 36.0);
 /// How near (in points of the screen) the pointer must be to a point to be over it.
 const HIT_RADIUS: f32 = 7.0;
 const MIN_ZOOM: f32 = 1.0;
@@ -109,6 +113,8 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
+    pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
 }
 
 impl Default for MapView {
@@ -125,11 +131,17 @@ impl Default for MapView {
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            hover_waveform: None,
         }
     }
 }
 
 impl MapView {
+    /// The width over the height of where the points were drawn last frame; 1 before the first.
+    pub fn aspect(&self) -> f32 {
+        aspect_of(self.area)
+    }
+
     /// Shows the answer to [`MapEvent::Similar`]: rings these items and lists them at the side.
     pub fn show_similar(&mut self, of: usize, items: Vec<usize>) {
         self.similar = Some((of, items));
@@ -137,6 +149,11 @@ impl MapView {
 
     pub fn similar(&self) -> Option<&(usize, Vec<usize>)> {
         self.similar.as_ref()
+    }
+
+    /// The point the pointer has rested on for [`HOVER_WAVEFORM_SECONDS`] by `now`.
+    pub fn resting(&self, now: f64) -> Option<usize> {
+        self.hovered.filter(|(_, since)| now - since >= HOVER_WAVEFORM_SECONDS).map(|(i, _)| i)
     }
 
     /// Fits all points in view.
@@ -189,15 +206,26 @@ impl Transform {
     }
 }
 
-/// Where each point is drawn: its cloud position, or the centre of its grid cell.
-fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>) -> Vec<[f32; 2]> {
+/// The width over the height of `rect`; 1 when it has no size.
+fn aspect_of(rect: Rect) -> f32 {
+    let aspect = rect.width() / rect.height();
+    if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
+}
+
+/// Where each point is drawn: its cloud position, or the centre of its grid cell. The grid
+/// fills a box of the view's `aspect` around the map's middle (the view shows 1 across its
+/// shorter side), with square cells.
+fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f32) -> Vec<[f32; 2]> {
     match (layout, grid) {
         (Layout::Grid, Some(grid)) if grid.cells.len() == points.len() => {
-            let side = grid.columns.max(grid.rows).max(1) as f32;
-            let offset = [(side - grid.columns as f32) / 2.0, (side - grid.rows as f32) / 2.0];
+            let (width, height) = if aspect >= 1.0 { (aspect, 1.0) } else { (1.0, 1.0 / aspect) };
+            let (columns, rows) = (grid.columns.max(1) as f32, grid.rows.max(1) as f32);
+            let cell = (width / columns).min(height / rows);
             grid.cells
                 .iter()
-                .map(|(c, r)| [(*c as f32 + 0.5 + offset[0]) / side, (*r as f32 + 0.5 + offset[1]) / side])
+                .map(|(c, r)| {
+                    [0.5 + (*c as f32 + 0.5 - columns / 2.0) * cell, 0.5 + (*r as f32 + 0.5 - rows / 2.0) * cell]
+                })
                 .collect()
         }
         _ => points.iter().map(|p| p.position).collect(),
@@ -317,7 +345,7 @@ pub fn show(
     });
 
     top_bar(ui, top, view, status, events);
-    let positions = positions(points, view.layout, grid);
+    let positions = positions(points, view.layout, grid, aspect_of(area));
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
@@ -556,6 +584,15 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
             ui.label(egui::RichText::new(kind).color(theme::text_secondary()));
             if !point.detail.is_empty() {
                 ui.label(egui::RichText::new(&point.detail).color(theme::text_secondary()));
+            }
+            if let Some((_, peaks)) = view.hover_waveform.as_ref().filter(|(i, _)| Some(*i) == under) {
+                let (rect, _) = ui.allocate_exact_size(TOOLTIP_WAVE, Sense::hover());
+                let seconds = peaks.frames as f64 / f64::from(peaks.sample_rate.max(1));
+                let count = rect.width() as usize;
+                let columns =
+                    crate::waveform::steady_columns(rect.left(), count, 0.0, seconds / count.max(1) as f64, 1.0);
+                let shape = crate::waveform::geometry(peaks, rect, &columns, crate::waveform::scale(ui.ctx()));
+                crate::waveform::paint(ui.painter(), &shape, crate::waveform::Colors::from(theme::text_secondary()));
             }
         });
     }
@@ -806,12 +843,17 @@ mod tests {
     fn grid_positions_are_cell_centres() {
         let points = vec![point(0.0, 0.0, Kind::Kick), point(1.0, 1.0, Kind::Kick)];
         let grid = Grid { columns: 2, rows: 1, cells: vec![(0, 0), (1, 0)] };
-        // A 2 by 1 grid sits in the middle of the square map.
-        assert_eq!(positions(&points, Layout::Grid, Some(&grid)), vec![[0.25, 0.5], [0.75, 0.5]]);
-        assert_eq!(positions(&points, Layout::Cloud, Some(&grid)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // A 2 by 1 grid sits in the middle of a square view.
+        assert_eq!(positions(&points, Layout::Grid, Some(&grid), 1.0), vec![[0.25, 0.5], [0.75, 0.5]]);
+        assert_eq!(positions(&points, Layout::Cloud, Some(&grid), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // In a view twice as wide, a 4 by 2 grid spreads over the whole width.
+        let wide: Vec<MapPoint> = (0..8).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let grid = Grid { columns: 4, rows: 2, cells: (0..8).map(|i| (i % 4, i / 4)).collect() };
+        let placed = positions(&wide, Layout::Grid, Some(&grid), 2.0);
+        assert_eq!((placed[0], placed[7]), ([-0.25, 0.25], [1.25, 0.75]));
         // A grid that does not match the points falls back to the cloud.
         let wrong = Grid { columns: 1, rows: 1, cells: vec![(0, 0)] };
-        assert_eq!(positions(&points, Layout::Grid, Some(&wrong)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        assert_eq!(positions(&points, Layout::Grid, Some(&wrong), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
     }
 
     #[test]

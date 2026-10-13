@@ -102,6 +102,10 @@ fn samples_are_analysed_laid_out_and_compared() {
     assert_eq!(of("thing.wav")["guessed"], true);
     assert!(of("hat 2.wav")["column"].is_u64());
     assert!(map["columns"].as_u64().unwrap() * map["rows"].as_u64().unwrap() >= 21);
+    // A wide view gets a wide grid: more columns than rows.
+    let wide = run(&mut p, "soundmap.layout", json!({ "grid": true, "aspect": 3.0 })).unwrap();
+    let (columns, rows) = (wide["columns"].as_u64().unwrap(), wide["rows"].as_u64().unwrap());
+    assert!(columns > rows && columns * rows >= 21, "{columns} by {rows}");
 
     // A place narrows the scope.
     let kicks = samples.join("Kicks").display().to_string();
@@ -128,6 +132,8 @@ fn samples_are_analysed_laid_out_and_compared() {
     assert!(run(&mut p, "soundmap.similar", json!({ "item": kick0, "count": 0 })).is_err());
     assert!(run(&mut p, "soundmap.similar", json!({ "item": "nowhere.wav" })).is_err());
     assert!(run(&mut p, "soundmap.layout", json!({ "maxSeconds": 0.5 })).is_err());
+    assert!(run(&mut p, "soundmap.layout", json!({ "grid": true, "aspect": 0.0 })).is_err());
+    assert!(run(&mut p, "soundmap.layout", json!({ "grid": true, "aspect": "wide" })).is_err());
     assert!(run(&mut p, "soundmap.analyse", json!({ "folder": "nowhere" })).is_err());
     assert!(run(&mut p, "soundmap.info", json!({ "item": "nowhere.wav" })).is_err());
 
