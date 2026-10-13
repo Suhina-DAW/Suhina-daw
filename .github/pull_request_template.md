@@ -21,4 +21,10 @@
 - [ ] `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings` and
       `cargo test --workspace` pass.
 - [ ] Documents that describe what changed are updated (`python scripts/docs.py impact`).
-- [ ] If an AI agent wrote part of it: I have read and understood every line.
+- [ ] I have tried every change by hand in the program (or the CLI) and it works as intended;
+      this applies to code an AI agent wrote too.
+
+## How I tested it
+
+<!-- What you did to try it by hand, on which OS, and what you saw. -->
+

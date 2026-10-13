@@ -21,7 +21,7 @@
   is added; CI rejects the project's old name (`python scripts/rename_suhina.py --check`).
 - **Commits:** small, focused, with a clear subject line, and signed off (see
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
-- **Issues:** small and scoped, with acceptance criteria (the issue template asks for them);
+- **Issues:** small and scoped, with acceptance criteria (the Task and Feature request templates ask for them; a Bug gives the steps to reproduce);
   architecture belongs in an ADR under `docs/decisions/`, not in an issue thread.
 
 ## Clean-room
@@ -96,8 +96,9 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
-- **You are responsible for what you submit.** Read and understand every line before you open a
-  pull request; you answer review questions, not the agent.
+- **You are responsible for what you submit.** Before you open a pull request, run the tests and
+  try every change by hand to see that it works as intended; you answer review questions, not
+  the agent.
 - **The clean-room rules apply to agents too.** Never give an agent decompiled, disassembled or
   leaked material, and never point it at proprietary binaries. An agent that has seen such
   material must not write Suhina code.
