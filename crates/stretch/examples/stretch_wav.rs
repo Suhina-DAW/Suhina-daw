@@ -1,5 +1,5 @@
 //! Stretches a WAV file, for listening tests:
-//! `cargo run --release -p loopwerk-stretch --example stretch_wav -- in.wav out.wav <ratio> [semitones]`
+//! `cargo run --release -p suhina-stretch --example stretch_wav -- in.wav out.wav <ratio> [semitones]`
 //! A ratio of 1.2 makes it 20 % longer (120 bpm material played at 100 bpm).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -23,7 +23,7 @@ fn main() {
     let out_frames = (samples.len() / channels) as f32 * ratio;
     let mut out = vec![0.0f32; out_frames as usize * channels];
     let started = std::time::Instant::now();
-    let mut stretch = loopwerk_stretch::Stretch::new(channels, spec.sample_rate as f32);
+    let mut stretch = suhina_stretch::Stretch::new(channels, spec.sample_rate as f32);
     stretch.set_transpose_semitones(semitones, 0.0);
     stretch.exact(&samples, &mut out);
     let seconds = out.len() as f64 / channels as f64 / f64::from(spec.sample_rate);

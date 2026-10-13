@@ -1,17 +1,17 @@
-//! Live's own devices that map onto Loopwerk's built-in devices (ADR 0004). Each mapping follows
+//! Live's own devices that map onto Suhina's built-in devices (ADR 0004). Each mapping follows
 //! `docs/spec/als-format.md` › Devices: the element Live stores, the unit of every value, and
-//! the Loopwerk parameter it becomes. Parameter ids are the devices' stable ids
+//! the Suhina parameter it becomes. Parameter ids are the devices' stable ids
 //! (`devices/<name>` in this repository).
 
-use loopwerk_model::DeviceParam;
 use roxmltree::Node;
+use suhina_model::DeviceParam;
 
 use crate::{boolean, number, path};
 
-/// Gain at or below this (in dB) is the Loopwerk utility's silence.
+/// Gain at or below this (in dB) is the Suhina utility's silence.
 const SILENCE_DB: f64 = -70.0;
 
-/// If `node` is a Live device with a Loopwerk counterpart: the Loopwerk device id, a default
+/// If `node` is a Live device with a Suhina counterpart: the Suhina device id, a default
 /// name, and the parameter values. `warn` gets notes about values that could not be read.
 pub(crate) fn builtin(
     node: Node,
@@ -45,7 +45,7 @@ fn toggle(on: bool) -> f64 {
     if on { 1.0 } else { 0.0 }
 }
 
-/// Live's Utility (`StereoGain`) as Loopwerk's `utility`.
+/// Live's Utility (`StereoGain`) as Suhina's `utility`.
 fn utility(node: Node, warn: &mut dyn FnMut(String)) -> Vec<DeviceParam> {
     let mut params = Vec::new();
     let mut set = |id: &str, value: Option<f64>| {

@@ -1,20 +1,20 @@
 [package]
-name = "loopwerk-media"
-description = "Finds and decodes the audio files a Loopwerk project uses"
+name = "suhina-media"
+description = "Finds and decodes the audio files a Suhina project uses"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-loopwerk-engine.workspace = true
+suhina-engine.workspace = true
 serde_json.workspace = true
 base64.workspace = true
 symphonia = { version = "0.6", default-features = false, features = ["wav", "aiff", "pcm", "flac", "mp3", "ogg", "vorbis", "isomp4", "aac", "alac"] }  # MPL-2.0
 
 [dev-dependencies]
-loopwerk-device-compressor.workspace = true
-loopwerk-device-limiter.workspace = true
+suhina-device-compressor.workspace = true
+suhina-device-limiter.workspace = true
 hound.workspace = true
 
 [lints]

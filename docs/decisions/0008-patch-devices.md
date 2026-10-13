@@ -19,19 +19,19 @@ into the DAW itself: a patch can read the set, launch clips and change parameter
 process audio and MIDI. That is what made such devices a community: people share instruments,
 effects, sequencers and controller tools built without a compiler.
 
-Loopwerk should have the same, with open tools. Candidates:
+Suhina should have the same, with open tools. Candidates:
 
 - **Pure Data** (Pd): an open visual patching language (BSD-3-Clause). **libpd** embeds it as a
   C library.
 - **plugdata**: a modern editor and plug-in built on Pd (GPL-3.0). It already runs as a CLAP,
   VST3 or LV2 plug-in, so patches can be used in any host that loads plug-ins.
 
-Loopwerk already has what such devices need from the DAW side: every action is a command
+Suhina already has what such devices need from the DAW side: every action is a command
 (ADR 0002) and the MCP server shows that commands work as an object model for an outside
 program. What is missing is a way for a patch to send them.
 
 Imported sets can also contain the other DAW's patch devices (`.amxd` files). They need a
-proprietary runtime and cannot run in Loopwerk.
+proprietary runtime and cannot run in Suhina.
 
 ## Decision (proposed)
 
@@ -39,7 +39,7 @@ proprietary runtime and cannot run in Loopwerk.
    plugdata loads like any CLAP or VST3 plug-in, out of process, and runs Pd patches with
    audio, MIDI and parameters. This is the first step and needs no Pd-specific code.
 2. **Patch devices are a device kind of their own.** A patch device is a Pd patch (and its
-   abstractions) that Loopwerk loads directly, without a plug-in in between. libpd runs it in
+   abstractions) that Suhina loads directly, without a plug-in in between. libpd runs it in
    the plug-in host process (ADR 0006), never in the engine process: a patch is user code and
    can hang or crash like a plug-in (AGENTS.md rule 5). It uses the same shared-memory block
    exchange and deadline as plug-ins, so no new `unsafe` crate is needed.
@@ -60,7 +60,7 @@ proprietary runtime and cannot run in Loopwerk.
 ## Not decided yet
 
 - **The editor.** plugdata's editor is the obvious candidate (open the patch in plugdata
-  standalone and reload on save), or a Loopwerk patch view later.
+  standalone and reload on save), or a Suhina patch view later.
 - **The command channel's shape:** Pd messages to command ids and JSON parameters, rate limits,
   and how a device's permissions are checked.
 - **Which Pd objects are allowed:** vanilla Pd only at first; externals bring their own licences

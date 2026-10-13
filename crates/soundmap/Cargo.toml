@@ -1,5 +1,5 @@
 [package]
-name = "loopwerk-soundmap"
+name = "suhina-soundmap"
 description = "The sample map: analyses samples, lays them out by how they sound, finds similar ones"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-loopwerk-media.workspace = true
+suhina-media.workspace = true
 bhtsne = { version = "0.7", default-features = false }  # MIT
 realfft = "3.5"  # MIT
 

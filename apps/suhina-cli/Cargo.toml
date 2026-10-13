@@ -1,0 +1,29 @@
+[package]
+name = "suhina-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "suhina-cli"
+path = "src/main.rs"
+
+[dependencies]
+suhina-engine.workspace = true
+suhina-als.workspace = true
+suhina-session.workspace = true
+suhina-automation.workspace = true
+suhina-media.workspace = true
+suhina-library.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
+suhina-output.workspace = true
+serde_json.workspace = true
+suhina-device-api.workspace = true
+suhina-device-registry.workspace = true
+suhina-device-fm-synth.workspace = true
+suhina-plugins.workspace = true
+hound.workspace = true
+
+[lints]
+workspace = true

@@ -4,12 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use loopwerk_library::Library;
-use loopwerk_session::{Projects, Session, blank_project};
 use serde_json::{Value, json};
+use suhina_library::Library;
+use suhina_session::{Projects, Session, blank_project};
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loopwerk-libcmd-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-libcmd-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -31,7 +31,7 @@ fn wav(path: &Path) {
 /// Projects with a library kept in `settings` (and its own empty plug-in library) and one open
 /// blank project.
 fn projects(settings: &Path) -> Projects {
-    let plugins = loopwerk_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
+    let plugins = suhina_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
     let mut projects = Projects::with_library(plugins);
     projects.set_file_library(Library::new(Some(settings.to_path_buf())));
     projects.add(Session::new(blank_project()), None).unwrap();

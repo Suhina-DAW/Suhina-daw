@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use egui::{Align2, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
-use loopwerk_engine::model::TrackId;
-use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
+use suhina_engine::model::TrackId;
+use suhina_session::{CommandKind, ProjectId, Projects, Session};
 
 use crate::arrangement_view::{self, ArrangementViewState};
 use crate::browser::{BrowserState, ResultsMode};
@@ -64,7 +64,7 @@ pub enum NewProject {
 /// A finished plug-in scan: the library with its new catalog, and how many files were read and
 /// failed, or why the scan could not run.
 struct ScanDone {
-    library: loopwerk_plugins::library::Library,
+    library: suhina_plugins::library::Library,
     report: Result<(usize, usize), String>,
 }
 
@@ -78,7 +78,7 @@ struct PendingDrop {
     decoded: std::sync::mpsc::Receiver<Vec<DecodedDrop>>,
 }
 
-type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<loopwerk_engine::AudioData>, crate::waveform::Peaks);
+type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioData>, crate::waveform::Peaks);
 
 /// A project's view state, kept while another project's tab is showing.
 #[derive(Default)]
@@ -241,8 +241,8 @@ impl App {
     }
 
     /// Uses `library` for the browser and the `library.*` commands (ADR 0012); the app gives
-    /// it Loopwerk's settings folder and starts it.
-    pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
+    /// it Suhina's settings folder and starts it.
+    pub fn set_file_library(&mut self, library: suhina_library::Library) {
         self.projects.set_file_library(library);
         self.browser.relist();
     }
@@ -256,15 +256,15 @@ impl App {
     pub fn record_project(&mut self, path: &Path) {
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         if let Err(e) =
-            self.projects.file_library_mut().record(loopwerk_library::Group::Projects, &path.display().to_string())
+            self.projects.file_library_mut().record(suhina_library::Group::Projects, &path.display().to_string())
         {
             self.status = Status::Error(e);
         }
     }
 
-    /// A window whose `plugins.*` commands use `library` instead of the one in Loopwerk's
+    /// A window whose `plugins.*` commands use `library` instead of the one in Suhina's
     /// settings folder (tests, portable setups).
-    pub fn with_library(library: loopwerk_plugins::library::Library) -> Self {
+    pub fn with_library(library: suhina_plugins::library::Library) -> Self {
         Self { projects: Projects::with_library(library), ..Self::new() }
     }
 
@@ -398,7 +398,7 @@ impl App {
     }
 
     /// Lets project `id` play through `player`.
-    pub fn attach_player(&mut self, id: ProjectId, player: loopwerk_session::Player) {
+    pub fn attach_player(&mut self, id: ProjectId, player: suhina_session::Player) {
         if let Some(session) = self.projects.get_mut(id) {
             session.attach_player(player);
         }
@@ -599,9 +599,9 @@ impl App {
             Some(id) => {
                 let name = self.projects.name(id).unwrap_or("Untitled");
                 let unsaved = self.projects.get(id).is_some_and(Session::has_unsaved_changes);
-                format!("{name}{} - Loopwerk", if unsaved { " •" } else { "" })
+                format!("{name}{} - Suhina", if unsaved { " •" } else { "" })
             }
-            None => "Loopwerk".to_string(),
+            None => "Suhina".to_string(),
         };
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -682,7 +682,7 @@ impl App {
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
             Ok(_) => {
-                let changes_project = loopwerk_session::commands()
+                let changes_project = suhina_session::commands()
                     .iter()
                     .find(|c| c.id == action.id)
                     .is_some_and(|c| matches!(c.kind, CommandKind::Edit | CommandKind::History));
@@ -713,7 +713,7 @@ impl App {
         }
         if self
             .session()
-            .is_some_and(|s| s.player().is_some() && !loopwerk_engine::plugin_devices(s.project()).is_empty())
+            .is_some_and(|s| s.player().is_some() && !suhina_engine::plugin_devices(s.project()).is_empty())
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
@@ -1081,7 +1081,7 @@ impl App {
             PluginRequest::Scan { all } => {
                 let mut library = self.projects.library_mut().clone();
                 let (done, receive) = std::sync::mpsc::channel();
-                let started = std::thread::Builder::new().name("loopwerk-plugin-scan".into()).spawn(move || {
+                let started = std::thread::Builder::new().name("suhina-plugin-scan".into()).spawn(move || {
                     let report = library.scan(all).map(|r| (r.read.len(), r.failed.len()));
                     let _unheard = done.send(ScanDone { library, report });
                 });
@@ -1646,18 +1646,18 @@ impl App {
         }
         let (send, decoded) = std::sync::mpsc::channel();
         let count = samples.len();
-        let started = std::thread::Builder::new().name("loopwerk-drop".into()).spawn(move || {
+        let started = std::thread::Builder::new().name("suhina-drop".into()).spawn(move || {
             // A Stems file gives every audio track, each under its stream number.
             let done: Vec<_> = samples
                 .into_iter()
                 .flat_map(|path| {
-                    let decoded: Vec<(Option<u16>, loopwerk_media::AudioData)> =
-                        if loopwerk_media::stems::is_stems_path(&path) {
-                            loopwerk_media::stems::decode_streams(&path)
+                    let decoded: Vec<(Option<u16>, suhina_media::AudioData)> =
+                        if suhina_media::stems::is_stems_path(&path) {
+                            suhina_media::stems::decode_streams(&path)
                                 .map(|all| all.into_iter().zip(0u16..).map(|(d, n)| (Some(n), d)).collect())
                                 .unwrap_or_default()
                         } else {
-                            loopwerk_media::decode_file(&path).map(|d| vec![(None, d)]).unwrap_or_default()
+                            suhina_media::decode_file(&path).map(|d| vec![(None, d)]).unwrap_or_default()
                         };
                     decoded.into_iter().map(move |(stream, data)| {
                         let peaks = crate::waveform::peaks(&data);
@@ -1689,7 +1689,7 @@ impl App {
                         let key = match stream {
                             Some(n) => {
                                 session.provide_stream(&path, n, data);
-                                loopwerk_engine::model::stream_key(&key, n)
+                                suhina_engine::model::stream_key(&key, n)
                             }
                             None => {
                                 session.provide_audio(&path, data);
@@ -1772,7 +1772,7 @@ impl App {
                 &painter,
                 bar.shrink2(Vec2::new(PAD, 0.0)),
                 Align2::LEFT_CENTER,
-                "Loopwerk",
+                "Suhina",
                 theme::ui_font(theme::TEXT),
                 theme::text_secondary(),
             );

@@ -17,8 +17,8 @@ last_verified: 2026-10-11
 - **Status:** behaviour spec only; nothing is implemented. Plan: [`ROADMAP.md`](../../ROADMAP.md)
   › Audio to MIDI.
 
-This document describes the behaviour Loopwerk will implement, in Loopwerk's terms. Where
-Loopwerk decides something the sources do not settle, the text says so (**Loopwerk:**). Live's
+This document describes the behaviour Suhina will implement, in Suhina's terms. Where
+Suhina decides something the sources do not settle, the text says so (**Suhina:**). Live's
 slicing presets, instruments and their sounds are its content and are not reproduced.
 
 ## Observed: the commands
@@ -65,7 +65,7 @@ The context menu of an audio clip has, together:
    **(hypothesis)**
 5. The source audio clip is left as it is.
 
-**Loopwerk:** presets are our own, starting with one per instrument (drum rack, sampler). A
+**Suhina:** presets are our own, starting with one per instrument (drum rack, sampler). A
 slice with no audible content is still created, so note numbers stay predictable.
 
 ## Converting
@@ -80,8 +80,8 @@ slice with no audible content is still created, so note numbers stay predictable
 
 ### Behaviour
 
-**Loopwerk:** four kinds of material instead of three. A detector that writes every note of a
-mix ("harmony") mixes parts up; narrow detectors are far more reliable, so Loopwerk offers:
+**Suhina:** four kinds of material instead of three. A detector that writes every note of a
+mix ("harmony") mixes parts up; narrow detectors are far more reliable, so Suhina offers:
 
 1. **Drums:** each hit becomes a note on a fixed key per drum class: kick, snare, hi-hat to
    start with.
@@ -100,7 +100,7 @@ For all four:
   and pitches and chords can be held to the project's key.
 - **Dropping onto a MIDI track** offers these four choices and *Cancel*. After a choice, the
   MIDI clip is written on the track it was dropped on, at the drop position, and the audio clip
-  is not placed there. *Cancel* drops nothing. **(hypothesis** for Live; Loopwerk does this.**)**
+  is not placed there. *Cancel* drops nothing. **(hypothesis** for Live; Suhina does this.**)**
 - Every conversion is a command (`clip.sliceToMidi`, `clip.convertToMidi` with
   `material: drums | bass | melody | chords`), runs off the audio thread, and is one undo step.
 

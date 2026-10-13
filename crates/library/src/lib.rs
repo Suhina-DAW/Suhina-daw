@@ -1,6 +1,6 @@
 //! The browser's library (`docs/spec/browser.md`, ADR 0012): the folders the user added, an
 //! index of the files in them kept on disk and up to date, and the pins, recent items and
-//! colour tags. It belongs to Loopwerk, not to one project; the session's `library.*` commands
+//! colour tags. It belongs to Suhina, not to one project; the session's `library.*` commands
 //! run on it.
 
 pub mod find;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-pub use loopwerk_media::info::FileKind;
+pub use suhina_media::info::FileKind;
 
 pub use crate::index::FolderIndex;
 use crate::store::Store;
@@ -52,7 +52,7 @@ impl Item {
             return (!spec.is_empty()).then(|| Self::Plugin(spec.to_string()));
         }
         if let Some((path, voice)) = key.rsplit_once('#')
-            && loopwerk_media::info::kind_of(Path::new(path)) == Some(FileKind::Preset)
+            && suhina_media::info::kind_of(Path::new(path)) == Some(FileKind::Preset)
             && let Ok(voice) = voice.parse::<usize>()
         {
             return (1..=32).contains(&voice).then(|| Self::Voice(PathBuf::from(path), voice));
@@ -72,7 +72,7 @@ impl Item {
     /// The kind of file it is, for a file or a preset voice.
     pub fn file_kind(&self) -> Option<FileKind> {
         match self {
-            Self::File(path) => loopwerk_media::info::kind_of(path),
+            Self::File(path) => suhina_media::info::kind_of(path),
             Self::Voice(..) => Some(FileKind::Preset),
             _ => None,
         }
@@ -147,7 +147,7 @@ struct Running {
 }
 
 pub struct Library {
-    /// Loopwerk's settings folder; nothing is kept on disk when it is `None`.
+    /// Suhina's settings folder; nothing is kept on disk when it is `None`.
     settings: Option<PathBuf>,
     loaded: bool,
     store: Store,
@@ -159,7 +159,7 @@ pub struct Library {
 
 impl Default for Library {
     /// A library that is not kept anywhere (tests); the window and the MCP server give it
-    /// Loopwerk's settings folder with [`Library::new`].
+    /// Suhina's settings folder with [`Library::new`].
     fn default() -> Self {
         Self::new(None)
     }
@@ -519,7 +519,7 @@ impl Library {
             if file_type.is_dir() {
                 out.push(Listing { path: entry.path(), name, kind: None, size: 0 });
             } else if file_type.is_file()
-                && let Some(kind) = loopwerk_media::info::kind_of(Path::new(&name))
+                && let Some(kind) = suhina_media::info::kind_of(Path::new(&name))
             {
                 let size = entry.metadata().map_or(0, |m| m.len());
                 out.push(Listing { path: entry.path(), name, kind: Some(kind), size });

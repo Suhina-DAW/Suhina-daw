@@ -1,10 +1,10 @@
-//! Saving a project as a Loopwerk project (.locr) and opening it again.
+//! Saving a project as a Suhina project (.locr) and opening it again.
 
-use loopwerk_session::{Projects, Session, blank_project};
 use serde_json::json;
+use suhina_session::{Projects, Session, blank_project};
 
 fn folder(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("loopwerk-save-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-save-{name}-{}", std::process::id()));
     let _fresh = std::fs::remove_dir_all(&dir);
     dir
 }

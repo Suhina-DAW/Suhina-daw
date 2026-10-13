@@ -1,4 +1,4 @@
-//! Loopwerk audio engine. Offline rendering and real-time playback share this code path:
+//! Suhina audio engine. Offline rendering and real-time playback share this code path:
 //! [`Renderer::new`] does all allocation up front, and [`Renderer::process`] never allocates,
 //! so the same `process` call can later run on the audio thread.
 
@@ -37,14 +37,14 @@ use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
-pub use loopwerk_device_api::NoteEvent as DeviceEvent;
-use loopwerk_device_api::ProcessContext;
-pub use loopwerk_model as model;
-use loopwerk_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, plugin_devices, plugin_key};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
+pub use suhina_device_api::NoteEvent as DeviceEvent;
+use suhina_device_api::ProcessContext;
+pub use suhina_model as model;
+use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
 
 /// The most frames a plug-in is asked to process at once: the size of a device chain's block.
 pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;
@@ -72,7 +72,7 @@ pub(crate) const MAX_LATENCY_SECONDS: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderError {
-    InvalidProject(Vec<loopwerk_model::ValidationError>),
+    InvalidProject(Vec<suhina_model::ValidationError>),
     InvalidSampleRate(u32),
     InvalidTempo(f64),
     TooLong { seconds: f64 },
@@ -719,7 +719,7 @@ impl Graph {
                             // Warped clips are time-stretched as they play; the rest, and clips
                             // the stretcher cannot handle, are re-pitched.
                             if region.warped
-                                && region.stretch != loopwerk_model::StretchMode::Repitch
+                                && region.stretch != suhina_model::StretchMode::Repitch
                                 && let Some(voice) = StretchVoice::new(clip, region, data.clone(), bpm, sample_rate)
                             {
                                 let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
@@ -888,7 +888,7 @@ pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
     let pan = if channel.pan.is_finite() { channel.pan.clamp(-1.0, 1.0) } else { 0.0 };
-    let gain = |c: &loopwerk_model::Channel| if c.volume.is_finite() { c.volume.max(0.0) } else { 0.0 };
+    let gain = |c: &suhina_model::Channel| if c.volume.is_finite() { c.volume.max(0.0) } else { 0.0 };
 
     let mut volume = 1.0;
     let mut visited = Vec::new();
@@ -918,8 +918,8 @@ pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32
 }
 
 /// Whether a track whose output passes through `chain` is heard while channels are soloed.
-fn heard_with_solo(project: &Project, channel: &loopwerk_model::Channel, chain: &[ChannelId]) -> bool {
-    let soloed = |c: &loopwerk_model::Channel| c.solo && c.role != ChannelRole::Master;
+fn heard_with_solo(project: &Project, channel: &suhina_model::Channel, chain: &[ChannelId]) -> bool {
+    let soloed = |c: &suhina_model::Channel| c.solo && c.role != ChannelRole::Master;
     if !project.channels.iter().any(soloed) || channel.role == ChannelRole::Effect {
         return true;
     }
@@ -1003,7 +1003,7 @@ fn collect_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_model::*;
+    use suhina_model::*;
 
     const SR: u32 = 48_000;
 

@@ -2,10 +2,10 @@
 //! offline here instead of on an audio device.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
 
-use loopwerk_engine::{AudioPool, Quantization, Renderer};
-use loopwerk_model::*;
-use loopwerk_session::{CommandKind, Player, Session, commands, parse_quantization};
 use serde_json::{Value, json};
+use suhina_engine::{AudioPool, Quantization, Renderer};
+use suhina_model::*;
+use suhina_session::{CommandKind, Player, Session, commands, parse_quantization};
 
 const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
