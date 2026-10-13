@@ -185,15 +185,50 @@ fn an_empty_project_survives_a_round_trip() {
 
 #[test]
 fn files_are_written_and_read() {
-    let dir = std::env::temp_dir().join(format!("suhina-locr-{}", std::process::id()));
-    let path = dir.join("song.locr");
+    let dir = std::env::temp_dir().join(format!("suhina-project-file-{}", std::process::id()));
+    let path = dir.join("song.suhina");
     assert_eq!(write_file(&path, &everything()), Ok(()));
     assert_eq!(read_file(&path), Ok(everything()));
     // Nothing is left beside it.
     let names: Vec<_> =
         std::fs::read_dir(&dir).map(|d| d.filter_map(Result::ok).map(|e| e.file_name()).collect()).unwrap_or_default();
-    assert_eq!(names, ["song.locr"]);
+    assert_eq!(names, ["song.suhina"]);
     let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_names_the_suhina_format() {
+    let text = to_json(&Project::default());
+    let root = serde_json::from_str::<Value>(&text).unwrap_or_default();
+    assert_eq!(root.get("format").and_then(Value::as_str), Some("suhina"));
+    assert_eq!(root.get("version").and_then(Value::as_u64), Some(VERSION));
+}
+
+#[test]
+fn a_file_saved_before_the_rename_still_opens() {
+    // Written with the old format name, as projects saved before October 2026 are.
+    let old = to_json(&everything()).replacen(r#""format": "suhina""#, r#""format": "locr""#, 1);
+    assert!(old.contains(r#""format": "locr""#), "{old}");
+    assert_eq!(from_json(&old), Ok(everything()));
+    // And from a file with the old extension.
+    let dir = std::env::temp_dir().join(format!("suhina-project-file-old-{}", std::process::id()));
+    let path = dir.join("song.locr");
+    let written = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, &old));
+    assert!(written.is_ok(), "{written:?}");
+    assert_eq!(read_file(&path), Ok(everything()));
+    // Saved again, it names the new format.
+    assert!(to_json(&everything()).contains(r#""format": "suhina""#));
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn project_files_are_known_by_either_extension() {
+    for name in ["a.suhina", "a.SUHINA", "a.locr", "a.LOCR", "dir/b c.suhina"] {
+        assert!(is_project_file(Path::new(name)), "{name}");
+    }
+    for name in ["a.als", "a.json", "a", "suhina", "a.suhina.saving"] {
+        assert!(!is_project_file(Path::new(name)), "{name}");
+    }
 }
 
 #[test]
@@ -203,15 +238,17 @@ fn what_is_not_a_project_is_refused() {
     assert!(refused("[1, 2]"));
     assert!(refused(r#"{ "version": 1, "project": {} }"#), "no format");
     assert!(refused(r#"{ "format": "als", "version": 1, "project": {} }"#));
-    assert!(refused(r#"{ "format": "locr", "project": {} }"#), "no version");
-    assert!(refused(r#"{ "format": "locr", "version": 2, "project": {} }"#), "a newer version");
-    assert!(refused(r#"{ "format": "locr", "version": 1 }"#), "no project");
+    assert!(refused(r#"{ "format": "suhina", "project": {} }"#), "no version");
+    assert!(refused(r#"{ "format": "suhina", "version": 2, "project": {} }"#), "a newer version");
+    assert!(refused(r#"{ "format": "suhina", "version": 1 }"#), "no project");
+    assert!(refused(r#"{ "format": "locr", "version": 2, "project": {} }"#), "a newer version, old name");
+    assert_eq!(from_json(r#"{ "format": "suhina", "version": 1, "project": {} }"#), Ok(Project::default()));
     assert_eq!(from_json(r#"{ "format": "locr", "version": 1, "project": {} }"#), Ok(Project::default()));
 }
 
 #[test]
 fn hostile_values_are_errors_not_crashes() {
-    let with = |project: &str| from_json(&format!(r#"{{ "format": "locr", "version": 1, "project": {project} }}"#));
+    let with = |project: &str| from_json(&format!(r#"{{ "format": "suhina", "version": 1, "project": {project} }}"#));
     for bad in [
         r#"{ "tracks": [ { "id": -1 } ] }"#,
         r#"{ "tracks": [ { "id": 99999999999 } ] }"#,
@@ -267,7 +304,7 @@ fn numbers_that_are_not_finite_are_written_as_zero() {
 
 #[test]
 fn audio_paths_follow_a_project_saved_elsewhere() {
-    let base = std::env::temp_dir().join(format!("suhina-locr-rebase-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("suhina-project-file-rebase-{}", std::process::id()));
     let samples = base.join("old").join("Samples");
     std::fs::create_dir_all(&samples).unwrap_or_default();
     std::fs::write(samples.join("loop.wav"), b"RIFF").unwrap_or_default();
@@ -286,7 +323,7 @@ fn audio_paths_follow_a_project_saved_elsewhere() {
 
 #[test]
 fn a_missing_audio_file_is_found_by_its_absolute_path() {
-    let base = std::env::temp_dir().join(format!("suhina-locr-absolute-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("suhina-project-file-absolute-{}", std::process::id()));
     std::fs::create_dir_all(&base).unwrap_or_default();
     let file = base.join("kept.wav");
     std::fs::write(&file, b"RIFF").unwrap_or_default();

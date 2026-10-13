@@ -11,8 +11,10 @@ covers:
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
   - crates/engine/src/launcher.rs
-  - crates/ui/src/settings.rs
   - apps/suhina-cli/src/play.rs
+  - crates/ui/src/menus.rs
+  - crates/ui/src/drop.rs
+  - crates/session/src/files.rs
 ---
 
 # Arrangement editing
@@ -30,8 +32,9 @@ plays through that track's instrument and effects. The move is one undo step.
 
 ## Duplicating and deleting
 
-`clip.duplicate {track, index}` places a copy right after the clip, replacing what the copy covers
-as a moved clip does; `clip.delete {track, index}` removes it. In the Arrangement view a clip's
+`clip.duplicate {track, index, stack?}` places a copy right after the clip, replacing what the
+copy covers unless stacked, as a moved clip does (the window stacks when the setting for the
+clip's kind is on); `clip.delete {track, index}` removes it. In the Arrangement view a clip's
 right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
 
 ## Copy, cut and paste
@@ -40,7 +43,8 @@ right-click menu has both, and the keys Ctrl+D and Delete act on the selected cl
 `clip.paste {track, start, stack?}` places the copy on a track that takes its kind, replacing what
 it covers unless stacked. The pasted clip plays its own copy of the content, so editing one does
 not change the other. The window's keys paste after the selected clip, or at the playhead on the
-selected track ([shortcuts](../shortcuts.md)).
+selected track ([shortcuts](../shortcuts.md)), and stack when the stacking setting for the
+clip's kind is on, like a moved clip.
 
 ## Fades
 
@@ -185,7 +189,8 @@ Stop returns to the marker.
 | `track.add {kind?, name?, after?, device?, preset?, voice?}` | A new audio or MIDI track with its channel, slots and lane, after `after` or after the last regular track ([browser](browser.md) › Commands). |
 
 Clips placed from the browser (`clip.addFiles`) replace what they cover in the Arrangement like a
-moved clip, unless the stacking settings allow it ([browser](browser.md) › Files).
+moved clip; they stack when either stacking setting is on (one `stack` flag for the whole drop,
+not per kind) ([browser](browser.md) › Files).
 
 In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G groups the selection,
 dragging a header moves the track above the lane under the pointer (below it from its lower half),
@@ -221,7 +226,8 @@ overlaps shows one row.
 
 ## Open
 
-- Placing new clips (from the browser, by recording, by duplicating) follows the same rules.
+- Placing clips by recording follows the same rules (clips from the browser, duplicating and
+  pasting already do).
 - Moving several selected clips at once.
 - Whether a stacked lane should grow taller automatically.
 - Dragging along the ruler to scrub, and a loop brace.

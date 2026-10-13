@@ -524,15 +524,12 @@ impl App {
         self.saved_path.take()
     }
 
-    /// Saves the active project: to its own `.locr` file, or, the first time and when `ask`, to a
-    /// name and folder the user gives.
+    /// Saves the active project: to its own project file (`.suhina`, or the `.locr` it was
+    /// opened from), or, the first time and when `ask`, to a name and folder the user gives.
     fn save_active(&mut self, ask: bool) {
         let Some(id) = self.projects.active() else { return };
         let Some(session) = self.projects.get(id) else { return };
-        let own_file = session
-            .source()
-            .filter(|s| s.extension().is_some_and(|e| e.eq_ignore_ascii_case("locr")))
-            .map(Path::to_path_buf);
+        let own_file = session.source().filter(|s| suhina_session::is_project_file(s)).map(Path::to_path_buf);
         match own_file {
             Some(path) if !ask => self.save_to(&path, false),
             own => {
@@ -1404,11 +1401,11 @@ impl App {
                 }
             } else if is(&path, "json") || is(&path, "zip") {
                 self.themes.import(path);
-            } else if (is(&path, "als") || is(&path, "locr")) && !opened {
+            } else if (is(&path, "als") || suhina_session::is_project_file(&path)) && !opened {
                 opened = true;
                 self.request_open(path);
             } else {
-                let what = "is not a project (.locr), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
+                let what = "is not a project (.suhina), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
                 self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
@@ -1489,7 +1486,20 @@ impl App {
                 if matches!(id, "clip.cut" | "clip.delete") {
                     self.arrangement.clear_selected_clip();
                 }
-                actions.push(Action::new(id, json!({ "track": track.0, "index": index })));
+                let mut params = json!({ "track": track.0, "index": index });
+                // A copy follows the stacking setting for its kind, as a moved clip does.
+                if id == "clip.duplicate" {
+                    let audio = self
+                        .timeline
+                        .as_ref()
+                        .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
+                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                        .map(|c| c.audio);
+                    if audio.is_some_and(|audio| self.stacks(audio)) {
+                        params["stack"] = json!(true);
+                    }
+                }
+                actions.push(Action::new(id, params));
             }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.
@@ -1503,7 +1513,13 @@ impl App {
                 };
                 match target {
                     Some((track, start)) => {
-                        actions.push(Action::new("clip.paste", json!({ "track": track.0, "start": start })))
+                        let mut params = json!({ "track": track.0, "start": start });
+                        // The pasted clip follows the stacking setting for its kind, as a moved clip does.
+                        let audio = self.session().and_then(Session::copied_clip_is_audio);
+                        if audio.is_some_and(|audio| self.stacks(audio)) {
+                            params["stack"] = json!(true);
+                        }
+                        actions.push(Action::new("clip.paste", params))
                     }
                     None => self.status = Status::Hint("Select a clip or a track to paste on".into()),
                 }
@@ -1519,6 +1535,12 @@ impl App {
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
         }
+    }
+
+    /// Whether a clip of this kind (audio, or notes) leaves the clips it lands on as they are:
+    /// Options › Settings › sample stacking for audio, MIDI stacking for notes.
+    fn stacks(&self, audio: bool) -> bool {
+        if audio { self.settings.sample_stacking } else { self.settings.midi_stacking }
     }
 
     /// Makes the whole window `steps` zoom steps larger or smaller and keeps that in the settings.
@@ -2122,7 +2144,10 @@ fn drop_overlay(ui: &Ui, area: Rect) {
     };
     let (project, themes) = ui.input(|i| {
         let files = &i.raw.hovered_files;
-        (files.iter().any(|f| is(f, "als")), files.iter().any(|f| is(f, "json") || is(f, "zip")))
+        (
+            files.iter().any(|f| is(f, "als") || f.path.as_deref().is_some_and(suhina_session::is_project_file)),
+            files.iter().any(|f| is(f, "json") || is(f, "zip")),
+        )
     });
     let shown = motion::toward(ui.ctx(), Id::new("drop-overlay"), project || themes, motion::HOVER);
     if shown <= 0.0 {

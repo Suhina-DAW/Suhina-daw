@@ -16,7 +16,7 @@ A project names the audio files its clips play. When a file has moved or been re
 project was saved, it cannot be decoded and its clips are silent. Suhina says so when the
 project opens and helps find the files again.
 
-- **Sources:** the owner's request (2026-10-13); other DAWs have such a view (a list of missing
+- **Sources:** the maintainer's request (2026-10-13); other DAWs have such a view (a list of missing
   files with an automatic search by name and a folder to search), known from their public
   manuals. The design below is Suhina's own.
 - **Builds on:** the browser's file index ([ADR 0012](../decisions/0012-file-library.md)) and
@@ -95,7 +95,7 @@ Over MCP, `folder` and every `to` path must be inside the server's read root ([`
 | What | Limit | Beyond it |
 |---|---|---|
 | Walking a folder | depth 32, 1 000 000 entries, symbolic links not followed | the walk stops and says so |
-| Candidates per file | 32 (today up to 32 from each source: index and project folder; [#191](https://github.com/juhamikael/Loopwerk/issues/191)) | the rest are left out |
+| Candidates per file | 32, from the index and the project folder together, without repeats, best first | the rest are left out |
 | Names in one `library.findFiles` | 4 096 | refused |
 | Files in one `project.relinkFiles` | 4 096 | refused |
 

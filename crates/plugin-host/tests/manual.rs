@@ -1,10 +1,10 @@
 //! Tools for looking into one installed plug-in by hand, run with `--ignored`: they take the
 //! plug-in from `SUHINA_PLUGIN` (`vst3:<bundle>` or `clap:<file>`, as the host takes it) and,
-//! for a crash, the host from `SUHINA_HOST` (a program that runs `suhina-plugin-host` with
-//! the arguments it is given, such as a debugger that logs the stack when it crashes).
+//! if set, the host from `SUHINA_HOST` (a program that runs `suhina-plugin-host` with the
+//! arguments it is given).
 //!
 //! ```sh
-//! SUHINA_PLUGIN="vst3:C:/Program Files/Common Files/VST3/Serum2.vst3" \
+//! SUHINA_PLUGIN="vst3:<path to a .vst3 bundle>" \
 //!   cargo test -p suhina-plugin-host --test manual -- --ignored --nocapture
 //! ```
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions

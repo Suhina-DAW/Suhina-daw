@@ -1,14 +1,14 @@
 ---
-description: The layout of Suhina's own project file (.locr), field by field, with what a reader accepts
-read_when: .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state
+description: The layout of Suhina's own project file (.suhina; .locr from before still read), field by field, with what a reader accepts
+read_when: .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
-  - crates/locr/src/lib.rs
+  - crates/project-file/src/lib.rs
 ---
 
-# The .locr project file
+# The .suhina project file
 
 Suhina's own project file ([ADR 0010](../decisions/0010-project-files.md)), version 1. It is
 UTF-8 JSON, written pretty-printed. Its parts mirror the project model
@@ -16,7 +16,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 
 ```json
 {
-  "format": "locr",
+  "format": "suhina",
   "version": 1,
   "project": {
     "transport": { "tempo_bpm": 120.0, "time_signature": [4, 4] },
@@ -29,8 +29,10 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 
 ## Rules
 
-- `format` is `"locr"` and `version` a whole number from 1 to the newest the reader knows;
-  anything else is refused.
+- `format` is `"suhina"` and `version` a whole number from 1 to the newest the reader knows;
+  anything else is refused. Files saved before 2026-10-13 end in `.locr` and name the format
+  `"locr"`: the same format, read the same way. A writer always writes `"suhina"`, also when it
+  saves back to a `.locr` path.
 - Ids are whole numbers that fit 32 bits. Numbers are finite (a writer writes 0 for one that is
   not). A list or an optional field may be left out or `null`.
 - Binary data (`state`, extension `data`) is standard base64.

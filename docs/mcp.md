@@ -8,13 +8,16 @@ covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
   - crates/session/src/audio.rs
+  - crates/automation/src/render.rs
+  - crates/engine/src/cpu.rs
+  - apps/suhina-cli/src/main.rs
 ---
 
 # MCP server
 
 `suhina-cli mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) on
 stdin/stdout (the official `rmcp` SDK), so an agent can open, inspect, edit and render projects.
-It follows the same conventions as PhotoCraft's MCP server.
+It follows the same conventions as [PhotoCraft](https://github.com/storytold/photocraft)'s MCP server.
 
 ```sh
 suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
@@ -23,12 +26,15 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Files.** Paths are relative to a root, or absolute paths beneath it. `..` and symlinks that
   lead outside are refused. Without `--read-root` the agent cannot open files; without
   `--write-root` it cannot write any. Existing files are replaced only with `overwrite: true`.
+  `project.save` writes below the write root only: with `path`, or over the project's own file
+  when that file is there (`overwrite: true` needed, as for any existing file; `overwrite` is an
+  MCP-only parameter, removed before the command runs).
   Commands that read files take the same paths and are checked the same way before they run:
   `clip.addFiles` (`paths`), `preview.play` (`path`), `device.add` and `track.add` (`preset`),
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
   `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
-  (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` and `soundmap.info`
-  (`item`, a folder `place`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` (`item`, a folder `place`) and
+  `soundmap.info` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
   `to` file).
 - **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
   find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
@@ -41,7 +47,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   the one their `project` argument names, without switching. At most 32 are open.
 - **Audio output.** With `--audio`, each opened project also plays on the chosen output device
   (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
-  `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
+  `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
@@ -72,10 +78,10 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([arrangement editing](spec/arrangement-editing.md) › Play position).
 
 - **Saving.** `project.save { path?, copy? }` (through `command_run`) writes the project as a
-  Suhina project (`.locr`, [spec](spec/locr-format.md)) with its plug-ins' state as it is now;
-  without a path, to the `.locr` it came from; `copy: true` writes a copy (a template) and the
+  Suhina project (`.suhina`, [spec](spec/suhina-format.md)) with its plug-ins' state as it is now;
+  without a path, to the project file it came from (a `.locr` from before October 2026 stays `.locr`); `copy: true` writes a copy (a template) and the
   project keeps its own file. `project.info` reports `unsaved_changes`. `project_open` opens
-  `.locr` files as well as Live Sets.
+  `.suhina` (and older `.locr`) files as well as Live Sets.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
@@ -98,8 +104,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `preview.stop` stops it; `launcher.state` reports `preview`.
 
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
-  rendering, in percent, smoothed over the last fifth of a second (`0.0` when nothing is
-  measured). The control bar shows the same number.
+  rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
+  a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.
 
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Suhina's settings folder) and keeps it up to date while it runs
@@ -133,7 +139,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   project's plug-in devices with the installed plug-in found for each (also a VST3 version
   standing in for a VST2 one), how it was found and whether its settings carry over. `plugins.addFolder` and
   `plugins.removeFolder` are refused for agents, since a folder decides whose code a scan runs;
-  the user adds folders with `suhina-cli plugins add-folder`. `plugins.setHosting` chooses
+  the user adds folders with `suhina-cli plugins add-folder` or in the desktop app's Settings ›
+  Plug-ins. `plugins.setHosting` chooses
   how a plug-in's instances share host processes (`binary`, the default, `vendor` or
   `instance`), from their next start.
 
@@ -146,8 +153,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   its editor is open, and how it keeps up (`blocks` given and `late_blocks` not answered in
   time, which the chain went on without; the device panel shows the share). `device.openEditor` and `device.closeEditor` open its editor in a window
   on the user's screen (above Suhina's window when the desktop app runs it, or inside its
-  device panel when its settings say so; there it opens in the background: the answer is
-  `"editor_open": "opening"` and `device.plugin` says when it is open), and `device.restart`
+  device panel when its settings say so). When the desktop app runs it, the editor opens in
+  the background: the answer is `"editor_open": "opening"` and `device.plugin` says when it is
+  open; otherwise it opens at once and the answer gives its `width` and `height`. And `device.restart`
   starts a crashed one again with its
   last settings. Renders run the installed plug-ins with their saved settings; their result's
   `plugins` lists those that are missing or did not start.
@@ -156,15 +164,15 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 | Tool | What it does |
 |---|---|
-| `project_open` | Open a Suhina project (`.locr`) or a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
+| `project_open` | Open a Suhina project (`.suhina`, or `.locr` from before) or a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
 | `project_inspect` | Summary, tracks (volume, pan, mute, devices) and arrangement clips as JSON; optional `project`. |
-| `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`) and parameter schema; optional `filter`. |
+| `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`, `plugin`, `library`, `audio`) and parameter schema; optional `filter`. |
 | `command_run` | Run one command: `{"id": "track.setPan", "params": {"track": "Bass", "pan": -1}}`; optional `project`. |
 | `command_batch` | Run `steps` in order; each editing command is its own undo step; `stop_on_error` (default true); optional `project` for every step. |
 | `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |
 
-Commands are defined once in `suhina-session` (ADR 0002); the MCP server, the CLI and later
-the UI all run the same ones. [`commands.md`](commands.md) lists every command with its
+Commands are defined once in `suhina-session` (ADR 0002); the MCP server, the CLI and the
+desktop app all run the same ones. [`commands.md`](commands.md) lists every command with its
 parameters; it is generated from the registry, so a new command needs no edit there.
 
 ## Errors
