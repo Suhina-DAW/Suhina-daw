@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use loopwerk_plugins::library::Library;
+use suhina_plugins::library::Library;
 
 use crate::commands::{CommandKind, CommandSpec, Param, ParamType, commands, param};
 use crate::plugins::plugin_commands;
@@ -24,7 +24,7 @@ struct Open {
 }
 
 /// The open projects in tab order, and which one is active; and the plug-in library, which
-/// belongs to Loopwerk rather than to any one project.
+/// belongs to Suhina rather than to any one project.
 #[derive(Default)]
 pub struct Projects {
     open: Vec<Open>,
@@ -38,9 +38,9 @@ pub struct Projects {
     editor_owner: Option<u64>,
     /// The browser's library (ADR 0012); kept nowhere until one is given with
     /// [`Projects::set_file_library`].
-    files: loopwerk_library::Library,
+    files: suhina_library::Library,
     /// The sample map's analysis (ADR 0013), made when first needed.
-    pub(crate) sound_map: Option<loopwerk_soundmap::SoundMap>,
+    pub(crate) sound_map: Option<suhina_soundmap::SoundMap>,
     /// Analysis runs only once started ([`Projects::start_sound_map`]), as indexing does.
     pub(crate) sound_map_started: bool,
     /// The library revision the sound map was last brought in line with.
@@ -188,7 +188,7 @@ impl Projects {
         Ok(closed.session)
     }
 
-    /// Uses `library` for the `plugins.*` commands instead of the one in Loopwerk's settings
+    /// Uses `library` for the `plugins.*` commands instead of the one in Suhina's settings
     /// folder (for tests, or a portable setup).
     pub fn with_library(library: Library) -> Self {
         Self { library, ..Self::default() }
@@ -213,8 +213,8 @@ impl Projects {
     }
 
     /// Uses `library` for the browser and the `library.*` commands: the desktop app and the
-    /// MCP server give it Loopwerk's settings folder.
-    pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
+    /// MCP server give it Suhina's settings folder.
+    pub fn set_file_library(&mut self, library: suhina_library::Library) {
         self.files = library;
         // The sound map keeps its caches beside the library's indexes.
         self.sound_map = None;
@@ -222,7 +222,7 @@ impl Projects {
     }
 
     /// The browser's library.
-    pub fn file_library_mut(&mut self) -> &mut loopwerk_library::Library {
+    pub fn file_library_mut(&mut self) -> &mut suhina_library::Library {
         &mut self.files
     }
 

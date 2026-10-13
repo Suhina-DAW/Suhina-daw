@@ -1,7 +1,7 @@
 //! A small self-made project: four tracks, two return tracks, six scenes with clips and a
 //! 48-bar arrangement. The app opens it with `--demo`, and the UI tests draw it.
 
-use loopwerk_engine::model::{
+use suhina_engine::model::{
     Arrangement, ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds,
     ContentLane, Extensions, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Scene, Send, Slot, Track,
     TrackId, Transport,

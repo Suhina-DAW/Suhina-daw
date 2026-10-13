@@ -1,20 +1,20 @@
 [package]
-name = "loopwerk-device-registry"
+name = "suhina-device-registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-loopwerk-device-api.workspace = true
-loopwerk-device-utility.workspace = true
-loopwerk-device-auto-pan.workspace = true
-loopwerk-device-dj-eq.workspace = true
-loopwerk-device-vinyl-distortion.workspace = true
-loopwerk-device-overdrive.workspace = true
-loopwerk-device-fm-synth.workspace = true
-loopwerk-device-compressor.workspace = true
-loopwerk-device-limiter.workspace = true
+suhina-device-api.workspace = true
+suhina-device-utility.workspace = true
+suhina-device-auto-pan.workspace = true
+suhina-device-dj-eq.workspace = true
+suhina-device-vinyl-distortion.workspace = true
+suhina-device-overdrive.workspace = true
+suhina-device-fm-synth.workspace = true
+suhina-device-compressor.workspace = true
+suhina-device-limiter.workspace = true
 
 [lints]
 workspace = true

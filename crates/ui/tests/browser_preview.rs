@@ -1,15 +1,15 @@
 //! Previewing from the browser end to end, through a real audio output: a sample row pressed
 //! starts playing, and keeps playing when the press turns into a drag. Needs an audio device, so it is ignored by default
-//! (`cargo test -p loopwerk-ui --test browser_preview -- --ignored`).
+//! (`cargo test -p suhina-ui --test browser_preview -- --ignored`).
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use loopwerk_session::{Projects, Session, blank_project};
-use loopwerk_ui::browser::BrowserState;
-use loopwerk_ui::browser_view;
-use loopwerk_ui::settings::Settings;
 use serde_json::json;
+use suhina_session::{Projects, Session, blank_project};
+use suhina_ui::browser::BrowserState;
+use suhina_ui::browser_view;
+use suhina_ui::settings::Settings;
 
 struct State {
     projects: Projects,
@@ -38,9 +38,9 @@ fn a_clicked_sample_previews() {
     writer.finalize().unwrap();
 
     let mut projects = Projects::new();
-    projects.set_file_library(loopwerk_library::Library::new(Some(root.join("settings"))));
+    projects.set_file_library(suhina_library::Library::new(Some(root.join("settings"))));
     let mut session = Session::new(blank_project());
-    let (player, _) = loopwerk_output::open_player(session.project(), session.audio()).unwrap();
+    let (player, _) = suhina_output::open_player(session.project(), session.audio()).unwrap();
     session.attach_player(player);
     projects.add(session, None).unwrap();
     projects.execute("library.addFolder", &json!({ "folder": samples.display().to_string() })).unwrap();

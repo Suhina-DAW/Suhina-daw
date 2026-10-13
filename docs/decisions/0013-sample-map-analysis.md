@@ -28,7 +28,7 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
 
 ## Decision
 
-1. **A crate of its own, `loopwerk-soundmap` (layer 2, beside `library`)**, depends on `media`
+1. **A crate of its own, `suhina-soundmap` (layer 2, beside `library`)**, depends on `media`
    (decoding) and `library` (which files exist, `Library::files`, `Library::revision`). It holds
    the analysis queue and threads, the feature cache, the layouts and the neighbour index. The
    `soundmap.*` commands run on it, held by `Projects` like the library. Nothing in it touches

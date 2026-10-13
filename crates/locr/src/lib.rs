@@ -1,4 +1,4 @@
-//! Loopwerk's own project file, `.locr`: the project model (ADR 0001) as versioned JSON, so a
+//! Suhina's own project file, `.locr`: the project model (ADR 0001) as versioned JSON, so a
 //! project can be saved and opened again with nothing lost, and read by people and agents
 //! (ADR 0010, `docs/spec/locr-format.md`).
 //!
@@ -16,13 +16,13 @@ use std::path::{Component, Path, PathBuf};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use loopwerk_model::{
+use serde_json::{Map, Value, json};
+use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, LaneData, Launcher,
     LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId,
     Transport, WarpMarker,
 };
-use serde_json::{Map, Value, json};
 
 /// The file extension, without the dot.
 pub const EXTENSION: &str = "locr";
@@ -97,11 +97,11 @@ pub fn from_json(text: &str) -> Result<Project, LocrError> {
     let root = serde_json::from_str::<Value>(text).map_err(|e| format!("the project is not JSON: {e}"))?;
     let root = root.as_object().ok_or("a project file is a JSON object")?;
     if root.get("format").and_then(Value::as_str) != Some(FORMAT) {
-        return Err("this is not a Loopwerk project (its format is not \"locr\")".to_string().into());
+        return Err("this is not a Suhina project (its format is not \"locr\")".to_string().into());
     }
     let version = root.get("version").and_then(Value::as_u64).ok_or("the project's version is missing")?;
     if version == 0 || version > VERSION {
-        return Err(format!("the project is version {version}; this Loopwerk reads up to version {VERSION}").into());
+        return Err(format!("the project is version {version}; this Suhina reads up to version {VERSION}").into());
     }
     let project = read_project(root.get("project").ok_or("the project is missing")?)?;
     project.validate().map_err(|errors| {

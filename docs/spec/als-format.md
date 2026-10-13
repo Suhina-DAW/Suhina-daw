@@ -146,7 +146,7 @@ velocity 100 in one clip and 98 in another.
 
 ## Audio clips
 
-Corpus: series 2, files `30`–`35` (one 4-second, 48 kHz WAV rendered by Loopwerk).
+Corpus: series 2, files `30`–`35` (one 4-second, 48 kHz WAV rendered by Suhina).
 
 `AudioClip` shares `Time`, `CurrentStart`/`CurrentEnd`, `Loop`, `Name`, `Color` and `Disabled`
 with `MidiClip`. Session audio clips sit in clip slots like MIDI clips, but **arrangement audio
@@ -199,7 +199,7 @@ from `true` to `false`) and `UserName@Value` (empty unless renamed).
 `Reverb`, `Delay`. Their parameters are nested elements with the usual `Manual` values; band 3
 gain of EQ Eight is `Bands.2/ParameterA/Gain/Manual` (+3 dB stored as `3`). `LastPresetRef`
 points at the default preset the device was loaded from. The importer keeps them as
-placeholders, except the ones that have a Loopwerk counterpart: those become Loopwerk devices
+placeholders, except the ones that have a Suhina counterpart: those become Suhina devices
 with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, below).
 
 **Plug-ins** are `PluginDevice` elements whose `PluginDesc` holds one of:
@@ -216,7 +216,7 @@ The VST3 `Uid` fields, each written as eight hex digits and joined, give the cla
 canonical text form the VST3 scanner and `moduleinfo.json` use: checked against the scanned
 catalog for 21 different VST3 plug-ins across 169 Live Sets, all equal.
 
-Plug-in state is the plug-in vendor's own format. Loopwerk keeps it verbatim and hands it back
+Plug-in state is the plug-in vendor's own format. Suhina keeps it verbatim and hands it back
 to the plug-in. For VST2, `VstPreset` also says how the `Buffer` is laid out, and the importer
 wraps it in the standard VST2 bank (an `.fxb` file's contents, `crates/als/src/vst2.rs`), which
 is what the model keeps and what a VST3 version of the plug-in reads:
@@ -241,7 +241,7 @@ one, not from the default, so a neighbour diff shows the step; `128` has both ph
 Live's Utility is the element `StereoGain`. Parameters that can be automated hold their value in
 `<Name>/Manual@Value` next to an `AutomationTarget`; the two plain elements hold it in `@Value`.
 
-| Element | Stored | Observed | Loopwerk `utility` |
+| Element | Stored | Observed | Suhina `utility` |
 |---|---|---|---|
 | `Gain` | linear gain | -12 dB → `0.2511886358`, +6 dB → `1.99526238`, -inf → `0`, fully up → `56.2341309` (+35 dB) | `gain` = 20·log10 of it, dB; `0` → the minimum (silence) |
 | `Balance` | -1 … 1 | the knob shows 50L … 50R; typing `50L` stored `-1`, typing `100R` stopped at `1` | `balance`, the same number |
@@ -260,8 +260,8 @@ Live's Utility is the element `StereoGain`. Parameters that can be automated hol
 | `LegacyGain`, `LegacyMode` | `0`, `false` | unchanged in every file | not mapped **(hypothesis: older sets stored gain here)** |
 
 Still open: how Mid/Side between the ends scales mid and side in the sound (the stored value is
-linear in the display; Loopwerk keeps one at full and turns the other down linearly), and
-whether Width and Mid/Side sound like Loopwerk's at the same settings. Both need bounces of
+linear in the display; Suhina keeps one at full and turns the other down linearly), and
+whether Width and Mid/Side sound like Suhina's at the same settings. Both need bounces of
 `118` and of the 50M and 50S files (`120-utility-midside-mid-50M.als`, `…-50S.als`).
 
 ## Noise: ignore when importing or diffing
