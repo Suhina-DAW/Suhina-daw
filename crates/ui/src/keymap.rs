@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 20] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 23] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -95,6 +95,9 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 20] = [
     ("view.browser", "Show or hide the browser", "View"),
     ("browser.search", "Search in the browser", "View"),
     ("view.sampleMap", "Show or hide the sample map in the main area", "View"),
+    ("view.zoomIn", "Make the whole window larger", "View"),
+    ("view.zoomOut", "Make the whole window smaller", "View"),
+    ("view.zoomReset", "Make the whole window its normal size", "View"),
     ("selection.copy", "Copy the selected clip", "Edit"),
     ("selection.cut", "Cut the selected clip", "Edit"),
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
@@ -128,7 +131,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 21] = [
+const DEFAULTS: [(&str, &[&str]); 24] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -140,6 +143,9 @@ const DEFAULTS: [(&str, &[&str]); 21] = [
     ("browser.search", &["Ctrl+F"]),
     ("view.sampleMap", &["Ctrl+Shift+M"]),
     ("settings.open", &["Ctrl+Comma"]),
+    ("view.zoomIn", &["Ctrl+Plus", "Ctrl+Equals"]),
+    ("view.zoomOut", &["Ctrl+Minus"]),
+    ("view.zoomReset", &["Ctrl+0"]),
     ("edit.undo", &["Ctrl+Z"]),
     ("edit.redo", &["Ctrl+Shift+Z", "Ctrl+Y"]),
     ("selection.copy", &["Ctrl+C"]),
@@ -263,13 +269,27 @@ mod tests {
 
     #[test]
     fn shortcuts_read_and_write_the_same() {
-        for text in ["Ctrl+Shift+Z", "Space", "Delete", "Ctrl+Comma", "Alt+F4", "Ctrl+Tab"] {
+        for text in [
+            "Ctrl+Shift+Z",
+            "Space",
+            "Delete",
+            "Ctrl+Comma",
+            "Alt+F4",
+            "Ctrl+Tab",
+            "Ctrl+Plus",
+            "Ctrl+Minus",
+            "Ctrl+Equals",
+            "Ctrl+0",
+            "Minus",
+        ] {
             let shortcut = Shortcut::parse(text).unwrap_or_else(|| panic!("{text}"));
             assert_eq!(Shortcut::parse(&shortcut.text()), Some(shortcut), "{text}");
         }
         assert_eq!(Shortcut::parse("ctrl+z"), Shortcut::parse("Ctrl+Z"));
         assert!(Shortcut::parse("Hyper+Z").is_none());
         assert!(Shortcut::parse("Ctrl+Nonsense").is_none());
+        assert_eq!(Shortcut::parse("Ctrl+0"), Some(Shortcut::new(Modifiers::COMMAND, Key::Num0)));
+        assert_eq!(Shortcut::parse("Ctrl++"), Some(Shortcut::new(Modifiers::COMMAND, Key::Plus)));
     }
 
     #[test]
@@ -292,6 +312,9 @@ mod tests {
             assert!(known.iter().any(|a| a.id == id), "{id}");
         }
         assert!(Keymap::default().conflicts().is_empty());
+        for id in ["view.zoomIn", "view.zoomOut", "view.zoomReset"] {
+            assert!(!Keymap::default().keys(id).is_empty(), "{id} has a key");
+        }
         assert!(known.iter().any(|a| a.id == "transport.play"), "commands without parameters are actions");
         assert!(!known.iter().any(|a| a.id == "track.setVolume"), "commands that need parameters are not");
     }

@@ -346,6 +346,19 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.animations = on;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(&painter, r, "Zoom", "The size of the whole window; Ctrl and + or -, Ctrl and 0 for 100 %");
+            let actual = format!("{} %", settings.zoom);
+            // Three buttons, none of them chosen: smaller, back to 100 %, larger.
+            let options = [("-", Some(-1)), (actual.as_str(), Some(0)), ("+", Some(1))];
+            match segmented(ui, &painter, control_rect(r, 3), "Zoom", &options, None) {
+                Some(Some(0)) if settings.zoom != crate::settings::ZOOM => {
+                    settings.zoom = crate::settings::ZOOM;
+                    outcome.changed = true;
+                }
+                Some(Some(steps)) if steps != 0 => outcome.changed |= settings.step_zoom(steps),
+                _ => {}
+            }
         }
         Page::Browser => {
             section(&mut y, "Browser");
