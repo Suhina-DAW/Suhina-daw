@@ -56,7 +56,7 @@ L0        model                    dsp, device-api
 Within layer 2, `session` uses `library` and `media`, `library` uses `media`, and `media` uses
 neither. The built-in effects and instruments sit apart: `dsp` and `device-api` depend on nothing in Suhina, and each
 device crate under `devices/` depends only on those two ([ADR 0004](decisions/0004-built-in-devices.md)).
-The engine does not run them yet (see *Planned parts*).
+The engine runs them in chains on tracks, made through `device-registry`.
 
 | Crate | Owns | Depends on |
 |---|---|---|
