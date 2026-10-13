@@ -14,7 +14,7 @@ use loopwerk_model::{LaneData, Project, TimeSignature};
 use crate::audio::{AudioEvent, AudioPool, Timing};
 use crate::chain::Chain;
 use crate::stretch::StretchVoice;
-use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, route, start_note};
+use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, note_velocity, route, start_note};
 
 /// Commands that can wait in the queue between two audio blocks.
 const QUEUE_CAPACITY: usize = 256;
@@ -551,7 +551,7 @@ fn plan_clip(
         match &lane.data {
             LaneData::Notes(lane_notes) => {
                 for note in lane_notes.iter().filter(|n| n.time.is_finite() && n.duration.is_finite()) {
-                    let velocity = note.velocity.clamp(0.0, 1.0);
+                    let velocity = note_velocity(note.velocity);
                     notes.push(PlanNote {
                         time: note.time,
                         duration: note.duration.max(0.0),
@@ -1285,6 +1285,16 @@ mod tests {
         renderer.process(&mut out);
         assert_eq!(monitor.column(0).unwrap().playing, Some(0));
         assert_onsets(&out, &(0..8).map(|b| b * BEAT).collect::<Vec<_>>());
+    }
+
+    /// A launched note with a NaN velocity is silent instead of making the mix NaN (#161).
+    #[test]
+    fn a_nan_velocity_note_leaves_the_launcher_finite() {
+        let bad = Note { velocity: f32::NAN, ..note(0.0, 60) };
+        let p = project(vec![notes(1, vec![bad, note(0.5, 72)])], vec![vec![with(clip(1, 1.0, true))]]);
+        let out = render(&p, &[(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })], 1.0);
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert_onsets(&out, &[BEAT / 2, BEAT + BEAT / 2]);
     }
 
     #[test]

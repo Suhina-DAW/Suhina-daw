@@ -874,6 +874,11 @@ pub fn render_launches_with_plugins(
 /// Solo: while any channel is soloed, a track sounds only if a channel on its way to the master
 /// is soloed (its own, or a group it plays into), or a soloed track plays into it (a group), or
 /// it is a return track, so effects stay audible.
+/// A note's velocity, 0 … 1; a NaN or infinite one is 0, so it cannot reach the mix.
+pub(crate) fn note_velocity(velocity: f32) -> f32 {
+    if velocity.is_finite() { velocity.clamp(0.0, 1.0) } else { 0.0 }
+}
+
 pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
@@ -961,10 +966,10 @@ fn collect_notes(
                 end: to_frame(end),
                 frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
                 key: note.key.min(127),
-                velocity: note.velocity.clamp(0.0, 1.0),
+                velocity: note_velocity(note.velocity),
                 track,
-                gain_left: gain_left * note.velocity.clamp(0.0, 1.0),
-                gain_right: gain_right * note.velocity.clamp(0.0, 1.0),
+                gain_left: gain_left * note_velocity(note.velocity),
+                gain_right: gain_right * note_velocity(note.velocity),
                 column,
                 bus,
             });
@@ -1306,6 +1311,17 @@ mod tests {
             let worst = out.iter().zip(&reference).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
             assert!(worst < 1e-4, "block {block}: differs by {worst}");
         }
+    }
+
+    /// A NaN velocity is silence for its note, not NaN in the whole mix (#161).
+    #[test]
+    fn a_nan_velocity_note_leaves_the_mix_finite() {
+        let mut bad = note(0.0, 1.0, 60);
+        bad.velocity = f32::NAN;
+        let project = project_with(untargeted(vec![bad, note(1.0, 1.0, 69)]), vec![clip(0.0, 4.0)], 1);
+        let out = render_offline(&project, SR, 256).unwrap();
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert_onsets(&out, &[SR as usize / 2]);
     }
 
     #[test]
