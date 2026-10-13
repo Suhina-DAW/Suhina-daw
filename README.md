@@ -147,7 +147,7 @@ trademark of Steinberg Media Technologies GmbH.
 
 ## Community
 
-- Discord: <https://discord.gg/ccQWu8rRcf>
+- Discord: <https://discord.gg/xeHvKnjfQN>
 
 ## License
 
