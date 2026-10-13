@@ -18,7 +18,7 @@ alike lie close together, kicks gather in one region and hats in another. Pointi
 plays it, so a library is explored by moving the mouse instead of reading names. Instrument
 presets that come with audio previews (NKS) take part in the same map.
 
-- **Sources:** the owner's request (2026-10-12) with two screenshots of commercial drum
+- **Sources:** the maintainer's request (2026-10-12) with two screenshots of commercial drum
   plug-ins that have such a view; public papers and open-source projects listed under
   *Prior art*. The screenshots were used for structure and behaviour only (what the view shows
   and how it reacts); the look follows [`docs/design/brief.md`](../design/brief.md). Nothing
@@ -277,7 +277,8 @@ so.
   grids.
 
 Repositories without a licence (ml4a's audio t-SNE viewer, the code of Shier et al., IsoMatch)
-are read for their ideas only.
+gave ideas only, through their papers and descriptions; no code was copied, ported or
+translated from them (CONTRIBUTING.md › Clean-room).
 
 ## To find out
 

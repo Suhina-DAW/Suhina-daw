@@ -6,7 +6,8 @@ status: current
 last_verified: 2026-10-13
 covers:
   - crates/ui/src/settings.rs
-  - crates/ui/src/app.rs
+  - crates/ui/src/keymap.rs
+  - crates/ui/src/settings_view.rs
 ---
 
 # Window zoom

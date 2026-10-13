@@ -536,7 +536,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             let note = if about.editors_embeddable {
                 "In a window above Suhina, or inside the device panel as part of the chain"
             } else {
-                "Inside the device panel is not available on this system; editors open in a window"
+                "Editors need Windows or an X server (DISPLAY); they do not open on this system yet"
             };
             label(&painter, r, "Editors", note);
             let options = [("Window", EditorPlacement::Window), ("Device view", EditorPlacement::DeviceView)];

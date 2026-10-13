@@ -731,7 +731,8 @@ fn clip_box<'a>(
         .on_hover_cursor(egui::CursorIcon::Grab);
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-    response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, actions));
+    let stack = if clip.audio { state.stack_audio } else { state.stack_midi };
+    response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, stack, actions));
     if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
         state.selected = Some(key);
     }

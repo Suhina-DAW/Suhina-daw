@@ -3,11 +3,14 @@ description: Real-time time-stretching of warped audio, stretch modes and backen
 read_when: warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality
 type: decision
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-13
 covers:
   - crates/engine/src/stretch.rs
   - crates/stretch/src/lib.rs
   - crates/media/src/lib.rs
+  - crates/engine/src/ahead.rs
+  - crates/engine/src/audio.rs
+  - crates/session/src/files.rs
 ---
 
 # 0003: Time-stretching and stretch modes
@@ -50,7 +53,8 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    `Smooth`. Codes not yet observed in our corpus map to `Smooth` with a warning. A sample
    placed from the browser (`clip.addFiles`) whose tempo is known (its metadata, its name, or
    detection in `media::tempo`) is warped with two markers at the file's tempo and the stretch
-   mode the window's Warp mode setting gives (`Rhythmic` by default); without a tempo it is not
+   mode `clip.addFiles`' `warp` parameter gives (the window passes its Warp mode setting;
+   `Rhythmic` by default); without a tempo it is not
    warped ([browser spec](../spec/browser.md) › Warping).
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
    stretch voice when the renderer is built: a `suhina_stretch::Stretch` plus a playlist that
@@ -64,8 +68,8 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      own pitch; its output is read at the project rate with linear interpolation. Transpose is
      the stretcher's own pitch shift.
    - Audio that already plays at its own speed and pitch everywhere (within 0.01 %) skips the
-     stretcher and is read directly. Segments slower than 0.25x or faster than 4x re-pitch the
-     clip.
+     stretcher and is read directly. Segments slower than 0.25x or faster than 4x, and files
+     outside 8-192 kHz or with more than 8 channels, re-pitch the clip (read directly).
    - **Transpose needs the stretcher.** Read directly, a warped clip's speed is set by the tempo
      and its pitch with it, so transpose has nothing left to change: `Repitch` mode has no
      transpose (as in Live, which greys Transpose out in Re-Pitch mode), and a clip in a
@@ -82,7 +86,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      0.5x for about 200 ms.) Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
      with no drift; the timestretch backend needed restarts before every onset and measured
      corrections to get there (see the measurements).
-3. **Loading a project only decodes.** `suhina-media` decodes every file on all cores. The
+3. **Loading a project only decodes.** `suhina-media` decodes every file in parallel, one thread per core up to 16. The
    stretcher needs no pre-analysis.
 4. **Modes choose backends behind one interface.** Now:
 
@@ -97,7 +101,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    2026-10-11: timestretch first, Rubber Band later). Its keylock profile, used within 20 % of
    the file's speed, sounded harsh on larger tempo changes. In a listening test of the same stems
    at 100 bpm (from 120), its phase-vocoder profile and the Signalsmith port sounded about the
-   same and both far better. The owner chose the Signalsmith port (2026-10-11): it is pure Rust
+   same and both far better. The maintainer chose the Signalsmith port (2026-10-11): it is pure Rust
    without `unsafe`, has transpose built in, keeps transients on the grid by itself and opens a
    set without an analysis pass. Rubber Band stays possible for `HighQuality` as an isolated FFI
    crate (`crates/rubberband`, `unsafe` allowed only there, recorded in AGENTS.md when made), if

@@ -10,11 +10,11 @@
 //! 3. [`How::Vst2Id`]: a VST3 plug-in whose class id is derived from the VST2 plug-in's id, the
 //!    VST 3 SDK's documented convention for a VST3 version that stands in for a VST2 one.
 //! 4. [`How::SameName`]: a VST3 plug-in with the same name once build words (`x64`, `64bit`)
-//!    and a leading vendor name are set aside, so `FabFilter Pro-Q 3 x64` finds `Pro-Q 3` by
-//!    FabFilter; or one whose name lacks the saved name's number but whose version starts with
-//!    it (`Nexus 5` finds a `Nexus` whose version is 5.x).
-//! 5. [`How::NewerVersion`]: the same name with a higher version number (`Serum` finds
-//!    `Serum 2`, `Pro-Q 2` finds `Pro-Q 3`); the nearest newer version is taken.
+//!    and a leading vendor name are set aside, so `Vendor Product 3 x64` finds `Product 3` by
+//!    Vendor; or one whose name lacks the saved name's number but whose version starts with
+//!    it (`Synth 5` finds a `Synth` whose version is 5.x).
+//! 5. [`How::NewerVersion`]: the same name with a higher version number (`Synth` finds
+//!    `Synth 2`, `Product 2` finds `Product 3`); the nearest newer version is taken.
 //!
 //! Only the first three promise that the saved state carries over; for the last two the state
 //! is handed over and the plug-in decides whether it reads it.
@@ -105,7 +105,7 @@ fn words(name: &str) -> Vec<String> {
 /// `name`'s words with `vendor`'s leading words taken off when the name starts with them.
 fn product_words(name: &str, vendor: &str) -> Vec<String> {
     let name = words(name);
-    // Vendor names carry company words ("Valhalla DSP, LLC"); compare the first word only.
+    // Vendor names carry company words ("Vendor DSP, LLC"); compare the first word only.
     let vendor = words(vendor).into_iter().next().map(|w| w.trim_end_matches(',').to_string());
     match (name.split_first(), vendor) {
         (Some((first, rest)), Some(vendor)) if *first == vendor && !rest.is_empty() => rest.to_vec(),
@@ -113,9 +113,9 @@ fn product_words(name: &str, vendor: &str) -> Vec<String> {
     }
 }
 
-/// A product's words split into its name and version number: `serum 2` is (`serum`, 2), a
+/// A product's words split into its name and version number: `synth 2` is (`synth`, 2), a
 /// name without a number is version 1. A number joined to the last word counts (`Warmer2`), and
-/// so does the one number word inside a name (`ozone 8 imager` is (`ozone imager`, 8): suites
+/// so does the one number word inside a name (`suite 8 imager` is (`suite imager`, 8): suites
 /// put the version between the brand and the module).
 fn versioned(words: &[String]) -> (Vec<String>, u32) {
     let Some((last, rest)) = words.split_last() else { return (Vec::new(), 1) };
@@ -193,13 +193,13 @@ impl Catalog {
         if words(name).is_empty() {
             return None;
         }
-        // The saved name may itself start with the vendor ("FabFilter Pro-Q 2"), so each
+        // The saved name may itself start with the vendor ("Vendor Product 2"), so each
         // installed plug-in's vendor is taken off both sides.
         let same = |p: &PluginInfo| product_words(name, &p.vendor) == product_words(&p.name, &p.vendor);
         if let Some(plugin) = self.vst3_plugins().find(|p| same(p)) {
             return Some(Match { plugin, how: How::SameName });
         }
-        // The number in the saved name is the installed one's version: `Nexus 5` is `Nexus`
+        // The number in the saved name is the installed one's version: `Synth 5` is `Synth`
         // 5.x.
         let numbered = |p: &PluginInfo| {
             let saved = product_words(name, &p.vendor);
