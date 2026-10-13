@@ -2,10 +2,10 @@
 //! per track with its clips placed in beats, and marks for the notes inside each clip. Pure data,
 //! like [`crate::grid`].
 
-use loopwerk_engine::LauncherMonitor;
 use std::sync::Arc;
+use suhina_engine::LauncherMonitor;
 
-use loopwerk_engine::model::{ChannelRole, Clip, ClipContent, LaneData, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Clip, ClipContent, LaneData, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, TRACK_PALETTE, gain_to_db};
 use crate::waveform::Waveforms;

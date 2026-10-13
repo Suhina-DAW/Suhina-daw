@@ -21,7 +21,7 @@ covers:
 
 ## Context
 
-Loopwerk ships its own instruments and effects ([`ROADMAP.md`](../../ROADMAP.md) › Built-in
+Suhina ships its own instruments and effects ([`ROADMAP.md`](../../ROADMAP.md) › Built-in
 devices): first a utility and an auto-pan, then a DJ EQ, distortion, dynamics, delays, reverbs
 and synths. Projects imported from other DAWs refer to those DAWs' devices, which come in as
 placeholders today (`DeviceKind::Foreign` in the model) and should later map onto ours.
@@ -37,10 +37,10 @@ the device code should not have to change when it lands.
 
 ## Decision
 
-1. **Three kinds of crate.** `crates/dsp` (`loopwerk-dsp`) holds building blocks: gain
+1. **Three kinds of crate.** `crates/dsp` (`suhina-dsp`) holds building blocks: gain
    conversions, parameter smoothing, filters, crossovers, later oscillators, envelopes, delay
-   lines and oversampling. `crates/device-api` (`loopwerk-device-api`) holds the interface. Each
-   device is its own crate under `devices/` (`loopwerk-device-<name>`), depending on those two
+   lines and oversampling. `crates/device-api` (`suhina-device-api`) holds the interface. Each
+   device is its own crate under `devices/` (`suhina-device-<name>`), depending on those two
    only. None of them depends on the model, the engine or each other, so a device can be tested
    alone and later built as a CLAP plug-in or moved to its own repository.
 2. **A device describes itself statically.** `DeviceInfo` gives a stable id (the id stored in the

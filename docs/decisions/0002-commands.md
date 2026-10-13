@@ -16,7 +16,7 @@ covers:
 
 ## Context
 
-Loopwerk will be driven from several places: the CLI, an MCP server for agents, later a UI and
+Suhina will be driven from several places: the CLI, an MCP server for agents, later a UI and
 MIDI controllers. If each of them changed the project in its own way, they would drift apart,
 undo would only work in some of them, and an agent could not do everything a person can.
 
@@ -26,7 +26,7 @@ UI, CLI, control channel and MCP server all dispatch commands by id. We take the
 
 ## Decision
 
-A new crate, `loopwerk-session`, holds a **session**: the open project, where it came from, and
+A new crate, `suhina-session`, holds a **session**: the open project, where it came from, and
 its undo history. All changes to a session go through **commands**.
 
 - A command has a stable **id** in `area.verb` form (`track.setPan`, `edit.undo`), a short label,
@@ -67,7 +67,7 @@ one `commands.list`.
 ## Amendment: plug-in commands (2026-10-12)
 
 A sixth kind, **plugins**, scans for installed plug-ins and chooses the folders scans look in
-(`plugins.*`, [ADR 0006](0006-plug-in-hosting.md)). The plug-in library belongs to Loopwerk,
+(`plugins.*`, [ADR 0006](0006-plug-in-hosting.md)). The plug-in library belongs to Suhina,
 not to a project, so these also run on `Projects`, never change a project and record no undo
 step. Agents over MCP may scan and list but not add or remove folders: a folder decides whose
 code a scan runs.
@@ -103,6 +103,6 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
   directly.
 - Command ids are part of the public interface for agents; renaming one is a breaking change.
 - The registry is the only list of commands: [`docs/commands.md`](../commands.md) is generated
-  from it (`loopwerk-cli commands --markdown`) on `main` after every merge.
+  from it (`suhina-cli commands --markdown`) on `main` after every merge.
 - Saving to `.als` is not possible yet (there is no writer), so sessions opened from Live Sets
   can be changed, rendered and played, but not saved. A native project format comes later.

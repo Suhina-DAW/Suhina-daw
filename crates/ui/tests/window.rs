@@ -4,16 +4,16 @@
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use loopwerk_session::Session;
-use loopwerk_ui::arrangement_view::{self, ArrangementViewState};
-use loopwerk_ui::demo::demo_project;
-use loopwerk_ui::grid::Grid;
-use loopwerk_ui::session_view::{self, SessionViewState};
-use loopwerk_ui::themes::FileAction;
-use loopwerk_ui::timeline::Timeline;
-use loopwerk_ui::widgets::Action;
-use loopwerk_ui::{App, OpenAs, Status, View, theme};
 use serde_json::json;
+use suhina_session::Session;
+use suhina_ui::arrangement_view::{self, ArrangementViewState};
+use suhina_ui::demo::demo_project;
+use suhina_ui::grid::Grid;
+use suhina_ui::session_view::{self, SessionViewState};
+use suhina_ui::themes::FileAction;
+use suhina_ui::timeline::Timeline;
+use suhina_ui::widgets::Action;
+use suhina_ui::{App, OpenAs, Status, View, theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
@@ -257,7 +257,7 @@ fn a_dropped_clip_replaces_what_it_covers_unless_midi_stacking_is_on() {
     assert_eq!(starts(&harness).map(|s| s.contains(&(120.0, 8.0))), Some(true));
 
     let mut harness = arrangement_app();
-    let settings = loopwerk_ui::settings::Settings { midi_stacking: true, ..Default::default() };
+    let settings = suhina_ui::settings::Settings { midi_stacking: true, ..Default::default() };
     let ctx = harness.ctx.clone();
     harness.state_mut().set_settings(&ctx, settings);
     harness.run();
@@ -290,9 +290,9 @@ fn dragging_a_clip_down_moves_it_to_the_next_track() {
 
 /// The demo project in the Arrangement view with `renderer` (stopped, made from the demo
 /// project) as its player, driven by the test instead of an audio device.
-fn arrangement_app_with_engine(renderer: &mut loopwerk_engine::Renderer) -> Harness<'static, App> {
+fn arrangement_app_with_engine(renderer: &mut suhina_engine::Renderer) -> Harness<'static, App> {
     let mut session = Session::new(demo_project());
-    session.attach_player(loopwerk_session::Player::new(renderer.controller(), None));
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
     let mut app = App::new();
     app.set_session(session, &[]);
     let mut harness = window(app);
@@ -302,14 +302,14 @@ fn arrangement_app_with_engine(renderer: &mut loopwerk_engine::Renderer) -> Harn
 }
 
 /// Renders a block, so the engine takes the commands sent so far.
-fn render_a_block(renderer: &mut loopwerk_engine::Renderer) {
+fn render_a_block(renderer: &mut suhina_engine::Renderer) {
     renderer.process(&mut [0.0f32; 2 * 64]);
 }
 
 #[test]
 fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     let mut renderer =
-        loopwerk_engine::Renderer::stopped(&demo_project(), &loopwerk_engine::AudioPool::new(), 48_000).unwrap();
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
     let mut harness = arrangement_app_with_engine(&mut renderer);
     let monitor = renderer.monitor();
     let ruler = harness.get_by_label("Ruler").rect();
@@ -347,7 +347,7 @@ fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     harness.run();
     assert_eq!(
         harness.state_mut().take_changed_settings().map(|s| s.stop),
-        Some(loopwerk_ui::settings::StopReturn::Here)
+        Some(suhina_ui::settings::StopReturn::Here)
     );
     harness.get_by_label("Close settings").click();
     harness.run();
@@ -390,8 +390,8 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.run();
     let saved = harness.state_mut().take_changed_settings();
     assert_eq!(saved.as_ref().map(|s| s.animations), Some(false));
-    assert_eq!(saved.map(|s| s.track_headers), Some(loopwerk_ui::settings::Side::Left));
-    assert!(!loopwerk_ui::motion::enabled(&harness.ctx));
+    assert_eq!(saved.map(|s| s.track_headers), Some(suhina_ui::settings::Side::Left));
+    assert!(!suhina_ui::motion::enabled(&harness.ctx));
     assert_eq!(harness.state_mut().take_changed_settings(), None);
     harness.get_by_label("Close settings").click();
     harness.run();
@@ -404,14 +404,14 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
     let mut colors = theme::Palette::DARK;
     colors.accent = egui::Color32::from_rgb(0x12, 0xAB, 0x9F);
     let night =
-        loopwerk_ui::themes::ThemeEntry { id: "night".into(), theme: theme::Theme { name: "Night".into(), colors } };
+        suhina_ui::themes::ThemeEntry { id: "night".into(), theme: theme::Theme { name: "Night".into(), colors } };
     let ctx = harness.ctx.clone();
     harness.state_mut().set_themes(&ctx, vec![night], Some("themes".into()));
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     harness.get_by_label("Settings page: Theme").click();
     harness.run();
-    assert!(harness.query_by_label("Theme: Loopwerk Dark").is_some());
+    assert!(harness.query_by_label("Theme: Suhina Dark").is_some());
     harness.get_by_label("Theme: Night").click();
     harness.run();
     assert_eq!(theme::accent(), colors.accent);
@@ -447,7 +447,7 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
 
     // A file saved elsewhere redraws the window.
     colors.accent = egui::Color32::from_rgb(1, 2, 3);
-    let edited = loopwerk_ui::themes::ThemeEntry {
+    let edited = suhina_ui::themes::ThemeEntry {
         id: "night-copy".into(),
         theme: theme::Theme { name: "Night copy".into(), colors },
     };
@@ -475,7 +475,7 @@ fn tab_only_switches_the_view() {
 
 #[test]
 fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
-    let dir = std::env::temp_dir().join(format!("loopwerk-ui-save-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-ui-save-{}", std::process::id()));
     let _fresh = std::fs::remove_dir_all(&dir);
     let mut app = demo_app();
     app.set_default_folders(dir.join("Projects"), dir.join("Templates"));
@@ -488,7 +488,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     assert_eq!(harness.state_mut().take_lists_wanted(), Some(dir.join("Templates")));
     harness.get_by_label("New blank project").click();
     harness.run();
-    assert_eq!(harness.state_mut().take_new_request(), Some(loopwerk_ui::NewProject::Blank));
+    assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
     assert!(!harness.state().project_dialog_open());
 
     // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
@@ -543,8 +543,8 @@ fn solo_is_exclusive_unless_ctrl_is_held() {
 }
 
 /// The demo project with a group track, "Group", that tracks can play into.
-fn project_with_a_group() -> loopwerk_engine::model::Project {
-    use loopwerk_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
+fn project_with_a_group() -> suhina_engine::model::Project {
+    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
     let mut project = demo_project();
     project.tracks.push(Track {
         id: TrackId(20),
@@ -571,7 +571,7 @@ fn a_tall_header_routes_its_track_into_a_group() {
         actions: Vec<Action>,
     }
     let mut state = ArrangementViewState::default();
-    state.set_lane_height(loopwerk_engine::model::TrackId(2), 90.0);
+    state.set_lane_height(suhina_engine::model::TrackId(2), 90.0);
     let view = Arrangement { timeline: Timeline::build(&project_with_a_group(), None), state, actions: Vec::new() };
     let mut harness = Harness::builder().with_size(SIZE).build_ui_state(
         |ui, v: &mut Arrangement| arrangement_view::show(ui, &v.timeline, &mut v.state, &mut v.actions),
@@ -650,8 +650,8 @@ fn dragging_a_header_moves_the_track() {
 
 /// The demo project with an audio track, "Loop", whose clip plays `loop.wav` (two seconds of a
 /// tone that fades out), and the waveforms of that file.
-fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::waveform::Waveforms) {
-    use loopwerk_engine::model::*;
+fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::Waveforms) {
+    use suhina_engine::model::*;
     let mut project = demo_project();
     project.tracks.push(Track {
         id: TrackId(30),
@@ -703,12 +703,12 @@ fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::wavefo
         clips: vec![clip],
     });
     let samples: Vec<f32> = (0..16000).map(|i| (i as f32 * 0.3).sin() * (1.0 - i as f32 / 16000.0)).collect();
-    let mut pool = loopwerk_engine::AudioPool::new();
+    let mut pool = suhina_engine::AudioPool::new();
     pool.files.insert(
         "loop.wav".into(),
-        std::sync::Arc::new(loopwerk_engine::AudioData { sample_rate: 8000, channels: 1, samples }),
+        std::sync::Arc::new(suhina_engine::AudioData { sample_rate: 8000, channels: 1, samples }),
     );
-    (project, loopwerk_ui::waveform::from_pool(&pool))
+    (project, suhina_ui::waveform::from_pool(&pool))
 }
 
 fn audio_app() -> App {
@@ -736,9 +736,9 @@ fn dragging_an_audio_clips_gain_sets_it() {
     harness.drop_at(field - egui::vec2(0.0, 30.0));
     harness.run();
     let gain = harness.state().session().and_then(|s| {
-        s.project().content(loopwerk_engine::model::ContentId(300)).and_then(|c| match &c.lanes[0].data {
-            loopwerk_engine::model::LaneData::Audio(region) => Some(region.gain),
-            loopwerk_engine::model::LaneData::Notes(_) => None,
+        s.project().content(suhina_engine::model::ContentId(300)).and_then(|c| match &c.lanes[0].data {
+            suhina_engine::model::LaneData::Audio(region) => Some(region.gain),
+            suhina_engine::model::LaneData::Notes(_) => None,
         })
     });
     // 30 points up at 0.1 dB a point: +3 dB.
@@ -749,7 +749,7 @@ fn dragging_an_audio_clips_gain_sets_it() {
 fn loop_fades(harness: &Harness<'static, App>) -> Option<(f64, f64)> {
     let session = harness.state().session()?;
     let lane =
-        session.project().arrangement.lanes.iter().find(|l| l.track == Some(loopwerk_engine::model::TrackId(30)))?;
+        session.project().arrangement.lanes.iter().find(|l| l.track == Some(suhina_engine::model::TrackId(30)))?;
     lane.clips.first().map(|clip| (clip.fade_in, clip.fade_out))
 }
 
@@ -858,7 +858,7 @@ fn opening_while_a_project_is_open_asks_and_can_remember() {
     harness.run();
     let request = harness.state_mut().take_open_request();
     assert_eq!(request, Some(("other.als".into(), OpenAs::NewTab)));
-    assert_eq!(harness.state().settings().on_open, loopwerk_ui::settings::OnOpen::NewTab);
+    assert_eq!(harness.state().settings().on_open, suhina_ui::settings::OnOpen::NewTab);
 
     // Remembered: the next one opens in a new tab without asking.
     harness.state_mut().request_open("third.als".into());
@@ -868,10 +868,10 @@ fn opening_while_a_project_is_open_asks_and_can_remember() {
 
 #[test]
 fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
-    let base = std::env::temp_dir().join(format!("loopwerk-ui-plugins-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("suhina-ui-plugins-{}", std::process::id()));
     let folder = base.join("my plug-ins");
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
-    let library = loopwerk_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host"))
+    let library = suhina_plugins::library::Library::new(Some(base.join("settings")), base.join("no-such-host"))
         .without_standard_folders();
     let mut app = App::with_library(library);
     app.set_session(Session::new(demo_project()), &[]);
@@ -962,8 +962,8 @@ fn keys_copy_paste_and_delete_the_selected_clip() {
 }
 
 /// The demo project with a utility device on Drums.
-fn project_with_a_device() -> loopwerk_engine::model::Project {
-    use loopwerk_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
+fn project_with_a_device() -> suhina_engine::model::Project {
+    use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
     let mut project = demo_project();
     project.channels[0].devices.push(Device {
         name: "Utility".into(),
@@ -987,10 +987,8 @@ fn the_detail_area_shows_the_selected_tracks_devices_in_a_row_or_stacked() {
     assert!(harness.query_by_label("Device Utility").is_some());
 
     let ctx = harness.ctx.clone();
-    let settings = loopwerk_ui::settings::Settings {
-        device_layout: loopwerk_ui::settings::DeviceLayout::Stack,
-        ..Default::default()
-    };
+    let settings =
+        suhina_ui::settings::Settings { device_layout: suhina_ui::settings::DeviceLayout::Stack, ..Default::default() };
     harness.state_mut().set_settings(&ctx, settings);
     harness.run();
     assert!(harness.query_by_label("Device Utility").is_some());
@@ -1021,7 +1019,7 @@ fn dragging_a_session_column_header_moves_the_track() {
 
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
-/// when asked: `cargo test -p loopwerk-ui -- --ignored`.
+/// when asked: `cargo test -p suhina-ui -- --ignored`.
 #[test]
 #[ignore = "needs a GPU adapter; run with --ignored"]
 fn render_the_session_window() {
@@ -1051,8 +1049,8 @@ fn render_the_session_window() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     harness.state_mut().set_project_lists(
-        vec!["C:/Music/Loopwerk/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
-        vec!["C:/Music/Loopwerk/Templates/Beat starter.locr".into(), "C:/Music/Loopwerk/Templates/Live rig.als".into()],
+        vec!["C:/Music/Suhina/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Suhina/Templates/Beat starter.locr".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
     );
     harness.state_mut().open_project_dialog(false);
     harness.run();
@@ -1123,10 +1121,8 @@ fn render_the_session_window() {
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("detail-row.png")).unwrap_or_else(|e| panic!("{e}"));
     let ctx = harness.ctx.clone();
-    let settings = loopwerk_ui::settings::Settings {
-        device_layout: loopwerk_ui::settings::DeviceLayout::Stack,
-        ..Default::default()
-    };
+    let settings =
+        suhina_ui::settings::Settings { device_layout: suhina_ui::settings::DeviceLayout::Stack, ..Default::default() };
     harness.state_mut().set_settings(&ctx, settings);
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
@@ -1139,9 +1135,9 @@ fn render_the_session_window() {
     image.save(folder.join("drop.png")).unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// Renders the Session and Arrangement views in every theme that comes with Loopwerk, to
+/// Renders the Session and Arrangement views in every theme that comes with Suhina, to
 /// `target/ui-snapshots/theme-<id>-session.png` and `-arrangement.png`, to look them over. Needs
-/// a GPU adapter: `cargo test -p loopwerk-ui -- --ignored`.
+/// a GPU adapter: `cargo test -p suhina-ui -- --ignored`.
 #[test]
 #[ignore = "needs a GPU adapter; run with --ignored"]
 fn render_every_built_in_theme() {

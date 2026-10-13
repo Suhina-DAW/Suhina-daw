@@ -2,10 +2,10 @@
 //! keeps its player.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
 
-use loopwerk_engine::{AudioPool, Renderer};
-use loopwerk_model::Project;
-use loopwerk_session::{CommandKind, MAX_OPEN_PROJECTS, Player, ProjectId, Projects, Session, commands};
 use serde_json::{Value, json};
+use suhina_engine::{AudioPool, Renderer};
+use suhina_model::Project;
+use suhina_session::{CommandKind, MAX_OPEN_PROJECTS, Player, ProjectId, Projects, Session, commands};
 
 fn untitled(projects: &mut Projects) -> ProjectId {
     projects.add(Session::new(Project::default()), None).unwrap()
@@ -148,8 +148,8 @@ fn project_commands_check_their_parameters() {
 
 #[test]
 fn the_commands_document_lists_every_command_once_with_its_parameters() {
-    let doc = loopwerk_session::commands_markdown();
-    let ids: Vec<String> = loopwerk_session::all_commands()
+    let doc = suhina_session::commands_markdown();
+    let ids: Vec<String> = suhina_session::all_commands()
         .as_array()
         .map(|all| all.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
         .unwrap_or_default();

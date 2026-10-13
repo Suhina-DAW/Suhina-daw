@@ -4,13 +4,13 @@
 
 use std::path::{Path, PathBuf};
 
-use loopwerk_library::Library;
-use loopwerk_session::{Projects, Session, blank_project};
 use serde_json::{Value, json};
+use suhina_library::Library;
+use suhina_session::{Projects, Session, blank_project};
 
 fn temp(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let dir = std::env::temp_dir().join(format!("loopwerk-relink-{name}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-relink-{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -40,7 +40,7 @@ fn missing_files_are_listed_found_and_relinked_in_one_undo_step() {
     wav(&kick);
     wav(&snare);
 
-    let plugins = loopwerk_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
+    let plugins = suhina_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
     let mut p = Projects::with_library(plugins);
     p.set_file_library(Library::new(Some(settings.clone())));
     p.add(Session::new(blank_project()), None).unwrap();

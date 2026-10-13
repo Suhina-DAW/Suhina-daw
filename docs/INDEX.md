@@ -11,7 +11,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [`AGENTS.md`](../AGENTS.md) | Rules for agents and contributors, the crate map, what to run before finishing |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Clean-room rules, licences, AI-assisted contributions |
 | [`ROADMAP.md`](../ROADMAP.md) | Milestones, what works now, what comes next |
-| [`README.md`](../README.md) | What Loopwerk is, how to try and build it |
+| [`README.md`](../README.md) | What Suhina is, how to try and build it |
 | [`docs/commands.md`](commands.md) | Every command with its kind and parameters, from the command registry (generated) |
 
 ## Documents
@@ -19,7 +19,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
@@ -28,12 +28,12 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) | decision | current | plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor | How third-party plug-ins are hosted out of process (process model, IPC, deadline, crashes), the unsafe exception, formats and the VST2 policy |
 | [0007: Several open projects](decisions/0007-several-open-projects.md) | decision | current | tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId | Several projects open at once like tabs, one active; where commands go, which project plays, and what is left for later |
 | [0008: Patch devices](decisions/0008-patch-devices.md) | decision | draft | Pure Data, Pd, plugdata, libpd, patch, patch device, community devices, Max for Live, Max device, amxd, scripting devices, collect and save | Proposed way for the community to build devices as Pure Data patches (plugdata, libpd) with access to commands, and how imported Max devices are kept |
-| [0009: egui for the UI; familiar workflow, Loopwerk's own look](decisions/0009-ui-toolkit-and-look.md) | decision | current | UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton | Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Loopwerk's own look |
-| [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) | decision | current | project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects | Loopwerk's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects |
+| [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) | decision | current | UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton | Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Suhina's own look |
+| [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) | decision | current | project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects | Suhina's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects |
 | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) | decision | current | preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, MIDI preview, browser sound | How a sample added while the project plays reaches the engine, and how the browser previews samples and MIDI files through the engine without locks or allocation on the audio thread |
 | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md) | decision | current | file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed | How the browser's folders are indexed, kept on disk and kept up to date (start-up check, file-system watching, polling), and the limits that protect it from hostile folders |
 | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md) | decision | current | sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, linear assignment, lapjv, RasterFairy, nearest neighbours, kiddo, feature cache | How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (k-d tree), caches the results, and which crates it uses |
-| [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Loopwerk's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
+| [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Suhina's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
@@ -42,11 +42,11 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
-| [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts |
+| [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Suhina's own project file (.locr), field by field, with what a reader accepts |
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
-| [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Loopwerk reads them |
+| [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them |
 | [Sample map](spec/sample-map.md) | spec | draft | sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands | How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map |
-| [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Loopwerk reads and how it maps the mastering to its compressor and limiter |
+| [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
@@ -61,9 +61,9 @@ Change this code, and check these documents.
 |---|---|
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
 | `Cargo.toml` | [Architecture](architecture.md) |
-| `apps/loopwerk-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `apps/loopwerk/src/main.rs` | [Architecture](architecture.md) |
-| `apps/loopwerk/src/recent.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
+| `apps/suhina-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `apps/suhina/src/main.rs` | [Architecture](architecture.md) |
+| `apps/suhina/src/recent.rs` | [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -87,7 +87,7 @@ Change this code, and check these documents.
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/library/**` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
 | `crates/library/src/find.rs` | [Missing files](spec/missing-files.md) |
-| `crates/locr` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
+| `crates/locr` | [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/locr/src/lib.rs` | [The .locr project file](spec/locr-format.md) |
 | `crates/media/src/info.rs` | [Browser](spec/browser.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
@@ -99,7 +99,7 @@ Change this code, and check these documents.
 | `crates/output/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
-| `crates/session/src/blank.rs` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
+| `crates/session/src/blank.rs` | [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
 | `crates/session/src/files.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |

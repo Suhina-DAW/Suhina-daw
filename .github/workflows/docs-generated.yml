@@ -41,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: docs/commands.md
-        run: cargo run --quiet -p loopwerk-cli -- commands --markdown > docs/commands.md
+        run: cargo run --quiet -p suhina-cli -- commands --markdown > docs/commands.md
       - name: docs/INDEX.md
         run: python3 scripts/docs.py index --write
       - uses: actions/upload-artifact@v4

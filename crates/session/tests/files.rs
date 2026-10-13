@@ -6,10 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use loopwerk_engine::{AudioPool, Renderer};
-use loopwerk_model::*;
-use loopwerk_session::{Player, Session, blank_project};
 use serde_json::{Value, json};
+use suhina_engine::{AudioPool, Renderer};
+use suhina_model::*;
+use suhina_session::{Player, Session, blank_project};
 
 const SR: u32 = 48_000;
 
@@ -18,7 +18,7 @@ fn run(session: &mut Session, id: &str, params: Value) -> Result<Value, String> 
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loopwerk-files-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-files-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -173,7 +173,7 @@ fn samples_go_one_after_another_on_a_track_at_their_length() {
     // The offline render plays them: the oracle for what was placed.
     let renderer = Renderer::with_audio(session.project(), session.audio(), SR).unwrap();
     drop(renderer);
-    let out = loopwerk_engine::render_offline_with_audio(session.project(), session.audio(), SR, 512).unwrap();
+    let out = suhina_engine::render_offline_with_audio(session.project(), session.audio(), SR, 512).unwrap();
     let at = |beat: f64| out[((beat * 0.5 + 0.05) * f64::from(SR)) as usize * 2].abs();
     assert!(at(4.0) > 0.1 && at(5.0) > 0.05, "{} {}", at(4.0), at(5.0));
     assert!(at(2.0) < 1e-6, "nothing before the clips");
@@ -393,7 +393,7 @@ fn audio_provided_ahead_is_used_instead_of_decoding_again() {
     let mut session = Session::new(blank_project());
     // What the window decoded on its own thread: a different level, so it shows which was used.
     let data =
-        std::sync::Arc::new(loopwerk_engine::AudioData { sample_rate: SR, channels: 1, samples: vec![0.125; 24_000] });
+        std::sync::Arc::new(suhina_engine::AudioData { sample_rate: SR, channels: 1, samples: vec![0.125; 24_000] });
     session.provide_audio(&sample, std::sync::Arc::clone(&data));
     run(&mut session, "clip.addFiles", json!({ "paths": [text(&sample)], "track": 3, "start": 0.0 })).unwrap();
     let key = text(&std::path::absolute(&sample).unwrap());
@@ -403,7 +403,7 @@ fn audio_provided_ahead_is_used_instead_of_decoding_again() {
 
 #[test]
 fn a_preset_adds_the_fm_synth_with_its_voice() {
-    use loopwerk_device_fm_synth::patch::{Patch, write_bank};
+    use suhina_device_fm_synth::patch::{Patch, write_bank};
     let dir = temp_dir("preset");
     let mut patch = Patch::default();
     patch.set_name("TUBULAR");

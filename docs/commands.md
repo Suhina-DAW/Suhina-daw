@@ -1,7 +1,7 @@
 # Commands
 
-Every command Loopwerk has, generated from the command registry in `crates/session` by
-`loopwerk-cli commands --markdown`; do not edit by hand. A workflow regenerates it on `main`
+Every command Suhina has, generated from the command registry in `crates/session` by
+`suhina-cli commands --markdown`; do not edit by hand. A workflow regenerates it on `main`
 after every merge, so pull requests leave it alone. The CLI, the MCP server and the UI run
 these same commands ([ADR 0002](decisions/0002-commands.md), [`mcp.md`](mcp.md)).
 

@@ -5,14 +5,14 @@
 
 use std::path::PathBuf;
 
-use loopwerk_model::Project;
-use loopwerk_plugins::library::Library;
-use loopwerk_session::{CommandKind, ProjectId, Projects, Session, plugin_commands};
 use serde_json::{Value, json};
+use suhina_model::Project;
+use suhina_plugins::library::Library;
+use suhina_session::{CommandKind, ProjectId, Projects, Session, plugin_commands};
 
 /// Projects whose plug-in library lives in a fresh folder of its own.
 fn projects(name: &str) -> (Projects, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("loopwerk-plugin-commands-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-plugin-commands-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("plugins")).unwrap();
     let library = Library::new(Some(dir.join("settings")), dir.join("no-such-host"));
@@ -67,7 +67,7 @@ fn nothing_scanned_lists_nothing_and_a_missing_host_is_an_error() {
 }
 
 #[test]
-fn plugin_commands_belong_to_loopwerk_not_to_a_project() {
+fn plugin_commands_belong_to_suhina_not_to_a_project() {
     assert!(plugin_commands().iter().all(|c| c.id.starts_with("plugins.") && c.kind == CommandKind::Plugins));
     let (mut p, _) = projects("kinds");
     let all = run(&mut p, "commands.list", json!({})).unwrap();
@@ -91,13 +91,13 @@ fn plugin_commands_belong_to_loopwerk_not_to_a_project() {
 
 #[test]
 fn a_projects_plugins_are_matched_to_the_installed_ones() {
-    use loopwerk_model::{Channel, ChannelId, ChannelRole, Device, DeviceKind, Extensions};
+    use suhina_model::{Channel, ChannelId, ChannelRole, Device, DeviceKind, Extensions};
     let (_, dir) = projects("check");
     // An installed VST3 plug-in that says it replaces the VST2 plug-in `Gain`.
     let settings = dir.join("settings");
     std::fs::create_dir_all(&settings).unwrap();
     let catalog = json!({ "version": 2, "entries": [{ "path": "/vst3/Gain.vst3", "modified": 1, "size": 1, "plugins": [{
-        "id": "4C6F6F707765726B5465737447616931", "name": "Gain 3", "vendor": "Loopwerk", "version": "3",
+        "id": "4C6F6F707765726B5465737447616931", "name": "Gain 3", "vendor": "Suhina", "version": "3",
         "features": ["Fx"], "replaces": ["5653544761696E6761696E0000000000"],
     }]}]});
     std::fs::write(settings.join("plugin-catalog.json"), catalog.to_string()).unwrap();
@@ -150,7 +150,7 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
 
 #[test]
 fn hosting_is_chosen_per_plug_in_and_reaches_the_sessions() {
-    use loopwerk_plugins::scan::{Catalog, PluginInfo};
+    use suhina_plugins::scan::{Catalog, PluginInfo};
     let (_, dir) = projects("hosting");
     let settings = dir.join("settings");
     std::fs::create_dir_all(&settings).unwrap();

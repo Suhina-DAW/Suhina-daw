@@ -1,4 +1,4 @@
-//! Headless Loopwerk CLI.
+//! Headless Suhina CLI.
 
 mod play;
 mod track_notes;
@@ -6,23 +6,23 @@ mod track_notes;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use loopwerk_automation::{LoopwerkMcp, Workspace, render_wav, scene_as_arrangement};
-use loopwerk_engine::AudioPool;
-use loopwerk_engine::model::*;
+use suhina_automation::{SuhinaMcp, Workspace, render_wav, scene_as_arrangement};
+use suhina_engine::AudioPool;
+use suhina_engine::model::*;
 
 const USAGE: &str = "\
-usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>] [<fm>]
-       loopwerk-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>]
-       loopwerk-cli fm-synth voices <file.syx>
-       loopwerk-cli commands [--markdown]
-       loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
-       loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
+usage: suhina-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>] [<fm>]
+       suhina-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>]
+       suhina-cli fm-synth voices <file.syx>
+       suhina-cli commands [--markdown]
+       suhina-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
+       suhina-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
                              | check <project.als> | set-hosting <plug-in> (binary | vendor | instance))
-       loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
-       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+       suhina-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       suhina-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
-       loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
-       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
+       suhina-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       suhina-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 commands:
   render    render a project offline to a 32-bit float stereo WAV file
@@ -53,7 +53,7 @@ commands:
             its window is closed, then --save writes the state it has to a file
 
 options:
-  <project.als>      a Live Set to import, or a Loopwerk project (.locr) to open
+  <project.als>      a Live Set to import, or a Suhina project (.locr) to open
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
@@ -150,7 +150,7 @@ fn main() -> ExitCode {
             }
         },
         Some("--version" | "-V") => {
-            println!("loopwerk-cli {}", env!("CARGO_PKG_VERSION"));
+            println!("suhina-cli {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Some("--help" | "-h") => {
@@ -164,11 +164,11 @@ fn main() -> ExitCode {
     }
 }
 
-/// `loopwerk-cli commands [--markdown]`.
+/// `suhina-cli commands [--markdown]`.
 fn list_commands(args: &[String]) -> Result<(), String> {
     match args {
         [] => {
-            for command in loopwerk_session::all_commands().as_array().into_iter().flatten() {
+            for command in suhina_session::all_commands().as_array().into_iter().flatten() {
                 let id = command["id"].as_str().unwrap_or_default();
                 let label = command["label"].as_str().unwrap_or_default();
                 println!("{id:<24} {label}");
@@ -176,10 +176,10 @@ fn list_commands(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         [flag] if flag == "--markdown" => {
-            print!("{}", loopwerk_session::commands_markdown());
+            print!("{}", suhina_session::commands_markdown());
             Ok(())
         }
-        _ => Err("usage: loopwerk-cli commands [--markdown]".into()),
+        _ => Err("usage: suhina-cli commands [--markdown]".into()),
     }
 }
 
@@ -263,11 +263,11 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
     let (project, audio) = match &args.source {
         Source::Demo => (demo_project(), AudioPool::new()),
         Source::Als(path) => {
-            // A Loopwerk project (.locr) or a Live Set to import.
-            let (session, warnings) = loopwerk_session::Session::open(path).map_err(|e| e.0)?;
+            // A Suhina project (.locr) or a Live Set to import.
+            let (session, warnings) = suhina_session::Session::open(path).map_err(|e| e.0)?;
             let folder = path.parent().unwrap_or(std::path::Path::new("."));
             let started = std::time::Instant::now();
-            let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
+            let (audio, audio_warnings) = suhina_media::load_project_audio(session.project(), folder);
             for warning in warnings.iter().chain(&audio_warnings) {
                 eprintln!("warning: {warning}");
             }
@@ -290,8 +290,8 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
 }
 
 /// The voice `--fm` asks for: from a DX7 voice or bank file, or the initial voice.
-fn load_voice(choice: &FmChoice) -> Result<loopwerk_device_fm_synth::Patch, String> {
-    let Some(path) = &choice.voices else { return Ok(loopwerk_device_fm_synth::Patch::default()) };
+fn load_voice(choice: &FmChoice) -> Result<suhina_device_fm_synth::Patch, String> {
+    let Some(path) = &choice.voices else { return Ok(suhina_device_fm_synth::Patch::default()) };
     let voices = read_voices(path)?;
     let count = voices.patches.len();
     voices
@@ -301,14 +301,14 @@ fn load_voice(choice: &FmChoice) -> Result<loopwerk_device_fm_synth::Patch, Stri
         .ok_or_else(|| format!("{} has {count} voices; --voice must be from 1 to {count}", path.display()))
 }
 
-fn read_voices(path: &std::path::Path) -> Result<loopwerk_device_fm_synth::patch::Voices, String> {
+fn read_voices(path: &std::path::Path) -> Result<suhina_device_fm_synth::patch::Voices, String> {
     const MAX_FILE: u64 = 1 << 20;
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
     if size > MAX_FILE {
         return Err(format!("{} is too large for DX7 voice data", path.display()));
     }
     let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let voices = loopwerk_device_fm_synth::patch::read(&data).map_err(|e| format!("{}: {e}", path.display()))?;
+    let voices = suhina_device_fm_synth::patch::read(&data).map_err(|e| format!("{}: {e}", path.display()))?;
     if !voices.checksum_ok {
         eprintln!("warning: {}: the checksum does not match; the voices are read anyway", path.display());
     }
@@ -317,19 +317,19 @@ fn read_voices(path: &std::path::Path) -> Result<loopwerk_device_fm_synth::patch
 
 /// Puts the FM synth with `patch` first on the channel of every track that plays notes, in
 /// place of an instrument already there.
-fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &loopwerk_device_fm_synth::Patch) {
-    use loopwerk_device_api::Device as _;
-    let mut synth = loopwerk_device_fm_synth::FmSynth::new();
+fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &suhina_device_fm_synth::Patch) {
+    use suhina_device_api::Device as _;
+    let mut synth = suhina_device_fm_synth::FmSynth::new();
     synth.load_patch(patch);
-    let params: Vec<DeviceParam> = loopwerk_device_fm_synth::INFO
+    let params: Vec<DeviceParam> = suhina_device_fm_synth::INFO
         .params
         .iter()
         .enumerate()
         .filter_map(|(i, p)| synth.param(i).map(|v| DeviceParam::new(p.id, v)))
         .collect();
     let device = Device {
-        name: loopwerk_device_fm_synth::INFO.name.into(),
-        kind: DeviceKind::Builtin(loopwerk_device_fm_synth::INFO.id.into()),
+        name: suhina_device_fm_synth::INFO.name.into(),
+        kind: DeviceKind::Builtin(suhina_device_fm_synth::INFO.id.into()),
         enabled: true,
         state: None,
         params,
@@ -339,8 +339,8 @@ fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &loopwerk_device_fm
         project.tracks.iter().filter(|t| t.content.notes).filter_map(|t| t.channel).collect();
     for channel in project.channels.iter_mut().filter(|c| channels.contains(&c.id)) {
         let first_is_instrument = channel.devices.first().is_some_and(|d| {
-            matches!(&d.kind, DeviceKind::Builtin(id) if loopwerk_device_registry::info(id)
-                .is_some_and(|i| i.role == loopwerk_device_api::Role::Instrument))
+            matches!(&d.kind, DeviceKind::Builtin(id) if suhina_device_registry::info(id)
+                .is_some_and(|i| i.role == suhina_device_api::Role::Instrument))
         });
         if first_is_instrument {
             channel.devices.remove(0);
@@ -352,7 +352,7 @@ fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &loopwerk_device_fm
 /// `fm-synth voices <file.syx>`.
 fn fm_synth(args: &[String]) -> Result<(), String> {
     let (Some("voices"), Some(path)) = (args.first().map(String::as_str), args.get(1)) else {
-        return Err(format!("usage: loopwerk-cli fm-synth voices <file.syx>\n\n{USAGE}"));
+        return Err(format!("usage: suhina-cli fm-synth voices <file.syx>\n\n{USAGE}"));
     };
     let voices = read_voices(std::path::Path::new(path))?;
     for (i, patch) in voices.patches.iter().enumerate() {
@@ -364,8 +364,8 @@ fn fm_synth(args: &[String]) -> Result<(), String> {
 fn render(args: &Args) -> Result<(), String> {
     let path = args.output.as_ref().ok_or("missing --output")?;
     let (project, audio) = load_project(args)?;
-    let mut library = loopwerk_plugins::library::Library::default();
-    let env = loopwerk_session::PluginEnv::from_library(&mut library);
+    let mut library = suhina_plugins::library::Library::default();
+    let env = suhina_session::PluginEnv::from_library(&mut library);
     let summary = render_wav(&project, &audio, path, args.sample_rate, Some(&env))?;
     for notice in &summary.plugins {
         eprintln!("plug-ins: {notice}");
@@ -379,19 +379,19 @@ fn render(args: &Args) -> Result<(), String> {
 fn plugin(args: &[String]) -> Result<(), String> {
     let usage = || {
         format!(
-            "usage: loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
-       loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
+            "usage: suhina-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
+       suhina-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
-       loopwerk-cli plugin (params <plug-in> | params-device <project.als> <device>)
-       loopwerk-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
+       suhina-cli plugin (params <plug-in> | params-device <project.als> <device>)
+       suhina-cli plugin (edit <plug-in> | edit-device <project.als> <device>) [--save <file>]
 
 {USAGE}"
         )
     };
     let mut words = args.iter().map(String::as_str);
-    let mut library = loopwerk_plugins::library::Library::default();
+    let mut library = suhina_plugins::library::Library::default();
     // For a device: the project and the device's channel, to read its track's notes.
-    let mut device_source: Option<(loopwerk_session::Session, ChannelId)> = None;
+    let mut device_source: Option<(suhina_session::Session, ChannelId)> = None;
     let (spec, mut state, input, output) = match words.next() {
         Some("run") => {
             let (Some(name), Some(input), Some(output)) = (words.next(), words.next(), words.next()) else {
@@ -461,13 +461,13 @@ fn plugin(args: &[String]) -> Result<(), String> {
 
     let audio = if input == "-" {
         let rate = 48_000u32;
-        loopwerk_media::AudioData {
+        suhina_media::AudioData {
             sample_rate: rate,
             channels: 2,
             samples: vec![0.0; (seconds * f64::from(rate)) as usize * 2],
         }
     } else {
-        loopwerk_media::decode_file(std::path::Path::new(input))?
+        suhina_media::decode_file(std::path::Path::new(input))?
     };
     let channels = usize::from(audio.channels.max(1));
     let stereo: Vec<f32> = audio
@@ -479,11 +479,11 @@ fn plugin(args: &[String]) -> Result<(), String> {
         })
         .collect();
     let tail_frames = (tail * f64::from(audio.sample_rate)) as usize;
-    let launch = loopwerk_plugins::Launch {
+    let launch = suhina_plugins::Launch {
         host: library.host().to_path_buf(),
         plugin: spec,
         channels: 2,
-        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        max_frames: suhina_plugins::offline::BLOCK_FRAMES,
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
         group: None,
@@ -519,7 +519,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
         None => Vec::new(),
     };
     let started = std::time::Instant::now();
-    let rendered = loopwerk_plugins::offline::render_with_events(launch, state, &stereo, &events, tail_frames)
+    let rendered = suhina_plugins::offline::render_with_events(launch, state, &stereo, &events, tail_frames)
         .map_err(|e| e.to_string())?;
     if let Some(why) = &rendered.state_refused {
         eprintln!("warning: the plug-in did not take the saved settings ({why}); it ran with its defaults");
@@ -549,10 +549,10 @@ fn plugin(args: &[String]) -> Result<(), String> {
 /// `plugins …`: runs the matching `plugins.*` command and prints its result.
 fn plugins(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut projects = loopwerk_session::Projects::new();
+    let mut projects = suhina_session::Projects::new();
     let (id, params) = match words.as_slice() {
         ["check", project] => {
-            let (session, warnings) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+            let (session, warnings) = suhina_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
             for warning in warnings {
                 eprintln!("warning: {warning}");
             }
@@ -586,12 +586,12 @@ fn plugins(args: &[String]) -> Result<(), String> {
 
 /// How the host is asked to load the plug-in `name`: a `clap:`, `vst3:` or `test:` name as it
 /// is, else a name or id from the catalog.
-fn plugin_spec(library: &mut loopwerk_plugins::library::Library, name: &str) -> Result<String, String> {
+fn plugin_spec(library: &mut suhina_plugins::library::Library, name: &str) -> Result<String, String> {
     if ["clap:", "vst3:", "test:"].iter().any(|p| name.starts_with(p)) {
         return Ok(name.to_string());
     }
     let found = library.catalog().find(name).ok_or_else(|| {
-        format!("no plug-in {name:?} in the catalog; `loopwerk-cli plugins scan` looks for installed ones")
+        format!("no plug-in {name:?} in the catalog; `suhina-cli plugins scan` looks for installed ones")
     })?;
     eprintln!("{} by {} ({})", found.name, found.vendor, found.path.display());
     Ok(found.spec())
@@ -600,19 +600,19 @@ fn plugin_spec(library: &mut loopwerk_plugins::library::Library, name: &str) -> 
 /// A project's plug-in device by name: the opened project, the device's channel, the installed
 /// plug-in found for it and the state the project saved.
 fn project_device(
-    library: &mut loopwerk_plugins::library::Library,
+    library: &mut suhina_plugins::library::Library,
     project: &str,
     device: &str,
-) -> Result<(loopwerk_session::Session, ChannelId, String, Option<loopwerk_plugins::SavedState>), String> {
-    let (session, _) = loopwerk_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
+) -> Result<(suhina_session::Session, ChannelId, String, Option<suhina_plugins::SavedState>), String> {
+    let (session, _) = suhina_session::Session::open(Path::new(project)).map_err(|e| e.0)?;
     let (channel, channel_id, saved) = session
         .project()
         .channels
         .iter()
         .find_map(|c| c.devices.iter().find(|d| d.name == device).map(|d| (c.name.clone(), c.id, d.clone())))
-        .ok_or_else(|| format!("no device {device:?} in {project}; `loopwerk-cli plugins check` lists them"))?;
-    let (found, state) = loopwerk_session::device_plugin(library.catalog(), &saved)
-        .ok_or_else(|| format!("no installed plug-in stands for {device:?}; `loopwerk-cli plugins check` says why"))?;
+        .ok_or_else(|| format!("no device {device:?} in {project}; `suhina-cli plugins check` lists them"))?;
+    let (found, state) = suhina_session::device_plugin(library.catalog(), &saved)
+        .ok_or_else(|| format!("no installed plug-in stands for {device:?}; `suhina-cli plugins check` says why"))?;
     eprintln!(
         "{device} on {channel}: {} by {} ({}), found by {}{}",
         found.plugin.name,
@@ -629,9 +629,9 @@ fn project_device(
 /// closed (or `--close-after` seconds pass); with `--save <file>`, writes the state it has then
 /// (a VST3 controller's own state next to it, in `<file>.controller`).
 fn edit_plugin<'a>(
-    library: &loopwerk_plugins::library::Library,
+    library: &suhina_plugins::library::Library,
     spec: String,
-    state: Option<loopwerk_plugins::SavedState>,
+    state: Option<suhina_plugins::SavedState>,
     mut words: impl Iterator<Item = &'a str>,
 ) -> Result<(), String> {
     let mut save: Option<String> = None;
@@ -650,16 +650,16 @@ fn edit_plugin<'a>(
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-    let launch = loopwerk_plugins::Launch {
+    let launch = suhina_plugins::Launch {
         host: library.host().to_path_buf(),
         plugin: spec,
         channels: 2,
-        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        max_frames: suhina_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
         group: None,
     };
-    let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
+    let (mut plugin, _audio) = suhina_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
         && let Err(e) = plugin.load_state(state)
     {
@@ -669,7 +669,7 @@ fn edit_plugin<'a>(
     eprintln!("editor open ({width} × {height}); close its window to finish");
     let started = std::time::Instant::now();
     while plugin.editor_open() {
-        if plugin.health() != loopwerk_plugins::Health::Running {
+        if plugin.health() != suhina_plugins::Health::Running {
             return Err("the plug-in stopped while its editor was open".into());
         }
         if close_after.is_some_and(|after| started.elapsed() >= after) {
@@ -692,20 +692,20 @@ fn edit_plugin<'a>(
 
 /// Starts the plug-in `spec`, gives it `state`, and prints its parameters as JSON.
 fn print_params(
-    library: &loopwerk_plugins::library::Library,
+    library: &suhina_plugins::library::Library,
     spec: String,
-    state: Option<loopwerk_plugins::SavedState>,
+    state: Option<suhina_plugins::SavedState>,
 ) -> Result<(), String> {
-    let launch = loopwerk_plugins::Launch {
+    let launch = suhina_plugins::Launch {
         host: library.host().to_path_buf(),
         plugin: spec,
         channels: 2,
-        max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
+        max_frames: suhina_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
         group: None,
     };
-    let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
+    let (mut plugin, _audio) = suhina_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
         && let Err(e) = plugin.load_state(state)
     {
@@ -741,8 +741,8 @@ fn mcp(args: &[String]) -> Result<(), String> {
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let library = loopwerk_library::Library::new(loopwerk_plugins::library::settings_folder());
-    let mut server = LoopwerkMcp::new(workspace).with_file_library(library);
+    let library = suhina_library::Library::new(suhina_plugins::library::settings_folder());
+    let mut server = SuhinaMcp::new(workspace).with_file_library(library);
     if audio {
         server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
     }
@@ -837,7 +837,7 @@ mod tests {
     fn demo_project_is_valid_and_renders_two_bars() {
         let project = demo_project();
         assert_eq!(project.validate(), Ok(()));
-        let samples = loopwerk_engine::render_offline(&project, 48_000, 512).unwrap();
+        let samples = suhina_engine::render_offline(&project, 48_000, 512).unwrap();
         let seconds = samples.len() as f64 / 2.0 / 48_000.0;
         assert!((4.0..4.2).contains(&seconds), "{seconds} s");
         let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
@@ -893,16 +893,16 @@ mod tests {
 
     #[test]
     fn fm_plays_every_note_track_with_a_voice_from_a_bank() {
-        use loopwerk_device_fm_synth::{FmSynth, Patch, patch};
+        use suhina_device_fm_synth::{FmSynth, Patch, patch};
         // A bank whose second voice is a two-operator sound, written to a file.
         let mut synth = FmSynth::new();
-        let index = |id: &str| loopwerk_device_fm_synth::INFO.param_index(id).unwrap();
-        use loopwerk_device_api::Device as _;
+        let index = |id: &str| suhina_device_fm_synth::INFO.param_index(id).unwrap();
+        use suhina_device_api::Device as _;
         synth.set_param(index("op2.level"), 80.0);
         synth.set_param(index("op2.coarse"), 3.0);
         let mut voice = synth.patch();
         voice.set_name("TWO OPS");
-        let path = std::env::temp_dir().join(format!("loopwerk-cli-bank-{}.syx", std::process::id()));
+        let path = std::env::temp_dir().join(format!("suhina-cli-bank-{}.syx", std::process::id()));
         std::fs::write(&path, patch::write_bank(&[Patch::default(), voice])).unwrap();
 
         let choice = FmChoice { voices: Some(path.clone()), voice: 1 };
@@ -919,7 +919,7 @@ mod tests {
         let stored = &project.channels[0].devices[0];
         assert_eq!(stored.kind, DeviceKind::Builtin("fm-synth".into()));
         assert!(stored.params.iter().any(|p| p.id == "op2.coarse" && p.value == 3.0));
-        let samples = loopwerk_engine::render_offline(&project, 48_000, 512).unwrap();
+        let samples = suhina_engine::render_offline(&project, 48_000, 512).unwrap();
         let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak > 0.05 && peak <= 1.0, "peak {peak}");
         let _ = std::fs::remove_file(path);

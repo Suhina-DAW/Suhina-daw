@@ -1,6 +1,6 @@
-use loopwerk_model::*;
-use loopwerk_session::{CommandKind, Session, commands};
 use serde_json::{Value, json};
+use suhina_model::*;
+use suhina_session::{CommandKind, Session, commands};
 
 fn project() -> Project {
     let track = |id: u32, name: &str| Track {
