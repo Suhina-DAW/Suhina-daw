@@ -7,6 +7,11 @@ last_verified: 2026-10-13
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
+  - crates/session/src/projects.rs
+  - crates/session/src/plugins.rs
+  - crates/session/src/library.rs
+  - crates/session/src/audio.rs
+  - crates/session/src/devices.rs
 ---
 
 # 0002: Every action is a command
@@ -20,7 +25,7 @@ Suhina will be driven from several places: the CLI, an MCP server for agents, la
 MIDI controllers. If each of them changed the project in its own way, they would drift apart,
 undo would only work in some of them, and an agent could not do everything a person can.
 
-PhotoCraft (MIT/Apache-2.0) solves the same problem with a command registry: every menu item,
+[PhotoCraft](https://github.com/storytold/photocraft) (MIT/Apache-2.0) solves the same problem with a command registry: every menu item,
 tool and dialog is a command with an id, a parameter description and a `run` function, and the
 UI, CLI, control channel and MCP server all dispatch commands by id. We take the idea, not code.
 
@@ -111,5 +116,5 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 - Command ids are part of the public interface for agents; renaming one is a breaking change.
 - The registry is the only list of commands: [`docs/commands.md`](../commands.md) is generated
   from it (`suhina-cli commands --markdown`) on `main` after every merge.
-- Saving to `.als` is not possible yet (there is no writer), so sessions opened from Live Sets
-  can be changed, rendered and played, but not saved. A native project format comes later.
+- Suhina does not write `.als` (there is no writer). A session opened from a Live Set is saved
+  as a Suhina project (`.suhina`) with `project.save` and a path ([ADR 0010](0010-project-files.md)).

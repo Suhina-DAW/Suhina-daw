@@ -3,8 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// Suhina's own project files.
-const LOCR: &str = "locr";
 /// How many are kept.
 const KEPT: usize = 12;
 /// Larger files are not a list of recent projects.
@@ -56,9 +54,7 @@ pub fn templates(folder: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             p.is_file()
-                && p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case(LOCR) || e.eq_ignore_ascii_case("als"))
+                && (suhina_session::is_project_file(p) || p.extension().is_some_and(|e| e.eq_ignore_ascii_case("als")))
         })
         .take(1000)
         .collect();
@@ -76,7 +72,7 @@ mod tests {
         let _fresh = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap_or_default();
         let file = dir.join("recent.txt");
-        let songs: Vec<PathBuf> = (0..14).map(|i| dir.join(format!("song {i}.locr"))).collect();
+        let songs: Vec<PathBuf> = (0..14).map(|i| dir.join(format!("song {i}.suhina"))).collect();
         for song in &songs {
             std::fs::write(song, "x").unwrap_or_default();
         }
@@ -101,12 +97,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("suhina-templates-{}", std::process::id()));
         let _fresh = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap_or_default();
-        for name in ["b.locr", "A.als", "notes.txt", "c.LOCR"] {
+        // `.locr` is how projects were saved before October 2026; they are listed too.
+        for name in ["b.suhina", "A.als", "notes.txt", "c.LOCR", "d.locr"] {
             std::fs::write(dir.join(name), "x").unwrap_or_default();
         }
         let names: Vec<String> =
             templates(&dir).iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
-        assert_eq!(names, ["A.als", "b.locr", "c.LOCR"]);
+        assert_eq!(names, ["A.als", "b.suhina", "c.LOCR", "d.locr"]);
         assert!(templates(&dir.join("missing")).is_empty());
         let _clean = std::fs::remove_dir_all(&dir);
     }

@@ -4190,15 +4190,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "suhina-locr"
-version = "0.0.1"
-dependencies = [
- "base64",
- "serde_json",
- "suhina-model",
-]
-
-[[package]]
 name = "suhina-media"
 version = "0.0.1"
 dependencies = [
@@ -4208,6 +4199,7 @@ dependencies = [
  "suhina-device-compressor",
  "suhina-device-limiter",
  "suhina-engine",
+ "suhina-project-file",
  "symphonia",
 ]
 
@@ -4263,6 +4255,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "suhina-project-file"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "serde_json",
+ "suhina-model",
+]
+
+[[package]]
 name = "suhina-session"
 version = "0.0.1"
 dependencies = [
@@ -4274,10 +4275,10 @@ dependencies = [
  "suhina-device-registry",
  "suhina-engine",
  "suhina-library",
- "suhina-locr",
  "suhina-media",
  "suhina-model",
  "suhina-plugins",
+ "suhina-project-file",
  "suhina-soundmap",
 ]
 

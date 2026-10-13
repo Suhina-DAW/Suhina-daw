@@ -124,4 +124,4 @@ test files may be committed only when the plug-in's state in them is our own:
   that previews are OGG Vorbis, and which plug-ins migrate VST2 presets to VST3.
 
 These describe files, not the maker's programs: none comes from disassembling a program, so
-they fall within CONTRIBUTING.md › Clean-room. Repositories without a licence are not read.
+they fall within CONTRIBUTING.md › Clean-room. Code without a licence is not copied, ported or translated (CONTRIBUTING.md › Clean-room).
