@@ -22,6 +22,9 @@ pub(crate) fn set_owner(owner: Option<u64>) {
     OWNER.with(|o| o.set(owner));
 }
 
+/// The engine's window that the next editor window opened on this thread belongs to, as
+/// [`set_owner`](self::set_owner) set it: read only where a window can be opened (Windows, X11).
+#[cfg(any(windows, target_os = "linux"))]
 fn owner() -> Option<u64> {
     OWNER.with(Cell::get)
 }
