@@ -268,7 +268,7 @@ workspace forbids.
     it goes (`place_editor`: the editor's origin and the panel's visible area in the window's
     pixels; the host keeps the editor inside a *clip* window of that area, so a scrolled or
     cut-off editor never paints over the rest of Suhina, and an empty area hides it, as when
-    another track is shown or the settings page is open). The plug-in may still resize its
+    another track is shown or Settings is open). The plug-in may still resize its
     editor (`editor_resized`, unasked); the user cannot drag an embedded one. A floating
     editor is never resized by the panel. Changing the setting closes the open editors and
     opens them again the other way; their state is in the plug-in, so nothing is lost. The

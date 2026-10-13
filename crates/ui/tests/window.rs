@@ -531,7 +531,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
     assert!(!harness.state().project_dialog_open());
 
-    // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
+    // Ctrl+S on a project without a .suhina file asks for a name, in the projects folder.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
     harness.run();
     harness.get_by_label("Name").click();
@@ -541,7 +541,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    let saved = dir.join("Projects").join("Night drive.locr");
+    let saved = dir.join("Projects").join("Night drive.suhina");
     assert!(saved.is_file(), "{:?}", harness.state().status());
     assert_eq!(harness.state_mut().take_saved_path(), Some(saved.clone()));
     let session = harness.state().session();
@@ -555,7 +555,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    assert!(dir.join("Templates").join("Night drive.locr").is_file());
+    assert!(dir.join("Templates").join("Night drive.suhina").is_file());
     assert_eq!(harness.state().session().and_then(|s| s.source()), Some(saved.as_path()));
     let _clean = std::fs::remove_dir_all(&dir);
 }
@@ -879,7 +879,10 @@ fn tabs_switch_keep_each_projects_edits_and_close() {
     assert_eq!(harness.state().projects().active(), ids.get(1).copied());
     assert!(harness.query_by_label("Turn Bass on").is_some());
 
+    // It has an edit, so closing it asks first.
     harness.get_by_label("Close Untitled 2").click();
+    harness.run();
+    harness.get_by_label("Don't save the changes").click();
     harness.run();
     harness.run();
     assert_eq!(harness.state().projects().len(), 1);
@@ -921,11 +924,11 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     harness.get_by_label("Settings page: Plug-ins").click();
     harness.run();
 
-    let field = harness.get_by_role(egui::accesskit::Role::TextInput);
+    let field = harness.get_by_label("Plug-in folder to add");
     field.focus();
     field.type_text(&folder.display().to_string());
     harness.run();
-    harness.get_by_label("Add folder").click();
+    harness.get_by_label("Add plug-in folder").click();
     harness.run();
     harness.run();
     let remove = harness.query_all_by_label_contains("Remove ").count();
@@ -1118,8 +1121,8 @@ fn render_the_session_window() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     harness.state_mut().set_project_lists(
-        vec!["C:/Music/Suhina/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
-        vec!["C:/Music/Suhina/Templates/Beat starter.locr".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
+        vec!["C:/Music/Suhina/Projects/Night drive.suhina".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Suhina/Templates/Beat starter.suhina".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
     );
     harness.state_mut().open_project_dialog(false);
     harness.run();
@@ -1314,4 +1317,168 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     let mut harness = window(app);
     harness.run();
     assert!(harness.query_by_label("CPU load").is_none());
+}
+
+/// The label of the active project's Close button in the tab row.
+fn active_close_label(harness: &Harness<'static, App>) -> String {
+    let projects = harness.state().projects();
+    let name = projects.active().and_then(|id| projects.name(id)).unwrap_or_default();
+    format!("Close {name}")
+}
+
+/// Whether the window asked to close itself in its last frame.
+fn asked_to_close(harness: &Harness<'static, App>) -> bool {
+    harness.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close))
+}
+
+#[test]
+fn closing_or_quitting_with_unsaved_changes_asks_first() {
+    let dir = std::env::temp_dir().join(format!("suhina-ui-unsaved-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let mut app = demo_app();
+    app.set_default_folders(dir.join("Projects"), dir.join("Templates"));
+    app.open_project(Session::new(demo_project()), &[], OpenAs::NewTab);
+    let mut harness = window(app);
+    let open = |h: &Harness<'static, App>| h.state().projects().ids().len();
+    let unsaved = |h: &Harness<'static, App>| h.state().session().is_some_and(Session::has_unsaved_changes);
+    assert_eq!(open(&harness), 2);
+
+    // An edit in the second project; closing its tab asks first, and Cancel keeps it open.
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    assert!(unsaved(&harness));
+    let label = active_close_label(&harness);
+    if let Some(close) = harness.get_all_by_label(&label).last() {
+        close.click();
+    }
+    harness.run();
+    assert!(harness.query_by_label("Don't save the changes").is_some());
+    harness.get_by_label("Cancel and keep the project open").click();
+    harness.run();
+    assert_eq!(open(&harness), 2);
+    assert!(harness.query_by_label("Don't save the changes").is_none());
+
+    // Don't save closes it.
+    let label = active_close_label(&harness);
+    if let Some(close) = harness.get_all_by_label(&label).last() {
+        close.click();
+    }
+    harness.run();
+    harness.get_by_label("Don't save the changes").click();
+    harness.run();
+    assert_eq!(open(&harness), 1);
+
+    // A project without changes closes without asking; quitting with one that has them asks,
+    // and Save first asks for a name, saves, then lets the window close.
+    harness.get_by_label("Turn Bass off").click();
+    harness.run();
+    harness.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    harness.run();
+    assert!(!asked_to_close(&harness));
+    assert!(harness.state().unsaved_prompt_open());
+    harness.get_by_label("Save the changes").click();
+    harness.run();
+    harness.get_by_label("Name").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.get_by_label("Name").type_text("Before quitting");
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.step();
+    harness.step();
+    let saved = dir.join("Projects").join("Before quitting.suhina");
+    assert!(saved.is_file(), "{:?}", harness.state().status());
+    assert!(!unsaved(&harness));
+    assert!(!harness.state().unsaved_prompt_open());
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_sample_map_opens_in_a_window_of_its_own_and_docks_back() {
+    let mut harness = window(demo_app());
+    // Hiding the browser for the test changed a setting already.
+    let _ = harness.state_mut().take_changed_settings();
+    assert!(harness.query_by_label("Dock").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::M);
+    harness.run();
+    // Without windows of their own (as here) the toolkit draws it as a window inside this one.
+    assert!(harness.state().sample_map.view.window);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(true));
+    assert!(harness.query_by_label("Dock").is_some(), "the map's bar offers to dock it");
+    assert!(harness.query_by_label("Large").is_none(), "no large view while it has a window");
+    harness.get_by_label("Dock").click();
+    harness.run();
+    assert!(!harness.state().sample_map.view.window);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
+    assert!(harness.query_by_label("Dock").is_none());
+
+    // The View menu does the same.
+    harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label_contains("Sample map in a window").click();
+    harness.run();
+    assert!(harness.state().sample_map.view.window);
+}
+
+#[test]
+fn a_saved_map_window_opens_at_the_start() {
+    let mut app = demo_app();
+    let settings = suhina_ui::settings::Settings {
+        map_window: true,
+        map_window_rect: Some([100, 80, 700, 500]),
+        browser_open: false,
+        ..Default::default()
+    };
+    app.set_settings(&egui::Context::default(), settings);
+    let mut harness = window(app);
+    assert!(harness.state().sample_map.view.window);
+    assert!(harness.query_by_label("Dock").is_some());
+    // The large view takes the map out of its window.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::M);
+    harness.run();
+    assert!(!harness.state().sample_map.view.window);
+    assert!(harness.state().sample_map.view.large);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
+}
+
+/// Renders the Arrangement view with an audio clip, linear and in decibels, to
+/// `target/ui-snapshots/arrangement-waveform*.png`, to look at the clip waveform in the window:
+/// `cargo test -p suhina-ui --test window -- --ignored render_the_clip_waveform`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_clip_waveform() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    for db in [false, true] {
+        let mut app = audio_app();
+        app.set_browser_open(false);
+        let mut harness = Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        theme::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        let mut settings = harness.state().settings().clone();
+        settings.waveform_db = db;
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        let name = if db { "arrangement-waveform-db.png" } else { "arrangement-waveform.png" };
+        image.save(folder.join(name)).unwrap_or_else(|e| panic!("{e}"));
+    }
+}
+
+#[test]
+fn settings_open_as_a_dialog_over_the_view_and_escape_closes_them() {
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings_open());
+    assert!(harness.query_by_label("Close settings").is_some());
+    // The view stays behind the dialog.
+    assert!(harness.query_by_label("Turn Bass off").is_some(), "the view is still drawn");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings_open());
 }

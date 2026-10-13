@@ -438,6 +438,20 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         Page::Arrangement => {
             section(&mut y, "Arrangement");
             let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Waveform scale",
+                "Linear, or decibels so quiet parts show; clips, previews and the map",
+            );
+            let options = [("Linear", false), ("dB", true)];
+            if let Some(db) =
+                segmented(ui, &painter, control_rect(r, 2), "Waveform scale", &options, settings.waveform_db)
+            {
+                settings.waveform_db = db;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
             label(&painter, r, "Track headers", "Which side of the timeline they are on");
             let options = [("Left", Side::Left), ("Right", Side::Right)];
             if let Some(side) =
@@ -880,7 +894,8 @@ fn plugin_section(
             .hint_text("A folder to look in as well")
             .font(small.clone()),
     );
-    let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add folder");
+    edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Plug-in folder to add"));
+    let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add plug-in folder");
     let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
     painter.rect_filled(add, 0.0, fill);
     widgets::text_in(painter, add, Align2::CENTER_CENTER, "Add", small.clone(), theme::text_primary());

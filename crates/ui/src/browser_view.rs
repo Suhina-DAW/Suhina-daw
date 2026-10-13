@@ -996,21 +996,18 @@ fn preview_strip(
         return;
     }
     if let Some(peaks) = &info.peaks {
-        let columns = wave.width().max(1.0) as usize;
-        for column in 0..columns {
-            let x = wave.left() + column as f32 + 0.5;
-            let from = column as f64 / columns as f64 * total;
-            let to = (column + 1) as f64 / columns as f64 * total;
-            let (low, high) = peaks.range(from, to);
-            let mid = wave.center().y;
-            let half = wave.height() / 2.0;
-            let color = if x <= played_x { theme::text_secondary() } else { theme::text_hint() };
-            painter.vline(
-                x,
-                (mid - high.clamp(-1.0, 1.0) * half)..=(mid - low.clamp(-1.0, 1.0) * half).max(mid - high * half + 1.0),
-                Stroke::new(1.0, color),
-            );
-        }
+        // The whole file across the width, the part played in the brighter colour.
+        let count = wave.width().max(1.0) as usize;
+        let per_point = if count > 0 { total / count as f64 } else { 0.0 };
+        let columns = crate::waveform::steady_columns(wave.left(), count, 0.0, per_point, 1.0);
+        let shape = crate::waveform::geometry(peaks, wave, &columns, crate::waveform::scale(ui.ctx()));
+        let (done, rest) = (
+            Rect::from_min_max(wave.min, Pos2::new(played_x, wave.bottom())),
+            Rect::from_min_max(Pos2::new(played_x, wave.top()), wave.max),
+        );
+        let clipped = |part: Rect| painter.with_clip_rect(part.intersect(painter.clip_rect()));
+        crate::waveform::paint(&clipped(done), &shape, crate::waveform::Colors::from(theme::text_secondary()));
+        crate::waveform::paint(&clipped(rest), &shape, crate::waveform::Colors::from(theme::text_hint()));
     } else if let Some(notes) = &info.notes {
         let (low, high) = notes.iter().fold((127u8, 0u8), |(l, h), n| (l.min(n.2), h.max(n.2)));
         let span = f32::from(high.saturating_sub(low).max(1));
