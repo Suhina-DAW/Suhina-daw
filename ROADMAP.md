@@ -326,6 +326,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
+- The whole window zooms from 50 % to 200 % (Ctrl and + or -, Cmd on macOS; Ctrl and 0 for
+  100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
+  ([spec](docs/spec/window-zoom.md)).
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
   (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Suhina (Suhina
   Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
