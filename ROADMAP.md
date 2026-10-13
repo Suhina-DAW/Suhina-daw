@@ -189,8 +189,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/suhina-format.md)).
-- Still to do: more commands (notes, clips, sends), MCP resources, asking before closing
-  a project with unsaved changes.
+- Still to do: more commands (notes, clips, sends), MCP resources.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -274,7 +273,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
   as `.suhina` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
   Save as template writes a copy to the templates folder. The tab and window title mark unsaved
-  changes with a dot.
+  changes with a dot, and closing a project, opening another in its place or quitting with
+  unsaved changes asks whether to save them.
 - The **browser** (Ctrl+B shows and hides it, left or right of the view): search (Ctrl+F),
   category filters (All, Samples, MIDI, Instruments, Effects, Presets, Plug-ins), a sidebar of
   Pinned, Recent (by kind) and the folders the user added (a path, or a folder dropped on the
