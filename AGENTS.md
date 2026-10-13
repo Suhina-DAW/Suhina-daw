@@ -103,7 +103,7 @@ docs/
   commands.md generated list of every command (suhina-cli commands --markdown)
 third_party/  vendored source built behind a feature: the ASIO SDK's host part (GPL-3.0, `asio`)
 scripts/   research helpers (e.g. extracting and diffing .als files), docs.py (the docs index) and
-           release_notes.py (release and nightly notes)
+           release_notes.py and discord_post.py (release notes, Discord posts)
 ```
 
 A crate may depend only on crates in its own or a lower layer, never in a cycle. Nothing below

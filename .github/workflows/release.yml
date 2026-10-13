@@ -369,7 +369,7 @@ jobs:
             "${flags[@]}" \
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
-      # Posts the new nightly to the Discord channel whose webhook is the secret DISCORD_WEBHOOK
+      # Posts the new nightly to the Discord releases channel, the secret DISCORD_WEBHOOK_RELEASES
       # (Discord: channel settings > Integrations > Webhooks); without the secret nothing is
       # posted. A failed post leaves the nightly published.
       - name: Tell Discord
@@ -377,10 +377,10 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           PREVIOUS: ${{ steps.previous.outputs.sha }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_RELEASES }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
-            echo "No DISCORD_WEBHOOK secret; nothing posted."
+            echo "No DISCORD_WEBHOOK_RELEASES secret; nothing posted."
             exit 0
           fi
           python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
