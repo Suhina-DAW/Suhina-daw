@@ -9,6 +9,7 @@ covers:
   - crates/als/src/devices.rs
   - crates/als/src/vst2.rs
   - crates/als/tests/synthetic.rs
+  - crates/als/tests/corpus.rs
 ---
 
 # Live Set (`.als`) format
@@ -18,7 +19,7 @@ What we have learned about the Live Set format, from Live Sets we authored ourse
 
 - **Observed with:** Live 12.4.6 (`Creator="Ableton Live 12.4.6"`, `MinorVersion="12.0_12402"`,
   `MajorVersion="5"`), Windows.
-- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`36` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio); series 6, files `110`–`135` (Utility).
+- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`35` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio); series 6, files `110`–`135` (Utility).
 - Every statement marked **(hypothesis)** still needs a corpus file that proves it.
 
 ## Container
@@ -185,12 +186,12 @@ Adding the first clip to an empty track renamed the track after the clip (`4-Aud
 
 ## Devices
 
-Corpus: series 3, files `40`–`44` (Simpler, EQ Eight, and the commercial plug-ins ShaperBox 3
-and Sylenth1 as VST2 and VST3; the plug-in files stay local, see below).
+Corpus: series 3, files `40`–`44` (Simpler, EQ Eight, and two third-party plug-ins, an effect and an
+instrument, as VST2 and VST3; the plug-in files stay local, see below).
 
 A track's device chain is `DeviceChain/DeviceChain/Devices`, devices in chain order. The main
 track has the same structure. Adding an instrument to a track named after its first clip renamed
-it after the device (`1-MIDI` → `1-Simpler`, later `1-Sylenth1`).
+it after the device (`1-MIDI` → `1-Simpler`, later after the plug-in).
 
 Every device has `On/Manual@Value` (the device on/off switch; turning EQ Eight off changed it
 from `true` to `false`) and `UserName@Value` (empty unless renamed).
@@ -212,6 +213,11 @@ with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, b
 | Location | `Path@Value`: absolute path of the `.dll` on the saving machine (**personal data**) | none |
 | Other | `Version`, `NumberOfParameters`, `Category`, window position | `DeviceType` (`1` for the instrument, `2` for the effect **(hypothesis)**), window position |
 
+The importer keeps a VST3 `ProcessorState` as the device's state and `ControllerState` in the
+`Vst3ControllerState` extension. A VST2 `Path` is kept in the `VstPath` extension, so it is
+saved with the project (`.locr` writes extensions) and goes with it when the project is shared.
+A plug-in of another kind (Audio Unit, CLAP) is skipped with a warning.
+
 The VST3 `Uid` fields, each written as eight hex digits and joined, give the class id in the
 canonical text form the VST3 scanner and `moduleinfo.json` use: checked against the scanned
 catalog for 21 different VST3 plug-ins across 169 Live Sets, all equal.
@@ -219,7 +225,8 @@ catalog for 21 different VST3 plug-ins across 169 Live Sets, all equal.
 Plug-in state is the plug-in vendor's own format. Suhina keeps it verbatim and hands it back
 to the plug-in. For VST2, `VstPreset` also says how the `Buffer` is laid out, and the importer
 wraps it in the standard VST2 bank (an `.fxb` file's contents, `crates/als/src/vst2.rs`), which
-is what the model keeps and what a VST3 version of the plug-in reads:
+is what the model keeps and what a VST3 version of the plug-in reads. The bank's layout follows
+the VST3 SDK's `vst2persistence.h` (MIT, linked from ADR 0006), not the VST2 SDK:
 
 | `VstPreset` child | Meaning |
 |---|---|
@@ -230,8 +237,10 @@ is what the model keeps and what a VST3 version of the plug-in reads:
 | `UniqueId` | the plug-in id again |
 
 Checked on a real project's 14 VST2 plug-ins: every `FxBk` buffer is exactly
-`ProgramCount × (28 + 4 × ParameterCount)` bytes. State of another `Type`, or a buffer of the
-wrong length, is kept unread in the `VstPresetBuffer` extension with a warning. **Never commit a corpus file that contains a commercial plug-in's state.**
+`ProgramCount × (28 + 4 × ParameterCount)` bytes. State the importer cannot wrap (another `Type`, a buffer of
+the wrong length, an unknown `ByteOrder`, missing counts, more than 65 536 programs or
+parameters) is kept unread in the `VstPresetBuffer` extension with a warning; a missing
+`ByteOrder` is read as `2`. **Never commit a corpus file that contains a commercial plug-in's state.**
 
 ### Utility (`StereoGain`)
 

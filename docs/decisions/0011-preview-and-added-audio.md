@@ -3,13 +3,14 @@ description: How a sample added while the project plays reaches the engine, and 
 read_when: preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, MIDI preview, browser sound
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/engine/src/preview.rs
   - crates/engine/src/swap.rs
   - crates/session/src/preview.rs
   - crates/session/src/files.rs
   - crates/session/src/lib.rs
+  - crates/media/src/lib.rs
 ---
 
 # 0011: Previewing, and audio added to a playing project
@@ -55,7 +56,7 @@ run the same code.
    on the controller's thread, as retired graphs are; when that queue is full the voice keeps
    the old one and takes nothing new until it can. The voice is mixed into the output after the
    track chains, so the project's main volume does not change it, and it plays whether the
-   transport runs or not. `LauncherMonitor` publishes whether it plays and its position.
+   transport runs or not. `PreviewMonitor` (`Controller::preview_monitor`) publishes whether it plays and its position.
 5. **A sample preview reads the file at its own rate,** stepping by file rate / engine rate with
    linear interpolation, as an unwarped clip does, with the click guard at its start and end.
 6. **A MIDI preview plays through the chosen track's chain** when that chain starts with an
@@ -66,11 +67,11 @@ run the same code.
    in (preview commands are taken once the chains have begun the block). A track without an
    instrument plays through a
    **fallback instrument**: an FM synth made and prepared on the controller's thread (in
-   `Controller::preview_notes`) and sent with the notes, processed into a buffer of its own and
+   `Controller::preview_instrument`, packed with the notes by `preview_notes`) and sent with the notes, processed into a buffer of its own and
    mixed with the sample preview.
 7. **Offline renders include the preview voice** like everything else, so tests render previews
    through the same `process`.
-8. **Commands:** `preview.play {path, from?, track?}` and `preview.stop` are Transport commands;
+8. **Commands:** `preview.play {path, from?, gain?, track?}` and `preview.stop` are Transport commands;
    they fail when no player is attached, like `transport.play`. The window decodes a preview
    on a thread and passes it with `Session::provide_audio` first, so the command finds it
    decoded.

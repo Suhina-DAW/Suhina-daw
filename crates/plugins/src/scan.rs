@@ -34,7 +34,7 @@ const CATALOG_VERSION: u64 = 2;
 pub struct PluginInfo {
     /// The file (or bundle) that holds it.
     pub path: PathBuf,
-    /// The plug-in's own stable id, such as `com.u-he.diva`.
+    /// The plug-in's own stable id, such as `com.example.synth`.
     pub id: String,
     pub name: String,
     pub vendor: String,

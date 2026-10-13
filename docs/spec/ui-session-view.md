@@ -6,9 +6,11 @@ status: draft
 last_verified: 2026-10-12
 covers:
   - crates/ui/src/session_view.rs
-  - crates/engine/src/lib.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/app.rs
+  - crates/ui/src/widgets.rs
+  - crates/ui/src/detail_view.rs
+  - crates/engine/src/cpu.rs
 ---
 
 # UI: main window and Session view
@@ -128,9 +130,10 @@ area at the end accepts dropped devices. Plug-ins show their name and an option 
 own window. Suhina shows where the plug-in stands (loading, running, missing, crashed) and a
 button that opens or closes its editor, or restarts it after a crash
 ([components](../design/components.md) › Device panel). With the setting Plug-ins › Editors ›
-Device view, the editor opens inside the panel under that line: the device grows as wide as
-the editor and the panel as tall as the tallest open editor; what does not fit is cut off at
-the panel's edge, and the editor goes with its track (shown only while the track is).
+Device view, the editor opens inside the panel under that line: in a row the device grows as wide as the
+editor and the panel as tall as the tallest open editor; stacked, the device grows as tall as
+its editor, which is cut off at the column's right edge; what does not fit is cut off at the
+panel's edge, and the editor goes with its track (shown only while the track is).
 
 ## Shortcuts (to observe and list)
 
@@ -138,6 +141,9 @@ Tab (Session/Arrangement), Ctrl+D (duplicate), Ctrl+T / Ctrl+Shift+T / Ctrl+Alt+
 MIDI / return track), Ctrl+I (insert scene), Ctrl+Shift+I (capture and insert scene), Space
 (play/stop), Enter (launch selected), arrow keys (move selection), 0 (deactivate) **(to observe:
 full list)**.
+
+**Suhina:** its keys and how to change them are in [shortcuts](../shortcuts.md); Ctrl+T there
+opens New or open, not a new track.
 
 ## Open
 
