@@ -15,6 +15,8 @@ pub mod loading_dialog;
 pub mod menus;
 pub mod motion;
 pub mod project_dialog;
+pub mod sample_map;
+pub mod sample_map_panel;
 pub mod session_view;
 pub mod settings;
 pub mod settings_view;

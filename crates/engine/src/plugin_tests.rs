@@ -364,6 +364,28 @@ fn a_plug_in_on_a_muted_track_keeps_running_and_sounds_again() {
     let _ = key;
 }
 
+/// A stopped preview's note-off reaches the track's instrument on the first frame of the block
+/// the stop is applied in, whatever the block size (#156); it came one block late.
+#[test]
+fn a_stopped_preview_releases_its_note_on_the_frame_the_stop_applies() {
+    for size in [512usize, 300] {
+        let p = project(Vec::new(), 8.0, vec![plug(vst3())]);
+        let stand = Stand::new(Behaviour::Instrument);
+        let seen = Arc::clone(&stand.seen);
+        let mut renderer =
+            Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins(&p, vec![(stand, INSTRUMENT)])).unwrap();
+        let mut controller = renderer.controller();
+        let notes = crate::preview_notes([(0.0, 64.0, 60, 1.0)], 120.0, SR, Some(TrackId(1)), None);
+        controller.preview_notes(notes, 1.0).unwrap();
+        blocks(&mut renderer, 2, size);
+        controller.preview_stop().unwrap();
+        blocks(&mut renderer, 2, size);
+        let seen = seen.lock().unwrap();
+        let off = seen.iter().find(|(_, e)| matches!(e, NoteEvent::Off { key: 60, .. })).map(|(at, _)| *at);
+        assert_eq!(off, Some(2 * size), "block {size}: {seen:?}");
+    }
+}
+
 #[test]
 fn a_plug_in_instrument_is_released_when_the_transport_stops() {
     let p = project(vec![note(0.0, 8.0, 60)], 8.0, vec![plug(vst3())]);

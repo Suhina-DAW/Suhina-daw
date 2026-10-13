@@ -172,6 +172,8 @@ impl LoopwerkMcp {
         let _ = library.start();
         if let Ok(mut projects) = self.projects.lock() {
             projects.set_file_library(library);
+            // And the sample map's analysis of its samples (`soundmap.*`, ADR 0013).
+            projects.start_sound_map();
         }
         self
     }
@@ -481,6 +483,16 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, 
             let folder = params.get("folder").and_then(Value::as_str).ok_or("folder must be a text")?;
             params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));
         }
+        "soundmap.analyse" => {
+            if let Some(folder) = params.get("folder").and_then(Value::as_str) {
+                params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));
+            }
+        }
+        "soundmap.similar" | "soundmap.info" => {
+            confine_file(workspace, &mut params, "item")?;
+            confine_place(workspace, &mut params)?;
+        }
+        "soundmap.layout" => confine_place(workspace, &mut params)?,
         "library.search" => {
             if let Some(place) = params.get("place").and_then(Value::as_str)
                 && place != "pinned"
@@ -505,6 +517,17 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, 
         _ => {}
     }
     Ok(params)
+}
+
+/// A folder `place` must be below the read root; `pinned` and `recent:…` are the library's own.
+fn confine_place(workspace: &Workspace, params: &mut Value) -> Result<(), String> {
+    if let Some(place) = params.get("place").and_then(Value::as_str)
+        && place != "pinned"
+        && !place.starts_with("recent:")
+    {
+        params["place"] = json!(display_path(&workspace.readable_folder(place)?));
+    }
+    Ok(())
 }
 
 fn confine_file(workspace: &Workspace, params: &mut Value, name: &str) -> Result<(), String> {
@@ -644,6 +667,10 @@ mod confine_tests {
             ("library.search", json!({ "place": dir.join("outside").display().to_string() })),
             ("library.info", json!({ "item": outside.clone() })),
             ("library.tag", json!({ "item": format!("{outside}#3"), "tag": "Red", "on": true })),
+            ("soundmap.layout", json!({ "place": dir.join("outside").display().to_string() })),
+            ("soundmap.similar", json!({ "item": outside.clone() })),
+            ("soundmap.info", json!({ "item": outside.clone() })),
+            ("soundmap.analyse", json!({ "folder": dir.join("outside").display().to_string() })),
         ] {
             assert!(confine(&workspace, id, params.clone()).is_err(), "{id} {params}");
         }
@@ -651,6 +678,7 @@ mod confine_tests {
         assert_eq!(confine(&workspace, "library.pin", kept.clone()).unwrap(), kept);
         let place = json!({ "place": "recent:samples" });
         assert_eq!(confine(&workspace, "library.search", place.clone()).unwrap(), place);
+        assert_eq!(confine(&workspace, "soundmap.layout", place.clone()).unwrap(), place);
         let voice = confine(&workspace, "library.info", json!({ "item": "bank.syx#4" })).unwrap();
         assert!(voice["item"].as_str().unwrap().ends_with("bank.syx#4"));
         let _ = std::fs::remove_dir_all(&dir);

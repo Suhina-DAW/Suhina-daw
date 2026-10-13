@@ -14,6 +14,7 @@ loopwerk-library.workspace = true
 loopwerk-media.workspace = true
 loopwerk-device-api.workspace = true
 loopwerk-device-registry.workspace = true
+loopwerk-soundmap.workspace = true
 serde_json.workspace = true
 egui = "0.36"  # MIT OR Apache-2.0
 

@@ -62,7 +62,9 @@ run the same code.
    instrument (built-in or plug-in): the voice gives the chain note-ons and note-offs at their
    frames, so the track's effects and mix apply. It holds its own notes apart from the
    arrangement's and, when it stops, a graph swap replaces the chain, or the transport stops,
-   it sends note-offs for the keys it holds. A track without an instrument plays through a
+   it sends note-offs for the keys it holds, on the first frame of the block the stop applies
+   in (preview commands are taken once the chains have begun the block). A track without an
+   instrument plays through a
    **fallback instrument**: an FM synth made and prepared on the controller's thread (in
    `Controller::preview_notes`) and sent with the notes, processed into a buffer of its own and
    mixed with the sample preview.

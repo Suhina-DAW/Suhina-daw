@@ -64,6 +64,9 @@ pub(crate) struct Chain {
     /// The index of the bus chain this chain's output goes into, or `None` for the output. Bus
     /// chains come after the chains that feed them, so they run after them in a block.
     pub(crate) target: Option<usize>,
+    /// Some chain plays into this one (a group bus): it runs after them, in order, rather than
+    /// in the stages the other chains run their plug-ins in together. Set with `target`.
+    pub(crate) is_bus: bool,
     buffer: Vec<f32>,
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
@@ -171,6 +174,7 @@ impl Chain {
             delay: Delay::new(0),
             post: (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN),
             target: None,
+            is_bus: false,
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
@@ -199,6 +203,7 @@ impl Chain {
             delay: Delay::new(0),
             post: (1.0, 1.0),
             target: None,
+            is_bus: false,
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::new(),
             span_events: Vec::new(),
@@ -238,12 +243,13 @@ impl Chain {
     }
 
     /// Runs the devices over the rest of the block one stage further, for chains that run
-    /// their plug-ins at the same time: built-in devices run here; at the next plug-in that
-    /// takes the block without waiting, the block is handed over and this returns true, for
-    /// [`Chain::collect`] to wait for it once every chain has handed its block over. Returns
-    /// false once every device has run (a plug-in that cannot take a block that way runs as
-    /// in [`Chain::finish`]).
-    pub(crate) fn advance(&mut self, frames: usize) -> bool {
+    /// their plug-ins at the same time: built-in devices run here, with the block's `context`;
+    /// at the next plug-in that takes the block without waiting, the block is handed over and
+    /// this returns true, for [`Chain::collect`] to wait for it once every chain has handed its
+    /// block over. Returns false once every device has run (a plug-in that cannot take a block
+    /// that way runs as in [`Chain::finish`]).
+    pub(crate) fn advance(&mut self, frames: usize, context: &ProcessContext) -> bool {
+        self.context = *context;
         if self.waiting.is_some() {
             return true;
         }

@@ -58,6 +58,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Show or hide the browser (`view.browser`) | Ctrl+B |
+| Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
 | Search in the browser (`browser.search`; shows it when hidden). In the search field: Up and Down move through the results, Enter adds the selection to the selected track, Escape clears the search and then leaves the field | Ctrl+F |
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
