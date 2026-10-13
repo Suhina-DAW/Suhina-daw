@@ -6,7 +6,8 @@ render of the same scenario by the original MSFA engine as Dexed ships it. The p
 to within 1e-6.
 
 - `scenarios.txt`: the voices, performance settings and notes. The voices were written for
-  these tests; none comes from a product's library.
+  these tests; none comes from a product's library. `init` is the FM synth's default voice,
+  `Patch::default()` ([spec](../../../../docs/spec/dx7-voice-format.md) › The default voice).
 - `<name>.f32`: the reference renders, little-endian 32-bit floats, one channel, every n-th
   frame as the scenario says.
 
