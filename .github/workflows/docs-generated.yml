@@ -17,11 +17,12 @@ name: Generated docs
 # or its dependencies (build scripts, proc macros): `generate` builds and writes the files with no
 # secrets; `publish` runs only git, copies exactly those files and pushes them.
 #
-# The push uses a deploy key that the main ruleset lets bypass pull requests. Setup:
-# `ssh-keygen -t ed25519 -N "" -f docs-bot`; add docs-bot.pub under Settings › Deploy keys with
-# write access; create the environment `docs-bot` (Settings › Environments) limited to the `main`
-# branch, with docs-bot as its secret DOCS_DEPLOY_KEY; add "Deploy keys" to the bypass list of the
-# main ruleset. Without the secret the files are generated but not pushed.
+# The push uses a short-lived token of the GitHub App `suhina-docs-bot`, which the main ruleset
+# lets bypass pull requests (the organisation does not allow deploy keys). Setup: the app has
+# Repository permissions › Contents: Read and write and is installed on this repository only; the
+# environment `docs-bot` (Settings › Environments), limited to the `main` branch, holds its App ID
+# as DOCS_BOT_APP_ID and a private key as DOCS_BOT_PRIVATE_KEY; the app is on the bypass list of
+# the main ruleset (Always). Without the secrets the files are generated but not pushed.
 on:
   push:
     branches: [main]
@@ -76,10 +77,20 @@ jobs:
     needs: generate
     runs-on: ubuntu-latest
     environment: docs-bot
+    env:
+      HAS_APP: ${{ secrets.DOCS_BOT_APP_ID != '' && secrets.DOCS_BOT_PRIVATE_KEY != '' }}
     steps:
+      # A token that lives for this run only, scoped to this repository's contents.
+      - name: Token of the docs bot app
+        id: app-token
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
-          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
       - uses: actions/download-artifact@v4
         with:
           name: generated-docs
@@ -87,7 +98,6 @@ jobs:
       - name: Commit and push when they changed
         env:
           GENERATED: ${{ runner.temp }}/generated
-          HAS_KEY: ${{ secrets.DOCS_DEPLOY_KEY != '' }}
         run: |
           for name in INDEX.md commands.md; do
             source="$GENERATED/$name"
@@ -118,8 +128,8 @@ jobs:
             exit 1
           fi
           git diff --stat
-          if [ "$HAS_KEY" != "true" ]; then
-            echo "::warning::DOCS_DEPLOY_KEY is not set in the docs-bot environment, so the files are not pushed."
+          if [ "$HAS_APP" != "true" ]; then
+            echo "::warning::DOCS_BOT_APP_ID or DOCS_BOT_PRIVATE_KEY is not set in the docs-bot environment, so the files are not pushed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
