@@ -223,7 +223,7 @@ renderer without a deadline.
   with a command channel ([ADR 0008](decisions/0008-patch-devices.md), proposed).
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;
   launched clips' stretch voices still run on the audio thread.
-- **Project files:** asking before closing a project with unsaved changes, autosave, and a
+- **Project files:** autosave, and a
   package that carries its audio ([ADR 0010](decisions/0010-project-files.md) › Not decided yet).
 - **Device automation and more chains:** automation of device parameters, and chains on return
   and master channels ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).

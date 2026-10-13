@@ -72,5 +72,3 @@ the layer that owns sessions.
   open project, with the files they refer to.
 - **Background playback:** whether a background project may keep playing (for example a
   reference track), and how its output is routed.
-- **Unsaved changes on close:** a tab marks unsaved changes (`Session::has_unsaved_changes`),
-  but closing still drops them without asking to save.
