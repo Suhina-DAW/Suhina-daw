@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use serde_json::{Value, json};
-use suhina_library::find::{MAX_NAMES, rank_candidates, walk_for_names};
+use suhina_library::find::{MAX_CANDIDATES, MAX_NAMES, rank_candidates, walk_for_names};
 use suhina_model::LaneData;
 
 use crate::{CommandError, Projects, Session};
@@ -130,8 +130,9 @@ pub(crate) fn find_files(projects: &mut Projects, params: &Value) -> Result<Valu
 }
 
 /// Candidates for each name: with `folder`, from walking it; otherwise from the browser's index
-/// and a walk of the active project's folder. Each name's candidates come best first for where
-/// the active project's missing file of that name was.
+/// and a walk of the active project's folder, without repeats. Each name's candidates come best
+/// first for where the active project's missing file of that name was, at most
+/// [`MAX_CANDIDATES`].
 pub fn search(
     projects: &mut Projects,
     names: &[String],
@@ -180,6 +181,8 @@ pub fn search(
     for (name, paths) in &mut found {
         let last = last_paths.iter().find(|(n, _)| *n == name.to_lowercase()).map(|(_, p)| p.clone());
         rank_candidates(&last.unwrap_or_else(|| PathBuf::from(name.as_str())), paths);
+        // The index and the project folder give up to MAX_CANDIDATES each; the best of both stay.
+        paths.truncate(MAX_CANDIDATES);
     }
     Ok((found, note))
 }

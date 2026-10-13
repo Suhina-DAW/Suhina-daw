@@ -124,3 +124,32 @@ fn missing_files_are_listed_found_and_relinked_in_one_undo_step() {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[test]
+fn candidates_from_the_index_and_the_project_folder_are_capped_together() {
+    let settings = temp("cap-settings");
+    let library_folder = temp("cap-library");
+    let project_folder = temp("cap-project");
+    for i in 0..40 {
+        wav(&library_folder.join(format!("pack{i:02}")).join("kick.wav"));
+        wav(&project_folder.join(format!("take{i:02}")).join("kick.wav"));
+    }
+    let song = project_folder.join("song.locr");
+    Session::new(blank_project()).save(&song, false).unwrap();
+    let (session, _) = Session::open(&song).unwrap();
+
+    let plugins = suhina_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
+    let mut p = Projects::with_library(plugins);
+    p.set_file_library(Library::new(Some(settings.clone())));
+    p.add(session, None).unwrap();
+    run(&mut p, "library.addFolder", json!({ "folder": library_folder.display().to_string() })).unwrap();
+
+    let found = run(&mut p, "library.findFiles", json!({ "names": ["kick.wav"] })).unwrap();
+    let paths: Vec<&str> = found["found"][0]["paths"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(paths.len(), suhina_library::find::MAX_CANDIDATES);
+    let unique: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+    assert_eq!(unique.len(), paths.len(), "no candidate twice");
+    for dir in [&settings, &library_folder, &project_folder] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
