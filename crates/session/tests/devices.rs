@@ -165,7 +165,7 @@ fn plug_in_commands_need_a_plug_in_and_a_playing_project() {
     assert_eq!(run(&mut session, "device.plugin", device.clone()).unwrap()["status"], "stopped");
     let listed = run(&mut session, "track.devices", json!({ "track": 1 })).unwrap();
     assert_eq!(listed[1]["plugin"]["status"], "stopped");
-    assert!(listed[0].get("plugin").is_none(), "a built-in device has no plug-in");
+    assert!(listed[0].get("plugin").is_none(), "a built-in effect or instrument has no plug-in");
     assert!(run(&mut session, "device.openEditor", device.clone()).is_err());
     assert!(run(&mut session, "device.restart", device).is_err());
     let built_in = run(&mut session, "device.openEditor", json!({ "track": 1, "device": 0 })).unwrap_err();

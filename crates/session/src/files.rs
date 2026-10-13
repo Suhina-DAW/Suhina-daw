@@ -187,17 +187,22 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
     // What the device is decides the kind when none is given.
     let device_role = match (device, preset) {
         (_, Some(_)) => Some(Role::Instrument),
-        (Some(id), None) => match suhina_device_registry::info(id) {
-            Some(info) => Some(info.role),
-            None => {
-                let env = session.plugins.env().ok_or_else(|| format!("no built-in device or plug-in {id:?}"))?;
-                let plugin =
+        (Some(id), None) => {
+            match suhina_device_registry::info(id) {
+                Some(info) => Some(info.role),
+                None => {
+                    let env = session
+                        .plugins
+                        .env()
+                        .ok_or_else(|| format!("no built-in effect, instrument or plug-in {id:?}"))?;
+                    let plugin =
                     env.catalog.find(id).or_else(|| env.catalog.plugins().find(|p| p.spec() == id)).ok_or_else(
-                        || format!("no built-in device or plug-in {id:?}; devices.list and plugins.list list them"),
+                        || format!("no built-in effect, instrument or plug-in {id:?}; devices.list and plugins.list list them"),
                     )?;
-                Some(if crate::is_instrument(plugin) { Role::Instrument } else { Role::Effect })
+                    Some(if crate::is_instrument(plugin) { Role::Instrument } else { Role::Effect })
+                }
             }
-        },
+        }
         (None, None) => None,
     };
     let kind = match text(params, "kind")? {

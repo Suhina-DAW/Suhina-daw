@@ -23,7 +23,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
-| [0004: Built-in devices](decisions/0004-built-in-devices.md) | decision | current | device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance | The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate |
+| [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) | decision | current | device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance | The interface of built-in effects and instruments (Device trait, parameters, real-time rules, contract tests) and the dsp crate |
 | [0005: Edits while playing](decisions/0005-edits-while-playing.md) | decision | current | edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26 | How edits reach an engine that is already playing — a new graph built off the audio thread and swapped in at an exact frame |
 | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) | decision | current | plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor | How third-party plug-ins are hosted out of process (process model, IPC, deadline, crashes), the unsafe exception, formats and the VST2 policy |
 | [0007: Several open projects](decisions/0007-several-open-projects.md) | decision | current | tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId | Several projects open at once like tabs, one active; where commands go, which project plays, and what is left for later |
@@ -74,12 +74,12 @@ Change this code, and check these documents.
 | `crates/als/tests/synthetic.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/automation/src/server.rs` | [Architecture](architecture.md), [MCP server](mcp.md) |
 | `crates/automation/src/workspace.rs` | [MCP server](mcp.md) |
-| `crates/device-api/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
-| `crates/device-registry/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
-| `crates/dsp/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/device-api/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
+| `crates/device-registry/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
+| `crates/dsp/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/audio.rs` | [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/engine/src/chain.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md) |
 | `crates/engine/src/launcher.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
@@ -107,7 +107,7 @@ Change this code, and check these documents.
 | `crates/session/src/audio.rs` | [Architecture](architecture.md), [MCP server](mcp.md) |
 | `crates/session/src/blank.rs` | [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/session/src/devices.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/session/src/devices.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/session/src/files.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |
 | `crates/session/src/lib.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/library.rs` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
@@ -142,7 +142,7 @@ Change this code, and check these documents.
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/waveform.rs` | [Components](design/components.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md) |
-| `devices/**` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `devices/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |
 | `scripts/stems-fixture.py` | [Stems files](spec/stems-format.md) |

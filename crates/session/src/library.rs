@@ -1,5 +1,5 @@
 //! Commands for the browser's library (`docs/spec/browser.md` › Commands, ADR 0012): the
-//! folders, searching them with the built-in devices and installed plug-ins, what a file is,
+//! folders, searching them with the built-in effects and instruments, and installed plug-ins, what a file is,
 //! pins, recent items and colour tags. They belong to Suhina, not to one project, so they run
 //! on [`Projects`] like the `plugins.*` commands, and never change a project.
 
@@ -57,7 +57,7 @@ static LIBRARY_COMMANDS: &[CommandSpec<Projects>] = &[
     },
     CommandSpec {
         id: "library.search",
-        label: "Search the folders' files, the built-in devices and the installed plug-ins; every word must appear in an item's name or path, best matches first",
+        label: "Search the folders' files, the built-in effects and instruments, and the installed plug-ins; every word must appear in an item's name or path, best matches first",
         params: &[
             optional("text", ParamType::Text, "the words to find (default: everything)"),
             optional(
@@ -393,7 +393,7 @@ pub fn search_items(
     }
     let within = place.map(PathBuf::from);
     let mut ranked: Vec<(u8, Found)> = Vec::new();
-    // Built-in devices and plug-ins, unless a folder is the place.
+    // Built-in effects and instruments, and plug-ins, unless a folder is the place.
     if within.is_none() {
         for info in suhina_device_registry::DEVICES {
             let kind = if info.role == Role::Instrument { "instrument" } else { "effect" };
@@ -500,7 +500,8 @@ fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
     let tags = projects.file_library_mut().item_tags(&item.key());
     let mut out = match &item {
         Item::Device(id) => {
-            let info = suhina_device_registry::info(id).ok_or_else(|| format!("no built-in device {id:?}"))?;
+            let info =
+                suhina_device_registry::info(id).ok_or_else(|| format!("no built-in effect or instrument {id:?}"))?;
             json!({ "kind": if info.role == Role::Instrument { "instrument" } else { "effect" }, "name": info.name })
         }
         Item::Plugin(spec) => {

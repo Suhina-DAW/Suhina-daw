@@ -14,13 +14,12 @@ Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
-## Built-in devices
+## Built-in effects and instruments
 
 Instruments and effects that ship with Suhina. They run inside the engine (rule 5 covers
 third-party plug-ins only), so they follow the real-time and never-crash rules like the engine
 itself. Written in Rust; DSP from GPL-compatible open-source projects may be ported (rule 9) with
-its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md). An ADR comes before
-the first device.
+its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
 - **Crates, in this repository:** `dsp` (filters, oscillators, envelopes, delay lines,
   convolution, oversampling; no engine or model dependency), `device-api` (the device trait,
@@ -32,9 +31,10 @@ the first device.
   overdrive, the compressor, the limiter and the FM synth (the first instrument: the DX7-style
   engine ported from MSFA, with DX7 voice files) exist and are tested on their own. The engine
   runs them in chains on tracks: a track's sound goes through its devices before its fader, and
-  an instrument first in the chain plays the track's notes (LOOP-35); `device.*` commands add,
+  an instrument first in the chain plays the track's notes; `device.*` commands add,
   remove, switch and set them.
-  Chains on group and master channels, and automation, come next.
+  A group with devices is a bus (ADR 0004 › 10). Chains on return and master channels, sends
+  into chains, and automation come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Suhina device for the
   most used ones. Which stored device lands in which Suhina device, and how each mapping is learnt
@@ -120,7 +120,8 @@ command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-
 
 FL Studio projects (`.flp`), automation, sends and returns in the mix (groups and the master
 already apply volume and mute), MIDI controllers and Push (from Ableton's published Push interface
-docs), Max for Live devices kept as placeholders and copied along with the project, bridging Windows
+docs), devices of an imported project that Suhina cannot run kept as placeholders and copied along
+with the project ([device import](docs/spec/device-import.md)), bridging Windows
 plug-ins.
 
 **Patch devices:** devices built by the community as Pure Data patches, with access to
@@ -138,7 +139,7 @@ Linux is the primary platform; Windows and macOS are supported.
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
   Windows and macOS when started by hand and in every release build.
 - Clean-room rules for people and agents ([`CONTRIBUTING.md`](CONTRIBUTING.md)) and the agent
-  guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe`, real-time safety, sandboxed plug-ins.
+  guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe` outside the two plug-in hosting crates, real-time safety, sandboxed plug-ins.
 - DAW-neutral project model: tracks and mixer channels apart, a pool of clip contents placed by
   clips, so per-track clips and shared patterns both fit
   ([ADR 0001](docs/decisions/0001-daw-neutral-model.md)).
@@ -159,8 +160,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M2 Playing
 - `suhina-cli play` plays a set, or one launcher scene, on the default audio device; `render`
   writes a 32-bit float WAV. Both run the same engine code.
-- Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
-  instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
+- Built-in effects and instruments on a track run in a chain before its fader; MIDI notes play
+  on the track's instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
   master volume and mute apply. A group with devices is a bus: its devices run over the sum of
   its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
   track, with a voice from a DX7 file; `suhina-cli fm-synth voices` lists a file's voices.

@@ -113,10 +113,10 @@ sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 | 61 | `61-audio-warp-off.als` | Session audio clip on 4-loopwerk-demo: Warp off. |
 | 62 | `62-audio-unwarped-loop-start.als` | Move the loop **Position** to about one second. Log the exact value Live shows. |
 
-## Series 6: built-in devices
+## Series 6: devices
 
 Teaches the importer how Live stores the parameters of its own devices, so they can be mapped
-onto Suhina's devices (ROADMAP › Built-in devices, step 1), and gives a bounce of each
+onto Suhina's devices (ROADMAP › Built-in effects and instruments, step 1), and gives a bounce of each
 setting to compare Suhina's sound with. It works differently from series 1–4 in three ways:
 
 - **Its own project:** `corpus/devices/`, so device files do not mix with the format series.

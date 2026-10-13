@@ -346,7 +346,7 @@ workspace forbids.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
-  engine's track chain together with built-in devices (LOOP-35, done, #100); editors (Windows
+  engine's track chain together with built-in effects and instruments (LOOP-35, done, #100); editors (Windows
   and X11 done, floating and embedded in the device panel).
 - **In the engine (#100).** The engine never sees `plugins`: a plug-in device's slot in a
   track's chain holds a `PluginProcessor` (`crates/engine/src/plugin.rs`), which the session

@@ -143,7 +143,7 @@ fn a_plug_in_effect_processes_the_tracks_sound() {
     let half: Vec<f32> = dry.iter().map(|s| s * 0.5).collect();
     assert!(max_diff(&wet, &half) < 1e-6, "{}", max_diff(&wet, &half));
 
-    // A plug-in with built-in devices around it: one after the other.
+    // A plug-in with built-in effects and instruments around it: one after the other.
     let p = project(vec![note(0.0, 2.0, 69)], 2.0, vec![device("utility", &[("gain", -6.0206)]), plug(vst3())]);
     let both = render_offline_with_plugins(
         &p,

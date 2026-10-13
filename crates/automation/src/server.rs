@@ -351,7 +351,7 @@ impl SuhinaMcp {
     }
 
     #[tool(
-        description = "Render the arrangement (or one launcher scene, or a script of clip launches) offline to a 32-bit float stereo WAV below the write root. Built-in devices and installed plug-ins (found in the plug-in catalog, with their saved state) run as in playback; notes on a track without an instrument play as sine tones; audio clips play. `plugins` in the result lists plug-ins that are missing or did not start."
+        description = "Render the arrangement (or one launcher scene, or a script of clip launches) offline to a 32-bit float stereo WAV below the write root. Built-in effects and instruments, and installed plug-ins (found in the plug-in catalog, with their saved state) run as in playback; notes on a track without an instrument play as sine tones; audio clips play. `plugins` in the result lists plug-ins that are missing or did not start."
     )]
     async fn project_render(&self, Parameters(p): Parameters<RenderParams>) -> Result<CallToolResult, McpError> {
         let path = match self.workspace.writable(&p.output, p.overwrite.unwrap_or(false)) {

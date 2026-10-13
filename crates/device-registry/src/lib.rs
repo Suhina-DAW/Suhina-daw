@@ -1,10 +1,10 @@
-//! Every built-in device by its stable id (ADR 0004): what the model stores as
+//! Every built-in effect or instrument by its stable id (ADR 0004): what the model stores as
 //! `DeviceKind::Builtin(id)` turns into a running device here. The engine builds device chains
 //! through this crate; front ends list what can be added.
 
 use suhina_device_api::{Device, DeviceInfo};
 
-/// The built-in devices, in the order a device browser lists them.
+/// The built-in effects and instruments, in the order a device browser lists them.
 pub const DEVICES: [&DeviceInfo; 8] = [
     &suhina_device_fm_synth::INFO,
     &suhina_device_utility::INFO,
@@ -40,7 +40,7 @@ pub fn create(id: &str) -> Option<Box<dyn Device>> {
 /// Largest preset file read.
 pub const MAX_PRESET_BYTES: usize = 64 * 1024;
 
-/// A device's values from a preset file (`docs/spec/browser.md` › Built-in devices, presets
+/// A device's values from a preset file (`docs/spec/browser.md` › Built-in effects and instruments, presets
 /// and plug-ins).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preset {
