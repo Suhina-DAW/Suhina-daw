@@ -88,7 +88,10 @@ impl HostGuiImpl for Shared {
 struct ClapEditor {
     window: crate::window::Window,
     size: crate::window::Size,
+    /// The user may resize the window (a floating one the plug-in allows it for).
     resizable: bool,
+    /// A size the editor got since the engine was last told, by the plug-in or the user.
+    resized: Option<crate::window::Size>,
 }
 
 /// How the editor is embedded on this system.
@@ -321,7 +324,10 @@ impl ClapPlugin {
         let audio_pending = pending.clone();
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(stopped, served, has_input, audio_pending, &audio_stop))
+            .spawn(move || {
+                crate::real_time_thread();
+                serve(stopped, served, has_input, audio_pending, &audio_stop)
+            })
             .map_err(|e| e.to_string())?;
         let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
         Ok(Self { instance, audio: Some(audio), stop, latency, pending, editor: None, name })
@@ -385,8 +391,8 @@ impl ClapPlugin {
         self.instance.access_shared_handler(|s| s.gui.get().copied().flatten())
     }
 
-    /// Opens the plug-in's editor (or returns the size of the one open).
-    pub(crate) fn open_editor(&mut self) -> Result<crate::window::Size, String> {
+    /// Opens the plug-in's editor as `mode` says (or returns the size of the one open).
+    pub(crate) fn open_editor(&mut self, mode: crate::window::Mode) -> Result<crate::window::Size, String> {
         if let Some(editor) = &self.editor {
             return Ok(editor.size);
         }
@@ -404,8 +410,8 @@ impl ClapPlugin {
             .get_size(&handle)
             .map(|s| crate::window::Size { width: s.width.clamp(1, 16_384), height: s.height.clamp(1, 16_384) })
             .unwrap_or(crate::window::Size { width: 800, height: 600 });
-        let resizable = gui.can_resize(&handle);
-        let window = match crate::window::Window::open(&self.name, size, resizable) {
+        let resizable = gui.can_resize(&handle) && mode == crate::window::Mode::Floating;
+        let window = match crate::window::Window::open_as(mode, &self.name, size, resizable) {
             Ok(window) => window,
             Err(e) => {
                 gui.destroy(&handle);
@@ -419,8 +425,20 @@ impl ClapPlugin {
             return Err("the plug-in's editor did not open".into());
         }
         let _ = gui.show(&handle);
-        self.editor = Some(ClapEditor { window, size, resizable });
+        self.editor = Some(ClapEditor { window, size, resizable, resized: None });
         Ok(size)
+    }
+
+    /// Puts an embedded editor where the engine says.
+    pub(crate) fn place_editor(&self, placement: crate::window::Placement) {
+        if let Some(editor) = &self.editor {
+            crate::window::place(editor.window.id(), placement);
+        }
+    }
+
+    /// A size the editor got since this was last asked.
+    pub(crate) fn editor_resized(&mut self) -> Option<crate::window::Size> {
+        self.editor.as_mut().and_then(|e| e.resized.take())
     }
 
     pub(crate) fn close_editor(&mut self) {
@@ -447,6 +465,7 @@ impl ClapPlugin {
             let size = crate::window::Size { width: size.width.clamp(1, 16_384), height: size.height.clamp(1, 16_384) };
             crate::window::resize(editor.window.id(), size);
             editor.size = size;
+            editor.resized = Some(size);
         } else if editor.resizable {
             let now = crate::window::client_size(editor.window.id());
             if now != editor.size && now.width > 0 && now.height > 0 {
@@ -456,6 +475,7 @@ impl ClapPlugin {
                     let _ = gui.set_size(&handle, fitted);
                 }
                 editor.size = now;
+                editor.resized = Some(now);
             }
         }
         let gone = self.instance.access_shared_handler(|s| s.gui_closed.swap(false, Ordering::AcqRel));

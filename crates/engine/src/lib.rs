@@ -348,7 +348,6 @@ impl Renderer {
         let measured = if self.offline { None } else { Some(Instant::now()) };
         self.receive_swap();
         self.receive_plugins();
-        self.preview.receive(&mut self.graph.chains);
         let mut rest = out;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
@@ -401,6 +400,12 @@ impl Renderer {
             chain.begin(frames, deadline);
         }
         self.block_frame = 0;
+        // Preview commands apply once the chains have begun the block, so a stopped preview's
+        // note-offs land on this block's first frame, not the previous block's length later
+        // (#156); the playing preview finds its chain first (the graph may have been swapped),
+        // and a new one after.
+        self.preview.begin(&self.graph.chains);
+        self.preview.receive(&mut self.graph.chains);
         self.preview.begin(&self.graph.chains);
         self.drain_commands();
         self.receive_params();
@@ -487,6 +492,23 @@ impl Renderer {
         }
         // What went straight to the output waits for the slowest chain (latency compensation).
         self.graph.direct_delay.run(out);
+        // The chains no chain plays into run their plug-ins at the same time, a stage at a
+        // time (every chain hands its block over, then every chain waits), so the block's
+        // deadline is shared by the slowest plug-in rather than by all of them in turn. A bus
+        // runs after the chains that play into it, in order below.
+        let chains = &mut self.graph.chains;
+        loop {
+            let mut out_for_an_answer = false;
+            for chain in chains.iter_mut().filter(|c| !c.is_bus) {
+                out_for_an_answer |= chain.advance(frames, &context);
+            }
+            if !out_for_an_answer {
+                break;
+            }
+            for chain in chains.iter_mut() {
+                chain.collect(frames);
+            }
+        }
         // In order, so a bus has every chain that plays into it before it runs.
         for i in 0..self.graph.chains.len() {
             let (done, later) = self.graph.chains.split_at_mut(i + 1);

@@ -3,12 +3,14 @@
 //! or stacked in a column beside it (a setting). It shows the project as it is; changing devices
 //! comes with the device commands. A plug-in device shows where its plug-in stands (loading,
 //! running, missing, crashed) and a button that opens its editor or restarts it, through the
-//! `device.*` commands (ADR 0006).
+//! `device.*` commands (ADR 0006). A plug-in's editor opened inside the panel (the setting)
+//! takes the room under that line, and where it lands in the window is reported each frame
+//! ([`EditorPlace`]) for the host process to put it there.
 
 use egui::{Align2, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::{DeviceKind, LaneData, Project, TrackId};
-use suhina_session::{PluginReport, PluginStatus};
+use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::grid::gain_to_db;
 use crate::theme::{self, PAD, ROW};
@@ -25,6 +27,23 @@ const ON_SWITCH: f32 = 9.0;
 /// A plug-in device's button (open its editor, restart it).
 const BUTTON_HEIGHT: f32 = 18.0;
 const BUTTON_WIDTH: f32 = 96.0;
+/// Where an embedded editor starts under a plug-in device's top: its header, state line and
+/// button.
+const EDITOR_TOP: f32 = ROW + PAD + PARAM_ROW + PAD / 2.0 + BUTTON_HEIGHT + PAD / 2.0;
+
+/// Where the panel shows a plug-in's embedded editor this frame, for its host to put it there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorPlace {
+    pub track: TrackId,
+    pub device: usize,
+    pub placement: Placement,
+}
+
+/// The height a device row needs to show an embedded editor `height` pixels tall under a
+/// plug-in's line and button, at `pixels_per_point`.
+pub fn row_height_with_editor(height: u32, pixels_per_point: f32) -> f32 {
+    EDITOR_TOP + height as f32 / pixels_per_point.max(0.01) + PAD
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceBox {
@@ -47,6 +66,8 @@ pub struct PluginBox {
     /// One line about it: the plug-in that runs, or why it does not.
     pub line: String,
     pub editor_open: bool,
+    /// Its editor is open inside the panel: the size of it, in pixels.
+    pub embedded: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,24 +83,41 @@ pub enum PluginState {
 impl PluginBox {
     fn from_report(report: Option<PluginReport>) -> Self {
         let Some(report) = report else {
-            return Self { state: PluginState::Stopped, line: "Not running".into(), editor_open: false };
+            return Self {
+                state: PluginState::Stopped,
+                line: "Not running".into(),
+                editor_open: false,
+                embedded: None,
+            };
         };
         let name = report.plugin.as_ref().map(|(name, vendor, _)| format!("{name} by {vendor}"));
         let (state, line) = match &report.status {
             PluginStatus::Loading => (PluginState::Loading, format!("Loading {}", name.unwrap_or_default())),
-            PluginStatus::Running => (
-                PluginState::Running,
-                match (&report.state_refused, report.latency) {
+            PluginStatus::Running => {
+                let mut line = match (&report.state_refused, report.latency) {
                     (Some(_), _) => "Running with its own settings".to_string(),
                     (None, 0) => name.unwrap_or_else(|| "Running".into()),
                     (None, latency) => format!("{} · {latency} frames", name.unwrap_or_else(|| "Running".into())),
-                },
-            ),
+                };
+                // Blocks it did not answer in time: the chain went on without it for those.
+                if report.late_blocks > 0 && report.blocks > 0 {
+                    let percent = (u64::from(report.late_blocks) * 100 / u64::from(report.blocks)).max(1);
+                    line.push_str(&format!(" · {percent}% of blocks late"));
+                }
+                (PluginState::Running, line)
+            }
             PluginStatus::Missing => (PluginState::Missing, "Not installed; kept with its settings".into()),
             PluginStatus::Crashed(why) => (PluginState::Crashed, format!("Crashed: {why}")),
             PluginStatus::Failed(why) => (PluginState::Crashed, format!("Could not start: {why}")),
         };
-        Self { state, line, editor_open: report.editor_open }
+        Self { state, line, editor_open: report.editor_open, embedded: report.editor_embedded }
+    }
+
+    /// The size the embedded editor takes in the panel, in points.
+    fn editor_size(&self, pixels_per_point: f32) -> Option<Vec2> {
+        let (width, height) = self.embedded?;
+        let scale = pixels_per_point.max(0.01);
+        Some(Vec2::new(width as f32 / scale, height as f32 / scale))
     }
 
     /// What its button does: its label and the command it runs.
@@ -232,34 +270,44 @@ fn format_value(value: f64) -> String {
 }
 
 /// The detail laid out in a row: devices side by side, or the clip's properties. A plug-in's
-/// button adds its command to `actions`.
-pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
+/// button adds its command to `actions`; where its embedded editor lands goes to `places`.
+pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places: &mut Vec<EditorPlace>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
-        Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions),
+        Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
             let column = clip_properties(&painter, area, info, false);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
             if rest.width() > 0.0 {
-                chain_row(ui, &painter, rest, chain, actions);
+                chain_row(ui, &painter, rest, chain, actions, places);
             }
         }
     }
 }
 
-/// A chain's devices side by side in `area`.
-fn chain_row(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain, actions: &mut Vec<Action>) {
+/// A chain's devices side by side in `area`; one with an embedded editor is as wide as it.
+fn chain_row(
+    ui: &Ui,
+    painter: &egui::Painter,
+    area: Rect,
+    chain: &Chain,
+    actions: &mut Vec<Action>,
+    places: &mut Vec<EditorPlace>,
+) {
     if chain.devices.is_empty() {
         hint(painter, area, &format!("No devices on {} yet", chain.name));
         return;
     }
+    let scale = ui.ctx().pixels_per_point();
     let mut x = area.left();
     for device in &chain.devices {
-        let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + DEVICE_WIDTH, area.bottom()));
+        let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
+        let width = editor.map_or(DEVICE_WIDTH, |e| DEVICE_WIDTH.max(e.x + PAD * 2.0));
+        let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + width, area.bottom()));
         x = rect.right() + 1.0;
         if rect.left() > area.right() {
             break;
@@ -267,39 +315,55 @@ fn chain_row(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain, action
         name_for_readers(ui, rect.intersect(area), device);
         device_panel(&painter.with_clip_rect(area), rect, device);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
+        if let Some(editor) = editor {
+            places.push(editor_place(ui, area, rect, editor, chain.track, device));
+        }
     }
 }
 
 /// The detail stacked in a column: devices one under another.
-pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>) {
+pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places: &mut Vec<EditorPlace>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
-        Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions),
+        Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
             let column = clip_properties(&painter, area, info, true);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
             if rest.height() > 0.0 {
-                chain_stack(ui, &painter, rest, chain, actions);
+                chain_stack(ui, &painter, rest, chain, actions, places);
             }
         }
     }
 }
 
-/// A chain's devices one under another in `area`.
-fn chain_stack(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain, actions: &mut Vec<Action>) {
+/// A chain's devices one under another in `area`; one with an embedded editor is as tall as
+/// it needs (the editor is cut off at the column's right edge when it is wider).
+fn chain_stack(
+    ui: &Ui,
+    painter: &egui::Painter,
+    area: Rect,
+    chain: &Chain,
+    actions: &mut Vec<Action>,
+    places: &mut Vec<EditorPlace>,
+) {
     if chain.devices.is_empty() {
         hint(painter, area, &format!("No devices on {} yet", chain.name));
         return;
     }
+    let scale = ui.ctx().pixels_per_point();
     let mut y = area.top();
     for device in &chain.devices {
+        let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
         let rows =
             if device.plugin.is_some() { 2.0 + BUTTON_HEIGHT / PARAM_ROW } else { device.params.len().max(1) as f32 };
-        let height = ROW + PAD * 2.0 + rows * PARAM_ROW;
+        let height = match editor {
+            Some(editor) => EDITOR_TOP + editor.y + PAD,
+            None => ROW + PAD * 2.0 + rows * PARAM_ROW,
+        };
         let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
         y = rect.bottom() + 1.0;
         if rect.top() > area.bottom() {
@@ -308,7 +372,34 @@ fn chain_stack(ui: &Ui, painter: &egui::Painter, area: Rect, chain: &Chain, acti
         name_for_readers(ui, rect.intersect(area), device);
         device_panel(&painter.with_clip_rect(area), rect, device);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
+        if let Some(editor) = editor {
+            places.push(editor_place(ui, area, rect, editor, chain.track, device));
+        }
     }
+}
+
+/// Where a plug-in's embedded editor of `editor` points goes under its line and button in the
+/// device's `rect`, as the host takes it: in the window's own pixels, with the part of the
+/// panel's `area` (and the device's box) that shows it; what falls outside is cut off.
+fn editor_place(ui: &Ui, area: Rect, rect: Rect, editor: Vec2, track: TrackId, device: &DeviceBox) -> EditorPlace {
+    let scale = ui.ctx().pixels_per_point();
+    let origin = Pos2::new(rect.left() + PAD, rect.top() + EDITOR_TOP);
+    let shown = Rect::from_min_size(origin, editor).intersect(rect).intersect(area);
+    let pixel = |value: f32| (value * scale).round() as i32;
+    let span = |from: f32, to: f32| u32::try_from(pixel(to).saturating_sub(pixel(from))).unwrap_or(0);
+    let placement = if shown.is_negative() || shown.width() <= 0.0 || shown.height() <= 0.0 {
+        Placement::HIDDEN
+    } else {
+        Placement {
+            x: pixel(origin.x),
+            y: pixel(origin.y),
+            clip_x: pixel(shown.left()),
+            clip_y: pixel(shown.top()),
+            clip_width: span(shown.left(), shown.right()),
+            clip_height: span(shown.top(), shown.bottom()),
+        }
+    };
+    EditorPlace { track, device: device.index, placement }
 }
 
 /// A plug-in device's button under its state line: opens or closes its editor while it runs,
@@ -558,6 +649,11 @@ mod tests {
             instrument: false,
             latency: 0,
             editor_open,
+            editor_embedded: None,
+            blocks: 0,
+            late_blocks: 0,
+            longest_us: 0,
+            no_time: 0,
             state_refused: None,
         }
     }
@@ -605,6 +701,76 @@ mod tests {
     }
 
     #[test]
+    fn an_embedded_editor_takes_its_room_and_says_where_it_lands() {
+        use egui_kittest::Harness;
+        let project = with_plugin();
+        let embedded = PluginReport { editor_embedded: Some((300, 200)), ..report(PluginStatus::Running, true) };
+        let Detail::Devices(chain) = build_with(&project, Some(TrackId(1)), None, &mut |_, _| Some(embedded.clone()))
+        else {
+            panic!()
+        };
+        assert_eq!(chain.devices[0].plugin.as_ref().unwrap().embedded, Some((300, 200)));
+        let detail = Detail::Devices(chain);
+        for stacked in [false, true] {
+            let mut harness = Harness::builder().with_size(egui::vec2(600.0, 300.0)).build_ui_state(
+                |ui, places: &mut Vec<EditorPlace>| {
+                    places.clear();
+                    let mut actions = Vec::new();
+                    if stacked {
+                        show_stack(ui, &detail, &mut actions, places);
+                    } else {
+                        show_row(ui, &detail, &mut actions, places);
+                    }
+                },
+                Vec::new(),
+            );
+            harness.run();
+            let places = harness.state();
+            assert_eq!(places.len(), 1, "stacked {stacked}");
+            let place = places[0];
+            assert_eq!((place.track, place.device), (TrackId(1), 0));
+            // Under the plug-in's line and button (past the harness's own margin), the whole
+            // editor showing (at 1 pixel a point).
+            let p = place.placement;
+            let margin = p.y - EDITOR_TOP as i32;
+            assert!(margin >= 0, "stacked {stacked}: {p:?}");
+            assert_eq!((p.x, p.clip_x, p.clip_y), (PAD as i32 + margin, p.x, p.y), "stacked {stacked}");
+            assert_eq!((p.clip_width, p.clip_height), (300, 200), "stacked {stacked}");
+        }
+        // A panel too short for it shows what fits; one with no room hides it.
+        let margin = {
+            let mut probe = Harness::builder().with_size(egui::vec2(600.0, 300.0)).build_ui_state(
+                |ui, places: &mut Vec<EditorPlace>| {
+                    places.clear();
+                    show_row(ui, &detail, &mut Vec::new(), places);
+                },
+                Vec::new(),
+            );
+            probe.run();
+            probe.state()[0].placement.y as f32 - EDITOR_TOP
+        };
+        let mut short =
+            Harness::builder().with_size(egui::vec2(600.0, EDITOR_TOP + 50.0 + margin * 2.0)).build_ui_state(
+                |ui, places: &mut Vec<EditorPlace>| {
+                    places.clear();
+                    show_row(ui, &detail, &mut Vec::new(), places);
+                },
+                Vec::new(),
+            );
+        short.run();
+        assert_eq!((short.state()[0].placement.clip_width, short.state()[0].placement.clip_height), (300, 50));
+        let mut none = Harness::builder().with_size(egui::vec2(600.0, EDITOR_TOP - 1.0 + margin * 2.0)).build_ui_state(
+            |ui, places: &mut Vec<EditorPlace>| {
+                places.clear();
+                show_row(ui, &detail, &mut Vec::new(), places);
+            },
+            Vec::new(),
+        );
+        none.run();
+        assert_eq!(none.state()[0].placement, Placement::HIDDEN);
+    }
+
+    #[test]
     fn the_editor_button_asks_for_the_device_command() {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
@@ -618,7 +784,13 @@ mod tests {
         for stacked in [false, true] {
             let mut harness = Harness::builder().with_size(egui::vec2(600.0, 200.0)).build_ui_state(
                 |ui, actions: &mut Vec<Action>| {
-                    if stacked { show_stack(ui, &detail, actions) } else { show_row(ui, &detail, actions) }
+                    let mut places = Vec::new();
+                    if stacked {
+                        show_stack(ui, &detail, actions, &mut places);
+                    } else {
+                        show_row(ui, &detail, actions, &mut places);
+                    }
+                    assert!(places.is_empty());
                 },
                 Vec::new(),
             );

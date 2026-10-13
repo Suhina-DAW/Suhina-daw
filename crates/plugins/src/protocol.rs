@@ -2,10 +2,12 @@
 //! object per line over a local socket. Audio does not go here; it goes through `suhina-ipc`.
 //!
 //! Every message has an `op`. Engine to host: `hello`, `load`, `unload`, `ping`, `get_state`,
-//! `set_state`, `get_params`, `set_param`, `open_editor`, `close_editor`, `quit`. Host to
-//! engine: `hello`, `loaded`, `unloaded`, `pong`, `state`, `params`, `param`, `editor_opened`,
-//! `editor_closed`, `error`. `editor_closed` also comes unasked, when the user closes an
-//! editor's window.
+//! `set_state`, `get_params`, `set_param`, `open_editor`, `place_editor`, `close_editor`,
+//! `quit`. Host to engine: `hello`, `loaded`, `unloaded`, `pong`, `state`, `params`, `param`,
+//! `editor_opened`, `editor_closed`, `editor_resized`, `error`. Every message is answered,
+//! except `place_editor` and `quit` (so the engine never waits on them). `editor_closed` also
+//! comes unasked, when the user closes an editor's window, and `editor_resized` only comes
+//! unasked, when a plug-in gives its editor a new size.
 //!
 //! One host process runs several plug-in instances. The engine names each with an `instance`
 //! number when it loads it; every message about one instance, and its reply, carries that
@@ -15,7 +17,7 @@
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 6;
+pub const VERSION: u64 = 7;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -69,6 +71,45 @@ impl ParamInfo {
             automatable: flag("automatable")?,
             read_only: flag("read_only")?,
             hidden: flag("hidden")?,
+        })
+    }
+}
+
+/// Where an embedded editor sits in the window it is a child of: its origin, in the window's
+/// own pixels from its top left (negative when the device panel is scrolled past it), and the
+/// part of the window that shows it (the panel's visible area): what falls outside it is cut
+/// off. An empty clip hides the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Placement {
+    pub x: i32,
+    pub y: i32,
+    pub clip_x: i32,
+    pub clip_y: i32,
+    pub clip_width: u32,
+    pub clip_height: u32,
+}
+
+impl Placement {
+    /// Nowhere: the editor is hidden.
+    pub const HIDDEN: Self = Self { x: 0, y: 0, clip_x: 0, clip_y: 0, clip_width: 0, clip_height: 0 };
+
+    fn to_json(self) -> Value {
+        json!({
+            "x": self.x, "y": self.y, "clip_x": self.clip_x, "clip_y": self.clip_y,
+            "clip_width": self.clip_width, "clip_height": self.clip_height,
+        })
+    }
+
+    fn from_json(value: &Value) -> Option<Self> {
+        let signed = |key: &str| value.get(key).and_then(Value::as_i64).and_then(|n| i32::try_from(n).ok());
+        let unsigned = |key: &str| value.get(key).and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
+        Some(Self {
+            x: signed("x")?,
+            y: signed("y")?,
+            clip_x: signed("clip_x")?,
+            clip_y: signed("clip_y")?,
+            clip_width: unsigned("clip_width")?,
+            clip_height: unsigned("clip_height")?,
         })
     }
 }
@@ -135,15 +176,30 @@ pub enum Message {
         instance: u32,
         param: ParamInfo,
     },
-    /// Open the plug-in's editor in a window of its own; answered with `EditorOpened` and the
-    /// size of its inside. `owner` is the engine's window (a Win32 `HWND`, an X11 window id)
-    /// that owns the editor's: it stays above it, has no taskbar entry of its own and is
-    /// minimised with it. `None`: a window of its own.
+    /// Open the plug-in's editor; answered with `EditorOpened` and the size of its inside.
+    /// `owner` is the engine's window (a Win32 `HWND`, an X11 window id). Not `embedded`: the
+    /// editor gets a window of its own that `owner` owns: it stays above it, has no taskbar
+    /// entry of its own and is minimised with it (`None`: a window of its own). `embedded`:
+    /// the editor is a child inside `owner` (which must then be given), hidden until the first
+    /// `PlaceEditor` puts it somewhere.
     OpenEditor {
         instance: u32,
         owner: Option<u64>,
+        embedded: bool,
     },
     EditorOpened {
+        instance: u32,
+        width: u32,
+        height: u32,
+    },
+    /// Put an embedded editor at `placement` in its parent window. Not answered; sent again
+    /// whenever the device panel moves, scrolls or resizes.
+    PlaceEditor {
+        instance: u32,
+        placement: Placement,
+    },
+    /// The plug-in gave its editor a new size (unasked, in both modes).
+    EditorResized {
         instance: u32,
         width: u32,
         height: u32,
@@ -179,6 +235,8 @@ impl Message {
             | Self::Param { instance, .. }
             | Self::OpenEditor { instance, .. }
             | Self::EditorOpened { instance, .. }
+            | Self::PlaceEditor { instance, .. }
+            | Self::EditorResized { instance, .. }
             | Self::CloseEditor { instance }
             | Self::EditorClosed { instance } => Some(*instance),
             Self::Error { instance, .. } => *instance,
@@ -214,11 +272,17 @@ impl Message {
                 json!({ "op": "set_param", "instance": instance, "id": id, "value": value })
             }
             Self::Param { instance, param } => json!({ "op": "param", "instance": instance, "param": param.to_json() }),
-            Self::OpenEditor { instance, owner } => {
-                json!({ "op": "open_editor", "instance": instance, "owner": owner })
+            Self::OpenEditor { instance, owner, embedded } => {
+                json!({ "op": "open_editor", "instance": instance, "owner": owner, "embedded": embedded })
             }
             Self::EditorOpened { instance, width, height } => {
                 json!({ "op": "editor_opened", "instance": instance, "width": width, "height": height })
+            }
+            Self::PlaceEditor { instance, placement } => {
+                json!({ "op": "place_editor", "instance": instance, "placement": placement.to_json() })
+            }
+            Self::EditorResized { instance, width, height } => {
+                json!({ "op": "editor_resized", "instance": instance, "width": width, "height": height })
             }
             Self::CloseEditor { instance } => json!({ "op": "close_editor", "instance": instance }),
             Self::EditorClosed { instance } => json!({ "op": "editor_closed", "instance": instance }),
@@ -296,9 +360,16 @@ impl Message {
                     None | Some(Value::Null) => None,
                     Some(v) => Some(v.as_u64()?),
                 },
+                embedded: value.get("embedded")?.as_bool()?,
             },
             "editor_opened" => {
                 Self::EditorOpened { instance: instance()?, width: small("width")?, height: small("height")? }
+            }
+            "place_editor" => {
+                Self::PlaceEditor { instance: instance()?, placement: Placement::from_json(value.get("placement")?)? }
+            }
+            "editor_resized" => {
+                Self::EditorResized { instance: instance()?, width: small("width")?, height: small("height")? }
             }
             "close_editor" => Self::CloseEditor { instance: instance()? },
             "editor_closed" => Self::EditorClosed { instance: instance()? },
@@ -344,7 +415,7 @@ mod tests {
 
     #[test]
     fn every_message_round_trips() {
-        assert_eq!(VERSION, 6);
+        assert_eq!(VERSION, 7);
         let messages = [
             Message::Hello { version: VERSION },
             Message::Load { instance: 3, plugin: "test:gain".into(), link: "/dev/shm/x".into(), sample_rate: 44_100.0 },
@@ -366,9 +437,14 @@ mod tests {
             Message::Params { instance: 4, params: Vec::new() },
             Message::SetParam { instance: 5, id: 7, value: -0.5 },
             Message::Param { instance: 5, param: gain() },
-            Message::OpenEditor { instance: 6, owner: None },
-            Message::OpenEditor { instance: 6, owner: Some(0x0012_0F3A) },
+            Message::OpenEditor { instance: 6, owner: None, embedded: false },
+            Message::OpenEditor { instance: 6, owner: Some(0x0012_0F3A), embedded: true },
             Message::EditorOpened { instance: 6, width: 800, height: 600 },
+            Message::PlaceEditor {
+                instance: 6,
+                placement: Placement { x: -40, y: 620, clip_x: 0, clip_y: 600, clip_width: 1280, clip_height: 0 },
+            },
+            Message::EditorResized { instance: 6, width: 1, height: 16_384 },
             Message::CloseEditor { instance: 6 },
             Message::EditorClosed { instance: 6 },
             Message::Error { instance: None, message: "no such plug-in: \"x\"\n".into() },
@@ -423,6 +499,12 @@ mod tests {
             r#"{"op":"get_state"}"#,
             r#"{"op":"get_params"}"#,
             r#"{"op":"open_editor"}"#,
+            r#"{"op":"open_editor","instance":1}"#,
+            r#"{"op":"open_editor","instance":1,"embedded":"yes"}"#,
+            r#"{"op":"place_editor","instance":1}"#,
+            r#"{"op":"place_editor","instance":1,"placement":{"x":0,"y":0,"clip_x":0,"clip_y":0,"clip_width":-1,"clip_height":0}}"#,
+            r#"{"op":"place_editor","instance":1,"placement":{"x":3000000000,"y":0,"clip_x":0,"clip_y":0,"clip_width":1,"clip_height":1}}"#,
+            r#"{"op":"editor_resized","instance":1,"height":2}"#,
             r#"{"op":"close_editor","instance":"1"}"#,
             r#"{"op":"editor_closed"}"#,
             r#"{"op":"unload"}"#,

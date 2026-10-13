@@ -71,11 +71,27 @@ fn finds_plugin_files_in_folders() {
     write(&dir.join("1/2/3/4/5/6/7/8/9/too-deep.clap"), "x");
     // On macOS a plug-in is a folder named *.clap; it is found, not looked into.
     write(&dir.join("bundle.clap/Contents/inner.clap"), "x");
+    // A folder linked into the standard one (as an installer may do) is looked into like any
+    // other. Making a link needs a right the test may not have; then this part is skipped.
+    write(&dir.join("elsewhere/linked.clap"), "x");
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(dir.join("elsewhere"), dir.join("link")).is_ok();
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(dir.join("elsewhere"), dir.join("link")).is_ok();
+    #[cfg(not(any(windows, unix)))]
+    let linked = false;
     let found: Vec<String> = find_files(std::slice::from_ref(&dir))
         .iter()
         .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
         .collect();
-    assert_eq!(found, ["1/2/3/4/5/6/7/deep.clap", "a.clap", "bundle.clap", "vendor/b.CLAP"]);
+    let mut expected = vec!["1/2/3/4/5/6/7/deep.clap", "a.clap", "bundle.clap", "elsewhere/linked.clap"];
+    if linked {
+        expected.push("link/linked.clap");
+    } else {
+        eprintln!("could not make a symbolic link here; the linked folder is not checked");
+    }
+    expected.push("vendor/b.CLAP");
+    assert_eq!(found, expected);
     assert!(find_files(&[dir.join("no-such-folder")]).is_empty());
     assert!(standard_folders().iter().all(|f| f.is_dir()));
 }
