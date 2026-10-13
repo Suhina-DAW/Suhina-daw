@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/model/src/lib.rs
 ---
@@ -65,8 +65,10 @@ Its key ideas:
    - an **arrangement** of lanes, each optionally bound to a track
    - a **launcher**: scenes and per-track slot columns
 2. **Per-format extensions.** Every object carries an `Extensions` list where an importer keeps
-   data the core does not model, keyed by format, verbatim. The exporter for the same format
-   writes it back, so `.als` → Suhina → `.als` loses nothing the core does not understand yet.
+   data the core does not model, keyed by format, verbatim, so that a future exporter for the
+   same format can write it back and lose nothing the core does not understand yet. No such
+   exporter exists yet (there is no `.als` writer); Suhina's own project file keeps the
+   extensions when a project is saved.
 3. **Formats live in their own crates** (`crates/als`, later `crates/flp`, `crates/dawproject`) and
    convert to and from the core. Adding a format never requires changing another format.
 
@@ -103,7 +105,7 @@ neither. Importers fill `params` when they map another DAW's device onto a Suhin
 - Plug-in state stays opaque, but in each plug-in format's standard container where a source
   format keeps its own: a VST2 plug-in's state is the standard VST2 bank (`.fxb`), which other
   hosts and a VST3 version of the plug-in read (ADR 0006, decision 8).
-- The core will grow (automation, tempo maps, markers, groups, comping). Each addition is checked
+- The core will grow (automation, tempo maps, markers, comping). Each addition is checked
   against at least two formats before it lands, so it does not bake in one DAW's assumptions.
 - Positions are `f64` beats in the core. If rounding errors appear against tick-based formats
   (FL uses PPQ ticks), we revisit this with a rational or tick-based time type.

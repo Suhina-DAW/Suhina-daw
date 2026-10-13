@@ -92,7 +92,7 @@ devices/
   fm-synth six operators, 32 algorithms, DX7 voice files; the engine is a port of MSFA (Apache-2.0)
   limiter  brickwall peak limiter with 1.5 ms lookahead; never over the ceiling
 apps/
-  suhina-cli   headless CLI: render, play, mcp
+  suhina-cli   headless CLI: render, play, mcp, commands, audio, plugins, plugin, fm-synth
   suhina       the desktop app (eframe): opens a project and shows it in the ui
 docs/
   architecture.md  how the crates, threads and commands fit together
@@ -105,7 +105,8 @@ third_party/  vendored source built behind a feature: the ASIO SDK's host part (
 scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```
 
-A crate may depend only on lower layers. Nothing below the UI layer may depend on a GUI toolkit.
+A crate may depend only on crates in its own or a lower layer, never in a cycle. Nothing below
+the UI layer may depend on a GUI toolkit.
 
 ### Crate names
 

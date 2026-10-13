@@ -3,10 +3,14 @@ description: Suhina's visual language: principles, what stays familiar and what 
 read_when: UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/themes.rs
+  - crates/ui/src/grid.rs
+  - apps/suhina/src/theme_files.rs
+  - crates/ui/themes/**
+  - crates/ui/src/settings_view.rs
 ---
 
 # Design brief
@@ -42,7 +46,8 @@ From [research](#sources) and the first design rounds:
 3. **States differ in lightness, not hue alone** (playing is brighter, not just "accent").
 4. **Two type sizes:** 11 px for UI text, 10 px for small values. No bold headings. 9 px is
    kept for tags beside a name, 13 px for a page title (components › Global rules).
-5. **One window, no pop-ups.** Menus and pickers open in place.
+5. **One window, no pop-ups.** Menus and pickers open in place. The exceptions are plug-in
+   editors, which float in their own windows (ADR 0006), and the project dialogs.
 6. **Progressive disclosure.** Controls appear when there is room or need (track height, toggled
    sections), never all at once.
 7. **Every grid shows its lines.** Columns and rows of the Session grid, bars and beats, key rows.
@@ -97,7 +102,8 @@ From [research](#sources) and the first design rounds:
 ## Tokens
 
 All colours, spacing, radii, stroke widths and type sizes are named tokens in one theme module.
-Widgets never contain literal colours. The colours below are the built-in theme, Suhina Dark;
+Widgets never contain literal colours (today: the default track palette in `grid.rs` and the
+sample map's kind colours; to move into `theme.rs`, [#192](https://github.com/juhamikael/Loopwerk/issues/192)). The colours below are the built-in theme, Suhina Dark;
 a theme file can change any of them (see Themes). Current values:
 
 | Token | Suhina Dark | Use |

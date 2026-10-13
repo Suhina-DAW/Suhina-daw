@@ -3,13 +3,14 @@ description: The interface of built-in effects and instruments (Device trait, pa
 read_when: device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/dsp/**
   - crates/device-api/**
   - devices/**
   - crates/device-registry/**
   - crates/engine/src/chain.rs
+  - crates/engine/src/buses.rs
   - crates/session/src/devices.rs
 ---
 
@@ -22,7 +23,7 @@ covers:
 ## Context
 
 Suhina ships its own instruments and effects ([`ROADMAP.md`](../../ROADMAP.md) › Built-in
-devices): first a utility and an auto-pan, then a DJ EQ, distortion, dynamics, delays, reverbs
+effects and instruments): first a utility and an auto-pan, then a DJ EQ, distortion, dynamics, delays, reverbs
 and synths. Projects imported from other DAWs refer to those DAWs' devices, which come in as
 placeholders today (`DeviceKind::Foreign` in the model) and should later map onto ours.
 
@@ -31,15 +32,16 @@ they are bound by the same rules as the engine: no allocation, locking or I/O on
 thread, and no panics. They also have to work from every front end: each parameter is a command
 (rule 6) and can be automated.
 
-The engine still mixes everything into one stereo bus and has no per-track chains; making edits
-reach a playing engine (LOOP-26, LOOP-32) is in progress. Devices should not wait for that, and
-the device code should not have to change when it lands.
+At the time of writing, the engine mixed everything into one stereo bus and had no per-track
+chains, and making edits reach a playing engine (LOOP-26, LOOP-32) was in progress. Devices were
+not to wait for that, and the device code was not to change when it landed; chains landed with
+decision 9.
 
 ## Decision
 
 1. **Three kinds of crate.** `crates/dsp` (`suhina-dsp`) holds building blocks: gain
-   conversions, parameter smoothing, filters, crossovers, later oscillators, envelopes, delay
-   lines and oversampling. `crates/device-api` (`suhina-device-api`) holds the interface. Each
+   conversions, parameter smoothing, filters, crossovers, LFOs, shapers, DC filtering and
+   oversampling; later oscillators, envelopes and delay lines. `crates/device-api` (`suhina-device-api`) holds the interface. Each
    device is its own crate under `devices/` (`suhina-device-<name>`), depending on those two
    only. None of them depends on the model, the engine or each other, so a device can be tested
    alone and later built as a CLAP plug-in or moved to its own repository.
@@ -120,22 +122,16 @@ the device code should not have to change when it lands.
    every chain that feeds it, and a block runs them in that order. Latency compensation follows
    every path: a bus's input waits for the slowest chain feeding it, and the output for the
    slowest path, so a track with a lookahead device inside a group with another still starts
-   with the rest (`crates/engine/src/buses.rs`). A group without devices stays a gain on the
+   with the rest (`crates/engine/src/buses.rs`). A device reports its delay with `latency()`
+   (the overdrive and vinyl distortion, 31 frames; the limiter, its 1.5 ms lookahead), and every
+   other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
    tracks routed through it, with no buffer of its own.
 
 ## Not decided yet
 
-- **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
-  `track.devices`, `device.add` (an instrument always first, one per track, and only on a track
-  that plays notes), `device.remove`, `device.setEnabled` and `device.setParam` (values stored
-  limited to the parameter's range). `device.add {preset, voice?}` adds a device with a preset's
-  values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
-  parameter's value, which the project stores like any other (stock presets for the other devices:
-  [ADR 0014](0014-stock-presets.md), their loader is not built yet).
-- **Chains on return and master channels, and sends into chains.** Latency compensation is
-  built for track and group chains (10 above): a device's `latency()` (the overdrive and vinyl
-  distortion, 31 frames; the limiter, its 1.5 ms lookahead) delays every
-  other track to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences).
+- **Automation lanes** for device parameters (LOOP-39).
+- **Chains on return and master channels, and sends into chains:** how they run and how latency
+  compensation (built for track and group chains, 10 above) extends to them.
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI
@@ -143,10 +139,17 @@ the device code should not have to change when it lands.
 
 ## Consequences
 
-- Devices can be written and tested now, in parallel with the engine work, and plug into the
-  engine without changes once it has chains.
-- The first device, `utility`, proves the shape: twelve parameters, all smoothed, bit-exact
+- Devices were written and tested in parallel with the engine work, and plugged into the
+  engine without changes once it had chains.
+- The first device, `utility`, proves the shape: thirteen parameters, all smoothed, bit-exact
   passthrough at the defaults.
+- Devices are edited through commands: `devices.list`, `track.devices`, `device.add` (an
+  instrument always first, one per track, and only on a track that plays notes),
+  `device.remove`, `device.setEnabled` and `device.setParam` (values stored limited to the
+  parameter's range). `device.add {preset, voice?}` adds a device with a preset's values:
+  `device-registry::preset` reads DX7 voice data for the FM synth and gives every parameter's
+  value, which the project stores like any other (stock presets for the other devices:
+  [ADR 0014](0014-stock-presets.md), their loader is not built yet).
 - Parameter ids and device ids are stored in projects: renaming one is a breaking change, like a
   command id (ADR 0002).
 - An instrument that works in fixed internal blocks (the FM synth renders 64 frames at a time)

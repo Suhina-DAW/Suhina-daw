@@ -27,8 +27,10 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Downloads
 
-Tagged versions build the headless command-line tool `suhina-cli` for Linux (x86_64), Windows
-(x64) and macOS (universal) and attach them to a GitHub Release. The binaries are not signed yet,
+Tagged versions build the headless command-line tool `suhina-cli` and the plug-in host
+`suhina-plugin-host` for Linux (x86_64), Windows (x64) and macOS (universal) and attach them to a
+GitHub Release. The host is the process plug-ins run in: keep it next to `suhina-cli`, which needs
+it to play or render a project with plug-ins. The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
 
@@ -73,14 +75,16 @@ With `--launcher` the set starts stopped and Suhina reads one command per line:
 | `clip Bass 1` | launch the clip of track *Bass* in scene 1 |
 | `stop Bass`, `stopall` | stop one track, or every track |
 | `play`, `stop` | start or stop the transport |
+| `stop here` | stop the transport and stay where it stopped |
+| `pos 16` | move the song position to beat 16 |
 | `quant 1/4` | launch quantisation: `none`, `8 bars` … `1 bar`, or a note value from `1/2` to `1/32`, `T` for triplets (`1/8T`) |
 | `back` | return every track to the arrangement |
-| `state`, `grid` | what is playing and queued; the scenes and clips |
-| `metronome on`, `metronome on -12`, `metronome off` | a click on every beat, higher on the bar; level in dB (−6 by default) |
+| `state` (or `s`), `grid` | what is playing and queued; the scenes and clips |
+| `metronome on`, `metronome on -12`, `metronome off` (or `click …`) | a click on every beat, higher on the bar; level in dB (−6 by default) |
 | `tempo 100`, `vol Bass -6`, `mute Bass`, `unmute Bass` | edits, heard while playing |
 | `undo`, `redo` | undo or redo the last edit |
 | `track.setMute {"track": 1, "mute": true}` | any command by id, with JSON parameters |
-| `help`, `quit` | |
+| `help` (or `?`), `quit` (or `exit`) | |
 
 ## Building
 

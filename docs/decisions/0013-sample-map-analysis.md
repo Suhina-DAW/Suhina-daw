@@ -1,11 +1,12 @@
 ---
-description: How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (k-d tree), caches the results, and which crates it uses
-read_when: sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, linear assignment, lapjv, RasterFairy, nearest neighbours, kiddo, feature cache
+description: How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (a linear scan), caches the results, and which crates it uses
+read_when: sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, RasterFairy, nearest neighbours, feature cache
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/soundmap/**
+  - crates/session/src/soundmap.rs
 ---
 
 # 0013: The sample map: features, layout and cache
@@ -29,8 +30,9 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
 ## Decision
 
 1. **A crate of its own, `suhina-soundmap` (layer 2, beside `library`)**, depends on `media`
-   (decoding) and `library` (which files exist, `Library::files`, `Library::revision`). It holds
-   the analysis queue and threads, the feature cache, the layouts and the neighbour index. The
+   (decoding) only. The session feeds it the library's files and watches the library's revision
+   (`Library::files`, `Library::revision`), so it lays out again when files change. It holds
+   the analysis queue and threads, the feature cache, the layouts and the neighbour search. The
    `soundmap.*` commands run on it, held by `Projects` like the library. Nothing in it touches
    the audio thread.
 2. **Features, version 1** (44 numbers per item), from a mono sum of the first 4 seconds,

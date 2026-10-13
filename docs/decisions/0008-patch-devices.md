@@ -3,7 +3,7 @@ description: Proposed way for the community to build devices as Pure Data patche
 read_when: Pure Data, Pd, plugdata, libpd, patch, patch device, community devices, Max for Live, Max device, amxd, scripting devices, collect and save
 type: decision
 status: draft
-last_verified: 2026-10-11
+last_verified: 2026-10-13
 ---
 
 # 0008: Patch devices
@@ -35,9 +35,10 @@ proprietary runtime and cannot run in Suhina.
 
 ## Decision (proposed)
 
-1. **plugdata works as a plug-in, with no extra work.** Once plug-in hosting lands (ADR 0006),
-   plugdata loads like any CLAP or VST3 plug-in, out of process, and runs Pd patches with
-   audio, MIDI and parameters. This is the first step and needs no Pd-specific code.
+1. **plugdata works as a plug-in, with no extra work.** Plug-in hosting has landed (ADR 0006,
+   `crates/plugin-host`), so plugdata is expected to load like any CLAP or VST3 plug-in, out of
+   process, and run Pd patches with audio, MIDI and parameters; it has not been tried yet. This
+   is the first step and needs no Pd-specific code.
 2. **Patch devices are a device kind of their own.** A patch device is a Pd patch (and its
    abstractions) that Suhina loads directly, without a plug-in in between. libpd runs it in
    the plug-in host process (ADR 0006), never in the engine process: a patch is user code and
@@ -72,7 +73,8 @@ proprietary runtime and cannot run in Suhina.
 
 ## Consequences
 
-- No Pd code is written before plug-in hosting exists; step 1 comes for free with it.
+- No Pd code was written before plug-in hosting existed; step 1 comes with it, once plugdata is
+  tried as a plug-in.
 - Licences fit: libpd is BSD-3-Clause and plugdata GPL-3.0, both compatible with
   GPL-3.0-or-later (AGENTS.md rule 9).
 - The command registry becomes an interface for device authors as well as agents, so command

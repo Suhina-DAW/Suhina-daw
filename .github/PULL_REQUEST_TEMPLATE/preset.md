@@ -4,7 +4,9 @@
 
 ## How I tested it
 
-<!-- You loaded each preset (device.add with the preset, or the browser) and listened to it. -->
+<!-- The preset loader is not built yet (ADR 0014): set each preset's values by hand with
+     device.setParam (or in the device view) and listen to it. Once the loader exists, load the
+     file (device.add with the preset, or the browser) instead. -->
 
 ## Checklist
 
@@ -15,4 +17,5 @@
       and every commit ends with a `Signed-off-by:` line (`git commit -s`).
 - [ ] Names, tags and descriptions are my own words and don't name commercial products or their
       presets; no banks or files from commercial products are included.
-- [ ] I loaded every preset and listened to it; `cargo test --workspace` passes.
+- [ ] I listened to every preset (its values set by hand until the loader exists);
+      `cargo test --workspace` passes.
