@@ -4,21 +4,25 @@ use egui::{Id, Key, Sense, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::{Rgb, TrackId};
 
-use crate::grid::TRACK_PALETTE;
+use crate::grid::to_rgb;
 use crate::theme;
 use crate::widgets::Action;
 
-/// Colours a track can be given from its menu: the brief's track colours and four more.
-pub const TRACK_SWATCHES: [Rgb; 8] = [
-    TRACK_PALETTE[0],
-    TRACK_PALETTE[1],
-    TRACK_PALETTE[2],
-    TRACK_PALETTE[3],
-    Rgb(0x8F, 0xA8, 0x7A),
-    Rgb(0xC2, 0x7C, 0x8E),
-    Rgb(0x7F, 0x8F, 0xB0),
-    Rgb(0xB9, 0xB2, 0xA6),
-];
+/// Colours a track can be given from its menu: the theme's eight track colours
+/// (`track.1` to `track.8`; the first four are the default track colours).
+pub fn track_swatches() -> [Rgb; 8] {
+    [
+        theme::track_color_1(),
+        theme::track_color_2(),
+        theme::track_color_3(),
+        theme::track_color_4(),
+        theme::track_color_5(),
+        theme::track_color_6(),
+        theme::track_color_7(),
+        theme::track_color_8(),
+    ]
+    .map(to_rgb)
+}
 
 /// What a track's menu needs to know.
 pub struct TrackMenu<'a> {
@@ -52,7 +56,7 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     // Colour.
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::splat(3.0);
-        for color in TRACK_SWATCHES {
+        for color in track_swatches() {
             let (rect, response) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::click());
             let hex = format!("#{:02x}{:02x}{:02x}", color.0, color.1, color.2);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Colour {hex}")));
@@ -86,11 +90,16 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     }
 }
 
-/// The menu of an arrangement clip.
-pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, actions: &mut Vec<Action>) {
+/// The menu of an arrangement clip; `stack` is true when the stacking setting for the clip's
+/// kind is on, so its copy leaves the clips it lands on as they are.
+pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions: &mut Vec<Action>) {
     ui.set_min_width(140.0);
     if ui.add(egui::Button::new("Duplicate").shortcut_text("Ctrl+D")).clicked() {
-        actions.push(Action::new("clip.duplicate", json!({ "track": track.0, "index": index })));
+        let mut params = json!({ "track": track.0, "index": index });
+        if stack {
+            params["stack"] = json!(true);
+        }
+        actions.push(Action::new("clip.duplicate", params));
         ui.close();
     }
     if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() {

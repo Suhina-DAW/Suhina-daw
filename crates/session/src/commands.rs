@@ -180,9 +180,9 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.save",
-        label: "Save the project as a Suhina project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
+        label: "Save the project as a Suhina project (.suhina) with its plug-ins' state as it is now; without a path, to the project file it was opened from or last saved to",
         params: &[
-            optional("path", ParamType::Text, "file to save to; .locr is added when missing"),
+            optional("path", ParamType::Text, "file to save to; .suhina is added when missing"),
             optional(
                 "copy",
                 ParamType::Bool,
@@ -346,8 +346,16 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.duplicate",
-        label: "Place a copy of an arrangement clip right after it, replacing what the copy covers",
-        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        label: "Place a copy of an arrangement clip right after it, replacing what the copy covers unless stacked",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            optional(
+                "stack",
+                ParamType::Bool,
+                "true leaves clips under the copy as they are; false (default) shortens, splits or removes them",
+            ),
+        ],
         kind: CommandKind::Edit,
         run: duplicate_clip,
     },
@@ -667,7 +675,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "device.openEditor",
-        label: "Open a plug-in device's editor in a window of its own; changes there are heard at once",
+        label: "Open a plug-in device's editor in a window, or inside the device view when Suhina embeds editors (Options › Settings › Plug-ins); changes there are heard at once",
         params: &[TRACK, DEVICE],
         kind: CommandKind::Plugin,
         run: devices::open_editor,
@@ -716,10 +724,8 @@ fn save(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let path = match params.get("path") {
         Some(Value::String(path)) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
         Some(Value::String(_)) | None | Some(Value::Null) => match session.source() {
-            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION)) => {
-                source.to_path_buf()
-            }
-            _ => return Err("the project has no .locr file yet; give a path to save it to".into()),
+            Some(source) if suhina_project_file::is_project_file(source) => source.to_path_buf(),
+            _ => return Err("the project has no .suhina file yet; give a path to save it to".into()),
         },
         Some(_) => return Err("path must be text".into()),
     };
@@ -1195,11 +1201,17 @@ fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandEr
 }
 
 fn duplicate_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let stack = match params.get("stack") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("stack must be true or false")?,
+    };
     let (lane, index) = lane_and_index(&session.project, params)?;
     let lane = session.project.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
     let mut copy = lane.clips.get(index).cloned().ok_or("the clip is missing")?;
     copy.start += copy.length;
-    make_room(&mut lane.clips, copy.start, copy.start + copy.length);
+    if !stack {
+        make_room(&mut lane.clips, copy.start, copy.start + copy.length);
+    }
     lane.clips.push(copy.clone());
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
     let new_index = lane.clips.iter().position(|c| *c == copy).unwrap_or_default();

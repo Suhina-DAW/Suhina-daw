@@ -65,9 +65,16 @@ What the law protects decides how close the UI may get (summary, not legal advic
    and never touches the audio thread. UI state (zoom, selection, open panels) is to be
    serialisable, so agents can read it and take offscreen screenshots (an aim, not built yet).
 6. **Design tokens** (colours, spacing, radii, type sizes) live in one theme module, never
-   hard-coded in widgets (today: the default track palette in `grid.rs` and the sample map's
-   kind colours; to move into `theme.rs`, [#192](https://github.com/juhamikael/Loopwerk/issues/192)). The colours come from the theme in use: the built-in one or a JSON
+   hard-coded in widgets; the default track colours and the sample map's kind colours are
+   tokens too. The colours come from the theme in use: the built-in one or a JSON
    theme file the user picks and edits ([brief](../design/brief.md) › Themes).
+
+7. **One main window.** Views open in place in the main window, not in windows of their own.
+   Two exceptions have a window of their own: plug-in editors (ADR 0006), and the sample map when
+   the user asks for it (View › Sample map in a window), so it can sit on a second screen. The
+   map's window is an eframe viewport drawn in the same frame as the main window (an immediate
+   viewport), so it shares the window's state: the browser, the previews and drags into the main
+   window ([sample map spec](../spec/sample-map.md) › Where the map is shown).
 
 ## Consequences
 

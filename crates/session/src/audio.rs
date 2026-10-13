@@ -367,8 +367,8 @@ mod tests {
         assert_eq!(same_host.device.as_deref(), Some("Speakers"));
         let reset = start.with_params(&json!({ "device": "", "sample_rate": 0, "buffer_frames": 0 })).unwrap();
         assert_eq!((reset.device, reset.sample_rate, reset.buffer_frames), (None, None, None));
-        let both = start.with_params(&json!({ "host": "ASIO", "device": "Apollo", "exclusive": true })).unwrap();
-        assert_eq!((both.device.as_deref(), both.exclusive), (Some("Apollo"), true));
+        let both = start.with_params(&json!({ "host": "ASIO", "device": "Interface", "exclusive": true })).unwrap();
+        assert_eq!((both.device.as_deref(), both.exclusive), (Some("Interface"), true));
     }
 
     #[test]

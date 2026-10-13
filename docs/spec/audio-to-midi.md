@@ -8,7 +8,7 @@ last_verified: 2026-10-11
 
 # Audio to MIDI
 
-- **Sources:** the owner's screenshots of Live 12.4 (2026-10-11): the audio clip context menu,
+- **Sources:** the maintainer's screenshots of Live 12.4 (2026-10-11): the audio clip context menu,
   the *Slice to New MIDI Track* dialog with its open menus, the *Convert Audio To MIDI* dialog,
   and dragging an audio clip onto another track in the Arrangement. The public Live 12 manual
   for what the commands produce.

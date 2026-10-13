@@ -8,6 +8,7 @@ covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
   - crates/ui/src/sample_map.rs
+  - crates/ui/src/sample_map_crowd.rs
   - crates/ui/src/sample_map_panel.rs
 ---
 
@@ -18,7 +19,7 @@ alike lie close together, kicks gather in one region and hats in another. Pointi
 plays it, so a library is explored by moving the mouse instead of reading names. Instrument
 presets that come with audio previews (NKS) take part in the same map.
 
-- **Sources:** the owner's request (2026-10-12) with two screenshots of commercial drum
+- **Sources:** the maintainer's request (2026-10-12) with two screenshots of commercial drum
   plug-ins that have such a view; public papers and open-source projects listed under
   *Prior art*. The screenshots were used for structure and behaviour only (what the view shows
   and how it reacts); the look follows [`docs/design/brief.md`](../design/brief.md). Nothing
@@ -75,6 +76,18 @@ Both play a sample as soon as the pointer is over it.
   at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
   switches go back. The browser stays beside it and shows its list meanwhile. While something is
   dragged from the large map, the main view shows instead, so the drop can land on a track.
+- **In a window of its own.** The **Window** button on the map's bar (and View › Sample map in a
+  window, **Ctrl+Alt+M**) moves the map into a separate window, which can sit on another screen
+  while the arrangement or the Session view keeps the main window. The browser shows its list
+  meanwhile, as for the large map. Everything works there as in the browser: pointing previews,
+  Show similar, tags, pins, double-click adds to the selected track, and a drag from the map to
+  a track, a slot or a device chain in the main window drops there (the map's window has the
+  pointer while the button is down; the main window shows the drop label and takes the drop).
+  The keymap's keys work in that window too. **Dock**, Ctrl+Alt+M, closing the window, the
+  browser's Map switch or the large view put the map back. Whether the window is open, and where
+  it is and how big (`map_window`, `map_window_rect` in `settings.txt`: left, top, width and
+  height in points on the whole desktop, so a second screen counts), are kept for the next
+  start; a place no screen could show is not used.
 
 The map holds the samples of the browser's place, whichever category filter is chosen (the
 filters choose what the list shows).
@@ -105,15 +118,65 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
+  item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
+  aspect ratio as `aspect`.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
   **(to decide:** whether new items are placed into the existing layout instead, until a
   Re-layout button is pressed**)**.
-- A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items);
-  meanwhile the map shows "Arranging…" over the previous layout or an empty map. A scope with
-  more than 100 000 items shows the first 100 000 and says so.
+- A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items, a
+  minute or more for 200 000); meanwhile the map shows "Arranging…" over the previous layout or
+  an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
+
+## Many items
+
+A library of 200 000 samples must stay readable and smooth (60 frames a second) at every zoom.
+Drawing every dot then only hides the dots under it, so the map changes how it draws with the
+number of points in view:
+
+- **Density** when more than 20 000 points are in view. The view is divided into cells of 3 by 3
+  screen pixels. Each point is spread over the cells around it with a small Gaussian kernel (about
+  6 pixels each way), and the raster is drawn with linear filtering, so a cluster reads as a soft
+  cloud rather than blocks. Each cell is coloured by the mix of the kinds of the points near it
+  (each kind's colour weighted by its count). Its opacity grows with the logarithm of the count,
+  fading out towards a cluster's edge and full in the densest cell in view. Clusters then show as coloured
+  regions, and where kinds meet, their colours blend. Dimmed points (search, tags, legend,
+  Show similar) count only as a faint grey under the others. Points that need to be seen one
+  by one are drawn on top as dots: the selected ones, the ones in use, the similar ones, and
+  the one under the pointer or last previewed. Pointing, clicking, dragging and the tooltip work
+  on the points as before.
+- **Dots** when 20 000 points or fewer are in view. The dots grow as the points spread out: the
+  radius follows the room each point has on screen, from 1.5 to 6 pixels. A dot that would cover
+  its neighbours is drawn translucent, so overlapping dots read as a denser region rather
+  than a solid blob.
+- The grid layout draws the same way. A cell smaller than 3 pixels is part of the density;
+  larger cells are drawn as before.
+
+**Labels.** Every cluster of a kind gets a label, not one label for the whole kind. Kinds
+that sit in several places are named in each of them.
+
+- A **cluster** is a group of map cells in which the kind holds at least a third of the points,
+  joined to its neighbours across sides and corners. The map is divided into a square of cells
+  half the square root of the item count a side (4 to 48), so a small map's sparse clusters stay
+  in one piece. The cluster's items are its kind's items in those cells.
+- A cluster gets a label when it holds at least 8 items (32 for Other) and at least one in
+  2 000 of the items in the map, so a map of 200 000 shows at most about a hundred
+  candidates.
+- The label sits at the cluster's item nearest to the cluster's centre. Its size grows with the
+  cluster's size (the logarithm of its count), from the map's label size up to 1.7 times it.
+  It is written in the light text colour with a dark shadow, since it sits on its own kind's
+  colour.
+- **Labels never overlap.** They are placed from the largest cluster down. A label that would
+  overlap one already placed is moved up or down by its own height and a small gap. If neither
+  place is free, it is left out for this zoom. Zooming in makes room, and smaller clusters appear. A label
+  that would fall outside the map area is left out too.
+- Labels fade out when zoomed in far enough to read point names, as before.
+
+**Kind toggles.** The legend works as before (click: only that kind; Ctrl+click: several). In
+the density view the dimmed kinds are drawn as faint grey, so the shown kinds stand out from
+the rest of the library. The legend's counts and the clusters are computed when the points
+change, not every frame.
 
 ## Kinds and colours
 
@@ -151,9 +214,8 @@ Every item has a kind. The kinds and the words in names that give them:
   kind is drawn a little paler, and the item's tooltip says "guessed".
 - Each kind has a colour from Suhina's own palette (the design brief's track colours, extended),
   chosen so that neighbouring kinds (kick and bass, snare and clap, the hats) are told apart.
-- **Labels.** The name of each kind with at least 8 items in view is written over its region, at
-  the item of that kind closest to the kind's centre, in the map's label style. Labels fade out
-  when zoomed in far enough to read point names.
+- **Labels.** Each cluster of a kind is named over its region, without overlapping another
+  label: *Many items* › Labels. Labels fade out when zoomed in far enough to read point names.
 - **Legend:** a row under the map with each kind, its colour and its count. Clicking a kind dims
   all others (Ctrl+click: several); clicking it again stops.
 
@@ -175,6 +237,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Input | Does |
 |---|---|
 | Pointer over a point | Highlights it and **previews it** (Settings › Interface › Browser › Map: preview on hover, on by default). Moving across points plays each in turn; a new one stops the one before. A point is played only after the pointer has rested on it for 40 ms, so a fast sweep does not play everything it crosses. |
+| Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
 | Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |
@@ -182,14 +245,14 @@ Every item has a kind. The kinds and the words in names that give them:
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |
 | Double-click empty space, the Fit button | Fits all points in view. |
-| Arrow keys | Moves the selection to the nearest point in that direction and previews it. |
+| Arrow keys | Moves the selection to the nearest point in that direction and previews it; with Show similar on, Up and Down step through the similar list instead. |
 | Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Show in folder (switches to the list with the item selected). |
 
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
-without Show similar).
+step through the list, starting from the item it was shown for, and preview each; Left and Right
+still move to the nearest point on the map.
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the
 same things.
@@ -231,7 +294,7 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); computes the layout when it is not cached |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
 | `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
 | `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
 
@@ -245,7 +308,9 @@ Over MCP, `item`, `place` and `folder` paths must be inside the server's read ro
 | Sample length in the map | 10 s by default, 1–60 s | not analysed, not shown |
 | Audio analysed per item | first 4 s | the rest is not read |
 | A file to analyse | 256 MiB | skipped with a reason |
-| Items in one map | 100 000 | the rest left out; the map says so |
+| Items in one map | 200 000 | the rest left out; the map says so |
+| Points drawn one by one | 20 000 in view | the density view (*Many items*) |
+| Label candidates | clusters of 8 or more items and of 1 in 2 000 of the map | smaller clusters get no label |
 | Grid part assigned exactly | 256 items | larger grids split first (ADR 0013) |
 | `count` in `soundmap.similar` | 100 | cut |
 | Feature cache per folder | 64 MiB | not read; the folder is analysed again |
@@ -276,7 +341,8 @@ so.
   grids.
 
 Repositories without a licence (ml4a's audio t-SNE viewer, the code of Shier et al., IsoMatch)
-are read for their ideas only.
+gave ideas only, through their papers and descriptions; no code was copied, ported or
+translated from them (CONTRIBUTING.md › Clean-room).
 
 ## To find out
 
@@ -284,8 +350,10 @@ are read for their ideas only.
   preset's state loads into the VST3 version of its plug-in.
 - Whether the guessed kinds are good enough with nearest neighbours, or a small classifier
   trained on openly licensed one-shots (CC-BY or CC0 only) is needed.
-- How the layout feels with real libraries of 1 000, 10 000 and 100 000 samples: perplexity,
-  the 4-second window and the feature weights are set by trying them.
+- How the layout feels with real libraries of 1 000, 10 000 and 200 000 samples: perplexity,
+  the 4-second window and the feature weights are set by trying them. With 200 000 items, also
+  whether t-SNE separates the kinds well enough or a UMAP-style layout is needed
+  ([ADR 0013](../decisions/0013-sample-map-analysis.md) › Alternatives).
 
 ## Not decided yet
 

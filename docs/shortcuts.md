@@ -7,6 +7,8 @@ last_verified: 2026-10-13
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
+  - crates/ui/src/browser_view.rs
+  - apps/suhina/src/main.rs
 ---
 
 # Keyboard shortcuts
@@ -59,6 +61,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Show or hide the browser (`view.browser`) | Ctrl+B |
 | Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
+| Open the sample map in a window of its own, or put it back (`view.sampleMapWindow`; [spec](spec/sample-map.md) › Where the map is shown) | Ctrl+Alt+M |
 | Search in the browser (`browser.search`; shows it when hidden). In the search field: Up and Down move through the results, Enter adds the selection to the selected track, Escape clears the search and then leaves the field | Ctrl+F |
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Make the whole window larger, smaller, its normal size (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`; 50–200 % in 10 % steps, kept in `settings.txt`, [spec](spec/window-zoom.md)) | Ctrl+Plus, Ctrl+Equals; Ctrl+Minus; Ctrl+0 |
@@ -70,8 +73,9 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
 
-Paste places the copy right after the selected clip, or at the playhead on the selected track; it
-replaces what it covers, like a moved clip ([arrangement editing](spec/arrangement-editing.md)).
+Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
+moved clip, it replaces what it covers unless the stacking setting for its kind is on
+([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.
 
 Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
 while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and

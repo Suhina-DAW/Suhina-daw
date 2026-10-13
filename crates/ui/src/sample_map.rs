@@ -4,23 +4,24 @@
 
 use std::collections::HashSet;
 
-use egui::{
-    Align2, Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
-};
+use egui::{Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
 use suhina_soundmap::grid::Grid;
 use suhina_soundmap::kinds::Kind;
 
+use crate::sample_map_crowd::{self as crowd, Cluster};
 use crate::theme;
 
 /// How long the pointer rests on a point before it is previewed, so a fast sweep does not play
 /// everything it crosses.
 pub const HOVER_PREVIEW_SECONDS: f64 = 0.040;
+/// How long the pointer rests on a point before its tooltip reads the file for a waveform.
+pub const HOVER_WAVEFORM_SECONDS: f64 = 0.15;
+/// The size of the waveform in a point's tooltip.
+const TOOLTIP_WAVE: Vec2 = Vec2::new(220.0, 36.0);
 /// How near (in points of the screen) the pointer must be to a point to be over it.
 const HIT_RADIUS: f32 = 7.0;
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 64.0;
-/// A kind with fewer items than this in view gets no label.
-const LABEL_MIN_ITEMS: usize = 8;
 /// Above this zoom the kind labels fade out, as point names become readable.
 const LABEL_FADE_ZOOM: f32 = 6.0;
 const TOP_BAR: f32 = 24.0;
@@ -88,6 +89,8 @@ pub enum MapEvent {
     Layout(Layout),
     /// The large-view button.
     ToggleLarge,
+    /// The button that moves the map into a window of its own, or back into the browser.
+    ToggleWindow,
 }
 
 /// The view's own state, kept by the browser between frames.
@@ -97,6 +100,8 @@ pub struct MapView {
     pub preview_on_hover: bool,
     /// The map is shown large, in the main area.
     pub large: bool,
+    /// The map is in a window of its own.
+    pub window: bool,
     zoom: f32,
     /// The map position at the middle of the view.
     centre: [f32; 2],
@@ -109,6 +114,52 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
+    pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
+    /// Counts [`MapView::points_changed`], so what is worked out from the points is kept until
+    /// they change.
+    revision: u64,
+    cache: Cache,
+}
+
+/// The points the cache was worked out for: [`MapView::points_changed`]'s count, their number and
+/// address, the layout and the view's aspect (the grid's positions follow it).
+type PointsKey = (u64, usize, usize, Layout, u32);
+
+/// What the view works out from the points when they change, not every frame
+/// (docs/spec/sample-map.md › Many items).
+#[derive(Clone, Default)]
+struct Cache {
+    /// The points it was worked out for.
+    key: Option<PointsKey>,
+    /// Items per kind, for the legend, in the order of [`Kind::ALL`].
+    counts: Vec<(Kind, usize)>,
+    /// The clusters that get a label, largest first.
+    clusters: Vec<Cluster>,
+    /// The density raster last drawn and what it was drawn for.
+    density: Option<(DensityKey, egui::TextureHandle)>,
+}
+
+impl std::fmt::Debug for Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("key", &self.key)
+            .field("counts", &self.counts)
+            .field("clusters", &self.clusters.len())
+            .field("density", &self.density.as_ref().map(|(_, t)| t.id()))
+            .finish()
+    }
+}
+
+/// Everything the density raster depends on; it is drawn again only when one of these changes.
+#[derive(Debug, Clone, PartialEq)]
+struct DensityKey {
+    points: Option<PointsKey>,
+    rect: Rect,
+    scale: f32,
+    centre: [f32; 2],
+    legend: Vec<Kind>,
+    similar: Option<(usize, Vec<usize>)>,
 }
 
 impl Default for MapView {
@@ -117,6 +168,7 @@ impl Default for MapView {
             layout: Layout::Cloud,
             preview_on_hover: true,
             large: false,
+            window: false,
             zoom: 1.0,
             centre: [0.5, 0.5],
             hovered: None,
@@ -125,11 +177,42 @@ impl Default for MapView {
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            revision: 0,
+            cache: Cache::default(),
+            hover_waveform: None,
         }
     }
 }
 
 impl MapView {
+    /// The points given to [`show`] changed (their positions, kinds or flags): the legend's
+    /// counts, the clusters and the density are worked out again.
+    pub fn points_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Works out the counts and clusters again when the points changed.
+    fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]], aspect: f32) {
+        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect.to_bits()));
+        if self.cache.key == key {
+            return;
+        }
+        let mut counts: Vec<(Kind, usize)> = Kind::ALL.iter().map(|k| (*k, 0)).collect();
+        for point in points {
+            if let Some((_, n)) = counts.iter_mut().find(|(k, _)| *k == point.kind) {
+                *n += 1;
+            }
+        }
+        let items: Vec<([f32; 2], Kind)> =
+            points.iter().zip(positions).filter(|(p, _)| p.matches).map(|(p, q)| (*q, p.kind)).collect();
+        self.cache = Cache { key, counts, clusters: crowd::clusters(&items), density: None };
+    }
+
+    /// The width over the height of where the points were drawn last frame; 1 before the first.
+    pub fn aspect(&self) -> f32 {
+        aspect_of(self.area)
+    }
+
     /// Shows the answer to [`MapEvent::Similar`]: rings these items and lists them at the side.
     pub fn show_similar(&mut self, of: usize, items: Vec<usize>) {
         self.similar = Some((of, items));
@@ -137,6 +220,11 @@ impl MapView {
 
     pub fn similar(&self) -> Option<&(usize, Vec<usize>)> {
         self.similar.as_ref()
+    }
+
+    /// The point the pointer has rested on for [`HOVER_WAVEFORM_SECONDS`] by `now`.
+    pub fn resting(&self, now: f64) -> Option<usize> {
+        self.hovered.filter(|(_, since)| now - since >= HOVER_WAVEFORM_SECONDS).map(|(i, _)| i)
     }
 
     /// Fits all points in view.
@@ -189,18 +277,43 @@ impl Transform {
     }
 }
 
-/// Where each point is drawn: its cloud position, or the centre of its grid cell.
-fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>) -> Vec<[f32; 2]> {
+/// The width over the height of `rect`; 1 when it has no size.
+fn aspect_of(rect: Rect) -> f32 {
+    let aspect = rect.width() / rect.height();
+    if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
+}
+
+/// Where each point is drawn: its cloud position, or the centre of its grid cell. The grid
+/// fills a box of the view's `aspect` around the map's middle (the view shows 1 across its
+/// shorter side), with square cells.
+fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f32) -> Vec<[f32; 2]> {
     match (layout, grid) {
         (Layout::Grid, Some(grid)) if grid.cells.len() == points.len() => {
-            let side = grid.columns.max(grid.rows).max(1) as f32;
-            let offset = [(side - grid.columns as f32) / 2.0, (side - grid.rows as f32) / 2.0];
+            let (width, height) = if aspect >= 1.0 { (aspect, 1.0) } else { (1.0, 1.0 / aspect) };
+            let (columns, rows) = (grid.columns.max(1) as f32, grid.rows.max(1) as f32);
+            let cell = (width / columns).min(height / rows);
             grid.cells
                 .iter()
-                .map(|(c, r)| [(*c as f32 + 0.5 + offset[0]) / side, (*r as f32 + 0.5 + offset[1]) / side])
+                .map(|(c, r)| {
+                    [0.5 + (*c as f32 + 0.5 - columns / 2.0) * cell, 0.5 + (*r as f32 + 0.5 - rows / 2.0) * cell]
+                })
                 .collect()
         }
         _ => points.iter().map(|p| p.position).collect(),
+    }
+}
+
+/// The next item down (or up) the Show similar list from `from`: the list starts with `of`, the
+/// item it was shown for, then the similar ones nearest first. From outside the list, Down goes to
+/// the nearest similar one. `None` past either end.
+fn step_similar(of: usize, items: &[usize], from: Option<usize>, down: bool) -> Option<usize> {
+    let at = from.and_then(|f| std::iter::once(of).chain(items.iter().copied()).position(|i| i == f));
+    let list = |n: usize| if n == 0 { Some(of) } else { items.get(n - 1).copied() };
+    match (at, down) {
+        (Some(at), true) => list(at + 1),
+        (Some(at), false) => at.checked_sub(1).and_then(list),
+        (None, true) => items.first().copied(),
+        (None, false) => None,
     }
 }
 
@@ -234,51 +347,27 @@ fn step(positions: &[[f32; 2]], from: usize, direction: [f32; 2]) -> Option<usiz
         .map(|(i, _)| i)
 }
 
-/// For each kind with enough items, where its label goes: the item of that kind nearest to the
-/// kind's centre.
-fn label_spots(points: &[MapPoint], positions: &[[f32; 2]]) -> Vec<(Kind, [f32; 2])> {
-    let mut out = Vec::new();
-    for kind in Kind::ALL {
-        let mine: Vec<[f32; 2]> =
-            points.iter().zip(positions).filter(|(p, _)| p.kind == kind && p.matches).map(|(_, q)| *q).collect();
-        if mine.len() < LABEL_MIN_ITEMS || kind == Kind::Other && mine.len() < LABEL_MIN_ITEMS * 4 {
-            continue;
-        }
-        let n = mine.len() as f32;
-        let centre = [mine.iter().map(|p| p[0]).sum::<f32>() / n, mine.iter().map(|p| p[1]).sum::<f32>() / n];
-        if let Some(spot) = mine.iter().min_by(|a, b| {
-            let da = (a[0] - centre[0]).powi(2) + (a[1] - centre[1]).powi(2);
-            let db = (b[0] - centre[0]).powi(2) + (b[1] - centre[1]).powi(2);
-            da.total_cmp(&db)
-        }) {
-            out.push((kind, *spot));
-        }
-    }
-    out
-}
-
 /// A kind's colour: Suhina's muted palette, extended, with neighbouring kinds told apart.
 pub fn kind_colour(kind: Kind) -> Color32 {
-    let hex: u32 = match kind {
-        Kind::Kick => 0xD0_6E_5E,
-        Kind::Snare => 0x73_AA_C0,
-        Kind::Clap => 0x5E_C0_B0,
-        Kind::ClosedHat => 0xC6_AC_5E,
-        Kind::OpenHat => 0xD0_8F_6E,
-        Kind::Hat => 0xD8_C4_7A,
-        Kind::Rim => 0x8C_A8_E0,
-        Kind::Tom => 0xB0_74_A4,
-        Kind::Crash => 0xE0_A0_C8,
-        Kind::Ride => 0xC8_B8_E8,
-        Kind::Cymbal => 0xA4_97_CC,
-        Kind::Percussion => 0x8F_C0_6E,
-        Kind::Bass => 0xA8_4F_4F,
-        Kind::Tonal => 0x6E_B0_D0,
-        Kind::Vocal => 0xE8_D0_A0,
-        Kind::Effect => 0x9C_C4_9C,
-        Kind::Other => 0x8A_86_80,
-    };
-    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+    match kind {
+        Kind::Kick => theme::kind_kick(),
+        Kind::Snare => theme::kind_snare(),
+        Kind::Clap => theme::kind_clap(),
+        Kind::ClosedHat => theme::kind_closed_hat(),
+        Kind::OpenHat => theme::kind_open_hat(),
+        Kind::Hat => theme::kind_hat(),
+        Kind::Rim => theme::kind_rim(),
+        Kind::Tom => theme::kind_tom(),
+        Kind::Crash => theme::kind_crash(),
+        Kind::Ride => theme::kind_ride(),
+        Kind::Cymbal => theme::kind_cymbal(),
+        Kind::Percussion => theme::kind_percussion(),
+        Kind::Bass => theme::kind_bass(),
+        Kind::Tonal => theme::kind_tonal(),
+        Kind::Vocal => theme::kind_vocal(),
+        Kind::Effect => theme::kind_effect(),
+        Kind::Other => theme::kind_other(),
+    }
 }
 
 /// Draws the map in the space `ui` offers and reports what the user did.
@@ -303,12 +392,14 @@ pub fn show(
     });
 
     top_bar(ui, top, view, status, events);
-    let positions = positions(points, view.layout, grid);
+    let aspect = aspect_of(area);
+    let positions = positions(points, view.layout, grid, aspect);
+    view.refresh(points, &positions, aspect);
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
     }
-    legend(ui, bottom, view, points);
+    legend(ui, bottom, view);
 }
 
 fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &mut Vec<MapEvent>) {
@@ -327,9 +418,21 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
     child.label(egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL));
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .button(if view.large { "Close" } else { "Large" })
-            .on_hover_text("Show the map in the main area")
+            .button(if view.window { "Dock" } else { "Window" })
+            .on_hover_text(if view.window {
+                "Put the map back into the browser"
+            } else {
+                "Open the map in a window of its own, for another screen"
+            })
             .clicked()
+        {
+            events.push(MapEvent::ToggleWindow);
+        }
+        if !view.window
+            && ui
+                .button(if view.large { "Close" } else { "Large" })
+                .on_hover_text("Show the map in the main area")
+                .clicked()
         {
             events.push(MapEvent::ToggleLarge);
         }
@@ -498,7 +601,8 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         (None, _) => {}
     }
 
-    // Keys: arrows step to the nearest point that way; Escape ends Show similar.
+    // Keys: arrows step to the nearest point that way, or with Show similar on, Up and Down step
+    // through its list; Escape ends Show similar.
     if response.contains_pointer() || response.has_focus() {
         let keys = [
             (Key::ArrowLeft, [-1.0, 0.0]),
@@ -509,9 +613,11 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         for (key, direction) in keys {
             if ui.input(|i| i.key_pressed(key)) {
                 let from = points.iter().position(|p| p.selected).or(view.previewed);
-                let next = match from {
-                    Some(from) => step(positions, from, direction),
-                    None => points.iter().position(|p| p.matches),
+                let vertical = matches!(key, Key::ArrowUp | Key::ArrowDown);
+                let next = match (view.similar.as_ref().filter(|_| vertical), from) {
+                    (Some((of, items)), from) => step_similar(*of, items, from, key == Key::ArrowDown),
+                    (None, Some(from)) => step(positions, from, direction),
+                    (None, None) => points.iter().position(|p| p.matches),
                 };
                 if let Some(next) = next {
                     events.push(MapEvent::Select { items: vec![next], add: false });
@@ -529,7 +635,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     }
 
     draw_points(&painter, view, points, &screen, grid, transform, under);
-    draw_labels(&painter, view, points, positions, transform);
+    draw_labels(&painter, view, transform);
 
     if let Some(point) = under.and_then(|i| points.get(i)) {
         let kind =
@@ -539,6 +645,15 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
             ui.label(egui::RichText::new(kind).color(theme::text_secondary()));
             if !point.detail.is_empty() {
                 ui.label(egui::RichText::new(&point.detail).color(theme::text_secondary()));
+            }
+            if let Some((_, peaks)) = view.hover_waveform.as_ref().filter(|(i, _)| Some(*i) == under) {
+                let (rect, _) = ui.allocate_exact_size(TOOLTIP_WAVE, Sense::hover());
+                let seconds = peaks.frames as f64 / f64::from(peaks.sample_rate.max(1));
+                let count = rect.width() as usize;
+                let columns =
+                    crate::waveform::steady_columns(rect.left(), count, 0.0, seconds / count.max(1) as f64, 1.0);
+                let shape = crate::waveform::geometry(peaks, rect, &columns, crate::waveform::scale(ui.ctx()));
+                crate::waveform::paint(ui.painter(), &shape, crate::waveform::Colors::from(theme::text_secondary()));
             }
         });
     }
@@ -552,28 +667,65 @@ fn cell_size(view: &MapView, grid: Option<&Grid>, transform: Transform) -> f32 {
     }
 }
 
+/// The points: one dot each, or the density raster with the points that must be seen one by one
+/// drawn on top when too many are in view (docs/spec/sample-map.md › Many items).
 fn draw_points(
     painter: &egui::Painter,
-    view: &MapView,
+    view: &mut MapView,
     points: &[MapPoint],
     screen: &[Pos2],
     grid: Option<&Grid>,
     transform: Transform,
     under: Option<usize>,
 ) {
-    let visible = painter.clip_rect().expand(8.0);
+    let area = painter.clip_rect();
+    let visible = area.expand(8.0);
     let cell = cell_size(view, grid, transform);
-    let radius = (2.0 * view.zoom.sqrt()).clamp(2.0, 6.0);
+    let in_view = screen.iter().filter(|p| area.contains(**p)).count();
+    let crowded = if cell > 0.0 { cell < crowd::BIN } else { in_view > crowd::DENSITY_ABOVE };
+    let legend = view.legend.clone();
+    let similar_of = view.similar.as_ref().map(|(of, _)| *of);
     let similar: HashSet<usize> = view.similar.as_ref().map(|(_, s)| s.iter().copied().collect()).unwrap_or_default();
     let dimmed = |i: usize, p: &MapPoint| {
         !p.matches
-            || !view.legend.is_empty() && !view.legend.contains(&p.kind)
-            || view.similar.is_some() && !similar.contains(&i) && view.similar.as_ref().is_some_and(|(of, _)| *of != i)
+            || !legend.is_empty() && !legend.contains(&p.kind)
+            || similar_of.is_some_and(|of| of != i) && !similar.contains(&i)
     };
+    if crowded {
+        let mut kinds: Vec<Kind> = legend.iter().copied().collect();
+        kinds.sort();
+        let key = DensityKey {
+            points: view.cache.key,
+            rect: area,
+            scale: transform.scale,
+            centre: transform.centre,
+            legend: kinds,
+            similar: view.similar.clone(),
+        };
+        if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
+            let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
+            let image = crowd::density(screen, colour, area);
+            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
+            view.cache.density = Some((key, handle));
+        }
+        if let Some((_, handle)) = view.cache.density.as_ref() {
+            let size = handle.size_vec2() * crowd::BIN;
+            let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+            painter.image(handle.id(), Rect::from_min_size(area.min, size), uv, Color32::WHITE);
+        }
+    }
+    let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
+    let cell = if crowded { 0.0 } else { cell };
     // Dimmed points first, so the others are drawn over them.
     for pass in [true, false] {
         for (i, (point, at)) in points.iter().zip(screen).enumerate() {
             if dimmed(i, point) != pass || !visible.contains(*at) {
+                continue;
+            }
+            let marked =
+                point.selected || point.in_use || similar.contains(&i) || view.previewed == Some(i) || under == Some(i);
+            // In the density view only the points that must be seen one by one are drawn.
+            if crowded && !marked {
                 continue;
             }
             let mut colour = kind_colour(point.kind);
@@ -582,6 +734,8 @@ fn draw_points(
             }
             if pass {
                 colour = colour.gamma_multiply(0.18);
+            } else if !marked {
+                colour = colour.gamma_multiply(opacity);
             }
             if cell > 0.0 {
                 let side = (cell - 1.0).max(1.0);
@@ -618,30 +772,32 @@ fn draw_points(
     }
 }
 
-fn draw_labels(
-    painter: &egui::Painter,
-    view: &MapView,
-    points: &[MapPoint],
-    positions: &[[f32; 2]],
-    transform: Transform,
-) {
+/// One label per cluster, sized by its count, placed largest first so none overlap
+/// (docs/spec/sample-map.md › Many items › Labels).
+fn draw_labels(painter: &egui::Painter, view: &MapView, transform: Transform) {
     let fade = ((LABEL_FADE_ZOOM - view.zoom) / 2.0).clamp(0.0, 1.0);
     if fade <= 0.0 {
         return;
     }
-    for (kind, spot) in label_spots(points, positions) {
-        let at = transform.to_screen(spot);
-        let colour = kind_colour(kind).gamma_multiply(fade);
-        let font = theme::ui_font(theme::TEXT * 1.6);
+    let clusters: Vec<&Cluster> =
+        view.cache.clusters.iter().filter(|c| view.legend.is_empty() || view.legend.contains(&c.kind)).collect();
+    let smallest = clusters.last().map_or(1, |c| c.count);
+    let galleys: Vec<_> = clusters
+        .iter()
+        .map(|c| {
+            let font = theme::ui_font(theme::TEXT * 1.6 * crowd::label_scale(c.count, smallest));
+            // Light text: a label sits on its own kind's colour, so that colour would not read.
+            painter.layout_no_wrap(c.kind.label().to_string(), font, theme::text_primary().gamma_multiply(fade))
+        })
+        .collect();
+    let sizes: Vec<(Pos2, Vec2)> =
+        clusters.iter().zip(&galleys).map(|(c, g)| (transform.to_screen(c.spot), g.size())).collect();
+    let shadow = theme::window_background().gamma_multiply(fade);
+    for (spot, galley) in crowd::place_labels(&sizes, painter.clip_rect()).into_iter().zip(galleys) {
+        let Some(spot) = spot else { continue };
         // A shadow keeps the label readable over the points.
-        painter.text(
-            at + Vec2::new(1.0, 1.0),
-            Align2::CENTER_CENTER,
-            kind.label(),
-            font.clone(),
-            theme::window_background().gamma_multiply(fade),
-        );
-        painter.text(at, Align2::CENTER_CENTER, kind.label(), font, colour);
+        painter.galley_with_override_text_color(spot.min + Vec2::new(1.0, 1.0), galley.clone(), shadow);
+        painter.galley(spot.min, galley, shadow);
     }
 }
 
@@ -676,15 +832,14 @@ fn similar_strip(ui: &mut Ui, rect: Rect, view: &mut MapView, points: &[MapPoint
     }
 }
 
-fn legend(ui: &mut Ui, rect: Rect, view: &mut MapView, points: &[MapPoint]) {
+fn legend(ui: &mut Ui, rect: Rect, view: &mut MapView) {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(theme::PAD, 1.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     let ctrl = child.input(|i| i.modifiers.command);
-    for kind in Kind::ALL {
-        let count = points.iter().filter(|p| p.kind == kind).count();
+    for (kind, count) in view.cache.counts.clone() {
         if count == 0 {
             continue;
         }
@@ -775,26 +930,41 @@ mod tests {
     }
 
     #[test]
-    fn labels_go_to_kinds_with_enough_items() {
+    fn the_legend_counts_and_the_clusters_follow_the_points() {
         let mut points: Vec<MapPoint> = (0..10).map(|i| point(0.1 + i as f32 * 0.01, 0.1, Kind::Kick)).collect();
         points.extend((0..3).map(|i| point(0.9, 0.9 + i as f32 * 0.01, Kind::Snare)));
         let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
-        let spots = label_spots(&points, &positions);
-        assert_eq!(spots.len(), 1);
-        assert_eq!(spots[0].0, Kind::Kick);
-        assert!((spots[0].1[0] - 0.145).abs() < 0.01);
+        let mut view = MapView::default();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.counts.contains(&(Kind::Kick, 10)) && view.cache.counts.contains(&(Kind::Snare, 3)));
+        // Only the kick cluster is large enough for a label.
+        assert_eq!(view.cache.clusters.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![Kind::Kick]);
+        // Kept until the points change.
+        for p in &mut points {
+            p.matches = false;
+        }
+        view.refresh(&points, &positions, 1.0);
+        assert_eq!(view.cache.clusters.len(), 1);
+        view.points_changed();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.clusters.is_empty());
     }
 
     #[test]
     fn grid_positions_are_cell_centres() {
         let points = vec![point(0.0, 0.0, Kind::Kick), point(1.0, 1.0, Kind::Kick)];
         let grid = Grid { columns: 2, rows: 1, cells: vec![(0, 0), (1, 0)] };
-        // A 2 by 1 grid sits in the middle of the square map.
-        assert_eq!(positions(&points, Layout::Grid, Some(&grid)), vec![[0.25, 0.5], [0.75, 0.5]]);
-        assert_eq!(positions(&points, Layout::Cloud, Some(&grid)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // A 2 by 1 grid sits in the middle of a square view.
+        assert_eq!(positions(&points, Layout::Grid, Some(&grid), 1.0), vec![[0.25, 0.5], [0.75, 0.5]]);
+        assert_eq!(positions(&points, Layout::Cloud, Some(&grid), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // In a view twice as wide, a 4 by 2 grid spreads over the whole width.
+        let wide: Vec<MapPoint> = (0..8).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let grid = Grid { columns: 4, rows: 2, cells: (0..8).map(|i| (i % 4, i / 4)).collect() };
+        let placed = positions(&wide, Layout::Grid, Some(&grid), 2.0);
+        assert_eq!((placed[0], placed[7]), ([-0.25, 0.25], [1.25, 0.75]));
         // A grid that does not match the points falls back to the cloud.
         let wrong = Grid { columns: 1, rows: 1, cells: vec![(0, 0)] };
-        assert_eq!(positions(&points, Layout::Grid, Some(&wrong)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        assert_eq!(positions(&points, Layout::Grid, Some(&wrong), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
     }
 
     #[test]
@@ -852,6 +1022,149 @@ mod tests {
 }
 
 #[cfg(test)]
+mod many {
+    use super::*;
+
+    /// `n` points in clusters of the 17 kinds, from a fixed seed.
+    pub(super) fn points(n: usize) -> Vec<MapPoint> {
+        let mut state = 7u32;
+        let mut noise = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as f32 / u32::MAX as f32
+        };
+        (0..n)
+            .map(|i| {
+                let k = i % Kind::ALL.len();
+                let kind = Kind::ALL[k];
+                let centre = [0.15 + (k % 5) as f32 * 0.18, 0.15 + (k / 5) as f32 * 0.22];
+                MapPoint {
+                    name: format!("{} {i}", kind.label()),
+                    detail: String::new(),
+                    // Roughly Gaussian clouds (the sum of three uniform draws), as t-SNE makes them.
+                    position: [
+                        (centre[0] + (noise() + noise() + noise() - 1.5) * 0.06).clamp(0.0, 1.0),
+                        (centre[1] + (noise() + noise() + noise() - 1.5) * 0.07).clamp(0.0, 1.0),
+                    ],
+                    kind,
+                    guessed: false,
+                    in_use: i % 5_000 == 0,
+                    selected: i == 3,
+                    matches: true,
+                    preset: false,
+                    pinned: false,
+                    tags: Vec::new(),
+                }
+            })
+            .collect()
+    }
+
+    /// The slowest of `frames` frames (the view's work and tessellation) with the pointer moving
+    /// over the map and, when `pan`, the map moved every frame so the density is drawn anew.
+    fn slowest_frame(points: &[MapPoint], frames: usize, pan: bool) -> std::time::Duration {
+        let ctx = egui::Context::default();
+        let mut view = MapView::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let mut slowest = std::time::Duration::ZERO;
+        for frame in 0..frames + 2 {
+            let mut input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            input.events.push(egui::Event::PointerMoved(Pos2::new(300.0 + frame as f32 * 7.0, 400.0)));
+            if pan {
+                view.centre = [0.5 + frame as f32 * 0.001, 0.5];
+            }
+            let started = std::time::Instant::now();
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut events = Vec::new();
+                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+            });
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            // No renderer here takes the density texture.
+            output.textures_delta.clear();
+            // The first frames lay out the fonts and work out the clusters.
+            if frame >= 2 {
+                slowest = slowest.max(started.elapsed());
+            }
+        }
+        slowest
+    }
+
+    #[test]
+    fn a_map_of_200_000_points_draws_at_60_frames_a_second() {
+        let points = points(200_000);
+        let still = slowest_frame(&points, 10, false);
+        let panning = slowest_frame(&points, 10, true);
+        eprintln!("200 000 points: still {still:?}, panning {panning:?}");
+        // A frame at 60 Hz in an optimised build; unoptimised test builds get more room.
+        let budget = std::time::Duration::from_micros(if cfg!(debug_assertions) { 100_000 } else { 16_700 });
+        assert!(still < budget && panning < budget, "still {still:?}, panning {panning:?}");
+    }
+}
+
+#[cfg(test)]
+mod similar_keys {
+    use super::*;
+
+    #[test]
+    fn up_and_down_step_through_the_similar_list() {
+        let items = [7, 3, 12];
+        assert_eq!(step_similar(0, &items, None, true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(0), true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), true), Some(3));
+        assert_eq!(step_similar(0, &items, Some(12), true), None, "past the end");
+        assert_eq!(step_similar(0, &items, Some(3), false), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), false), Some(0), "back to the item it was shown for");
+        assert_eq!(step_similar(0, &items, Some(0), false), None);
+        assert_eq!(step_similar(0, &items, Some(5), true), Some(7), "from outside the list");
+    }
+
+    #[test]
+    fn down_with_show_similar_on_previews_the_next_similar_item() {
+        use egui_kittest::Harness;
+        let point = |x: f32, y: f32| MapPoint {
+            name: format!("{x},{y}"),
+            detail: String::new(),
+            position: [x, y],
+            kind: Kind::Kick,
+            guessed: false,
+            in_use: false,
+            selected: false,
+            matches: true,
+            preset: false,
+            pinned: false,
+            tags: Vec::new(),
+        };
+        // A row of points left to right: spatially, Down from point 0 has nowhere to go.
+        let points: Vec<MapPoint> = (0..6).map(|i| point(i as f32 / 5.0, 0.5)).collect();
+        let mut view = MapView::default();
+        view.show_similar(0, vec![4, 2]);
+        let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "6 samples", &[], events),
+            (view, Vec::<MapEvent>::new()),
+        );
+        harness.run();
+        let view = &harness.state().0;
+        let middle = view.area.center();
+        harness.hover_at(middle);
+        harness.run();
+        harness.state_mut().0.previewed = Some(0);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(4)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(2)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        // Right still steps on the map: from point 2 to its neighbour 3.
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(3)), "{:?}", harness.state().1);
+    }
+}
+
+#[cfg(test)]
 mod look {
     use super::*;
 
@@ -884,7 +1197,10 @@ mod look {
                 let mut p = MapPoint {
                     name: format!("{} {i}", kind.label()),
                     detail: String::new(),
-                    position: [centre[0] + noise() * 0.22, centre[1] + noise() * 0.22],
+                    position: [
+                        centre[0] + (noise() + noise() + noise()) * 0.07,
+                        centre[1] + (noise() + noise() + noise()) * 0.07,
+                    ],
                     kind: *kind,
                     guessed: i % 7 == 0,
                     in_use: i == 3 && k % 2 == 0,
@@ -915,5 +1231,23 @@ mod look {
             let name = format!("../../target/sample-map-{layout:?}.png").to_lowercase();
             image.save(name).unwrap();
         }
+    }
+
+    /// Renders 200 000 points (the density view) to `target/sample-map-crowded.png`.
+    #[test]
+    #[ignore]
+    fn render_a_crowded_map() {
+        use egui_kittest::Harness;
+        let points = super::many::points(200_000);
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 640.0)).build_ui_state(
+            |ui, view: &mut MapView| {
+                crate::theme::install(ui.ctx());
+                let mut events = Vec::new();
+                show(ui, view, &points, None, "200 000 samples", &[], &mut events);
+            },
+            MapView::default(),
+        );
+        harness.run();
+        harness.render().unwrap().save("../../target/sample-map-crowded.png").unwrap();
     }
 }
