@@ -89,7 +89,8 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
   audio thread through a
   lock-free queue and applied at the start of the next audio block. **Loopwerk:**
   `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
-  beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)).
+  beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)),
+  and the engine's CPU load (`cpu`: percent), which the control bar shows.
 
 ## To observe
 

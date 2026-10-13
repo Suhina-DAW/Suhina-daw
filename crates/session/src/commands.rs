@@ -365,7 +365,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "launcher.state",
-        label: "What the audio engine is playing: transport, tempo, position, and each track's playing and queued clip",
+        label: "What the audio engine is playing: transport, tempo, position, each track's playing and queued clip, and the engine's CPU load",
         params: &[],
         kind: CommandKind::Transport,
         run: launcher_state,
@@ -1387,6 +1387,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         let preview = player.preview_monitor();
         json!({ "playing": preview.playing(), "seconds": (preview.seconds() * 1000.0).round() / 1000.0 })
     });
+    let cpu = session.player().map(|player| player.cpu_monitor().load_percent());
     let monitor = session.player_mut()?.monitor();
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
     let start_beat = monitor.start_beat();
@@ -1435,6 +1436,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
         "preview": preview_state,
+        "cpu": cpu,
     }))
 }
 
