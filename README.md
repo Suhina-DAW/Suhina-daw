@@ -144,6 +144,30 @@ build at them (`CPAL_ASIO_DIR`); nothing is downloaded. The SDK is GPL-3.0 only,
 `asio` is distributed under the GPL-3.0; Suhina's own code stays GPL-3.0-or-later. "ASIO" is a
 trademark of Steinberg Media Technologies GmbH.
 
+## Contributing
+
+Everything that is planned or being worked on is on the board,
+[**Suhina** (GitHub project)](https://github.com/orgs/suhina-daw/projects/1), and every item there
+is an [issue](https://github.com/suhina-daw/suhina-daw/issues) in this repository. To start:
+
+1. **Read the rules once:** [`CONTRIBUTING.md`](CONTRIBUTING.md) (clean-room, licences, sign-off)
+   and [`AGENTS.md`](AGENTS.md) (golden rules, crate map, what to run before you finish). They
+   apply to people and to AI agents alike.
+2. **Pick an issue** on the board in *Backlog* or *Ready* with no open pull request for it; the
+   [`good first issue`](https://github.com/suhina-daw/suhina-daw/labels/good%20first%20issue) and
+   [`help wanted`](https://github.com/suhina-daw/suhina-daw/labels/help%20wanted) labels mark good
+   places to begin. Say in the issue that you take it, with a short plan.
+3. **Find the documents for it** in [`docs/INDEX.md`](docs/INDEX.md), by what you are about to do
+   or by the code you change, and read [`docs/architecture.md`](docs/architecture.md) to see where
+   the code goes.
+4. **Build and test** as [Building](#building) shows; before the pull request run `cargo fmt --all`,
+   `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and
+   `python scripts/docs.py check`.
+5. **Open a pull request** that says `Closes #<issue>` and fills in the template.
+
+Something missing or a bug? Open an issue with one of the forms, or ask on
+[Discord](https://discord.com/invite/e5JAZYMU).
+
 ## Documentation
 
 | | |
