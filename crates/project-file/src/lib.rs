@@ -787,12 +787,12 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files
 /// written before fade shapes).
-fn fade_curve(c: &Obj, fade: &str, at: &str) -> Result<FadeCurve, LocrError> {
+fn fade_curve(c: &Obj, fade: &str, at: &str) -> Result<FadeCurve, ProjectFileError> {
     let shape_key = format!("{fade}_shape");
     let shape = match c.get(&shape_key) {
         None | Some(Value::Null) => FadeShape::default(),
         Some(Value::String(name)) => FadeShape::from_name(name)
-            .ok_or_else(|| LocrError(format!("{at}.{shape_key}: unknown fade shape {name:?}")))?,
+            .ok_or_else(|| ProjectFileError(format!("{at}.{shape_key}: unknown fade shape {name:?}")))?,
         Some(_) => return Err(format!("{at}.{shape_key}: expected a fade shape name").into()),
     };
     let curve_key = format!("{fade}_curve");

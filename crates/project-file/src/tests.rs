@@ -277,7 +277,7 @@ fn hostile_values_are_errors_not_crashes() {
 #[test]
 fn a_clip_without_fade_shapes_has_linear_fades() {
     let project = from_json(
-        r#"{ "format": "locr", "version": 1, "project": { "contents": [ { "id": 1, "length": 4 } ],
+        r#"{ "format": "suhina", "version": 1, "project": { "contents": [ { "id": 1, "length": 4 } ],
             "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in": 1, "fade_out": 1 } ] } ] } } }"#,
     )
     .unwrap();
