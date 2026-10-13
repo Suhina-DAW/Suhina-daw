@@ -1,10 +1,13 @@
-//! Suhina's own project file, `.locr`: the project model (ADR 0001) as versioned JSON, so a
+//! Suhina's own project file, `.suhina`: the project model (ADR 0001) as versioned JSON, so a
 //! project can be saved and opened again with nothing lost, and read by people and agents
-//! (ADR 0010, `docs/spec/locr-format.md`).
+//! (ADR 0010, `docs/spec/suhina-format.md`).
 //!
 //! ```json
-//! { "format": "locr", "version": 1, "project": { "transport": { … }, "tracks": [ … ], … } }
+//! { "format": "suhina", "version": 1, "project": { "transport": { … }, "tracks": [ … ], … } }
 //! ```
+//!
+//! Files saved before October 2026 end in `.locr` and name the format `"locr"`; they are the
+//! same format and still open ([`OLD_EXTENSION`], [`is_project_file`]).
 //!
 //! Binary data (plug-in state, extensions) is base64. Audio files are referred to by path,
 //! relative to the project file; [`rebase_audio`] moves those paths when a project is saved
@@ -25,9 +28,14 @@ use suhina_model::{
 };
 
 /// The file extension, without the dot.
-pub const EXTENSION: &str = "locr";
+pub const EXTENSION: &str = "suhina";
+/// The extension of project files saved before October 2026, without the dot: the same format,
+/// still read, never chosen for a new file.
+pub const OLD_EXTENSION: &str = "locr";
 /// The `format` every file names.
-const FORMAT: &str = "locr";
+const FORMAT: &str = "suhina";
+/// The `format` files saved before October 2026 name; read as [`FORMAT`].
+const OLD_FORMAT: &str = "locr";
 /// The version this crate writes, and the newest it reads.
 pub const VERSION: u64 = 1;
 /// A larger file is refused before it is parsed.
@@ -35,30 +43,36 @@ const MAX_FILE: u64 = 512 * 1024 * 1024;
 
 /// Why a file could not be read as a project.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocrError(pub String);
+pub struct ProjectFileError(pub String);
 
-impl fmt::Display for LocrError {
+impl fmt::Display for ProjectFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl std::error::Error for LocrError {}
+impl std::error::Error for ProjectFileError {}
 
-impl From<String> for LocrError {
+impl From<String> for ProjectFileError {
     fn from(message: String) -> Self {
         Self(message)
     }
 }
 
-impl From<&str> for LocrError {
+impl From<&str> for ProjectFileError {
     fn from(message: &str) -> Self {
         Self(message.to_string())
     }
 }
 
+/// Whether `path` names a project file by its extension: `.suhina`, or `.locr` from before
+/// October 2026 (either case).
+pub fn is_project_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION) || e.eq_ignore_ascii_case(OLD_EXTENSION))
+}
+
 /// Reads a project file.
-pub fn read_file(path: &Path) -> Result<Project, LocrError> {
+pub fn read_file(path: &Path) -> Result<Project, ProjectFileError> {
     let file = std::fs::File::open(path).map_err(|e| format!("could not open the project: {e}"))?;
     let mut text = String::new();
     file.take(MAX_FILE + 1).read_to_string(&mut text).map_err(|e| format!("could not read the project: {e}"))?;
@@ -70,8 +84,8 @@ pub fn read_file(path: &Path) -> Result<Project, LocrError> {
 
 /// Writes `project` to `path`: to a file beside it first, then moved over it, so a failed save
 /// never leaves half a project.
-pub fn write_file(path: &Path, project: &Project) -> Result<(), LocrError> {
-    let failed = |e: std::io::Error| LocrError(format!("could not save {}: {e}", path.display()));
+pub fn write_file(path: &Path, project: &Project) -> Result<(), ProjectFileError> {
+    let failed = |e: std::io::Error| ProjectFileError(format!("could not save {}: {e}", path.display()));
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(failed)?;
     }
@@ -85,19 +99,19 @@ pub fn write_file(path: &Path, project: &Project) -> Result<(), LocrError> {
     })
 }
 
-/// The project as the text of a `.locr` file.
+/// The project as the text of a `.suhina` file.
 pub fn to_json(project: &Project) -> String {
     let file = json!({ "format": FORMAT, "version": VERSION, "project": project_value(project) });
     serde_json::to_string_pretty(&file).unwrap_or_default()
 }
 
-/// Reads the text of a `.locr` file. The project must validate (ids unique, references
-/// resolve), as an imported one must.
-pub fn from_json(text: &str) -> Result<Project, LocrError> {
+/// Reads the text of a `.suhina` file, or of a `.locr` one saved before October 2026. The
+/// project must validate (ids unique, references resolve), as an imported one must.
+pub fn from_json(text: &str) -> Result<Project, ProjectFileError> {
     let root = serde_json::from_str::<Value>(text).map_err(|e| format!("the project is not JSON: {e}"))?;
     let root = root.as_object().ok_or("a project file is a JSON object")?;
-    if root.get("format").and_then(Value::as_str) != Some(FORMAT) {
-        return Err("this is not a Suhina project (its format is not \"locr\")".to_string().into());
+    if !matches!(root.get("format").and_then(Value::as_str), Some(FORMAT | OLD_FORMAT)) {
+        return Err("this is not a Suhina project (its format is not \"suhina\")".to_string().into());
     }
     let version = root.get("version").and_then(Value::as_u64).ok_or("the project's version is missing")?;
     if version == 0 || version > VERSION {
@@ -366,11 +380,11 @@ fn stretch_name(mode: StretchMode) -> &'static str {
 
 type Obj = Map<String, Value>;
 
-fn object<'a>(value: &'a Value, at: &str) -> Result<&'a Obj, LocrError> {
-    value.as_object().ok_or_else(|| LocrError(format!("{at}: expected an object")))
+fn object<'a>(value: &'a Value, at: &str) -> Result<&'a Obj, ProjectFileError> {
+    value.as_object().ok_or_else(|| ProjectFileError(format!("{at}: expected an object")))
 }
 
-fn list<'a>(o: &'a Obj, key: &str, at: &str) -> Result<&'a [Value], LocrError> {
+fn list<'a>(o: &'a Obj, key: &str, at: &str) -> Result<&'a [Value], ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(&[]),
         Some(Value::Array(items)) => Ok(items),
@@ -378,42 +392,42 @@ fn list<'a>(o: &'a Obj, key: &str, at: &str) -> Result<&'a [Value], LocrError> {
     }
 }
 
-fn float(o: &Obj, key: &str, at: &str) -> Result<f64, LocrError> {
+fn float(o: &Obj, key: &str, at: &str) -> Result<f64, ProjectFileError> {
     o.get(key)
         .and_then(Value::as_f64)
         .filter(|v| v.is_finite())
-        .ok_or_else(|| LocrError(format!("{at}.{key}: expected a number")))
+        .ok_or_else(|| ProjectFileError(format!("{at}.{key}: expected a number")))
 }
 
-fn float_or(o: &Obj, key: &str, default: f64, at: &str) -> Result<f64, LocrError> {
+fn float_or(o: &Obj, key: &str, default: f64, at: &str) -> Result<f64, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(default),
         Some(_) => float(o, key, at),
     }
 }
 
-fn optional_float(o: &Obj, key: &str, at: &str) -> Result<Option<f64>, LocrError> {
+fn optional_float(o: &Obj, key: &str, at: &str) -> Result<Option<f64>, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(_) => float(o, key, at).map(Some),
     }
 }
 
-fn whole<T: TryFrom<u64>>(o: &Obj, key: &str, at: &str) -> Result<T, LocrError> {
+fn whole<T: TryFrom<u64>>(o: &Obj, key: &str, at: &str) -> Result<T, ProjectFileError> {
     o.get(key)
         .and_then(Value::as_u64)
         .and_then(|n| T::try_from(n).ok())
-        .ok_or_else(|| LocrError(format!("{at}.{key}: expected a whole number in range")))
+        .ok_or_else(|| ProjectFileError(format!("{at}.{key}: expected a whole number in range")))
 }
 
-fn optional_whole<T: TryFrom<u64>>(o: &Obj, key: &str, at: &str) -> Result<Option<T>, LocrError> {
+fn optional_whole<T: TryFrom<u64>>(o: &Obj, key: &str, at: &str) -> Result<Option<T>, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(_) => whole(o, key, at).map(Some),
     }
 }
 
-fn flag(o: &Obj, key: &str, default: bool, at: &str) -> Result<bool, LocrError> {
+fn flag(o: &Obj, key: &str, default: bool, at: &str) -> Result<bool, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(default),
         Some(Value::Bool(b)) => Ok(*b),
@@ -421,7 +435,7 @@ fn flag(o: &Obj, key: &str, default: bool, at: &str) -> Result<bool, LocrError> 
     }
 }
 
-fn text(o: &Obj, key: &str, at: &str) -> Result<String, LocrError> {
+fn text(o: &Obj, key: &str, at: &str) -> Result<String, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(String::new()),
         Some(Value::String(s)) => Ok(s.clone()),
@@ -429,24 +443,24 @@ fn text(o: &Obj, key: &str, at: &str) -> Result<String, LocrError> {
     }
 }
 
-fn required_text(o: &Obj, key: &str, at: &str) -> Result<String, LocrError> {
+fn required_text(o: &Obj, key: &str, at: &str) -> Result<String, ProjectFileError> {
     match o.get(key) {
         Some(Value::String(s)) => Ok(s.clone()),
         _ => Err(format!("{at}.{key}: expected text").into()),
     }
 }
 
-fn bytes(o: &Obj, key: &str, at: &str) -> Result<Option<Vec<u8>>, LocrError> {
+fn bytes(o: &Obj, key: &str, at: &str) -> Result<Option<Vec<u8>>, ProjectFileError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => {
-            BASE64.decode(s).map(Some).map_err(|e| LocrError(format!("{at}.{key}: not base64: {e}")))
+            BASE64.decode(s).map(Some).map_err(|e| ProjectFileError(format!("{at}.{key}: not base64: {e}")))
         }
         Some(_) => Err(format!("{at}.{key}: expected base64 text").into()),
     }
 }
 
-fn extensions(o: &Obj, at: &str) -> Result<Extensions, LocrError> {
+fn extensions(o: &Obj, at: &str) -> Result<Extensions, ProjectFileError> {
     let mut out = Vec::new();
     for (i, item) in list(o, "extensions", at)?.iter().enumerate() {
         let at = format!("{at}.extensions[{i}]");
@@ -460,7 +474,7 @@ fn extensions(o: &Obj, at: &str) -> Result<Extensions, LocrError> {
     Ok(Extensions(out))
 }
 
-fn read_project(value: &Value) -> Result<Project, LocrError> {
+fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
     let p = object(value, "project")?;
     let transport = match p.get("transport") {
         None | Some(Value::Null) => Transport::default(),
@@ -561,7 +575,7 @@ fn read_project(value: &Value) -> Result<Project, LocrError> {
     Ok(Project { transport, tracks, channels, contents, arrangement, launcher, extensions: extensions(p, "project")? })
 }
 
-fn read_track(value: &Value, at: &str) -> Result<Track, LocrError> {
+fn read_track(value: &Value, at: &str) -> Result<Track, ProjectFileError> {
     let t = object(value, at)?;
     let color = match t.get("color") {
         None | Some(Value::Null) => None,
@@ -570,7 +584,7 @@ fn read_track(value: &Value, at: &str) -> Result<Track, LocrError> {
             let parsed = (digits.len() == 6 && digits.chars().all(|c| c.is_ascii_hexdigit()))
                 .then(|| u32::from_str_radix(digits, 16).ok())
                 .flatten();
-            let rgb = parsed.ok_or_else(|| LocrError(format!("{at}.color: expected #RRGGBB")))?;
+            let rgb = parsed.ok_or_else(|| ProjectFileError(format!("{at}.color: expected #RRGGBB")))?;
             Some(Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8))
         }
         Some(_) => return Err(format!("{at}.color: expected #RRGGBB").into()),
@@ -586,7 +600,7 @@ fn read_track(value: &Value, at: &str) -> Result<Track, LocrError> {
     })
 }
 
-fn read_channel(value: &Value, at: &str) -> Result<Channel, LocrError> {
+fn read_channel(value: &Value, at: &str) -> Result<Channel, ProjectFileError> {
     let c = object(value, at)?;
     let role = match c.get("role").and_then(Value::as_str) {
         None | Some("regular") => ChannelRole::Regular,
@@ -630,7 +644,7 @@ fn read_channel(value: &Value, at: &str) -> Result<Channel, LocrError> {
     })
 }
 
-fn read_device(value: &Value, at: &str) -> Result<Device, LocrError> {
+fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
     let d = object(value, at)?;
     let kind_at = format!("{at}.kind");
     let k = object(d.get("kind").unwrap_or(&Value::Null), &kind_at)?;
@@ -660,7 +674,7 @@ fn read_device(value: &Value, at: &str) -> Result<Device, LocrError> {
     })
 }
 
-fn read_content(value: &Value, at: &str) -> Result<ClipContent, LocrError> {
+fn read_content(value: &Value, at: &str) -> Result<ClipContent, ProjectFileError> {
     let c = object(value, at)?;
     let mut lanes = Vec::new();
     for (i, v) in list(c, "lanes", at)?.iter().enumerate() {
@@ -703,7 +717,7 @@ fn read_content(value: &Value, at: &str) -> Result<ClipContent, LocrError> {
     })
 }
 
-fn read_audio(value: &Value, at: &str) -> Result<AudioRegion, LocrError> {
+fn read_audio(value: &Value, at: &str) -> Result<AudioRegion, ProjectFileError> {
     let a = object(value, at)?;
     let stretch = match a.get("stretch").and_then(Value::as_str) {
         Some("repitch") => StretchMode::Repitch,
@@ -739,7 +753,7 @@ fn read_audio(value: &Value, at: &str) -> Result<AudioRegion, LocrError> {
     })
 }
 
-fn read_clip(value: &Value, at: &str) -> Result<Clip, LocrError> {
+fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
     let c = object(value, at)?;
     let loop_range = match c.get("loop") {
         None | Some(Value::Null) => None,

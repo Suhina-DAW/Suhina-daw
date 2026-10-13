@@ -214,7 +214,7 @@ with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, b
 
 The importer keeps a VST3 `ProcessorState` as the device's state and `ControllerState` in the
 `Vst3ControllerState` extension. A VST2 `Path` is kept in the `VstPath` extension, so it is
-saved with the project (`.locr` writes extensions) and goes with it when the project is shared.
+saved with the project (`.suhina` writes extensions) and goes with it when the project is shared.
 A plug-in of another kind (Audio Unit, CLAP) is skipped with a warning.
 
 The VST3 `Uid` fields, each written as eight hex digits and joined, give the class id in the

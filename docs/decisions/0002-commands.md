@@ -112,4 +112,4 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 - The registry is the only list of commands: [`docs/commands.md`](../commands.md) is generated
   from it (`suhina-cli commands --markdown`) on `main` after every merge.
 - Suhina does not write `.als` (there is no writer). A session opened from a Live Set is saved
-  as a Suhina project (`.locr`) with `project.save` and a path ([ADR 0010](0010-project-files.md)).
+  as a Suhina project (`.suhina`) with `project.save` and a path ([ADR 0010](0010-project-files.md)).

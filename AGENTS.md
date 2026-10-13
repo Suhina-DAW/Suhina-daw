@@ -64,7 +64,7 @@ crates/
   engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
            and the clip launcher; no file I/O
   als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
-  locr     L1 Suhina's own project file (.locr, versioned JSON): reads and writes the model (ADR 0010)
+  project-file L1 Suhina's own project file (.suhina, versioned JSON; .locr still read): reads and writes the model (ADR 0010)
   media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool;
            reads MIDI files, file metadata (tempo, key) and detects tempo
   library  L2 the browser's library: added folders, an index kept on disk and watched, search, pins,

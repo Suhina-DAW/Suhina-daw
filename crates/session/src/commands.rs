@@ -180,9 +180,9 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.save",
-        label: "Save the project as a Suhina project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
+        label: "Save the project as a Suhina project (.suhina) with its plug-ins' state as it is now; without a path, to the project file it was opened from or last saved to",
         params: &[
-            optional("path", ParamType::Text, "file to save to; .locr is added when missing"),
+            optional("path", ParamType::Text, "file to save to; .suhina is added when missing"),
             optional(
                 "copy",
                 ParamType::Bool,
@@ -716,10 +716,8 @@ fn save(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let path = match params.get("path") {
         Some(Value::String(path)) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
         Some(Value::String(_)) | None | Some(Value::Null) => match session.source() {
-            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION)) => {
-                source.to_path_buf()
-            }
-            _ => return Err("the project has no .locr file yet; give a path to save it to".into()),
+            Some(source) if suhina_project_file::is_project_file(source) => source.to_path_buf(),
+            _ => return Err("the project has no .suhina file yet; give a path to save it to".into()),
         },
         Some(_) => return Err("path must be text".into()),
     };

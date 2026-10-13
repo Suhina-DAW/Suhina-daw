@@ -44,7 +44,7 @@ pub struct SuhinaMcp {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenParams {
-    /// Path of a `.als` Live Set, relative to the read root.
+    /// Path of a Suhina project (`.suhina`, or `.locr` from before) or a `.als` Live Set, relative to the read root.
     pub path: String,
 }
 
@@ -214,7 +214,7 @@ impl SuhinaMcp {
 #[tool_router]
 impl SuhinaMcp {
     #[tool(
-        description = "Open a Live Set (.als) below the read root and make it the session's project. Returns a summary and the importer's warnings (unsupported content is skipped, not fatal)."
+        description = "Open a Suhina project (.suhina, or .locr from before) or a Live Set (.als) below the read root and make it the session's project. Returns a summary and the importer's warnings (unsupported content is skipped, not fatal)."
     )]
     async fn project_open(&self, Parameters(p): Parameters<OpenParams>) -> Result<CallToolResult, McpError> {
         let path = match self.workspace.readable(&p.path) {

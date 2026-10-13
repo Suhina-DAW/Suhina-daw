@@ -51,7 +51,7 @@ project.
 | Stems file | `.stem.mp4` `.stem.m4a` (a master and its stems, [spec](stems-format.md)) | Samples |
 | MIDI file | `.mid` `.midi` | MIDI |
 | Preset | `.syx` (DX7 voice data: one voice, or a bank of 32; [spec](dx7-voice-format.md)) | Presets |
-| Project | `.locr`, `.als` | All only |
+| Project | `.suhina`, `.locr` (saved before October 2026), `.als` | All only |
 
 Other files are not listed. Extensions are matched without regard to case.
 

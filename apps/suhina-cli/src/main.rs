@@ -57,7 +57,7 @@ commands:
             its window is closed, then --save writes the state it has to a file
 
 options:
-  <project.als>      a Live Set to import, or a Suhina project (.locr) to open
+  <project.als>      a Live Set to import, or a Suhina project (.suhina, or .locr from before) to open
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
@@ -296,7 +296,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
     }
     Ok(Args {
-        source: source.ok_or(format!("missing project: give a .locr or .als file, or --demo\n\n{USAGE}"))?,
+        source: source.ok_or(format!("missing project: give a .suhina or .als file, or --demo\n\n{USAGE}"))?,
         output,
         scene,
         launcher,
@@ -312,7 +312,7 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
     let (project, audio) = match &args.source {
         Source::Demo => (demo_project(), AudioPool::new()),
         Source::Als(path) => {
-            // A Suhina project (.locr) or a Live Set to import.
+            // A Suhina project (.suhina or .locr) or a Live Set to import.
             let (session, warnings) = suhina_session::Session::open(path).map_err(|e| e.0)?;
             let folder = path.parent().unwrap_or(std::path::Path::new("."));
             let started = std::time::Instant::now();
