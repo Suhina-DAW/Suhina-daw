@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use suhina_model::{AudioRegion, Clip};
+use suhina_model::{AudioRegion, Clip, FadeShape};
 
 /// File sample rates the direct reader plays; a file outside them is not read (a rate of 0 would
 /// freeze on one frame). Wider than [`STRETCH_SAMPLE_RATES`], since the direct reader is where a
@@ -130,12 +130,17 @@ impl TimeMap {
 
 /// How loud a clip is near its edges: a short click guard at both ends, times the clip's own
 /// fade-in and fade-out (`docs/spec/arrangement-editing.md` › Fades). All lengths are in frames;
-/// the fades are linear in amplitude and multiply with the guard.
+/// the fades follow their shape and curve, the guard is linear, and they multiply. The curves'
+/// exponents are worked out here, off the audio thread.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Fades {
     click: f64,
     fade_in: f64,
     fade_out: f64,
+    fade_in_shape: FadeShape,
+    fade_out_shape: FadeShape,
+    fade_in_exponent: f64,
+    fade_out_exponent: f64,
 }
 
 /// The click guard at both ends of every audio clip, in seconds.
@@ -154,17 +159,26 @@ impl Fades {
             click: (CLICK_GUARD_SECONDS * f64::from(sample_rate)).max(1.0),
             fade_in: frames(fade_in),
             fade_out: frames(fade_out),
+            fade_in_shape: clip.fade_in_curve.shape,
+            fade_out_shape: clip.fade_out_curve.shape,
+            fade_in_exponent: clip.fade_in_curve.exponent(),
+            fade_out_exponent: clip.fade_out_curve.exponent(),
         }
     }
 
     /// The gain `since_start` frames after the clip starts and `until_end` frames before it
     /// ends (the end is the frame after the last), 0 … 1. The ramps count the frames before and
-    /// after this one, so the first and the last frame are both 0.
+    /// after this one, so the first and the last frame are both 0. Never allocates.
     pub(crate) fn gain(&self, since_start: f64, until_end: f64) -> f32 {
         let until_end = until_end - 1.0;
         let guard = (since_start / self.click).min(until_end / self.click);
-        let fade_in = if self.fade_in > 0.0 { since_start / self.fade_in } else { 1.0 };
-        let fade_out = if self.fade_out > 0.0 { until_end / self.fade_out } else { 1.0 };
+        // A shape is worked out only inside its fade; past it the gain is 1.
+        let bent = |length: f64, frames: f64, shape: FadeShape, exponent: f64| {
+            let t = if length > 0.0 { frames / length } else { 1.0 };
+            if t < 1.0 { shape.gain_bent(t, exponent) } else { 1.0 }
+        };
+        let fade_in = bent(self.fade_in, since_start, self.fade_in_shape, self.fade_in_exponent);
+        let fade_out = bent(self.fade_out, until_end, self.fade_out_shape, self.fade_out_exponent);
         (guard.clamp(0.0, 1.0) * fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
     }
 }
@@ -355,6 +369,8 @@ mod tests {
             enabled: true,
             fade_in: 0.0,
             fade_out: 0.0,
+            fade_in_curve: Default::default(),
+            fade_out_curve: Default::default(),
             extensions: Extensions::default(),
         }
     }

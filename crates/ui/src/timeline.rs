@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use suhina_engine::LauncherMonitor;
 
-use suhina_engine::model::{ChannelRole, Clip, ClipContent, LaneData, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, default_track_colour, gain_to_db};
 use crate::waveform::Waveforms;
@@ -72,6 +72,9 @@ pub struct ClipBox {
     /// Fade-in and fade-out, in beats (`clip.setFades`).
     pub fade_in: f64,
     pub fade_out: f64,
+    /// The fades' shapes and curves.
+    pub fade_in_curve: FadeCurve,
+    pub fade_out_curve: FadeCurve,
     /// For an audio clip, how to draw its waveform.
     pub audio_view: Option<AudioView>,
     pub notes: Vec<NoteMark>,
@@ -152,6 +155,8 @@ impl Timeline {
                                 enabled: clip.enabled,
                                 fade_in: clip.fade_in,
                                 fade_out: clip.fade_out,
+                                fade_in_curve: clip.fade_in_curve,
+                                fade_out_curve: clip.fade_out_curve,
                                 audio: content
                                     .is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)))),
                                 audio_view: content.and_then(|c| audio_view(c, clip, project.transport.tempo_bpm)),

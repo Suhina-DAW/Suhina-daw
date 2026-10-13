@@ -34,6 +34,8 @@ fn project() -> Project {
         enabled: true,
         fade_in: 0.0,
         fade_out: 0.0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -451,7 +453,11 @@ fn an_audio_clip_takes_fades_that_undo() {
         (clip.fade_in, clip.fade_out)
     };
     let done = set(&mut session, json!({ "track": "Bass", "index": 1, "in": 1.5 })).unwrap();
-    assert_eq!(done, json!({ "fade_in": 1.5, "fade_out": 0.0 }));
+    assert_eq!(
+        done,
+        json!({ "fade_in": 1.5, "fade_out": 0.0, "fade_in_shape": "linear", "fade_in_curve": 0.0,
+                "fade_out_shape": "linear", "fade_out_curve": 0.0 })
+    );
     set(&mut session, json!({ "track": "Bass", "index": 1, "out": 0.25 })).unwrap();
     assert_eq!(fades(&session), (1.5, 0.25), "out alone keeps the fade-in");
     set(&mut session, json!({ "track": "Bass", "index": 1, "in": 2, "out": 2 })).unwrap();
@@ -469,6 +475,40 @@ fn an_audio_clip_takes_fades_that_undo() {
     assert_eq!(fades(&session), (1.5, 0.0));
 }
 
+/// Shapes and curves are set alone or with the lengths, listed by project.clips, and undone
+/// like any edit (#197).
+#[test]
+fn fade_shapes_and_curves_are_set_and_undone() {
+    let mut session = Session::new(audio_project());
+    let set = |session: &mut Session, params: Value| run(session, "clip.setFades", params);
+    let curves = |session: &Session| {
+        let clip = &session.project().arrangement.lanes[0].clips[1];
+        (clip.fade_in_curve, clip.fade_out_curve)
+    };
+    set(&mut session, json!({ "track": "Bass", "index": 1, "in": 1, "inShape": "equal_power" })).unwrap();
+    set(&mut session, json!({ "track": "Bass", "index": 1, "outShape": "s_curve", "outCurve": -0.5 })).unwrap();
+    set(&mut session, json!({ "track": "Bass", "index": 1, "inCurve": 1 })).unwrap();
+    assert_eq!(
+        curves(&session),
+        (FadeCurve { shape: FadeShape::EqualPower, curve: 1.0 }, FadeCurve { shape: FadeShape::SCurve, curve: -0.5 })
+    );
+    let listed = run(&mut session, "project.clips", json!({ "track": "Bass" })).unwrap();
+    assert_eq!(
+        [
+            &listed[1]["fade_in_shape"],
+            &listed[1]["fade_in_curve"],
+            &listed[1]["fade_out_shape"],
+            &listed[1]["fade_out_curve"]
+        ],
+        [&json!("equal_power"), &json!(1.0), &json!("s_curve"), &json!(-0.5)]
+    );
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(curves(&session).0.curve, 0.0, "one undo step per call");
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &audio_project());
+}
+
 #[test]
 fn bad_fades_are_errors_that_change_nothing() {
     let mut session = Session::new(audio_project());
@@ -481,6 +521,11 @@ fn bad_fades_are_errors_that_change_nothing() {
         json!({ "track": "Bass", "index": 1, "in": 5 }),
         json!({ "track": "Bass", "index": 7, "in": 1 }),
         json!({ "track": "Bass", "index": 0, "in": 1 }),
+        json!({ "track": "Bass", "index": 1, "inShape": "wobbly" }),
+        json!({ "track": "Bass", "index": 1, "outShape": 2 }),
+        json!({ "track": "Bass", "index": 1, "inCurve": 1.5 }),
+        json!({ "track": "Bass", "index": 1, "outCurve": -2 }),
+        json!({ "track": "Bass", "index": 0, "inShape": "fast" }),
     ] {
         assert!(run(&mut session, "clip.setFades", params.clone()).is_err(), "{params}");
     }

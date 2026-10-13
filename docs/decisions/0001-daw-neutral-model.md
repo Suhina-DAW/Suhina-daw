@@ -95,6 +95,14 @@ by an older or newer Suhina still opens. Plug-ins keep using `state`; placeholde
 neither. Importers fill `params` when they map another DAW's device onto a Suhina device
 (first: Live's Utility, `docs/spec/als-format.md` › Devices).
 
+## Amendment: fade shapes and curves (2026-10-13)
+
+Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`): a
+`FadeShape` (linear, equal power, fast, slow, S-curve) and a curve from −1 to +1 that bends it.
+Linear with curve 0 is the default, so a project without them sounds as before. A curve outside
+−1 … +1 does not validate (`ValidationError::BadFades`). The formulas are in
+[arrangement editing](../spec/arrangement-editing.md) › Fades.
+
 ## Consequences
 
 - Importers do real conversion work instead of copying a file's structure, and every importer

@@ -458,7 +458,8 @@ empty templates.
 
 Shows where a Live Set stores an arrangement audio clip's fade-in and fade-out, in which unit,
 and how the curve is shaped, so the importer can read fades into `Clip::fade_in` and
-`Clip::fade_out` ([arrangement editing](arrangement-editing.md) › Fades). Until then the importer
+`Clip::fade_out`, and their shapes and curves into `Clip::fade_in_curve` and
+`Clip::fade_out_curve` ([arrangement editing](arrangement-editing.md) › Fades). Until then the importer
 leaves fades at 0 and `als-format.md` lists them as an open question.
 
 ### Setup

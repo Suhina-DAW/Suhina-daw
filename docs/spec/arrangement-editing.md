@@ -1,6 +1,6 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
 last_verified: 2026-10-13
@@ -15,6 +15,7 @@ covers:
   - crates/ui/src/menus.rs
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
+  - crates/project-file/src/lib.rs
 ---
 
 # Arrangement editing
@@ -53,16 +54,39 @@ An audio clip on the arrangement has a **fade-in** and a **fade-out**, each a le
 at most the clip's length; a project that breaks this does not validate
 (`ValidationError::BadFades`), so a renderer refuses it instead of guessing.
 
-`clip.setFades {track, index, in?, out?}` sets one or both, in beats; one undo step. It refuses a
-negative length, fades together longer than the clip, a MIDI clip, and a call with neither.
-`project.clips` lists each clip's `fade_in` and `fade_out`.
+Each fade also has a **shape** and a **curve** (`Clip::fade_in_curve`, `Clip::fade_out_curve`:
+a `FadeCurve` of a `FadeShape` and a number). The default is linear with curve 0 at both ends,
+so a project without them sounds as it did before shapes existed.
 
-**The curve is linear in amplitude.** On the frame `beats` into a clip of `length` beats, with
-`frame` the length of one frame in beats, the clip's gain is
+`clip.setFades {track, index, in?, out?, inShape?, outShape?, inCurve?, outCurve?}` sets any of
+them, lengths in beats; one undo step. It refuses a negative length, fades together longer than
+the clip, an unknown shape, a curve outside −1 … +1, a MIDI clip, and a call with none of them.
+`project.clips` lists each clip's `fade_in` and `fade_out` and their shapes and curves
+(`fade_in_shape`, `fade_in_curve`, `fade_out_shape`, `fade_out_curve`).
+
+**Shapes.** Over a fade, `t` runs from 0 at its silent end to 1 at full level: `t = beats /
+fade_in` for the fade-in, and `t = (length − frame − beats) / fade_out` for the fade-out, where
+`frame` is the length of one frame in beats. A fade-out is therefore the mirror image of a
+fade-in with the same shape. The shape gives the gain `s(t)`:
+
+| Shape | `s(t)` | At ½ | Character |
+|---|---|---|---|
+| `linear` | `t` | 0.5 (−6 dB) | Straight line in amplitude |
+| `equal_power` | `sin(π t / 2)` | 0.707 (−3 dB) | A fade-out and a fade-in of the same length over each other keep the power constant |
+| `fast` | `1 − (1 − t)²` | 0.75 | Rises quickly, then levels off |
+| `slow` | `t²` | 0.25 (−12 dB) | Stays low, then rises |
+| `s_curve` | `t² (3 − 2t)` | 0.5 | Flat at both ends, steepest in the middle |
+
+**Curve.** The curve `c`, −1 … +1, bends the shape: `gain = s(t)^(4^(−c))`. At 0 the gain is the
+shape exactly; +1 raises it to the power ¼ (a faster start, a logarithmic feel), −1 to the power 4
+(a slower start, an exponential feel). Every shape and curve gives 0 at `t = 0` and 1 at `t = 1`,
+and rises in between.
+
+On the frame `beats` into a clip of `length` beats the clip's gain is
 
 ```text
-fade_in_gain  = min(1, beats / fade_in)                      (1 when fade_in is 0)
-fade_out_gain = min(1, (length - frame - beats) / fade_out)  (1 when fade_out is 0)
+fade_in_gain  = gain(fade_in_curve, min(1, beats / fade_in))                      (1 when fade_in is 0)
+fade_out_gain = gain(fade_out_curve, min(1, (length - frame - beats) / fade_out)) (1 when fade_out is 0)
 gain          = fade_in_gain × fade_out_gain × click guard
 ```
 
@@ -79,12 +103,20 @@ fitted to what is left: a split clip's first part keeps the fade-in and the seco
 fade-out, and fades longer together than the part shrink in proportion.
 
 In the Arrangement view an audio clip shows its fades as a line over the waveform, from the
-clip's bottom corner to where the fade ends at the top, and the waveform is scaled by the fades.
+clip's bottom corner to where the fade ends at the top, following the fade's shape and curve,
+and the waveform is scaled by the fades.
 While the clip is hovered or selected, a small square **handle** sits at its top-left corner
 (fade-in) and top-right corner (fade-out); with a fade, the handle sits where the fade ends. A
 horizontal drag sets the fade with its end on the grid (Alt held: free), up to the other fade;
 the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
-double-click on a handle removes that fade. Measurements are in
+double-click on a handle removes that fade. A right-click on a handle opens a menu of the shapes,
+with the fade's shape checked; choosing one runs `clip.setFades`. A fade at least 21 px wide has a
+second, round **curve handle** on its line half-way through the fade. Dragging it up or down
+moves it with the pointer: the curve becomes the one whose line passes through the handle (up
+for +, down for −), until it reaches −1 or +1, the line following live, and letting go runs
+`clip.setFades`; a double-click sets the curve back to 0. The view draws the fades per pixel
+with `t` in beats (`length − beats` for the fade-out), without the one-frame term above, which
+is less than a pixel at any zoom. Measurements are in
 [components](../design/components.md) › Arrangement view.
 
 ## Start marker and loop

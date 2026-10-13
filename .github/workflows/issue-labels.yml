@@ -1,0 +1,64 @@
+name: Issue labels
+
+# The issue forms set the type label themselves (`labels:` in .github/ISSUE_TEMPLATE). This adds
+# the area and platform labels from the answers in the form's dropdowns, which a form cannot do.
+# It only adds labels from the fixed maps below; the issue text is parsed in JavaScript and never
+# reaches a shell. Labels added or removed by hand later are left alone.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // Dropdown label in the form -> answer -> labels to add.
+            const maps = {
+              "Kind of problem": {
+                "Sound (clicks, dropouts, wrong timing or pitch, silence)": ["engine"],
+                "Wrong result in an offline render": ["engine"],
+                "User interface": ["ui"],
+                "Opening, saving or importing a file": ["formats"],
+              },
+              "Area": {
+                "Arrangement and editing": ["ui"],
+                "Clip launcher": ["engine"],
+                "Mixer and routing": ["engine"],
+                "Built-in effects and instruments": ["devices"],
+                "Plug-in hosting": ["plug-ins"],
+                "Browser and library": ["browser"],
+                "Audio and MIDI input and output": ["audio-io"],
+                "Importing and exporting files": ["formats"],
+                "User interface and settings": ["ui"],
+              },
+              "Operating system": {
+                "Windows": ["windows"],
+                "macOS": ["macos"],
+                "macOS (Apple silicon)": ["macos"],
+                "macOS (Intel)": ["macos"],
+                "Linux": ["linux"],
+              },
+            };
+            // An issue form renders each answer as "### <label>\n\n<answer>".
+            const body = context.payload.issue.body || "";
+            const labels = new Set();
+            for (const [question, answers] of Object.entries(maps)) {
+              const heading = `### ${question}`;
+              const at = body.indexOf(heading);
+              if (at < 0) continue;
+              const answer = body.slice(at + heading.length).trim().split("\n")[0].trim();
+              if (!Object.hasOwn(answers, answer)) continue;
+              for (const label of answers[answer]) labels.add(label);
+            }
+            if (labels.size === 0) return;
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.payload.issue.number,
+              labels: [...labels],
+            });

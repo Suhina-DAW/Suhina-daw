@@ -24,7 +24,11 @@
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
 - **Issues:** small and scoped, with acceptance criteria (the issue forms ask for them: Bug, Plug-in problem, Feature request, New effect or
   instrument, Preset contribution, Task);
-  architecture belongs in an ADR under `docs/decisions/`, not in an issue thread.
+  architecture belongs in an ADR under `docs/decisions/`, not in an issue thread. Every issue has
+  a type label (`bug`, `enhancement`, `documentation`, `question`) and one or more area labels
+  (`engine`, `ui`, `formats`, `browser`, `audio-io`, `plug-ins`, `devices`, `presets`, `tests`),
+  plus `windows`, `macos` or `linux` when it concerns one platform. The forms set the type, and
+  `.github/workflows/issue-labels.yml` adds area and platform labels from the form's answers.
 
 ## Clean-room
 

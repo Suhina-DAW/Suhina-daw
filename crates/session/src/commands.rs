@@ -3,7 +3,9 @@
 
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
-use suhina_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
+use suhina_model::{
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
+};
 
 use crate::{CommandError, Session, devices, files, preview};
 
@@ -309,12 +311,24 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.setFades",
-        label: "Set an audio clip's fade-in and fade-out lengths, in beats; together at most the clip's length",
+        label: "Set an audio clip's fade-in and fade-out: lengths in beats (together at most the clip's length), shapes and curves",
         params: &[
             TRACK,
             param("index", ParamType::Integer, "clip index on the track, from project.clips"),
             optional("in", ParamType::Number, "fade-in length in beats from the clip's start, at least 0; 0 is none"),
             optional("out", ParamType::Number, "fade-out length in beats before the clip's end, at least 0; 0 is none"),
+            optional("inShape", ParamType::Text, "fade-in shape: linear, equal_power, fast, slow or s_curve"),
+            optional("outShape", ParamType::Text, "fade-out shape: linear, equal_power, fast, slow or s_curve"),
+            optional(
+                "inCurve",
+                ParamType::Number,
+                "fade-in curve, -1 (slower start) to +1 (faster start); 0 is the shape",
+            ),
+            optional(
+                "outCurve",
+                ParamType::Number,
+                "fade-out curve, -1 (slower start) to +1 (faster start); 0 is the shape",
+            ),
         ],
         kind: CommandKind::Edit,
         run: set_clip_fades,
@@ -813,6 +827,10 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
         "enabled": clip.enabled,
         "fade_in": clip.fade_in,
         "fade_out": clip.fade_out,
+        "fade_in_shape": clip.fade_in_curve.shape.name(),
+        "fade_in_curve": clip.fade_in_curve.curve,
+        "fade_out_shape": clip.fade_out_curve.shape.name(),
+        "fade_out_curve": clip.fade_out_curve.curve,
         "notes": notes,
         "audio_file": audio.map(|r| r.file.as_str()),
         "audio_stream": audio.and_then(|r| r.stream),
@@ -1109,9 +1127,39 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
             }
         }
     };
+    let shape_of = |name: &str| -> Result<Option<FadeShape>, CommandError> {
+        match params.get(name) {
+            None => Ok(None),
+            Some(Value::String(s)) => FadeShape::from_name(s).map(Some).ok_or_else(|| {
+                let names: Vec<&str> = FadeShape::ALL.iter().map(|s| s.name()).collect();
+                format!("{name} must be one of {}, got {s:?}", names.join(", ")).into()
+            }),
+            Some(_) => Err(format!("{name} must be a shape name").into()),
+        }
+    };
+    let curve_of = |name: &str| -> Result<Option<f64>, CommandError> {
+        match params.get(name) {
+            None => Ok(None),
+            Some(_) => {
+                let curve = number(params, name)?;
+                if !(-1.0..=1.0).contains(&curve) {
+                    return Err(format!("{name} must be from -1 to +1, got {curve}").into());
+                }
+                Ok(Some(curve))
+            }
+        }
+    };
     let (fade_in, fade_out) = (length_of("in")?, length_of("out")?);
-    if fade_in.is_none() && fade_out.is_none() {
-        return Err("give in, out or both, in beats".into());
+    let (in_shape, out_shape) = (shape_of("inShape")?, shape_of("outShape")?);
+    let (in_curve, out_curve) = (curve_of("inCurve")?, curve_of("outCurve")?);
+    if fade_in.is_none()
+        && fade_out.is_none()
+        && in_shape.is_none()
+        && out_shape.is_none()
+        && in_curve.is_none()
+        && out_curve.is_none()
+    {
+        return Err("give in, out (beats), inShape, outShape, inCurve or outCurve".into());
     }
     let (lane, index) = lane_and_index(&session.project, params)?;
     let p = &mut session.project;
@@ -1120,16 +1168,37 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
     if !audio {
         return Err("only an audio clip has fades".into());
     }
-    let changed =
-        Clip { fade_in: fade_in.unwrap_or(clip.fade_in), fade_out: fade_out.unwrap_or(clip.fade_out), ..clip.clone() };
+    let changed = Clip {
+        fade_in: fade_in.unwrap_or(clip.fade_in),
+        fade_out: fade_out.unwrap_or(clip.fade_out),
+        fade_in_curve: FadeCurve {
+            shape: in_shape.unwrap_or(clip.fade_in_curve.shape),
+            curve: in_curve.unwrap_or(clip.fade_in_curve.curve),
+        },
+        fade_out_curve: FadeCurve {
+            shape: out_shape.unwrap_or(clip.fade_out_curve.shape),
+            curve: out_curve.unwrap_or(clip.fade_out_curve.curve),
+        },
+        ..clip.clone()
+    };
     if !changed.fades_valid() {
+        if !(changed.fade_in_curve.is_valid() && changed.fade_out_curve.is_valid()) {
+            return Err("the clip's fade curves are outside -1 to +1; set inCurve and outCurve".into());
+        }
         return Err(format!(
             "the fades ({} + {} beats) are longer than the clip ({} beats)",
             changed.fade_in, changed.fade_out, changed.length
         )
         .into());
     }
-    let result = json!({ "fade_in": changed.fade_in, "fade_out": changed.fade_out });
+    let result = json!({
+        "fade_in": changed.fade_in,
+        "fade_out": changed.fade_out,
+        "fade_in_shape": changed.fade_in_curve.shape.name(),
+        "fade_in_curve": changed.fade_in_curve.curve,
+        "fade_out_shape": changed.fade_out_curve.shape.name(),
+        "fade_out_curve": changed.fade_out_curve.curve,
+    });
     if let Some(slot) = p.arrangement.lanes.get_mut(lane).and_then(|l| l.clips.get_mut(index)) {
         *slot = changed;
     }

@@ -341,7 +341,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
   gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
 - Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades
-  on the grid (Alt for free, double-click removes), the fades are drawn over the waveform, and
+  on the grid (Alt for free, double-click removes), a right-click on a handle picks the shape
+  (linear, equal power, fast, slow, S-curve) and a round handle on the fade bends its curve, the
+  fades are drawn over the waveform, and
   the engine plays them sample-accurately in renders and playback (`clip.setFades`,
   [spec](docs/spec/arrangement-editing.md#fades)).
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
