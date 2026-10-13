@@ -1,11 +1,12 @@
 ---
 description: How versions are numbered, how release builds and the nightly for Linux, Windows and macOS are made
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, Discord announcement
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, Discord announcement, release notes, changelog
 type: howto
 status: current
 last_verified: 2026-10-13
 covers:
   - .github/workflows/release.yml
+  - scripts/release_notes.py
 ---
 
 # Releasing
@@ -39,7 +40,7 @@ published as GitHub pre-releases and never become the repository's "latest" rele
 3. The workflow checks the version's form and that the tag matches it, builds the packages, runs
    each binary's `--version` and checks its library dependencies, and creates a **draft** release
    with the archives and their SHA-256 sums attached.
-4. Read the draft on GitHub, write the notes and publish it.
+4. Read the draft on GitHub, edit the notes (see [Release notes](#release-notes)) and publish it.
 5. For the next candidate, or the final release, repeat from step 1 with `0.1.0-rc.2` or `0.1.0`.
 
 Running the workflow by hand (Actions › Release › Run workflow) builds the same packages as
@@ -63,8 +64,8 @@ the latest one never changes:
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz
 ```
 
-Each new nightly is posted to Discord: the version, the download link and the first line of
-every commit since the previous nightly (at most 15). The post goes to the channel whose webhook
+Each new nightly is posted to Discord: the version, the download link and the changes since the
+previous nightly (at most 15, as described under [Release notes](#release-notes)). The post goes to the channel whose webhook
 URL is the repository secret `DISCORD_WEBHOOK` (Discord: channel settings › Integrations ›
 Webhooks; GitHub: Settings › Secrets and variables › Actions). Without the secret nothing is
 posted, and a failed post leaves the nightly published. Releases from version tags are not
@@ -72,6 +73,23 @@ posted; they are announced by hand when the draft is published.
 
 The nightly never becomes the repository's "latest" release, and nothing is promoted from it: a
 release is made from a version tag as above.
+
+## Release notes
+
+[`scripts/release_notes.py`](../scripts/release_notes.py) writes the notes from git alone (no
+network, no AI service). A change is one commit on `main`'s first-parent line, so one squash-merged
+pull request, listed by its title with a link to the pull request. Changes that touch only
+documentation, CI, scripts and tests are counted, not listed. Pull request titles are the release
+notes, so they say what changed for a user: "Clip fades: shapes and an adjustable curve".
+
+- **Nightly:** the changes since the previous nightly, on its release page and in the Discord post.
+- **Draft of a tagged release:** first *New and changed*, the bullets of ROADMAP.md › What works now
+  that are new or reworded since the previous release, by milestone, then *All changes*. A
+  release candidate counts from the tag before it, a release from the previous release, the first
+  from the beginning. Edit the draft before publishing: the ROADMAP bullets describe what works,
+  not what changed, and a reworded bullet may be a fix of its text.
+
+Its tests run in CI: `python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
 ## Packages
 

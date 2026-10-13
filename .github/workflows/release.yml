@@ -264,6 +264,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The whole history and the tags, for the notes (scripts/release_notes.py).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -275,6 +280,21 @@ jobs:
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           ls -l dist
+          # The release the notes count from: for a candidate the tag before it, for a release the
+          # previous release (its candidates' changes belong to it). None for the first.
+          previous=$(git tag --merged "$GITHUB_SHA^" --list 'v*' --sort=-v:refname \
+            | { if [[ "$VERSION" == *-* ]]; then cat; else grep -v -- '-' || true; fi; } | head -n 1)
+          echo "Notes count from ${previous:-the beginning}."
+          changes=$(python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$previous" --head "$GITHUB_SHA" --style release)
+          notes=$(cat <<EOF
+          Pre-alpha build of the desktop app (\`$APP\`) and the command-line tool (\`$BIN\`). The binaries are not signed.
+
+          <!-- Generated from ROADMAP.md (What works now) and the changes since ${previous:-the beginning}. Edit before publishing. -->
+
+          $changes
+          EOF
+          )
           flags=()
           # A pre-release never becomes the "latest" release on the repository page.
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease --latest=false); fi
@@ -283,7 +303,7 @@ jobs:
             --draft \
             "${flags[@]}" \
             --title "Suhina $VERSION" \
-            --notes "Pre-alpha build of the desktop app (\`$APP\`) and the command-line tool (\`$BIN\`). The binaries are not signed."
+            --notes "$notes"
 
   # Replaces the previous nightly: its release and its tag go, and the new one is published at once
   # (no draft), on the commit it was built from.
@@ -298,30 +318,41 @@ jobs:
       group: nightly
       cancel-in-progress: false
     steps:
+      # The whole history, for the list of changes (scripts/release_notes.py).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      # The commit of the nightly being replaced, for the list of what changed since.
+      # The commit of the nightly being replaced; the changes are counted from it.
       - name: Note the previous nightly
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)
+          echo "Previous nightly: ${sha:-none}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Publish the nightly
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ steps.previous.outputs.sha }}
         run: |
           ls -l dist
+          changes=$(python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$PREVIOUS" --head "$GITHUB_SHA" --style nightly)
           notes=$(cat <<EOF
           **A development build, not a release.** Built from \`main\` at $GITHUB_SHA: whatever works there today, unfinished parts and bugs included. Projects saved with it may not open in later builds.
 
           The desktop app is \`$APP\`; \`$BIN\` is the command-line tool, and \`$HOST\` is the process plug-ins run in, kept in the same folder. The binaries are not signed: macOS and Windows warn before running them. On Linux they need the ALSA library (\`libasound2\`).
 
           Talk about it on Discord: https://discord.com/invite/e5JAZYMU. Bugs and ideas: https://github.com/$GITHUB_REPOSITORY/issues (say which nightly: \`$VERSION\`).
+
+          $changes
           EOF
           )
           gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
@@ -338,7 +369,6 @@ jobs:
       - name: Tell Discord
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
           PREVIOUS: ${{ steps.previous.outputs.sha }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
@@ -347,16 +377,9 @@ jobs:
             echo "No DISCORD_WEBHOOK secret; nothing posted."
             exit 0
           fi
-          # The first line of each commit since the previous nightly, newest first, at most 15.
-          changes=""
-          if [ -n "$PREVIOUS" ]; then
-            changes=$(gh api "repos/$GITHUB_REPOSITORY/compare/$PREVIOUS...$GITHUB_SHA" \
-              --jq '[.commits[].commit.message | split("\n")[0]] | reverse | .[:15] | map("- " + .) | join("\n")' \
-              || true)
-          fi
-          link="https://github.com/$GITHUB_REPOSITORY/releases/tag/nightly"
-          message="**Suhina nightly \`$VERSION\`** is out: $link"
-          if [ -n "$changes" ]; then message="$message"$'\n\nNew since the last nightly:\n'"$changes"; fi
-          # Discord takes at most 2000 characters.
-          jq -n --arg content "${message:0:1990}" '{content: $content, allowed_mentions: {parse: []}}' \
+          python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$PREVIOUS" --head "$GITHUB_SHA" --style discord --version "$VERSION" > post.txt
+          cat post.txt
+          # allowed_mentions: a commit title never pings anyone.
+          jq -Rs '{content: ., allowed_mentions: {parse: []}}' post.txt \
             | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
