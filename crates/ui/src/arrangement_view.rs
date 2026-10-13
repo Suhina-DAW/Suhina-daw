@@ -409,7 +409,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
 
     // Zoom around the pointer with Ctrl and the wheel, lane heights with Alt and the wheel; the
     // wheel alone scrolls.
-    if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
+    if let Some(pointer) = widgets::pointer_over(ui, area) {
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0 && time.contains(pointer) {
             let beat = (pointer.x - time.left() + state.scroll.x) / state.beat_width;
@@ -436,7 +436,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         )
     });
     if middle_pressed {
-        state.panning = ui.ctx().pointer_interact_pos().is_some_and(|p| time.contains(p) && p.y > ruler.top());
+        state.panning = widgets::pointer_over(ui, time).is_some_and(|p| p.y > ruler.top());
     }
     if !middle_down {
         state.panning = false;
@@ -923,7 +923,7 @@ fn clip_box<'a>(
     let rect = clip_rect(space, clip.start, clip.length, x_of);
     let selected = state.selected == Some(key);
     let fading = state.fade_drag.is_some_and(|d| d.key == key) || state.curve_drag.is_some_and(|d| d.key == key);
-    let pointer_in = ui.ctx().pointer_hover_pos().is_some_and(|p| visible.contains(p));
+    let pointer_in = widgets::pointer_over(ui, visible).is_some();
     let fits = rect.width() >= 3.0 * FADE_HANDLE && rect.height() >= 2.0 * FADE_HANDLE;
     if clip.audio && fits && state.clip_drag.is_none_or(|d| !mine(&d)) && (pointer_in || selected || fading) {
         let grid = fade_grid;
