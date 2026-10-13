@@ -72,6 +72,9 @@ struct Folder {
     file: Option<PathBuf>,
     state: FolderState,
     last_poll: Instant,
+    /// The folder's root with its symlinks resolved, when it has one: what FSEvents reports
+    /// paths under (macOS), where the root as given (`/var` …) is a symlink (`/private/var` …).
+    canonical: Option<PathBuf>,
 }
 
 /// Network file systems on Linux, whose changes the system does not report.
@@ -160,6 +163,7 @@ fn run(out: &Sender<FromWorker>, inbox: &Receiver<ToWorker>, own: &Sender<ToWork
                     file,
                     state: FolderState::Scanning,
                     last_poll: Instant::now(),
+                    canonical: std::fs::canonicalize(&root).ok(),
                 };
                 let changed = if saved.is_some() {
                     folder.index.refresh(&root)
@@ -220,12 +224,23 @@ fn run(out: &Sender<FromWorker>, inbox: &Receiver<ToWorker>, own: &Sender<ToWork
             }
             Some(ToWorker::Events(paths, rescan)) => {
                 for (root, folder) in &mut folders {
-                    let mine: Vec<PathBuf> = paths.iter().filter(|p| p.starts_with(root)).cloned().collect();
+                    // FSEvents (macOS) reports watched paths resolved through their symlinks
+                    // (`/var` as `/private/var`), inotify the paths as they were given, so an
+                    // event is this folder's when it is under the folder's canonical root too.
+                    let base = folder.canonical.as_ref().filter(|c| paths.iter().any(|p| p.starts_with(c)));
+                    let mine: Vec<PathBuf> = paths
+                        .iter()
+                        .filter(|p| p.starts_with(root) || base.is_some_and(|b| p.starts_with(b)))
+                        .cloned()
+                        .collect();
                     if mine.is_empty() && !rescan {
                         continue;
                     }
-                    let changed =
-                        if rescan { folder.index.refresh(root) } else { folder.index.update_paths(root, &mine) };
+                    let changed = if rescan {
+                        folder.index.refresh(root)
+                    } else {
+                        folder.index.update_paths(base.unwrap_or(root), &mine)
+                    };
                     if changed {
                         send_index(root, folder);
                     }

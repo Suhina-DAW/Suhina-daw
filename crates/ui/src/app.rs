@@ -752,6 +752,8 @@ impl App {
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
+        // The CPU load the control bar shows, from the engine's monitor, in per mille.
+        let cpu = self.session().and_then(|s| s.player()).map(|p| p.cpu_monitor().load_milli());
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
@@ -766,7 +768,7 @@ impl App {
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
-            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), &mut actions));
+            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), cpu, &mut actions));
         egui::Panel::bottom("status-bar")
             .exact_size(theme::STATUS_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
@@ -1808,7 +1810,7 @@ impl App {
             .collect()
     }
 
-    fn control_bar(&mut self, ui: &mut Ui, grid: Option<&Grid>, actions: &mut Vec<Action>) {
+    fn control_bar(&mut self, ui: &mut Ui, grid: Option<&Grid>, cpu: Option<u32>, actions: &mut Vec<Action>) {
         let bar = ui.max_rect();
         ui.allocate_rect(bar, Sense::hover());
         let painter = ui.painter_at(bar);
@@ -1917,8 +1919,46 @@ impl App {
             theme::text_primary(),
         );
 
-        // Right: the view switch; the current view is underlined.
+        // Right: the view switch; the current view is underlined. Left of it, the CPU
+        // load, from the engine's monitor (per mille, smoothed): how much of the time the
+        // audio engine spends rendering.
         let mut right = bar.right() - PAD;
+        if let Some(milli) = cpu {
+            let rect = row(right - 56.0, 56.0);
+            let percent = f64::from(milli.min(1000)) / 10.0;
+            painter.rect_filled(rect, 0.0, theme::window_background());
+            let inner = rect.shrink2(Vec2::new(PAD - 2.0, 0.0));
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::LEFT_CENTER,
+                "CPU",
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_hint(),
+            );
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::RIGHT_CENTER,
+                &format!("{percent:.0}%"),
+                theme::mono_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
+            let track = Rect::from_min_max(
+                Pos2::new(rect.left() + 1.0, rect.bottom() - 3.0),
+                Pos2::new(rect.right() - 1.0, rect.bottom() - 1.0),
+            );
+            painter.rect_filled(track, 0.0, theme::control_background());
+            let fill = track.width() * milli.min(1000) as f32 / 1000.0;
+            let full = Rect::from_min_max(track.min, Pos2::new(track.left() + fill, track.bottom()));
+            let color = if milli >= 800 { theme::meter_hot() } else { theme::meter_normal() };
+            painter.rect_filled(full, 0.0, color);
+            let response = ui.interact(rect, Id::new("cpu-load"), Sense::hover());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("CPU load {percent:.1}%"))
+            });
+            right = rect.left() - PAD;
+        }
         let mut underline_at = None;
         for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
             let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };

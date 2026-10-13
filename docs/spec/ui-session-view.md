@@ -31,8 +31,10 @@ From top to bottom:
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker and
      stop returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
-   - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
-   - view switches (Session / Arrangement)
+    - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
+      (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`
+      reports it as `cpu`; the rest is not)
+    - view switches (Session / Arrangement)
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
      collections (user colour tags), library categories and places (user folders); a results

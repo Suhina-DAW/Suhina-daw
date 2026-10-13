@@ -321,9 +321,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
-- The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
-  stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every click is a command, the same the CLI and
-  MCP run.
+- The control bar has tempo, launch quantisation, play, stop, the position and the CPU load
+  (how much of the time the audio engine spends rendering, from the engine's monitor; hidden
+  while no engine plays); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every
+  click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - A track header 70 px or taller shows where the track plays: the main output or a group
@@ -352,5 +353,5 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
-- Still to do: fades read from Live Sets, input routing and sends, arm, meters, device editing
-  and the clip editor in the detail area, installers.
+- Still to do: fades read from Live Sets, input routing and sends, arm, level meters, device
+  editing and the clip editor in the detail area, installers.
