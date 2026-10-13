@@ -61,6 +61,8 @@ so a project without them sounds as it did before shapes existed.
 `clip.setFades {track, index, in?, out?, inShape?, outShape?, inCurve?, outCurve?}` sets any of
 them, lengths in beats; one undo step. It refuses a negative length, fades together longer than
 the clip, an unknown shape, a curve outside −1 … +1, a MIDI clip, and a call with none of them.
+With `scene` instead of `index` it sets the fades of the clip in that track's launcher slot
+([clip launching](clip-launching.md) › Clip fades).
 `project.clips` lists each clip's `fade_in` and `fade_out` and their shapes and curves
 (`fade_in_shape`, `fade_in_curve`, `fade_out_shape`, `fade_out_curve`).
 

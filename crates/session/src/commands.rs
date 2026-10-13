@@ -311,10 +311,15 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.setFades",
-        label: "Set an audio clip's fade-in and fade-out: lengths in beats (together at most the clip's length), shapes and curves",
+        label: "Set an audio clip's fade-in and fade-out: lengths in beats (together at most the clip's length), shapes and curves; an arrangement clip by index, a launcher clip by scene",
         params: &[
             TRACK,
-            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            optional("index", ParamType::Integer, "arrangement clip index on the track, from project.clips"),
+            optional(
+                "scene",
+                ParamType::Integer,
+                "instead of index: the clip in the track's slot of this scene, from 1",
+            ),
             optional("in", ParamType::Number, "fade-in length in beats from the clip's start, at least 0; 0 is none"),
             optional("out", ParamType::Number, "fade-out length in beats before the clip's end, at least 0; 0 is none"),
             optional("inShape", ParamType::Text, "fade-in shape: linear, equal_power, fast, slow or s_curve"),
@@ -1084,6 +1089,47 @@ fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), Command
     Ok((lane, index))
 }
 
+/// Where a clip an edit command names is: on the arrangement (`index`) or in a launcher slot
+/// (`scene`).
+#[derive(Debug, Clone, Copy)]
+enum ClipAt {
+    Arrangement { lane: usize, index: usize },
+    Slot { column: usize, scene: usize },
+}
+
+impl ClipAt {
+    fn get(self, p: &Project) -> Option<&Clip> {
+        match self {
+            Self::Arrangement { lane, index } => p.arrangement.lanes.get(lane)?.clips.get(index),
+            Self::Slot { column, scene } => p.launcher.columns.get(column)?.slots.get(scene)?.clip.as_ref(),
+        }
+    }
+
+    fn get_mut(self, p: &mut Project) -> Option<&mut Clip> {
+        match self {
+            Self::Arrangement { lane, index } => p.arrangement.lanes.get_mut(lane)?.clips.get_mut(index),
+            Self::Slot { column, scene } => p.launcher.columns.get_mut(column)?.slots.get_mut(scene)?.clip.as_mut(),
+        }
+    }
+}
+
+/// The clip `params` names: an arrangement clip by `index`, or the clip in a launcher slot by
+/// `scene`.
+fn clip_at(p: &Project, params: &Value) -> Result<ClipAt, CommandError> {
+    match (params.get("index"), params.get("scene")) {
+        (Some(_), Some(_)) => Err("give index or scene, not both".into()),
+        (None, Some(_)) => {
+            let (column, scene) = (column_index(p, params)?, scene_index(p, params)?);
+            match p.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
+                Some(slot) if slot.clip.is_some() => Ok(ClipAt::Slot { column, scene }),
+                _ => Err(format!("the slot of scene {} is empty", scene + 1).into()),
+            }
+        }
+        (Some(_), None) => lane_and_index(p, params).map(|(lane, index)| ClipAt::Arrangement { lane, index }),
+        (None, None) => Err("give index (an arrangement clip) or scene (a launcher clip)".into()),
+    }
+}
+
 fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let db = number_or_neg_infinity(params, "db")?;
     if db > 24.0 {
@@ -1161,9 +1207,9 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
     {
         return Err("give in, out (beats), inShape, outShape, inCurve or outCurve".into());
     }
-    let (lane, index) = lane_and_index(&session.project, params)?;
+    let at = clip_at(&session.project, params)?;
     let p = &mut session.project;
-    let clip = p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?;
+    let clip = at.get(p).ok_or("the clip is missing")?;
     let audio = p.content(clip.content).is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))));
     if !audio {
         return Err("only an audio clip has fades".into());
@@ -1199,8 +1245,8 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
         "fade_out_shape": changed.fade_out_curve.shape.name(),
         "fade_out_curve": changed.fade_out_curve.curve,
     });
-    if let Some(slot) = p.arrangement.lanes.get_mut(lane).and_then(|l| l.clips.get_mut(index)) {
-        *slot = changed;
+    if let Some(target) = at.get_mut(p) {
+        *target = changed;
     }
     Ok(result)
 }

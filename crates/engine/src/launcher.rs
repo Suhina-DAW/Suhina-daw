@@ -574,13 +574,16 @@ fn plan_clip(
             }
             LaneData::Audio(region) => {
                 let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
-                // Placed at frame 0; a looping clip is given an endless length. Fades belong to
-                // arrangement clips; a launched clip has only the click guard.
+                // Placed at frame 0; a looping clip is given an endless length. The fades are
+                // fitted to the clip's own length: the fade-in plays once from the launch, the
+                // fade-out where the clip ends by itself, which a looping clip never does
+                // (`docs/spec/clip-launching.md` › Clip fades).
+                let (fade_in, fade_out) = clip.fitted_fades();
                 let placed = suhina_model::Clip {
                     start: 0.0,
                     length: if loop_range.is_some() { ENDLESS_BEATS } else { clip.length },
-                    fade_in: 0.0,
-                    fade_out: 0.0,
+                    fade_in,
+                    fade_out: if loop_range.is_some() { 0.0 } else { fade_out },
                     ..clip.clone()
                 };
                 let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);

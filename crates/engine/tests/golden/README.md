@@ -7,6 +7,10 @@ playback: both run the same `Renderer::process` (AGENTS.md › One render path).
 - `fade-in.f32`: a 2-beat audio clip at 120 bpm, 8 kHz, playing a constant 0.25, with a
   1-beat fade-in.
 - `fade-out.f32`: the same clip with a half-beat fade-out.
+- `launched-loop-fade-in.f32`: the same 2-beat clip in a launcher slot, looping, with a 1-beat
+  fade-in and a half-beat fade-out, launched at once and rendered for three passes through
+  `render_launches`: it fades in once and never fades out (`docs/spec/clip-launching.md` › Clip
+  fades).
 
 Each file is little-endian 32-bit floats, one channel, one per frame. The tests also check every
 frame against the envelope written out in the test (linear fades times the 2 ms click guard,
