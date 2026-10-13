@@ -156,6 +156,19 @@ impl Link {
         true
     }
 
+    /// Waits until `deadline` for the host to answer the last block sent, one whose answer was
+    /// given up on ([`Link::wait`] said `Missed`), so the next can go. `true` when the link is
+    /// free; `false` at the deadline, or while a block is out (its [`Link::wait`] comes first).
+    /// Real-time safe.
+    pub fn wait_ready(&self, deadline: Instant) -> bool {
+        if self.in_flight.is_some() {
+            return false;
+        }
+        let sequence = self.sequence;
+        self.region.response() == sequence
+            || self.to_engine.wait(self.region.response_word(), |v| v == sequence, deadline)
+    }
+
     /// The second half: waits until `deadline` for the block sent with
     /// [`Link::send_with_events`] and reads its result into `output`. `Busy` when no block is
     /// out. Real-time safe.

@@ -188,11 +188,12 @@ fn start(spec: &str) -> (Plugin, Hosted) {
     (plugin, Hosted::new(audio))
 }
 
-/// Each block the engine plays counts once against a plug-in that does not answer, however
+/// Each round trip the engine makes counts once against a plug-in that does not answer, however
 /// the block reaches it (#188): a host still busy with an earlier block refuses the next, and
-/// that refusal is the block's one miss, not one for handing it over and another for trying
-/// again. A plug-in that hangs in its first block is therefore hung after exactly
-/// `HUNG_AFTER` blocks, on a quiet machine or a loaded one.
+/// that refusal is the round trip's one miss, not one for handing it over and another for
+/// trying again. These blocks (480 frames, a few notes) are one round trip each (a block is
+/// two only when its events fill the chain's queue), so a plug-in that hangs in its first block
+/// is hung after exactly `HUNG_AFTER` blocks, on a quiet machine or a loaded one.
 #[test]
 fn a_block_a_plug_in_does_not_answer_counts_once() {
     let p = project(8.0, false, vec![plugin_device("x")]);
@@ -206,6 +207,47 @@ fn a_block_a_plug_in_does_not_answer_counts_once() {
     assert_eq!(control.health(), Health::Running, "after {below} unanswered blocks");
     play(&mut renderer, 1);
     assert_eq!(control.health(), Health::Hung, "after {} unanswered blocks", below + 1);
+}
+
+/// A plug-in still busy with its first blocks (just started or restarted): an offline render
+/// waits for it, so every block goes through it and none is lost (ADR 0006, decision 4); in
+/// real time a block it cannot take in time is lost to it, and the sound passes through.
+#[test]
+fn a_busy_plug_in_loses_no_block_offline_and_passes_the_sound_in_real_time() {
+    let p = project(8.0, false, vec![plugin_device("x")]);
+    let key = plugin_devices(&p)[0].key;
+    let mut dry = Renderer::with_audio(&p, &AudioPool::new(), SR).unwrap();
+    dry.set_offline(true);
+    let (reference, _) = play(&mut dry, 20);
+
+    let (_control, hosted) = start("test:slow-start:5");
+    let counts = hosted.counts();
+    let mut plugins = suhina_engine::Plugins::new();
+    plugins.insert(key, suhina_engine::PluginSlotInfo::default(), Box::new(hosted));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    renderer.set_offline(true);
+    let (out, _) = play(&mut renderer, 20);
+    assert_eq!(counts.read(), (20, 0), "every block given, none late");
+    let half: Vec<f32> = reference.iter().map(|s| s * 0.5).collect();
+    assert!(max_diff(&out, &half) < 1e-6, "every block went through the plug-in: {}", max_diff(&out, &half));
+
+    // The same in real time, a block every 10 ms as a device asks for them: its slow blocks
+    // are late or refused, and those pass the sound; once settled it answers again.
+    let (_control, hosted) = start("test:slow-start:5");
+    let counts = hosted.counts();
+    let mut plugins = suhina_engine::Plugins::new();
+    plugins.insert(key, suhina_engine::PluginSlotInfo::default(), Box::new(hosted));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    let period = Duration::from_millis(10);
+    for _ in 0..40 {
+        let started = Instant::now();
+        play(&mut renderer, 1);
+        std::thread::sleep(period.saturating_sub(started.elapsed()));
+    }
+    let (given, late) = counts.read();
+    assert_eq!(given, 40);
+    assert!(late >= 1, "a 30 ms block misses a 10 ms block's deadline");
+    assert!(late < 40, "it answers again once settled ({late} late)");
 }
 
 #[test]
@@ -237,9 +279,26 @@ fn a_plug_in_that_crashes_or_hangs_leaves_the_engine_playing() {
         // No block waited much past its deadline (10 ms of audio, 60 % of it for plug-ins),
         // however the plug-in failed; the slack is for a busy test machine.
         assert!(longest < Duration::from_millis(100), "{spec}: a block took {longest:?}");
-        // Restarted, it answers again: blocks come back done, so it is not counted as hung.
+        // Restarted, it answers again: blocks come back done, so it is not counted as hung,
+        // and its health says so at once, not the old instance's.
         let audio = control.restart().unwrap();
-        controller.send_plugin(key, Box::new(Hosted::new(audio))).unwrap();
+        assert_eq!(control.health(), Health::Running, "{spec}: right after the restart");
+        let hosted = Hosted::new(audio);
+        let counts = hosted.counts();
+        controller.send_plugin(key, Box::new(hosted)).unwrap();
+        // A block every 10 ms, as a device asks for them, until the new process answers one;
+        // the blocks before that are misses, never enough to read as hung.
+        let deadline = Instant::now() + PATIENT;
+        loop {
+            let started = Instant::now();
+            play(&mut renderer, 1);
+            let (given, late) = counts.read();
+            if given > late {
+                break;
+            }
+            assert!(Instant::now() < deadline, "{spec}: the restarted plug-in never answered ({late} late)");
+            std::thread::sleep(Duration::from_millis(10).saturating_sub(started.elapsed()));
+        }
         play(&mut renderer, 20);
         assert_eq!(control.health(), Health::Running, "{spec}");
     }

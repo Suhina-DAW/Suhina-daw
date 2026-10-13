@@ -11,6 +11,7 @@ covers:
   - crates/engine/src/plugin.rs
   - crates/session/src/rack.rs
   - crates/output/src/lib.rs
+  - crates/engine/src/chain.rs
   - crates/session/src/devices.rs
 ---
 
@@ -152,11 +153,19 @@ workspace forbids.
    its answer (`Link::wait`, `PluginProcessor::wait`), and so on until every chain is done;
    a bus runs after the chains that play into it. The budget is then set by the slowest
    plug-in, not the sum: the same project went from 30 to 50 % of blocks late to none, the
-   longest wait 6 ms. A host still busy with an earlier block refuses the next
-   (`Sent::Refused`): that block is one miss, and the chain does not try it again through
-   `process`, which would count it a second time and make a slow host *hung* after 16
-   blocks instead of 32 (#188; `Sent::Unsupported` is for processors that do not split a
-   block, which run it with `process`).
+   longest wait 6 ms. A host still busy with an earlier block (one whose answer came after
+   its deadline) refuses the next (`Sent::Refused`). In real time the engine does not wait
+   for it, since that would spend the deadline every chain shares: the round trip is one
+   miss and the block is lost to the plug-in, so an effect passes the sound through and an
+   instrument is silent for that block, as when it misses its deadline. The chain does not
+   try it again through `process`, which would count it a second time and make a slow host
+   *hung* after 16 round trips instead of 32 (#188). An offline render waits for the busy
+   host, up to `OFFLINE_TIMEOUT` (`PluginProcessor::send`'s patience, `Link::wait_ready`),
+   so no block of a render is lost to it. Misses count per round trip: a block is one, or
+   two when its events fill the chain's queue. `Sent::Unsupported` is for processors that do
+   not split a block, which run it with `process`. A restarted plug-in reads as running at
+   once (`Plugin::health` keeps what it found last, and a restart sets that), not as the
+   instance it replaced.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it
@@ -367,8 +376,9 @@ workspace forbids.
   before) keeps its releases (note-offs, the sustain pedal, all notes off) for the next block
   that is, so no note is left hanging; stopping releases each held key on its own before the
   all-notes-off, which many plug-ins ignore. Offline (`Renderer::set_offline`, every
-  `render_*` function, the CLI's and MCP's WAV renders) each block waits up to 10 s, through
-  the same `process`.
+  `render_*` function, the CLI's and MCP's WAV renders) each block waits up to 10 s for a
+  host still busy with the block before, and up to 10 s for its own answer, through the same
+  staged round trips as playback, so no block of a render is lost to a slow plug-in.
   Each plug-in device has a key made from its channel, its plug-in and how many of the same
   plug-in come before it on that channel, so it keeps its running plug-in when devices are
   added, removed or moved around it; its processor reaches the audio thread as a message

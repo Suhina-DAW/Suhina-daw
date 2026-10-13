@@ -144,11 +144,16 @@ impl PluginAudio {
     }
 
     /// The first half of [`PluginAudio::process_with_events`]: sends the block (at most
-    /// `room` samples, the output's size) without waiting, so several plug-ins' blocks can be
-    /// out at once; `false` when the host is still busy with an earlier block (counted as
-    /// unanswered). Real-time safe.
-    pub fn send(&mut self, input: &[f32], events: &[Event], room: usize) -> bool {
-        let sent = self.link.send_with_events(input, events, room);
+    /// `room` samples, the output's size) without waiting for its answer, so several plug-ins'
+    /// blocks can be out at once. When the host is still busy with an earlier block it waits
+    /// up to `patience` for that one to be answered (an offline render; in real time
+    /// `patience` is zero). `false` when the block could not go: counted as unanswered, once.
+    /// Real-time safe.
+    pub fn send(&mut self, input: &[f32], events: &[Event], room: usize, patience: Duration) -> bool {
+        let mut sent = self.link.send_with_events(input, events, room);
+        if !sent && !patience.is_zero() && self.link.wait_ready(Instant::now() + patience) {
+            sent = self.link.send_with_events(input, events, room);
+        }
         if !sent {
             self.note(Outcome::Busy);
         }
@@ -753,6 +758,8 @@ impl Plugin {
     /// already replaced by another's restart is loaded into the new one. An instance with a
     /// process of its own always gets a new process.
     pub fn restart(&mut self) -> Result<PluginAudio, PluginError> {
+        // The instance being replaced: if its audio thread is stuck in a shared process, that
+        // process cannot let it go and is ended. Read before the counter is replaced below.
         let own_hung = self.unanswered.load(Ordering::Relaxed) >= HUNG_AFTER;
         let shared = self.launch.group.is_some();
         let group = self.group.clone();
@@ -782,6 +789,9 @@ impl Plugin {
         self.editor_open = false;
         self.editor_size = None;
         self.unanswered = Arc::new(AtomicU32::new(0));
+        // What `health` says while the group is busy (#188): the new instance, not the old one's
+        // `Crashed` or `Hung`.
+        self.last_health = Health::Running;
         let audio = PluginAudio { link, unanswered: self.unanswered.clone() };
         let params = std::mem::take(&mut self.params_since);
         if let Some(state) = self.last_state.clone() {

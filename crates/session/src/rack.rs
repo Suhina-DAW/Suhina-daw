@@ -322,23 +322,27 @@ impl Hosted {
 
 impl PluginProcessor for Hosted {
     fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
-        if self.send(buffer, events) != Sent::Out {
+        if self.send(buffer, events, timeout) != Sent::Out {
             return false;
         }
         self.wait_for(buffer, timeout)
     }
 
-    /// Never [`Sent::Unsupported`]: a block that cannot go is refused and counted as missed
-    /// here, once, so the chain must not run it again (#188).
-    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> Sent {
-        if !self.take(buffer, events) {
+    /// Never [`Sent::Unsupported`]: a block that cannot go (the host still busy with an earlier
+    /// block after `patience`) is refused, so the chain must not run it again (#188). It counts
+    /// once as a late block here and in the engine; when it was the host that was busy, once as
+    /// unanswered too (`PluginAudio::send`).
+    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)], patience: Duration) -> Sent {
+        // A block longer than the link holds (none is, today) cannot be taken in at all.
+        let Some(input) = self.take(buffer, events).then(|| self.input.get(..buffer.len())).flatten() else {
+            self.counts.late.fetch_add(1, Ordering::Relaxed);
             return Sent::Refused;
-        }
-        let Some(input) = self.input.get(..buffer.len()) else { return Sent::Refused };
-        if self.audio.send(input, &self.events, buffer.len()) {
+        };
+        if self.audio.send(input, &self.events, buffer.len(), patience) {
             return Sent::Out;
         }
-        // The host is still busy with an earlier block: this one is lost, as a miss.
+        // The host is still busy with an earlier block: this one is lost to it, as a miss; its
+        // note releases go with the next block.
         self.counts.late.fetch_add(1, Ordering::Relaxed);
         carry_releases(&self.events, &mut self.carried);
         Sent::Refused

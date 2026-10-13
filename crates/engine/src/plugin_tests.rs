@@ -11,8 +11,8 @@ use suhina_model::*;
 
 use crate::chain_tests::{BEAT, SR, blocks, device, left, max_diff, note, peak, project};
 use crate::{
-    AudioPool, PluginProcessor, PluginSlotInfo, Plugins, Renderer, Sent, plugin_devices, render_offline,
-    render_offline_with_plugins,
+    AudioPool, OFFLINE_TIMEOUT, PluginProcessor, PluginSlotInfo, Plugins, Renderer, Sent, plugin_devices,
+    render_offline, render_offline_with_plugins,
 };
 
 /// What a stand-in plug-in does with a block.
@@ -181,39 +181,134 @@ fn a_plug_in_instrument_gets_the_notes_at_their_frames() {
     }
 }
 
+/// Splits blocks, and refuses one unless it may wait (an offline render), as a host still
+/// busy with an earlier block does; a block let through plays as an effect that silences the
+/// sound, or an instrument that plays 0.5.
+struct Busy {
+    instrument: bool,
+    sends: Arc<AtomicUsize>,
+    processes: Arc<AtomicUsize>,
+    /// The patience each block was handed over with.
+    patience: Arc<std::sync::Mutex<Vec<Duration>>>,
+}
+
+impl Busy {
+    fn new(instrument: bool) -> Self {
+        Self { instrument, sends: Arc::default(), processes: Arc::default(), patience: Arc::default() }
+    }
+}
+
+impl PluginProcessor for Busy {
+    fn process(&mut self, _: &mut [f32], _: &[(usize, NoteEvent)], _: Duration) -> bool {
+        self.processes.fetch_add(1, Ordering::SeqCst);
+        false
+    }
+    fn send(&mut self, _: &[f32], _: &[(usize, NoteEvent)], patience: Duration) -> Sent {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut seen) = self.patience.lock() {
+            seen.push(patience);
+        }
+        if patience.is_zero() { Sent::Refused } else { Sent::Out }
+    }
+    fn wait(&mut self, buffer: &mut [f32], _: Duration) -> bool {
+        buffer.fill(if self.instrument { 0.5 } else { 0.0 });
+        true
+    }
+}
+
 #[test]
 fn a_block_a_plug_in_refuses_is_one_miss_and_is_not_run_again() {
-    /// Splits blocks, and refuses every one, as a host still busy with an earlier block does.
-    struct Refusing {
-        sends: Arc<AtomicUsize>,
-        processes: Arc<AtomicUsize>,
-    }
-    impl PluginProcessor for Refusing {
-        fn process(&mut self, _: &mut [f32], _: &[(usize, NoteEvent)], _: Duration) -> bool {
-            self.processes.fetch_add(1, Ordering::SeqCst);
-            false
-        }
-        fn send(&mut self, _: &[f32], _: &[(usize, NoteEvent)]) -> Sent {
-            self.sends.fetch_add(1, Ordering::SeqCst);
-            Sent::Refused
-        }
-    }
     let notes = vec![note(0.0, 4.0, 69)];
     let dry_project = project(notes.clone(), 4.0, vec![device("utility", &[])]);
     let mut dry = Renderer::with_audio(&dry_project, &AudioPool::new(), SR).unwrap();
     let dry = blocks(&mut dry, 20, 480);
     let p = project(notes, 4.0, vec![plug(vst3())]);
-    let (sends, processes) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-    let refusing = Refusing { sends: Arc::clone(&sends), processes: Arc::clone(&processes) };
+    let busy = Busy::new(false);
+    let (sends, processes, patience) =
+        (Arc::clone(&busy.sends), Arc::clone(&busy.processes), Arc::clone(&busy.patience));
     let mut plugins = Plugins::new();
-    plugins.insert(plugin_devices(&p)[0].key, EFFECT, Box::new(refusing));
+    plugins.insert(plugin_devices(&p)[0].key, EFFECT, Box::new(busy));
     let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
     let out = blocks(&mut renderer, 20, 480);
     assert_eq!(sends.load(Ordering::SeqCst), 20, "one hand-over a block");
+    assert!(patience.lock().unwrap().iter().all(|p| p.is_zero()), "in real time nothing waits for a busy host");
     assert_eq!(processes.load(Ordering::SeqCst), 0, "a refused block is not run again");
-    assert_eq!(renderer.graph.chains[0].missed(), 20, "one miss a block");
+    // Each block here is one round trip, so one miss a block.
+    assert_eq!(renderer.graph.chains[0].missed(), 20, "one miss a round trip");
     // The effect is skipped: the dry sound.
     assert!(max_diff(&out, &dry) < 1e-6);
+}
+
+/// An instrument whose block is refused is silent for it, as when it misses its deadline.
+#[test]
+fn an_instrument_that_refuses_a_block_is_silent_for_it() {
+    let p = project(vec![note(0.0, 4.0, 60)], 4.0, vec![plug(vst3())]);
+    let busy = Busy::new(true);
+    let mut plugins = Plugins::new();
+    plugins.insert(plugin_devices(&p)[0].key, INSTRUMENT, Box::new(busy));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    let out = blocks(&mut renderer, 10, 480);
+    assert_eq!(peak(&out), 0.0, "no sine voice, no plug-in sound: silence");
+    assert_eq!(renderer.graph.chains[0].missed(), 10);
+}
+
+/// An offline render waits for a host busy with an earlier block (up to `OFFLINE_TIMEOUT`), so
+/// no block is lost to it: what a restarted host refuses in real time, an offline render gets
+/// through (ADR 0006, decision 4).
+#[test]
+fn an_offline_render_waits_for_a_busy_plug_in_and_loses_no_block() {
+    let notes = vec![note(0.0, 2.0, 69)];
+    for (instrument, info) in [(false, EFFECT), (true, INSTRUMENT)] {
+        let p = project(notes.clone(), 2.0, vec![plug(vst3())]);
+        let busy = Busy::new(instrument);
+        let (processes, patience) = (Arc::clone(&busy.processes), Arc::clone(&busy.patience));
+        let mut plugins = Plugins::new();
+        plugins.insert(plugin_devices(&p)[0].key, info, Box::new(busy));
+        let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 480, plugins).unwrap();
+        let patience = patience.lock().unwrap().clone();
+        assert!(!patience.is_empty());
+        assert!(patience.iter().all(|p| *p == OFFLINE_TIMEOUT), "offline every block may wait");
+        assert_eq!(processes.load(Ordering::SeqCst), 0);
+        if instrument {
+            // The plug-in played every block: 0.5 throughout the notes' length.
+            assert!((left(&out)[0] - 0.5).abs() < 1e-6);
+            assert!((left(&out)[BEAT * 2 - 1] - 0.5).abs() < 1e-6);
+        } else {
+            assert_eq!(peak(&out), 0.0, "every block went through the silencing effect");
+        }
+    }
+}
+
+/// A processor that does not split blocks (the trait's default `send`) runs each block with
+/// `process`, in real time and offline.
+#[test]
+fn a_processor_that_cannot_split_blocks_runs_them_whole() {
+    struct Whole {
+        processes: Arc<AtomicUsize>,
+    }
+    impl PluginProcessor for Whole {
+        fn process(&mut self, buffer: &mut [f32], _: &[(usize, NoteEvent)], _: Duration) -> bool {
+            self.processes.fetch_add(1, Ordering::SeqCst);
+            buffer.fill(0.0);
+            true
+        }
+    }
+    let p = project(vec![note(0.0, 4.0, 69)], 4.0, vec![plug(vst3())]);
+    let processes = Arc::new(AtomicUsize::new(0));
+    let mut plugins = Plugins::new();
+    plugins.insert(plugin_devices(&p)[0].key, EFFECT, Box::new(Whole { processes: Arc::clone(&processes) }));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    let out = blocks(&mut renderer, 10, 480);
+    assert_eq!(processes.load(Ordering::SeqCst), 10, "one process a block");
+    assert_eq!(peak(&out), 0.0);
+    assert_eq!(renderer.graph.chains[0].missed(), 0);
+
+    let processes = Arc::new(AtomicUsize::new(0));
+    let mut plugins = Plugins::new();
+    plugins.insert(plugin_devices(&p)[0].key, EFFECT, Box::new(Whole { processes: Arc::clone(&processes) }));
+    let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 480, plugins).unwrap();
+    assert!(processes.load(Ordering::SeqCst) > 0);
+    assert_eq!(peak(&out), 0.0);
 }
 
 #[test]

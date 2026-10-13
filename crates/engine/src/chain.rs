@@ -273,7 +273,7 @@ impl Chain {
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        match plugin.send(span, span_events) {
+                        match plugin.send(span, span_events, *deadline) {
                             Sent::Out => {
                                 *waiting = Some(*stage);
                                 return true;

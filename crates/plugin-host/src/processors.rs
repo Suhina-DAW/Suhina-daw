@@ -7,6 +7,8 @@
 //! - `test:hang-after:<n>`: passes audio through, then stops answering in block `n`.
 //! - `test:slow-load:<ms>`: `test:gain` that takes `ms` milliseconds (at most 60 s) to load, like
 //!   a large plug-in.
+//! - `test:slow-start:<n>`: `test:gain` whose first `n` blocks take 30 ms each, like a plug-in
+//!   that has just started (or been restarted) and is still settling.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -31,6 +33,8 @@ pub(crate) fn create(plugin: &str) -> Result<std::sync::Arc<dyn Processor>, Stri
     } else if let Some(ms) = after("test:slow-load:") {
         std::thread::sleep(Duration::from_millis(u64::from(ms.min(60_000))));
         Ok(std::sync::Arc::new(Gain(AtomicU32::new(0.5f32.to_bits()))))
+    } else if let Some(n) = after("test:slow-start:") {
+        Ok(std::sync::Arc::new(SlowStart { slow: n, blocks: AtomicU32::new(0) }))
     } else if let Some(n) = after("test:hang-after:") {
         Ok(std::sync::Arc::new(Failing { after: n, blocks: AtomicU32::new(0), hang: true }))
     } else {
@@ -59,6 +63,33 @@ impl Processor for Gain {
             return Err("gain is not a finite number".into());
         }
         self.0.store(gain.to_bits(), Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+/// The time each of a `test:slow-start` plug-in's first blocks takes.
+const SLOW_BLOCK: Duration = Duration::from_millis(30);
+
+struct SlowStart {
+    slow: u32,
+    blocks: AtomicU32,
+}
+
+impl Processor for SlowStart {
+    fn process(&self, input: &[f32], output: &mut [f32]) {
+        if self.blocks.fetch_add(1, Ordering::Relaxed) < self.slow {
+            std::thread::sleep(SLOW_BLOCK);
+        }
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = i * 0.5;
+        }
+    }
+
+    fn state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn set_state(&self, _data: &[u8]) -> Result<(), String> {
         Ok(())
     }
 }
