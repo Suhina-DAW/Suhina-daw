@@ -879,7 +879,10 @@ fn tabs_switch_keep_each_projects_edits_and_close() {
     assert_eq!(harness.state().projects().active(), ids.get(1).copied());
     assert!(harness.query_by_label("Turn Bass on").is_some());
 
+    // It has an edit, so closing it asks first.
     harness.get_by_label("Close Untitled 2").click();
+    harness.run();
+    harness.get_by_label("Don't save the changes").click();
     harness.run();
     harness.run();
     assert_eq!(harness.state().projects().len(), 1);
@@ -1384,6 +1387,7 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
     assert!(!unsaved(&harness));
     assert!(!harness.state().unsaved_prompt_open());
     let _clean = std::fs::remove_dir_all(&dir);
+}
 
 /// Renders the Arrangement view with an audio clip, linear and in decibels, to
 /// `target/ui-snapshots/arrangement-waveform*.png`, to look at the clip waveform in the window:
