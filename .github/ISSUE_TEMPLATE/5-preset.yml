@@ -1,0 +1,34 @@
+name: Preset contribution
+description: Offer presets for one of Suhina's built-in effects or instruments
+labels: [presets]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stock presets live in `presets/<device id>/` and are released under CC0 1.0
+        ([ADR 0014](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0014-stock-presets.md)).
+        You can also open the pull request straight away with the [preset template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=preset.md).
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: The device id, from `suhina-cli` or `devices.list`.
+      placeholder: e.g. compressor
+    validations:
+      required: true
+  - type: textarea
+    id: presets
+    attributes:
+      label: The presets
+      description: A name and one line on what each is for.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I release these presets under CC0 1.0.
+          required: true
+        - label: Names and descriptions are my own and don't name commercial products; no commercial banks or files are included.
+          required: true

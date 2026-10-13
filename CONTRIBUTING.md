@@ -21,7 +21,8 @@
   is added; CI rejects the project's old name (`python scripts/rename_suhina.py --check`).
 - **Commits:** small, focused, with a clear subject line, and signed off (see
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
-- **Issues:** small and scoped, with acceptance criteria (the issue forms ask for them: Bug, Plug-in problem, Feature request, Task);
+- **Issues:** small and scoped, with acceptance criteria (the issue forms ask for them: Bug, Plug-in problem, Feature request, New effect or
+  instrument, Preset contribution, Task);
   architecture belongs in an ADR under `docs/decisions/`, not in an issue thread.
 
 ## Clean-room
@@ -89,6 +90,18 @@ agent that wrote it was given such material. CI checks the sign-off on pull requ
 If you believe Suhina contains code, content or design that infringes your rights, or that a
 contribution broke the clean-room rules, see [`IP.md`](IP.md). Such reports are handled before
 any other work.
+
+## Effects, instruments and presets
+
+- **A new built-in effect or instrument** follows [ADR 0004](docs/decisions/0004-built-in-devices.md):
+  propose it with the *New effect or instrument* issue form, then open the pull request with the
+  [device template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=device.md)
+  (choose your branch on that page).
+- **Presets** for them go in `presets/<device id>/` under CC0 1.0
+  ([ADR 0014](docs/decisions/0014-stock-presets.md)); open the pull request with the
+  [preset template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=preset.md).
+  Presets need no clean-room review; their names don't name commercial products, and banks or
+  files from commercial products are not accepted.
 
 ## AI-assisted contributions
 

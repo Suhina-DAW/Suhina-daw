@@ -1,0 +1,50 @@
+name: New effect or instrument
+description: Propose a built-in effect or instrument for Suhina, or offer to build one
+labels: [enhancement, devices]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Built-in effects and instruments follow [ADR 0004](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0004-built-in-devices.md).
+        Describe it in your own words; don't paste text, images or presets from another product.
+        When you open the pull request, use the [device template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=device.md).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Audio effect
+        - Instrument
+        - MIDI or note effect
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does and why Suhina needs it
+    validations:
+      required: true
+  - type: textarea
+    id: params
+    attributes:
+      label: Parameters
+      description: Name, range and unit of each, as far as you know.
+      placeholder: |
+        - Time: 1 ms to 2 s
+        - Feedback: 0 to 100 %
+  - type: input
+    id: dsp
+    attributes:
+      label: DSP source
+      description: Own design, or an open-source project to port (name and licence; must be GPLv3-compatible).
+      placeholder: e.g. own design / <project> (MIT)
+    validations:
+      required: true
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Building it
+      options:
+        - label: I'd like to build it myself.
+        - label: I searched the open issues and the ROADMAP for this.
+          required: true
