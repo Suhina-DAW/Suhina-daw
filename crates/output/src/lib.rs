@@ -61,6 +61,8 @@ pub struct Progress {
     callback_frames: AtomicUsize,
     /// The last measured latency, engine to speaker, in microseconds.
     latency_us: AtomicU64,
+    /// The render thread, woken when the device has taken from the ring.
+    render: std::sync::OnceLock<std::thread::Thread>,
 }
 
 impl Progress {
@@ -105,6 +107,48 @@ impl Progress {
     pub(crate) fn add_frames(&self, frames: usize) {
         self.frames.fetch_add(frames as u64, Ordering::Relaxed);
     }
+
+    /// Wakes the render thread, if there is one, to fill what the device took: no waiting for
+    /// its next look, which a coarse system timer can make late. Lock-free, never allocates.
+    pub(crate) fn wake_render(&self) {
+        if let Some(render) = self.render.get() {
+            render.unpark();
+        }
+    }
+}
+
+/// Keeps the calling thread at real-time priority while it lives: on Windows it joins MMCSS
+/// "Pro Audio" (time-critical scheduling and a fine timer), elsewhere the highest priority the
+/// system gives. `LOOPWERK_NO_REALTIME=1` leaves it at its normal priority, to compare.
+pub(crate) struct RealTime {
+    #[cfg(windows)]
+    _mmcss: Option<audio_thread_priority::RtPriorityHandle>,
+}
+
+impl RealTime {
+    pub(crate) fn join(buffer_frames: usize, sample_rate: u32) -> Self {
+        if std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
+            return Self {
+                #[cfg(windows)]
+                _mmcss: None,
+            };
+        }
+        #[cfg(windows)]
+        {
+            let frames = u32::try_from(buffer_frames).unwrap_or(u32::MAX);
+            let mmcss = audio_thread_priority::promote_current_thread_to_real_time(frames, sample_rate).ok();
+            if mmcss.is_none() {
+                let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
+            }
+            Self { _mmcss: mmcss }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (buffer_frames, sample_rate);
+            let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
+            Self {}
+        }
+    }
 }
 
 /// Fills `out` (interleaved stereo) from the ring, with silence, counted as an underrun, for
@@ -125,6 +169,7 @@ pub(crate) fn read_ring(ring: &mut Ring, out: &mut [f32], progress: &Progress) {
         }
         progress.underruns.fetch_add(1, Ordering::Relaxed);
     }
+    progress.wake_render();
 }
 
 /// The time from the engine to the speaker: the frames queued in the ring, played at
@@ -430,6 +475,7 @@ impl Output {
             .name("loopwerk-render".into())
             .spawn(move || render_ahead(renderer, producer, block, &stopping, &watching))
             .map_err(|e| format!("could not start the render thread: {e}"))?;
+        let _set = progress.render.set(render.thread().clone());
         let asio = self.host == "ASIO";
         if asio {
             ASIO_OPEN.store(true, Ordering::Release);
@@ -459,10 +505,7 @@ fn render_ahead(
     stop: &AtomicBool,
     progress: &Progress,
 ) -> Renderer {
-    // `LOOPWERK_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
-    if !std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
-        let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
-    }
+    let _realtime = RealTime::join(frames, renderer.sample_rate());
     let mut block = vec![0.0f32; frames * 2];
     let capacity = ring.buffer().capacity();
     while !stop.load(Ordering::Acquire) {
@@ -742,7 +785,16 @@ where
                     on_data.add_frames(frames);
                 }
             },
-            move |_err| on_error.fail(),
+            move |err: cpal::Error| match err.kind() {
+                // The driver was late (an ASIO overload): heard as a dropout, counted as one.
+                cpal::ErrorKind::Xrun => {
+                    on_error.underruns.fetch_add(1, Ordering::Relaxed);
+                }
+                // Rerouted to the new default device, or no real-time rights: it plays on.
+                cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => {}
+                // A reset the driver asked for, a device gone: the output is opened again.
+                _ => on_error.fail(),
+            },
             None,
         )
         .map_err(|e| format!("could not open audio output {device}: {e}"))

@@ -158,6 +158,14 @@ pub struct Settings {
     /// Several dropped files go one track each without Ctrl (and onto one track with it).
     pub drop_separate: bool,
     pub warp_mode: WarpMode,
+    /// The audio output (Settings › Audio, `audio.setOutput`): host and device by name, empty
+    /// for the default; sample rate and buffer size, 0 for the device's own.
+    pub audio_host: String,
+    pub audio_device: String,
+    pub audio_sample_rate: u32,
+    pub audio_buffer: u32,
+    /// WASAPI exclusive mode; off, so other programs stay heard.
+    pub audio_exclusive: bool,
 }
 
 impl Default for Settings {
@@ -182,11 +190,37 @@ impl Default for Settings {
             preview_volume: PREVIEW_VOLUME,
             drop_separate: false,
             warp_mode: WarpMode::Beats,
+            audio_host: String::new(),
+            audio_device: String::new(),
+            audio_sample_rate: 0,
+            audio_buffer: 0,
+            audio_exclusive: false,
         }
     }
 }
 
 impl Settings {
+    /// The audio output these settings choose.
+    pub fn output_choice(&self) -> loopwerk_session::OutputChoice {
+        let text = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_string());
+        loopwerk_session::OutputChoice {
+            host: text(&self.audio_host),
+            device: text(&self.audio_device),
+            sample_rate: (self.audio_sample_rate > 0).then_some(self.audio_sample_rate),
+            buffer_frames: (self.audio_buffer > 0).then_some(self.audio_buffer),
+            exclusive: self.audio_exclusive,
+        }
+    }
+
+    /// Keeps `choice` as the audio output.
+    pub fn set_output_choice(&mut self, choice: &loopwerk_session::OutputChoice) {
+        self.audio_host = choice.host.clone().unwrap_or_default();
+        self.audio_device = choice.device.clone().unwrap_or_default();
+        self.audio_sample_rate = choice.sample_rate.unwrap_or(0);
+        self.audio_buffer = choice.buffer_frames.unwrap_or(0);
+        self.audio_exclusive = choice.exclusive;
+    }
+
     /// The settings as the lines of a settings file.
     pub fn to_text(&self) -> String {
         let headers = match self.track_headers {
@@ -212,7 +246,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -224,6 +258,11 @@ impl Settings {
             on(self.preview_autoplay),
             self.preview_volume,
             self.warp_mode.param(),
+            self.audio_host,
+            self.audio_device,
+            self.audio_sample_rate,
+            self.audio_buffer,
+            on(self.audio_exclusive),
             stop = self.stop.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
@@ -285,6 +324,19 @@ impl Settings {
                 ("warp_mode", mode) if WarpMode::parse(mode).is_some() => {
                     settings.warp_mode = WarpMode::parse(mode).unwrap_or_default();
                 }
+                ("audio_host", host) => settings.audio_host = host.to_string(),
+                ("audio_device", device) => settings.audio_device = device.to_string(),
+                ("audio_sample_rate", rate) if rate.parse::<u32>().is_ok_and(|r| r <= MAX_SAMPLE_RATE) => {
+                    settings.audio_sample_rate = rate.parse().unwrap_or(0);
+                }
+                ("audio_buffer", frames)
+                    if frames
+                        .parse::<u32>()
+                        .is_ok_and(|f| f == 0 || (MIN_BUFFER_FRAMES..=MAX_BUFFER_FRAMES).contains(&f)) =>
+                {
+                    settings.audio_buffer = frames.parse().unwrap_or(0);
+                }
+                ("audio_exclusive", "on" | "off") => settings.audio_exclusive = value == "on",
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -293,6 +345,8 @@ impl Settings {
         (settings, warnings)
     }
 }
+
+use loopwerk_session::audio::{MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
 
 /// Whether `id` can name a theme file: not empty and not a path.
 pub fn is_theme_id(id: &str) -> bool {
@@ -325,6 +379,11 @@ mod tests {
             preview_volume: -12,
             drop_separate: true,
             warp_mode: WarpMode::Tonal,
+            audio_host: "ASIO".into(),
+            audio_device: "Universal Audio Thunderbolt".into(),
+            audio_sample_rate: 48_000,
+            audio_buffer: 256,
+            audio_exclusive: true,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
@@ -337,6 +396,27 @@ mod tests {
         assert_eq!((settings.browser_width, settings.preview_volume), (BROWSER_WIDTHS.1, PREVIEW_VOLUMES.0));
         assert_eq!(settings.warp_mode, WarpMode::Beats);
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn the_audio_output_is_a_choice_and_nonsense_keeps_the_default() {
+        let (settings, warnings) = Settings::from_text(
+            "audio_host = WASAPI\naudio_device = Speakers (Apollo)\naudio_sample_rate = 44100\naudio_buffer = 512\n",
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let choice = settings.output_choice();
+        assert_eq!(choice.host.as_deref(), Some("WASAPI"));
+        assert_eq!(choice.device.as_deref(), Some("Speakers (Apollo)"));
+        assert_eq!((choice.sample_rate, choice.buffer_frames, choice.exclusive), (Some(44_100), Some(512), false));
+        let mut back = Settings::default();
+        back.set_output_choice(&choice);
+        assert_eq!(back.output_choice(), choice);
+        assert_eq!(Settings::default().output_choice(), loopwerk_session::OutputChoice::default());
+
+        let (settings, warnings) =
+            Settings::from_text("audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\n");
+        assert_eq!(settings, Settings::default());
+        assert_eq!(warnings.len(), 3);
     }
 
     #[test]

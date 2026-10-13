@@ -3,7 +3,7 @@ description: Several projects open at once like tabs, one active; where commands
 read_when: tabs, several projects, open projects, switch project, Ctrl+Tab, projects.list, projects.switch, Projects, ProjectId
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/session/src/projects.rs
 ---
@@ -40,7 +40,8 @@ the layer that owns sessions.
    registry for now, since it needs file access that each front end grants differently (the
    MCP server's read root).
 4. **Only the active project plays.** Switching closes the previous project's `Player`; the
-   front end starts one for the new active project. Two projects never mix into one output.
+   front end starts one for the new active project on the output chosen (`Projects` keeps the
+   choice, `audio.setOutput`). Two projects never mix into one output.
 
 ## Consequences
 

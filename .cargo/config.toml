@@ -1,0 +1,3 @@
+[env]
+# The ASIO SDK the `asio` feature builds cpal's ASIO host with (third_party/asiosdk, GPL-3.0).
+CPAL_ASIO_DIR = { value = "third_party/asiosdk", relative = true }

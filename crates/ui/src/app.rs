@@ -1119,6 +1119,44 @@ impl App {
         }
     }
 
+    /// Lists the audio hosts and devices for Settings › Audio (`audio.devices`).
+    fn list_audio_devices(&mut self) {
+        match self.projects.execute("audio.devices", &json!({})) {
+            Ok(_) => {
+                self.about.audio_hosts = self.projects.audio_system().map(|s| s.hosts()).unwrap_or_default();
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
+    /// Plays on the output `choice` names from now on (`audio.setOutput`): the active project's
+    /// output opens again there, the transport where it was.
+    fn choose_output(&mut self, choice: &loopwerk_session::OutputChoice) {
+        let params = choice.to_json();
+        let params = json!({
+            "host": params["host"].as_str().unwrap_or(""),
+            "device": params["device"].as_str().unwrap_or(""),
+            "sample_rate": choice.sample_rate.unwrap_or(0),
+            "buffer_frames": choice.buffer_frames.unwrap_or(0),
+            "exclusive": choice.exclusive,
+        });
+        match self.projects.execute("audio.setOutput", &params) {
+            Ok(result) => {
+                self.status = match result["notice"].as_str() {
+                    Some(notice) => Status::Hint(notice.to_string()),
+                    None => Status::Done(format!(
+                        "Audio output: {}",
+                        self.session()
+                            .and_then(Session::player)
+                            .and_then(loopwerk_session::Player::output_info)
+                            .map_or_else(|| "chosen; it opens with the next project".to_string(), |i| i.describe())
+                    )),
+                };
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
     /// Whether a plug-in scan is running.
     pub fn scanning(&self) -> bool {
         self.scan.is_some()
@@ -1133,6 +1171,12 @@ impl App {
         self.about.projects_default = self.default_folders.0.display().to_string();
         self.about.templates_default = self.default_folders.1.display().to_string();
         let tag_limit = self.projects.file_library_mut().tag_limit();
+        self.about.audio_live =
+            self.session().and_then(Session::player).and_then(loopwerk_session::Player::output_info);
+        if self.page.page == settings_view::Page::Audio {
+            // The latency and underruns change while it plays.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        }
         let sources = Sources {
             about: &self.about,
             plugins: &mut self.plugins,
@@ -1158,6 +1202,12 @@ impl App {
         }
         if let Some(request) = outcome.plugins.clone() {
             self.plugin_request(request);
+        }
+        if outcome.audio_refresh {
+            self.list_audio_devices();
+        }
+        if let Some(choice) = outcome.audio_output.clone() {
+            self.choose_output(&choice);
         }
         if outcome.changed {
             motion::set_enabled(ui.ctx(), self.settings.animations);

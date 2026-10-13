@@ -24,6 +24,8 @@ thread-priority = "3.1.1"  # MIT
 [target.'cfg(windows)'.dependencies]
 # WASAPI in exclusive mode, which cpal does not open.
 wasapi = "0.19"  # MIT
+# The render and exclusive-mode threads join MMCSS "Pro Audio" (AvSetMmThreadCharacteristics).
+audio_thread_priority = { version = "0.38", default-features = false }  # MPL-2.0
 
 [dev-dependencies]
 loopwerk-model.workspace = true

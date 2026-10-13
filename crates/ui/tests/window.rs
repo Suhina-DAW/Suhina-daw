@@ -1166,3 +1166,66 @@ fn render_every_built_in_theme() {
         image.save(folder.join(format!("theme-{id}-arrangement.png"))).unwrap_or_else(|e| panic!("{e}"));
     }
 }
+
+/// An audio system with one device on one host, whose players run nowhere.
+struct StandAudio;
+
+impl loopwerk_session::AudioSystem for StandAudio {
+    fn hosts(&self) -> Vec<loopwerk_session::audio::HostInfo> {
+        use loopwerk_session::audio::{DeviceInfo, HostInfo};
+        vec![HostInfo {
+            name: "Stand".into(),
+            default: true,
+            devices: vec![DeviceInfo {
+                name: "Stand Out".into(),
+                default: true,
+                channels: 2,
+                sample_rates: vec![48_000],
+                default_sample_rate: Some(48_000),
+                buffer_sizes: vec![256, 512],
+                buffer_range: Some((256, 512)),
+                exclusive: false,
+            }],
+            error: None,
+        }]
+    }
+
+    fn open(
+        &self,
+        project: &loopwerk_engine::model::Project,
+        audio: &loopwerk_engine::AudioPool,
+        _choice: &loopwerk_session::OutputChoice,
+        _previous: Option<loopwerk_session::Player>,
+    ) -> Result<loopwerk_session::audio::Opened, String> {
+        let mut renderer = loopwerk_engine::Renderer::stopped(project, audio, 48_000).map_err(|e| e.to_string())?;
+        let player = loopwerk_session::Player::new(renderer.controller(), None);
+        Ok(loopwerk_session::audio::Opened { player, notice: None, plugins_kept: true })
+    }
+}
+
+#[test]
+fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
+    let mut app = demo_app();
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
+    app.projects_mut().open_output(None).unwrap_or_else(|e| panic!("{e}"));
+    let mut harness = window(app);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Audio").click();
+    // The page redraws while it shows the latency, so it is stepped, not run until still.
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert!(harness.query_by_label("Driver: Default (Stand)").is_some());
+    assert!(harness.query_by_label("Device: Default (Stand Out)").is_some());
+    harness.get_by_label("Buffer size: Default (1024 frames)").click();
+    harness.step();
+    harness.step();
+    harness.get_by_label("512 frames (10.7 ms)").click();
+    harness.step();
+    harness.step();
+    assert_eq!(harness.state().projects().output_choice().buffer_frames, Some(512));
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.audio_buffer);
+    assert_eq!(saved, Some(512));
+    assert!(harness.query_by_label("Buffer size: 512 frames (10.7 ms)").is_some());
+}

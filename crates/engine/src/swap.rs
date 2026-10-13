@@ -342,40 +342,52 @@ fn place(chains: &mut [crate::chain::Chain], key: u64, mut processor: Processor)
 
 /// Keeps `processor` until a graph with its slot takes over; one for the same plug-in that was
 /// already waiting goes back. Never allocates: the caller checked there is room.
-/// Takes every plug-in processor out of `graph`'s chains into `out`.
-fn take_from_graph(graph: &mut Graph, out: &mut HashMap<u64, Processor>) {
-    for chain in &mut graph.chains {
-        for slot in chain.plugin_slots() {
-            if let Some(processor) = slot.processor.take() {
-                out.insert(slot.key, processor);
+/// What a renderer gives back of its plug-ins: each device's processor, and what its slot
+/// knew about it (instrument, latency).
+#[derive(Default)]
+pub(crate) struct Taken {
+    pub(crate) processors: HashMap<u64, Processor>,
+    pub(crate) info: HashMap<u64, PluginSlotInfo>,
+}
+
+impl Taken {
+    /// Takes every plug-in processor out of `graph`'s chains, and what each slot knows.
+    fn from_graph(&mut self, graph: &mut Graph) {
+        for chain in &mut graph.chains {
+            for slot in chain.plugin_slots() {
+                self.info.insert(slot.key, PluginSlotInfo { instrument: slot.instrument, latency: slot.latency });
+                if let Some(processor) = slot.processor.take() {
+                    self.processors.insert(slot.key, processor);
+                }
             }
         }
     }
 }
 
 impl SwapState {
-    /// Takes every processor the renderer holds into `out`: in the graph not taken back yet,
-    /// the `current` one, parked without a slot, in graphs waiting to be swapped in and still in
-    /// their queue. A device found twice keeps the newest, the one found last.
-    pub(crate) fn take_processors(&mut self, current: &mut Graph, out: &mut HashMap<u64, Processor>) {
+    /// Takes every processor the renderer holds: in the graph not taken back yet, the
+    /// `current` one, parked without a slot, in graphs waiting to be swapped in and still in
+    /// their queue. A device found twice keeps the newest, the one found last; so does what its
+    /// slots knew about it.
+    pub(crate) fn take_processors(&mut self, current: &mut Graph, taken: &mut Taken) {
         if let Some(held) = self.held.as_mut() {
-            take_from_graph(held, out);
+            taken.from_graph(held);
         }
-        take_from_graph(current, out);
+        taken.from_graph(current);
         for (key, processor) in self.parked.drain(..) {
-            out.insert(key, processor);
+            taken.processors.insert(key, processor);
         }
         if let Some(pending) = self.pending.as_mut() {
-            take_from_graph(&mut pending.graph, out);
+            taken.from_graph(&mut pending.graph);
         }
         if let Some(incoming) = self.incoming.as_mut() {
             while let Ok(mut swap) = incoming.pop() {
-                take_from_graph(&mut swap.graph, out);
+                taken.from_graph(&mut swap.graph);
             }
         }
         if let Some(queue) = self.plugins.as_mut() {
             while let Ok((key, processor)) = queue.pop() {
-                out.insert(key, processor);
+                taken.processors.insert(key, processor);
             }
         }
     }

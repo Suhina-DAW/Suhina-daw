@@ -1,12 +1,13 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
+read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, loopwerk-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
+  - crates/session/src/audio.rs
 ---
 
 # MCP server
@@ -31,8 +32,8 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   it active; `projects.list`, `projects.switch`, `projects.next`, `projects.previous` and
   `projects.close` (through `command_run`) manage them. Tools work on the active project, or on
   the one their `project` argument names, without switching. At most 32 are open.
-- **Audio output.** With `--audio`, each opened project also plays on the default output device
-  with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
+- **Audio output.** With `--audio`, each opened project also plays on the chosen output device
+  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
@@ -42,6 +43,19 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
+- **Choosing the output.** `audio.devices` lists the audio hosts (WASAPI, and ASIO in a build
+  with the `asio` feature; ALSA, JACK or CoreAudio elsewhere) and each one's output devices with
+  `sample_rates`, `buffer_sizes` (what the driver allows), `buffer_range` and whether WASAPI
+  exclusive mode is possible, plus the output `chosen`. `audio.setOutput {host?, device?,
+  sample_rate?, buffer_frames?, exclusive?}` changes the parts given (an empty text or 0 goes back
+  to the default; a new host forgets the device) and reopens the active project's output there,
+  the transport where it was (while playing, the play start marker moves to the playhead) and the
+  plug-ins running on when the sample rate stays the same; a device that is not there plays the
+  default output and the result's `notice` says so. The engine renders in blocks of
+  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
+  now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
+  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns` and
+  `failed`. Without `--audio`, `audio.devices` returns an error.
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the

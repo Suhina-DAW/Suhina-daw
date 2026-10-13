@@ -215,9 +215,7 @@ fn run(
         let _ = client.stop_stream();
         return;
     }
-    if !std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
-        let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
-    }
+    let _realtime = crate::RealTime::join(frames, sample_rate);
     let period = Duration::from_secs_f64(frames as f64 / f64::from(sample_rate.max(1)));
     while !stop.load(Ordering::Acquire) {
         if event.wait_for_event(WAIT_MS).is_err() {
@@ -260,6 +258,39 @@ struct Device {
     frames: usize,
 }
 
+// IAudioClient::Initialize results that say why exclusive mode could not be had.
+const AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED: u32 = 0x8889_0019;
+const AUDCLNT_E_DEVICE_IN_USE: u32 = 0x8889_000A;
+const AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED: u32 = 0x8889_000E;
+const AUDCLNT_E_UNSUPPORTED_FORMAT: u32 = 0x8889_0008;
+const AUDCLNT_E_ENDPOINT_CREATE_FAILED: u32 = 0x8889_000F;
+
+/// The Windows error code behind a `wasapi` error, if it is one.
+fn hresult(e: &wasapi::WasapiError) -> Option<u32> {
+    match e {
+        wasapi::WasapiError::Windows(windows) => Some(windows.code().0 as u32),
+        _ => None,
+    }
+}
+
+/// Why opening the device exclusively failed, in words.
+fn init_error(e: &wasapi::WasapiError) -> String {
+    reason(hresult(e)).map_or_else(|| format!("could not open the device exclusively: {e}"), String::from)
+}
+
+fn reason(code: Option<u32>) -> Option<&'static str> {
+    match code? {
+        AUDCLNT_E_DEVICE_IN_USE => Some("another program has the device in exclusive mode"),
+        AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED => {
+            Some("the device does not allow exclusive mode (Sound settings › device › Advanced)")
+        }
+        AUDCLNT_E_UNSUPPORTED_FORMAT => Some("the device does not take this format in exclusive mode"),
+        AUDCLNT_E_ENDPOINT_CREATE_FAILED => Some("the device is not there or not ready"),
+        AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED => Some("the device cannot use this buffer size"),
+        _ => None,
+    }
+}
+
 fn set_up(name: Option<&str>, sample_rate: u32, buffer_frames: Option<u32>) -> Result<Device, String> {
     let error = |what: &str, e: wasapi::WasapiError| format!("{what}: {e}");
     wasapi::initialize_mta().ok().map_err(|e| format!("could not start COM: {e}"))?;
@@ -289,7 +320,10 @@ fn set_up(name: Option<&str>, sample_rate: u32, buffer_frames: Option<u32>) -> R
     // Intel HDA devices need buffers in multiples of 128 bytes.
     let period = client.calculate_aligned_period_near(wanted, Some(128), &format).unwrap_or(wanted);
     let mode = StreamMode::EventsExclusive { period_hns: period };
-    if client.initialize_client(&format, &Direction::Render, &mode).is_err() {
+    if let Err(e) = client.initialize_client(&format, &Direction::Render, &mode) {
+        if hresult(&e) != Some(AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
+            return Err(init_error(&e));
+        }
         // A buffer the device cannot align to: it says the size it can, and a new client is
         // set up with that (the documented way back).
         let frames = client.get_buffer_size().map_err(|e| error("could not open the device exclusively", e))?;
@@ -297,7 +331,7 @@ fn set_up(name: Option<&str>, sample_rate: u32, buffer_frames: Option<u32>) -> R
         client = device.get_iaudioclient().map_err(|e| error("could not open the device", e))?;
         client
             .initialize_client(&format, &Direction::Render, &StreamMode::EventsExclusive { period_hns: period })
-            .map_err(|e| error("could not open the device exclusively", e))?;
+            .map_err(|e| init_error(&e))?;
     }
     let event = client.set_get_eventhandle().map_err(|e| error("no device event", e))?;
     let render = client.get_audiorenderclient().map_err(|e| error("no render client", e))?;
@@ -356,6 +390,17 @@ mod tests {
         let mut none = [7u8; 4];
         encode(Encoding::F32, &[1.0, 1.0], 0, &mut none);
         assert_eq!(none, [7; 4]);
+    }
+
+    #[test]
+    fn driver_errors_are_said_in_words() {
+        assert!(reason(Some(AUDCLNT_E_DEVICE_IN_USE)).unwrap().contains("another program"));
+        assert!(reason(Some(AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED)).unwrap().contains("does not allow"));
+        assert_eq!(reason(Some(0x8000_4005)), None);
+        assert_eq!(reason(None), None);
+        let other = wasapi::WasapiError::ClientNotInit;
+        assert_eq!(hresult(&other), None);
+        assert!(init_error(&other).starts_with("could not open the device exclusively"));
     }
 
     /// Probing works on any Windows machine, with or without exclusive-capable devices.

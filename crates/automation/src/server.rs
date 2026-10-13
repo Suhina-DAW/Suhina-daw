@@ -5,9 +5,10 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use loopwerk_engine::AudioPool;
 use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_session::{CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands};
+use loopwerk_session::{
+    AudioSystem, CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands,
+};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
@@ -33,19 +34,12 @@ transport.stop, transport.setPosition, launcher.state) play on a real audio devi
 /// Most steps a single `command_batch` may run.
 const MAX_BATCH_STEPS: usize = 256;
 
-/// Opens real-time audio output for a project, so transport commands are heard. The CLI
-/// provides one when the server is started with `--audio`.
-pub trait AudioOutput: Send + Sync {
-    /// Starts an engine for `project` with its transport stopped. Returns the player and a
-    /// description of the output device.
-    fn open(&self, project: &Project, audio: &AudioPool) -> Result<(Player, String), String>;
-}
-
 #[derive(Clone)]
 pub struct LoopwerkMcp {
     projects: Arc<Mutex<Projects>>,
     workspace: Arc<Workspace>,
-    audio_output: Option<Arc<dyn AudioOutput>>,
+    /// Opened projects play out loud (`--audio`): the projects have an audio system.
+    audio_output: bool,
     tool_router: ToolRouter<Self>,
 }
 
@@ -161,7 +155,7 @@ impl LoopwerkMcp {
         Self {
             projects: Arc::new(Mutex::new(Projects::new())),
             workspace: Arc::new(workspace),
-            audio_output: None,
+            audio_output: false,
             tool_router: Self::tool_router(),
         }
     }
@@ -176,9 +170,13 @@ impl LoopwerkMcp {
         self
     }
 
-    /// Plays each opened project on `output`, so transport and launcher commands are heard.
-    pub fn with_audio_output(mut self, output: Arc<dyn AudioOutput>) -> Self {
-        self.audio_output = Some(output);
+    /// Plays each opened project on `system`'s devices, so transport and launcher commands are
+    /// heard and the `audio.*` commands choose the output.
+    pub fn with_audio_output(mut self, system: Arc<dyn AudioSystem>) -> Self {
+        if let Ok(mut projects) = self.projects.lock() {
+            projects.set_audio_system(system);
+            self.audio_output = true;
+        }
         self
     }
 
@@ -231,10 +229,7 @@ impl LoopwerkMcp {
                 let session = projects.session_mut(Some(id)).map_err(|e| e.0)?;
                 let mut info = session.execute("project.info", &json!({})).map_err(|e| e.0)?;
                 info["source"] = json!(display_path(&path));
-                let audio_output = match output {
-                    Some(output) => start_audio(session, output.as_ref(), &mut warnings),
-                    None => Value::Null,
-                };
+                let audio_output = if output { start_audio(projects, id, &mut warnings) } else { Value::Null };
                 Ok(json!({ "project": id.0, "info": info, "warnings": warnings, "audio_output": audio_output }))
             })
             .await;
@@ -294,7 +289,7 @@ impl LoopwerkMcp {
         let result = self
             .with_projects(move |projects| {
                 let mut value = projects.execute_in(target, &p.id, &params).map_err(|e| e.0)?;
-                if let Some(audio_output) = play_active(projects, &p.id, output.as_deref())
+                if let Some(audio_output) = play_active(projects, &p.id, output)
                     && let Some(object) = value.as_object_mut()
                 {
                     object.insert("audio_output".into(), audio_output);
@@ -328,7 +323,7 @@ impl LoopwerkMcp {
                         (None, Ok(params)) => projects.execute_in(target, &step.id, &params),
                     };
                     if outcome.is_ok() {
-                        play_active(projects, &step.id, output.as_deref());
+                        play_active(projects, &step.id, output);
                     }
                     match outcome {
                         Ok(value) => results.push(json!({ "id": step.id, "ok": true, "result": value })),
@@ -421,17 +416,20 @@ impl LoopwerkMcp {
     }
 }
 
-/// Starts `output` playing `session`'s project. Returns the device description, or why it is not
-/// available; missing audio files are added to `warnings`.
-fn start_audio(session: &mut Session, output: &dyn AudioOutput, warnings: &mut Vec<String>) -> Value {
+/// Starts project `id` playing on the chosen output. Returns the device description, or why it
+/// is not available; missing audio files and a fallback to the default device are added to
+/// `warnings`.
+fn start_audio(projects: &mut Projects, id: ProjectId, warnings: &mut Vec<String>) -> Value {
+    let Ok(session) = projects.session_mut(Some(id)) else { return Value::Null };
     let project = session.project().clone();
     let (audio, audio_warnings) = project_audio(session, &project);
     warnings.extend(audio_warnings);
     session.set_audio(audio);
-    match output.open(session.project(), session.audio()) {
-        Ok((player, description)) => {
-            session.attach_player(player);
-            json!(description)
+    match projects.open_output(Some(id)) {
+        Ok(notice) => {
+            warnings.extend(notice);
+            let described = projects.get(id).and_then(Session::player).and_then(Player::output_info);
+            json!(described.map(|i| i.describe()))
         }
         Err(e) => json!(format!("not available: {e}")),
     }
@@ -536,17 +534,19 @@ fn refused(id: &str) -> Option<String> {
 
 /// After a project command, starts the newly active project playing when the server has audio
 /// output, since switching closes the previous project's player. Returns what was started.
-fn play_active(projects: &mut Projects, id: &str, output: Option<&dyn AudioOutput>) -> Option<Value> {
-    let output = output?;
+fn play_active(projects: &mut Projects, id: &str, output: bool) -> Option<Value> {
+    if !output {
+        return None;
+    }
     if !project_commands().iter().any(|c| c.id == id && c.kind == CommandKind::Projects) {
         return None;
     }
-    let session = projects.session_mut(None).ok()?;
-    if session.player().is_some() {
+    let active = projects.active()?;
+    if projects.get(active)?.player().is_some() {
         return None;
     }
     let mut warnings = Vec::new();
-    let started = start_audio(session, output, &mut warnings);
+    let started = start_audio(projects, active, &mut warnings);
     Some(json!({ "device": started, "warnings": warnings }))
 }
 

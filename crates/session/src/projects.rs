@@ -46,7 +46,13 @@ pub struct Projects {
     audio: Option<std::sync::Arc<dyn crate::AudioSystem>>,
     /// The output the user chose (`audio.setOutput`, the window's settings).
     output_choice: crate::OutputChoice,
+    /// When a failed output was last opened again, so a device that keeps failing is tried
+    /// every [`OUTPUT_RETRY`], not every frame.
+    output_retried: Option<std::time::Instant>,
 }
+
+/// How often an output whose device reported an error is opened again.
+const OUTPUT_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
 
@@ -313,6 +319,37 @@ impl Projects {
     /// thread that owns the projects (the window calls it every frame); commands call it too.
     /// Returns what the user should hear about.
     pub fn poll_plugins(&mut self) -> Vec<String> {
+        let mut notices = self.check_output();
+        notices.extend(self.sync_active_plugins());
+        notices
+    }
+
+    /// Opens the active project's output again when its device reported an error: a driver
+    /// that asked to be reset (ASIO, after its buffer size or sample rate changed in its own
+    /// panel), or a device unplugged, which then falls back to the default one. Returns what
+    /// the user should hear about.
+    pub fn check_output(&mut self) -> Vec<String> {
+        let failed = self
+            .session_mut(None)
+            .ok()
+            .and_then(|s| s.player())
+            .and_then(crate::Player::output_info)
+            .is_some_and(|info| info.failed);
+        if !failed || self.output_retried.is_some_and(|t| t.elapsed() < OUTPUT_RETRY) {
+            return Vec::new();
+        }
+        self.output_retried = Some(std::time::Instant::now());
+        match self.reopen_output() {
+            Ok(notice) => {
+                let mut said = vec!["the audio device reported an error; its output was opened again".to_string()];
+                said.extend(notice);
+                said
+            }
+            Err(e) => vec![e.0],
+        }
+    }
+
+    fn sync_active_plugins(&mut self) -> Vec<String> {
         let Some(active) = self.active else { return Vec::new() };
         if self.get(active).is_none_or(|s| s.player().is_none()) {
             return Vec::new();

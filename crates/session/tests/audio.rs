@@ -22,9 +22,11 @@ struct Stand {
     opened: Mutex<Vec<(OutputChoice, bool)>>,
     /// The device that is "not there": choosing it falls back with a notice.
     missing: Option<String>,
+    /// Each opened output's error flag, to fail it as a driver would.
+    failed: Mutex<Vec<Arc<std::sync::atomic::AtomicBool>>>,
 }
 
-struct Live(OutputChoice);
+struct Live(OutputChoice, Arc<std::sync::atomic::AtomicBool>);
 
 impl LiveOutput for Live {
     fn info(&self) -> OutputInfo {
@@ -36,6 +38,7 @@ impl LiveOutput for Live {
             engine_block: self.0.buffer_frames.unwrap_or(1024),
             latency_ms: 21.3,
             underruns: 2,
+            failed: self.1.load(std::sync::atomic::Ordering::Relaxed),
             ..OutputInfo::default()
         }
     }
@@ -76,7 +79,9 @@ impl AudioSystem for Stand {
         self.opened.lock().unwrap().push((choice.clone(), previous.is_some()));
         drop(previous);
         let mut renderer = Renderer::stopped(project, audio, choice.sample_rate.unwrap_or(SR)).unwrap();
-        let player = Player::with_output(renderer.controller(), None, Arc::new(Live(choice)));
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.failed.lock().unwrap().push(Arc::clone(&failed));
+        let player = Player::with_output(renderer.controller(), None, Arc::new(Live(choice, failed)));
         self.renderers.lock().unwrap().push(renderer);
         Ok(Opened { player, notice, plugins_kept: true })
     }
@@ -222,4 +227,21 @@ fn nothing_reopens_while_no_project_plays() {
     // A transport command needs no reopen to reach the new player.
     let mut player = projects.session_mut(None).unwrap().detach_player().unwrap();
     player.send(LaunchCommand::Play).unwrap();
+}
+
+#[test]
+fn an_output_whose_device_fails_opens_again_but_not_every_frame() {
+    let (mut projects, stand) = with_stand(None);
+    projects.add(Session::new(project()), None).unwrap();
+    projects.open_output(None).unwrap();
+    assert!(projects.check_output().is_empty(), "nothing to do while it plays");
+    // The driver asks for a reset.
+    stand.failed.lock().unwrap()[0].store(true, std::sync::atomic::Ordering::Relaxed);
+    let said = projects.poll_plugins();
+    assert!(said.iter().any(|s| s.contains("opened again")), "{said:?}");
+    assert_eq!(stand.opened.lock().unwrap().len(), 2);
+    // The new one fails at once too: it is tried again later, not on the next frame.
+    stand.failed.lock().unwrap()[1].store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(projects.check_output().is_empty());
+    assert_eq!(stand.opened.lock().unwrap().len(), 2);
 }
