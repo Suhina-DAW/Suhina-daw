@@ -338,6 +338,32 @@ fn a_plug_in_arrives_while_playing_and_stays_through_edits_and_restarts() {
     assert_eq!(second_dropped.load(Ordering::SeqCst), 1);
 }
 
+/// A muted track (or one left out by a solo) keeps its chain, so its plug-in keeps its
+/// process and sounds again when the track does; a chain left out of the graph would give the
+/// processor back and the plug-in would stay silent for good.
+#[test]
+fn a_plug_in_on_a_muted_track_keeps_running_and_sounds_again() {
+    let p = project(vec![note(0.0, 16.0, 60)], 16.0, vec![plug(vst3())]);
+    let key = plugin_devices(&p)[0].key;
+    let stand = Stand::new(Behaviour::Instrument);
+    let dropped = Arc::clone(&stand.dropped);
+    let mut renderer =
+        Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins(&p, vec![(stand, INSTRUMENT)])).unwrap();
+    let mut controller = renderer.controller();
+    assert!(peak(&blocks(&mut renderer, 5, 480)) > 0.1);
+    let mut muted = p.clone();
+    muted.channels[0].mute = true;
+    controller.update(&muted).unwrap();
+    blocks(&mut renderer, 2, 480);
+    assert_eq!(peak(&blocks(&mut renderer, 5, 480)), 0.0, "muted");
+    controller.update(&p).unwrap();
+    blocks(&mut renderer, 2, 480);
+    assert!(peak(&blocks(&mut renderer, 5, 480)) > 0.1, "sounds again");
+    controller.collect();
+    assert_eq!(dropped.load(Ordering::SeqCst), 0, "the plug-in carried over");
+    let _ = key;
+}
+
 #[test]
 fn a_plug_in_instrument_is_released_when_the_transport_stops() {
     let p = project(vec![note(0.0, 8.0, 60)], 8.0, vec![plug(vst3())]);
