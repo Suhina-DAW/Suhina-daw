@@ -116,6 +116,11 @@ pub const MAP_MAX_SECONDS: u32 = 10;
 pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
 pub const PREVIEW_VOLUME: i32 = -6;
+/// The size of the whole window, in percent: the smallest and largest, the default, and how much
+/// one Zoom in or Zoom out changes it.
+pub const ZOOMS: (u32, u32) = (50, 200);
+pub const ZOOM: u32 = 100;
+pub const ZOOM_STEP: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -153,6 +158,9 @@ pub struct Settings {
     pub map_grid: bool,
     pub map_hover_preview: bool,
     pub map_max_seconds: u32,
+    /// The size of the whole window, in percent (`ZOOMS`): everything is drawn this much larger
+    /// or smaller.
+    pub zoom: u32,
 }
 
 impl Default for Settings {
@@ -179,11 +187,35 @@ impl Default for Settings {
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
+            zoom: ZOOM,
         }
     }
 }
 
 impl Settings {
+    /// Makes the window `steps` zoom steps larger (or smaller, when negative), onto the steps and
+    /// within the limits. Returns whether the zoom changed.
+    pub fn step_zoom(&mut self, steps: i32) -> bool {
+        let step = i64::from(ZOOM_STEP);
+        let zoom = i64::from(self.zoom);
+        // From the step on the side it moves away from, so a hand-edited 115 goes to 120 or 110.
+        let from = match steps.signum() {
+            1 => zoom / step * step,
+            -1 => (zoom + step - 1) / step * step,
+            _ => return false,
+        };
+        let wanted = from.saturating_add(i64::from(steps).saturating_mul(step));
+        let zoom = u32::try_from(wanted.clamp(i64::from(ZOOMS.0), i64::from(ZOOMS.1))).unwrap_or(ZOOM);
+        let changed = zoom != self.zoom;
+        self.zoom = zoom;
+        changed
+    }
+
+    /// The zoom as the factor everything is drawn at (1.0 for 100 %).
+    pub fn zoom_factor(&self) -> f32 {
+        self.zoom.clamp(ZOOMS.0, ZOOMS.1) as f32 / 100.0
+    }
+
     /// The settings as the lines of a settings file.
     pub fn to_text(&self) -> String {
         let headers = match self.track_headers {
@@ -205,7 +237,7 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nzoom = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -219,6 +251,7 @@ impl Settings {
             self.warp_mode.param(),
             on(self.map_hover_preview),
             self.map_max_seconds,
+            self.zoom,
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             stop = self.stop.param(),
             browser_side = match self.browser_side {
@@ -282,6 +315,9 @@ impl Settings {
                         .unwrap_or(MAP_MAX_SECONDS)
                         .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
                 }
+                ("zoom", percent) if percent.parse::<u32>().is_ok() => {
+                    settings.zoom = percent.parse::<u32>().unwrap_or(ZOOM).clamp(ZOOMS.0, ZOOMS.1);
+                }
                 ("drop_files", "one_track") => settings.drop_separate = false,
                 ("drop_files", "separate") => settings.drop_separate = true,
                 ("warp_mode", mode) if WarpMode::parse(mode).is_some() => {
@@ -329,6 +365,7 @@ mod tests {
             map_grid: true,
             map_hover_preview: false,
             map_max_seconds: 30,
+            zoom: 130,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
@@ -341,6 +378,37 @@ mod tests {
         assert_eq!((settings.browser_width, settings.preview_volume), (BROWSER_WIDTHS.1, PREVIEW_VOLUMES.0));
         assert_eq!(settings.warp_mode, WarpMode::Beats);
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn the_zoom_steps_within_its_limits_and_a_saved_one_is_limited_too() {
+        let mut settings = Settings::default();
+        assert!(settings.step_zoom(1));
+        assert_eq!((settings.zoom, settings.zoom_factor()), (110, 1.1));
+        assert!(settings.step_zoom(-3));
+        assert_eq!(settings.zoom, 80);
+        assert!(settings.step_zoom(-100));
+        assert_eq!(settings.zoom, ZOOMS.0);
+        assert!(!settings.step_zoom(-1), "already the smallest");
+        assert!(settings.step_zoom(i32::MAX));
+        assert_eq!(settings.zoom, ZOOMS.1);
+        settings.zoom = 115;
+        assert!(settings.step_zoom(1));
+        assert_eq!(settings.zoom, 120, "onto the next step");
+        settings.zoom = 115;
+        assert!(settings.step_zoom(-1));
+        assert_eq!(settings.zoom, 110);
+
+        let (settings, warnings) = Settings::from_text(
+            "zoom = 900
+",
+        );
+        assert_eq!((settings.zoom, warnings.len()), (ZOOMS.1, 0));
+        let (settings, warnings) = Settings::from_text(
+            "zoom = big
+",
+        );
+        assert_eq!((settings.zoom, warnings.len()), (ZOOM, 1));
     }
 
     #[test]

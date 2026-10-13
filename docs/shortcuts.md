@@ -3,7 +3,7 @@ description: Keyboard shortcuts in the desktop app: the default keys, the keymap
 read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys
 type: howto
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -46,7 +46,7 @@ data (`%APPDATA%\Loopwerk\data` on Windows, `~/.local/share/Loopwerk` on Linux,
 ```
 
 A key is its modifiers and its name joined with `+`: `Ctrl` (Cmd on macOS), `Shift`, `Alt`, then
-a key such as `Z`, `Space`, `Delete`, `Backspace`, `Tab`, `Comma`, `F4`. An action the file lists
+a key such as `Z`, `Space`, `Delete`, `Backspace`, `Tab`, `Comma`, `Plus`, `Minus`, `0`, `F4`. An action the file lists
 takes exactly the keys listed (an empty list unbinds it); actions it leaves out keep their default
 keys. Unknown actions and keys are skipped with a warning in the status bar.
 
@@ -61,6 +61,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
 | Search in the browser (`browser.search`; shows it when hidden). In the search field: Up and Down move through the results, Enter adds the selection to the selected track, Escape clears the search and then leaves the field | Ctrl+F |
 | Open or close Settings (`settings.open`) | Ctrl+, |
+| Make the whole window larger, smaller, its normal size (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`; 50–200 % in 10 % steps, kept in `settings.txt`, [spec](spec/window-zoom.md)) | Ctrl+Plus, Ctrl+Equals; Ctrl+Minus; Ctrl+0 |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
 | Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
 | Duplicate, delete the selected clip (`selection.duplicate`, `.delete`) | Ctrl+D; Delete, Backspace |

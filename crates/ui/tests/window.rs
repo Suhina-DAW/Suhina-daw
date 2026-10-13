@@ -375,6 +375,46 @@ fn arrangement_headers_turn_tracks_off() {
 }
 
 #[test]
+fn ctrl_and_plus_or_minus_zoom_the_whole_window_and_the_zoom_is_saved() {
+    let mut harness = window(demo_app());
+    assert_eq!(harness.ctx.zoom_factor(), 1.0);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Plus);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Equals);
+    harness.run();
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.zoom), Some(120));
+    assert!((harness.ctx.zoom_factor() - 1.2).abs() < 1e-6);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Minus);
+    harness.run();
+    assert_eq!(harness.state().settings().zoom, 110);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num0);
+    harness.run();
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.zoom), Some(100));
+    assert_eq!(harness.ctx.zoom_factor(), 1.0);
+}
+
+#[test]
+fn a_saved_zoom_is_used_from_the_start_and_settings_can_change_it() {
+    let mut app = demo_app();
+    let ctx = egui::Context::default();
+    let settings = loopwerk_ui::settings::Settings { zoom: 150, ..Default::default() };
+    app.set_settings(&ctx, settings);
+    let mut harness = window(app);
+    assert!((harness.ctx.zoom_factor() - 1.5).abs() < 1e-6);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Interface").click();
+    harness.run();
+    harness.get_by_label("Zoom: -").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.zoom), Some(140));
+    harness.get_by_label("Zoom: 140 %").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.zoom), Some(100));
+    assert_eq!(harness.ctx.zoom_factor(), 1.0);
+}
+
+#[test]
 fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     let mut harness = window(demo_app());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
