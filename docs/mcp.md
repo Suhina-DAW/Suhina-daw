@@ -112,9 +112,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **The sample map.** The server also analyses the library's samples in the background, as the
   desktop app does ([sample map spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)).
   `soundmap.status` tells how far it is per folder; `soundmap.layout {place?, text?, tags?,
-  grid?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
+  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
   such as kick, snare or hat and whether it was guessed, whether it matches `text` and `tags`,
-  and with `grid` a cell); `soundmap.similar {item, count?, place?}` gives the samples that sound
+  and with `grid` a cell in a grid shaped close to `aspect`, width over height); `soundmap.similar {item, count?, place?}` gives the samples that sound
   most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
   `soundmap.analyse {folder?}` analyses again.
 

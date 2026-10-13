@@ -105,7 +105,8 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
+  item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
+  aspect ratio as `aspect`.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
@@ -231,7 +232,7 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); computes the layout when it is not cached |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
 | `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
 | `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
 
