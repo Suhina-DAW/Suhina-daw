@@ -16,7 +16,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use suhina_engine::{
-    DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, model::DeviceKind, plugin_devices,
+    DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, Sent, model::DeviceKind, plugin_devices,
 };
 use suhina_model::{Device, Project};
 use suhina_plugins::library::{Hosting, group_for};
@@ -322,24 +322,26 @@ impl Hosted {
 
 impl PluginProcessor for Hosted {
     fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
-        if !self.send(buffer, events) {
+        if self.send(buffer, events) != Sent::Out {
             return false;
         }
         self.wait_for(buffer, timeout)
     }
 
-    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
+    /// Never [`Sent::Unsupported`]: a block that cannot go is refused and counted as missed
+    /// here, once, so the chain must not run it again (#188).
+    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> Sent {
         if !self.take(buffer, events) {
-            return false;
+            return Sent::Refused;
         }
-        let Some(input) = self.input.get(..buffer.len()) else { return false };
+        let Some(input) = self.input.get(..buffer.len()) else { return Sent::Refused };
         if self.audio.send(input, &self.events, buffer.len()) {
-            return true;
+            return Sent::Out;
         }
         // The host is still busy with an earlier block: this one is lost, as a miss.
         self.counts.late.fetch_add(1, Ordering::Relaxed);
         carry_releases(&self.events, &mut self.carried);
-        false
+        Sent::Refused
     }
 
     fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {

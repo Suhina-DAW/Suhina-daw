@@ -11,7 +11,7 @@ use suhina_model::*;
 
 use crate::chain_tests::{BEAT, SR, blocks, device, left, max_diff, note, peak, project};
 use crate::{
-    AudioPool, PluginProcessor, PluginSlotInfo, Plugins, Renderer, plugin_devices, render_offline,
+    AudioPool, PluginProcessor, PluginSlotInfo, Plugins, Renderer, Sent, plugin_devices, render_offline,
     render_offline_with_plugins,
 };
 
@@ -179,6 +179,41 @@ fn a_plug_in_instrument_gets_the_notes_at_their_frames() {
             events.iter().filter(|(_, e)| matches!(e, NoteEvent::On { .. })).map(|(at, _)| *at).collect();
         assert_eq!(ons, [0, second], "block {block}");
     }
+}
+
+#[test]
+fn a_block_a_plug_in_refuses_is_one_miss_and_is_not_run_again() {
+    /// Splits blocks, and refuses every one, as a host still busy with an earlier block does.
+    struct Refusing {
+        sends: Arc<AtomicUsize>,
+        processes: Arc<AtomicUsize>,
+    }
+    impl PluginProcessor for Refusing {
+        fn process(&mut self, _: &mut [f32], _: &[(usize, NoteEvent)], _: Duration) -> bool {
+            self.processes.fetch_add(1, Ordering::SeqCst);
+            false
+        }
+        fn send(&mut self, _: &[f32], _: &[(usize, NoteEvent)]) -> Sent {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Sent::Refused
+        }
+    }
+    let notes = vec![note(0.0, 4.0, 69)];
+    let dry_project = project(notes.clone(), 4.0, vec![device("utility", &[])]);
+    let mut dry = Renderer::with_audio(&dry_project, &AudioPool::new(), SR).unwrap();
+    let dry = blocks(&mut dry, 20, 480);
+    let p = project(notes, 4.0, vec![plug(vst3())]);
+    let (sends, processes) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let refusing = Refusing { sends: Arc::clone(&sends), processes: Arc::clone(&processes) };
+    let mut plugins = Plugins::new();
+    plugins.insert(plugin_devices(&p)[0].key, EFFECT, Box::new(refusing));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    let out = blocks(&mut renderer, 20, 480);
+    assert_eq!(sends.load(Ordering::SeqCst), 20, "one hand-over a block");
+    assert_eq!(processes.load(Ordering::SeqCst), 0, "a refused block is not run again");
+    assert_eq!(renderer.graph.chains[0].missed(), 20, "one miss a block");
+    // The effect is skipped: the dry sound.
+    assert!(max_diff(&out, &dry) < 1e-6);
 }
 
 #[test]

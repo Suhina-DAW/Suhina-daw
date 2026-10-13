@@ -38,7 +38,9 @@ pub use cpu::CpuMonitor;
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
 use plugin::{DEADLINE_SHARE, Delay};
-pub use plugin::{OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, plugin_devices, plugin_key};
+pub use plugin::{
+    OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
+};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;

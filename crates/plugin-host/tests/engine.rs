@@ -188,6 +188,26 @@ fn start(spec: &str) -> (Plugin, Hosted) {
     (plugin, Hosted::new(audio))
 }
 
+/// Each block the engine plays counts once against a plug-in that does not answer, however
+/// the block reaches it (#188): a host still busy with an earlier block refuses the next, and
+/// that refusal is the block's one miss, not one for handing it over and another for trying
+/// again. A plug-in that hangs in its first block is therefore hung after exactly
+/// `HUNG_AFTER` blocks, on a quiet machine or a loaded one.
+#[test]
+fn a_block_a_plug_in_does_not_answer_counts_once() {
+    let p = project(8.0, false, vec![plugin_device("x")]);
+    let key = plugin_devices(&p)[0].key;
+    let (mut control, hosted) = start("test:hang-after:0");
+    let mut plugins = suhina_engine::Plugins::new();
+    plugins.insert(key, suhina_engine::PluginSlotInfo::default(), Box::new(hosted));
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    let below = suhina_plugins::HUNG_AFTER as usize - 1;
+    play(&mut renderer, below);
+    assert_eq!(control.health(), Health::Running, "after {below} unanswered blocks");
+    play(&mut renderer, 1);
+    assert_eq!(control.health(), Health::Hung, "after {} unanswered blocks", below + 1);
+}
+
 #[test]
 fn a_plug_in_that_crashes_or_hangs_leaves_the_engine_playing() {
     for (spec, health) in [("test:crash-after:40", Health::Crashed), ("test:hang-after:40", Health::Hung)] {

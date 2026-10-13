@@ -150,7 +150,11 @@ workspace forbids.
    its answer (`Link::wait`, `PluginProcessor::wait`), and so on until every chain is done;
    a bus runs after the chains that play into it. The budget is then set by the slowest
    plug-in, not the sum: the same project went from 30 to 50 % of blocks late to none, the
-   longest wait 6 ms.
+   longest wait 6 ms. A host still busy with an earlier block refuses the next
+   (`Sent::Refused`): that block is one miss, and the chain does not try it again through
+   `process`, which would count it a second time and make a slow host *hung* after 16
+   blocks instead of 32 (#188; `Sent::Unsupported` is for processors that do not split a
+   block, which run it with `process`).
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it

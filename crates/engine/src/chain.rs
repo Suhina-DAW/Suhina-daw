@@ -22,7 +22,7 @@ use std::time::Instant;
 use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
 use suhina_model::{DeviceKind, Project, TrackId};
 
-use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, plugin_devices};
+use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
 
 /// The most frames one block of a chain holds; the renderer splits longer blocks.
 pub(crate) const MAX_BLOCK: usize = 1024;
@@ -273,11 +273,15 @@ impl Chain {
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        if plugin.send(span, span_events) {
-                            *waiting = Some(*stage);
-                            return true;
+                        match plugin.send(span, span_events) {
+                            Sent::Out => {
+                                *waiting = Some(*stage);
+                                return true;
+                            }
+                            // A miss already counted: running it again would count it twice.
+                            Sent::Refused => {}
+                            Sent::Unsupported => plugin.run(span, span_events, *deadline),
                         }
-                        plugin.run(span, span_events, *deadline);
                     }
                 }
             }
