@@ -1,4 +1,5 @@
 # Suhina
+<img width="12525" height="3663" alt="suhina-logo" src="https://github.com/user-attachments/assets/7efa72b4-fba5-42f3-9503-0ea9f4e864f6" />
 
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
