@@ -2,6 +2,8 @@
 
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
+Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
+
 > **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (MIDI as sine tones for
 > now, audio clips with real-time time-stretching), and lets agents edit them over MCP. The
 > desktop app shows the Session view so far. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.

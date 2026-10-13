@@ -96,6 +96,13 @@ enum Command {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Settings kept under the program's old name are copied to the new one on the first start.
+    let old = suhina_plugins::library::old_settings_folder();
+    if let Some(warning) =
+        suhina_plugins::library::adopt_old_folder(old, suhina_plugins::library::new_settings_folder())
+    {
+        eprintln!("warning: {warning}");
+    }
     match args.first().map(String::as_str) {
         Some(name @ ("render" | "play")) => {
             let command = if name == "render" { Command::Render } else { Command::Play };
