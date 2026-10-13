@@ -8,6 +8,7 @@ covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
   - crates/ui/src/sample_map.rs
+  - crates/ui/src/sample_map_crowd.rs
   - crates/ui/src/sample_map_panel.rs
 ---
 
@@ -75,6 +76,18 @@ Both play a sample as soon as the pointer is over it.
   at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
   switches go back. The browser stays beside it and shows its list meanwhile. While something is
   dragged from the large map, the main view shows instead, so the drop can land on a track.
+- **In a window of its own.** The **Window** button on the map's bar (and View › Sample map in a
+  window, **Ctrl+Alt+M**) moves the map into a separate window, which can sit on another screen
+  while the arrangement or the Session view keeps the main window. The browser shows its list
+  meanwhile, as for the large map. Everything works there as in the browser: pointing previews,
+  Show similar, tags, pins, double-click adds to the selected track, and a drag from the map to
+  a track, a slot or a device chain in the main window drops there (the map's window has the
+  pointer while the button is down; the main window shows the drop label and takes the drop).
+  The keymap's keys work in that window too. **Dock**, Ctrl+Alt+M, closing the window, the
+  browser's Map switch or the large view put the map back. Whether the window is open, and where
+  it is and how big (`map_window`, `map_window_rect` in `settings.txt`: left, top, width and
+  height in points on the whole desktop, so a second screen counts), are kept for the next
+  start; a place no screen could show is not used.
 
 The map holds the samples of the browser's place, whichever category filter is chosen (the
 filters choose what the list shows).
@@ -123,9 +136,11 @@ Drawing every dot then only hides the dots under it, so the map changes how it d
 number of points in view:
 
 - **Density** when more than 20 000 points are in view. The view is divided into cells of 3 by 3
-  screen pixels. Each cell is coloured by the mix of the kinds of the points in it (each
-  kind's colour weighted by its count). Its opacity grows with the logarithm of the count, from
-  faint for one point to full for the densest cell in view. Clusters then show as coloured
+  screen pixels. Each point is spread over the cells around it with a small Gaussian kernel (about
+  6 pixels each way), and the raster is drawn with linear filtering, so a cluster reads as a soft
+  cloud rather than blocks. Each cell is coloured by the mix of the kinds of the points near it
+  (each kind's colour weighted by its count). Its opacity grows with the logarithm of the count,
+  fading out towards a cluster's edge and full in the densest cell in view. Clusters then show as coloured
   regions, and where kinds meet, their colours blend. Dimmed points (search, tags, legend,
   Show similar) count only as a faint grey under the others. Points that need to be seen one
   by one are drawn on top as dots: the selected ones, the ones in use, the similar ones, and
@@ -150,6 +165,8 @@ that sit in several places are named in each of them.
   candidates.
 - The label sits at the cluster's item nearest to the cluster's centre. Its size grows with the
   cluster's size (the logarithm of its count), from the map's label size up to 1.7 times it.
+  It is written in the light text colour with a dark shadow, since it sits on its own kind's
+  colour.
 - **Labels never overlap.** They are placed from the largest cluster down. A label that would
   overlap one already placed is moved up or down by its own height and a small gap. If neither
   place is free, it is left out for this zoom. Zooming in makes room, and smaller clusters appear. A label
@@ -228,14 +245,14 @@ Every item has a kind. The kinds and the words in names that give them:
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |
 | Double-click empty space, the Fit button | Fits all points in view. |
-| Arrow keys | Moves the selection to the nearest point in that direction and previews it. |
+| Arrow keys | Moves the selection to the nearest point in that direction and previews it; with Show similar on, Up and Down step through the similar list instead. |
 | Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Show in folder (switches to the list with the item selected). |
 
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
-without Show similar).
+step through the list, starting from the item it was shown for, and preview each; Left and Right
+still move to the nearest point on the map.
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the
 same things.

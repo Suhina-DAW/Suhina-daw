@@ -105,7 +105,7 @@ from top to bottom:
 | Colour tag | 6 px dot after the name, 2 px apart, in the tag's colour |
 | Preview strip | 54 px, `window.background`, a 1 px `border` on top: 22 px play button (`control.background`, its glyph `accent` while playing), file name 10 px, length, BPM ("~" when detected) and key right in 9 px mono `text.secondary`; under them the waveform ([waveforms](../spec/waveforms.md); a MIDI file: 2 px note bars), played part `text.secondary`, rest `text.hint`, playhead 1 px `accent` |
 | List and Map | 22 px row above the results: two buttons like the category filters, List and Map; Map shows the [sample map](../spec/sample-map.md) in the results area |
-| Sample map | A 24 px top bar (Cloud and Grid, the status in 10 px `text.secondary`, then +, −, Fit, Large at the right), the map on `window.background`, a 20 px legend under it (a 7 px dot and "Kick 150" in 10 px, per kind, in the kind's colour; dimmed kinds at 30 %). Points: 2–6 px dots by zoom (a 1.2 px ring for a preset), or square cells 1 px apart in the grid; a guessed kind at 70 % and dimmed points at 18 %; rings: in use 1.5 px in the kind's colour, selected 1 px `text.primary`, previewed or under the pointer 1.5 px `accent`, similar 1 px `accent`. Kind names 17.6 px in the kind's colour with a 1 px `window.background` shadow, fading out from 4× to 6× zoom. Show similar adds a 180 px `panel.background` list at the right. Kind colours are our own muted hues (kick `#D06E5E`, snare `#73AAC0`, clap `#5EC0B0`, closed hat `#C6AC5E`, open hat `#D08F6E`, …; `sample_map::kind_colour`) |
+| Sample map | A 24 px top bar (Cloud and Grid, the status in 10 px `text.secondary`, then +, −, Fit, Large and Window at the right; in its own window Dock instead of Large and Window, the window `window.background` all over), the map on `window.background`, a 20 px legend under it (a 7 px dot and "Kick 150" in 10 px, per kind, in the kind's colour; dimmed kinds at 30 %). Points: 2–6 px dots by zoom (a 1.2 px ring for a preset), or square cells 1 px apart in the grid; a guessed kind at 70 % and dimmed points at 18 %; rings: in use 1.5 px in the kind's colour, selected 1 px `text.primary`, previewed or under the pointer 1.5 px `accent`, similar 1 px `accent`. Kind names 17.6 px in the kind's colour with a 1 px `window.background` shadow, fading out from 4× to 6× zoom. Show similar adds a 180 px `panel.background` list at the right. Kind colours are our own muted hues (kick `#D06E5E`, snare `#73AAC0`, clap `#5EC0B0`, closed hat `#C6AC5E`, open hat `#D08F6E`, …; `sample_map::kind_colour`) |
 | Footer | 20 px, `panel.background`, a 1 px `border` on top: the tags as 6 px dots (a filter ring in `text.primary` when on), the count right in 9 px mono `text.hint` ("12 items", "3 selected") |
 | Drag label | Beside the pointer while dragging from the browser: 10 px text on `control.activeBackground` with a 1 px `accent` outline when it can land (`border.strong` when not); the target is outlined 1.5 px `accent` (a 2 px `accent` mark at the beat on an Arrangement lane) |
 
@@ -318,6 +318,13 @@ time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name a
 (the projects folder, the project's own folder, or the templates folder), the file that will be
 written under them (in the recording red when it is there already and will be replaced), Cancel
 and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
+
+Closing a project, opening another in its place or quitting while a project has unsaved changes
+first shows a 420 px "Unsaved changes" prompt in the same style: "Save the changes to *name*
+before closing it?" (or "opening another project in its place", "quitting") in 11 px
+`text.primary`, and Cancel, Don't save and Save (Enter) at the bottom right; Escape cancels.
+Quitting asks about each project with changes in turn; Save on a project without a file shows
+the save prompt first, and cancelling it cancels the close.
 
 ## Device panel
 

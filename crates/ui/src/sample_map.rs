@@ -89,6 +89,8 @@ pub enum MapEvent {
     Layout(Layout),
     /// The large-view button.
     ToggleLarge,
+    /// The button that moves the map into a window of its own, or back into the browser.
+    ToggleWindow,
 }
 
 /// The view's own state, kept by the browser between frames.
@@ -98,6 +100,8 @@ pub struct MapView {
     pub preview_on_hover: bool,
     /// The map is shown large, in the main area.
     pub large: bool,
+    /// The map is in a window of its own.
+    pub window: bool,
     zoom: f32,
     /// The map position at the middle of the view.
     centre: [f32; 2],
@@ -164,6 +168,7 @@ impl Default for MapView {
             layout: Layout::Cloud,
             preview_on_hover: true,
             large: false,
+            window: false,
             zoom: 1.0,
             centre: [0.5, 0.5],
             hovered: None,
@@ -298,6 +303,20 @@ fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f
     }
 }
 
+/// The next item down (or up) the Show similar list from `from`: the list starts with `of`, the
+/// item it was shown for, then the similar ones nearest first. From outside the list, Down goes to
+/// the nearest similar one. `None` past either end.
+fn step_similar(of: usize, items: &[usize], from: Option<usize>, down: bool) -> Option<usize> {
+    let at = from.and_then(|f| std::iter::once(of).chain(items.iter().copied()).position(|i| i == f));
+    let list = |n: usize| if n == 0 { Some(of) } else { items.get(n - 1).copied() };
+    match (at, down) {
+        (Some(at), true) => list(at + 1),
+        (Some(at), false) => at.checked_sub(1).and_then(list),
+        (None, true) => items.first().copied(),
+        (None, false) => None,
+    }
+}
+
 /// The point nearest to `pointer` on screen, within `radius`.
 fn hit(screen: &[Pos2], pointer: Pos2, radius: f32) -> Option<usize> {
     screen
@@ -400,9 +419,21 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
     child.label(egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL));
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .button(if view.large { "Close" } else { "Large" })
-            .on_hover_text("Show the map in the main area")
+            .button(if view.window { "Dock" } else { "Window" })
+            .on_hover_text(if view.window {
+                "Put the map back into the browser"
+            } else {
+                "Open the map in a window of its own, for another screen"
+            })
             .clicked()
+        {
+            events.push(MapEvent::ToggleWindow);
+        }
+        if !view.window
+            && ui
+                .button(if view.large { "Close" } else { "Large" })
+                .on_hover_text("Show the map in the main area")
+                .clicked()
         {
             events.push(MapEvent::ToggleLarge);
         }
@@ -571,7 +602,8 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         (None, _) => {}
     }
 
-    // Keys: arrows step to the nearest point that way; Escape ends Show similar.
+    // Keys: arrows step to the nearest point that way, or with Show similar on, Up and Down step
+    // through its list; Escape ends Show similar.
     if response.contains_pointer() || response.has_focus() {
         let keys = [
             (Key::ArrowLeft, [-1.0, 0.0]),
@@ -582,9 +614,11 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         for (key, direction) in keys {
             if ui.input(|i| i.key_pressed(key)) {
                 let from = points.iter().position(|p| p.selected).or(view.previewed);
-                let next = match from {
-                    Some(from) => step(positions, from, direction),
-                    None => points.iter().position(|p| p.matches),
+                let vertical = matches!(key, Key::ArrowUp | Key::ArrowDown);
+                let next = match (view.similar.as_ref().filter(|_| vertical), from) {
+                    (Some((of, items)), from) => step_similar(*of, items, from, key == Key::ArrowDown),
+                    (None, Some(from)) => step(positions, from, direction),
+                    (None, None) => points.iter().position(|p| p.matches),
                 };
                 if let Some(next) = next {
                     events.push(MapEvent::Select { items: vec![next], add: false });
@@ -672,7 +706,7 @@ fn draw_points(
         if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
             let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
             let image = crowd::density(screen, colour, area);
-            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::NEAREST);
+            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
             view.cache.density = Some((key, handle));
         }
         if let Some((_, handle)) = view.cache.density.as_ref() {
@@ -753,7 +787,8 @@ fn draw_labels(painter: &egui::Painter, view: &MapView, transform: Transform) {
         .iter()
         .map(|c| {
             let font = theme::ui_font(theme::TEXT * 1.6 * crowd::label_scale(c.count, smallest));
-            painter.layout_no_wrap(c.kind.label().to_string(), font, kind_colour(c.kind).gamma_multiply(fade))
+            // Light text: a label sits on its own kind's colour, so that colour would not read.
+            painter.layout_no_wrap(c.kind.label().to_string(), font, theme::text_primary().gamma_multiply(fade))
         })
         .collect();
     let sizes: Vec<(Pos2, Vec2)> =
@@ -1008,9 +1043,10 @@ mod many {
                 MapPoint {
                     name: format!("{} {i}", kind.label()),
                     detail: String::new(),
+                    // Roughly Gaussian clouds (the sum of three uniform draws), as t-SNE makes them.
                     position: [
-                        (centre[0] + (noise() - 0.5) * 0.2).clamp(0.0, 1.0),
-                        (centre[1] + (noise() - 0.5) * 0.2).clamp(0.0, 1.0),
+                        (centre[0] + (noise() + noise() + noise() - 1.5) * 0.06).clamp(0.0, 1.0),
+                        (centre[1] + (noise() + noise() + noise() - 1.5) * 0.07).clamp(0.0, 1.0),
                     ],
                     kind,
                     guessed: false,
@@ -1067,6 +1103,69 @@ mod many {
 }
 
 #[cfg(test)]
+mod similar_keys {
+    use super::*;
+
+    #[test]
+    fn up_and_down_step_through_the_similar_list() {
+        let items = [7, 3, 12];
+        assert_eq!(step_similar(0, &items, None, true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(0), true), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), true), Some(3));
+        assert_eq!(step_similar(0, &items, Some(12), true), None, "past the end");
+        assert_eq!(step_similar(0, &items, Some(3), false), Some(7));
+        assert_eq!(step_similar(0, &items, Some(7), false), Some(0), "back to the item it was shown for");
+        assert_eq!(step_similar(0, &items, Some(0), false), None);
+        assert_eq!(step_similar(0, &items, Some(5), true), Some(7), "from outside the list");
+    }
+
+    #[test]
+    fn down_with_show_similar_on_previews_the_next_similar_item() {
+        use egui_kittest::Harness;
+        let point = |x: f32, y: f32| MapPoint {
+            name: format!("{x},{y}"),
+            detail: String::new(),
+            position: [x, y],
+            kind: Kind::Kick,
+            guessed: false,
+            in_use: false,
+            selected: false,
+            matches: true,
+            preset: false,
+            pinned: false,
+            tags: Vec::new(),
+        };
+        // A row of points left to right: spatially, Down from point 0 has nowhere to go.
+        let points: Vec<MapPoint> = (0..6).map(|i| point(i as f32 / 5.0, 0.5)).collect();
+        let mut view = MapView::default();
+        view.show_similar(0, vec![4, 2]);
+        let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "6 samples", &[], events),
+            (view, Vec::<MapEvent>::new()),
+        );
+        harness.run();
+        let view = &harness.state().0;
+        let middle = view.area.center();
+        harness.hover_at(middle);
+        harness.run();
+        harness.state_mut().0.previewed = Some(0);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(4)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        harness.key_press(Key::ArrowDown);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(2)), "{:?}", harness.state().1);
+        harness.state_mut().1.clear();
+        // Right still steps on the map: from point 2 to its neighbour 3.
+        harness.key_press(Key::ArrowRight);
+        harness.run();
+        assert!(harness.state().1.contains(&MapEvent::Preview(3)), "{:?}", harness.state().1);
+    }
+}
+
+#[cfg(test)]
 mod look {
     use super::*;
 
@@ -1099,7 +1198,10 @@ mod look {
                 let mut p = MapPoint {
                     name: format!("{} {i}", kind.label()),
                     detail: String::new(),
-                    position: [centre[0] + noise() * 0.22, centre[1] + noise() * 0.22],
+                    position: [
+                        centre[0] + (noise() + noise() + noise()) * 0.07,
+                        centre[1] + (noise() + noise() + noise()) * 0.07,
+                    ],
                     kind: *kind,
                     guessed: i % 7 == 0,
                     in_use: i == 3 && k % 2 == 0,
