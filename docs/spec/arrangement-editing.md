@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs

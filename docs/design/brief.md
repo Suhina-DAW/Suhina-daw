@@ -47,7 +47,9 @@ From [research](#sources) and the first design rounds:
 4. **Two type sizes:** 11 px for UI text, 10 px for small values. No bold headings. 9 px is
    kept for tags beside a name, 13 px for a page title (components › Global rules).
 5. **One window, no pop-ups.** Menus and pickers open in place. The exceptions are plug-in
-   editors, which float in their own windows (ADR 0006), and the project dialogs.
+   editors, which float in their own windows (ADR 0006), the project dialogs, and the sample map
+   when the user moves it into a window of its own for another screen
+   ([spec](../spec/sample-map.md) › Where the map is shown).
 6. **Progressive disclosure.** Controls appear when there is room or need (track height, toggled
    sections), never all at once.
 7. **Every grid shows its lines.** Columns and rows of the Session grid, bars and beats, key rows.
@@ -102,8 +104,7 @@ From [research](#sources) and the first design rounds:
 ## Tokens
 
 All colours, spacing, radii, stroke widths and type sizes are named tokens in one theme module.
-Widgets never contain literal colours (today: the default track palette in `grid.rs` and the
-sample map's kind colours; to move into `theme.rs`, [#192](https://github.com/juhamikael/Loopwerk/issues/192)). The colours below are the built-in theme, Suhina Dark;
+Widgets never contain literal colours. The colours below are the built-in theme, Suhina Dark;
 a theme file can change any of them (see Themes). Current values:
 
 | Token | Suhina Dark | Use |
@@ -130,9 +131,11 @@ a theme file can change any of them (see Themes). Current values:
 | `track.mutedBackground` | `#34322F` | The fills of a muted track |
 | `pan.background` | `#232220` | Behind a track header's pan field |
 | `pan.centre` | `#55524C` | The centre mark of a pan field |
-| `track.1`–`track.4` | `#D08F6E` `#C6AC5E` `#73AAC0` `#A497CC` | (palette to extend to 16) |
+| `track.1`–`track.4` | `#D08F6E` `#C6AC5E` `#73AAC0` `#A497CC` | The colours tracks without one of their own take in turn; also the browser's icons (effects, MIDI files, samples, instruments and presets) |
+| `track.5`–`track.8` | `#8FA87A` `#C27C8E` `#7F8FB0` `#B9B2A6` | The other colours a track's menu offers |
+| `kind.kick`, `kind.snare`, `kind.clap`, `kind.closedHat`, `kind.openHat`, `kind.hat`, `kind.rim`, `kind.tom`, `kind.crash`, `kind.ride`, `kind.cymbal`, `kind.percussion`, `kind.bass`, `kind.tonal`, `kind.vocal`, `kind.effect`, `kind.other` | `#D06E5E` `#73AAC0` `#5EC0B0` `#C6AC5E` `#D08F6E` `#D8C47A` `#8CA8E0` `#B074A4` `#E0A0C8` `#C8B8E8` `#A497CC` `#8FC06E` `#A84F4F` `#6EB0D0` `#E8D0A0` `#9CC49C` `#8A8680` | Sample-map points of each kind ([spec](../spec/sample-map.md)) |
 | type | 11 px UI, 10 px values, 9 px rulers | |
-| row height | 20 px grid rows and fields, 15–16 px inline fields, 17 px browser rows | |
+| row height | 20 px grid rows and fields, 15–16 px inline fields, 17 px browser rows (`theme::BROWSER_ROW`) | |
 | radius | 0 everywhere | |
 
 ## Themes
@@ -148,7 +151,8 @@ A theme is a JSON file in the `themes` folder of Suhina's app-data folder, besid
 A token the file leaves out keeps Suhina Dark's colour, so a file needs only the colours it
 changes; an unknown token or a value that is not `#RRGGBB` is skipped with a warning. Files with
 the first token names (`surface.0`, `line`, `text.tertiary` …) still read. Only colours belong to
-a theme: sizes, spacing and type stay the design's. Track colours come from the project.
+a theme: sizes, spacing and type stay the design's. A track's own colour comes from the project; tracks without one take the theme's
+`track.1`–`track.4` in turn.
 
 Themes that come with Suhina (`crates/ui/themes/`, read-only; editing one makes a copy):
 Suhina Dark (the default), Editor Dark (cool greys and blue, like a code editor), Suhina

@@ -5,9 +5,24 @@
 use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
 use suhina_engine::{LauncherMonitor, Queued};
 
-/// Colours for tracks that have none, in track order (design brief › Tokens).
-pub const TRACK_PALETTE: [Rgb; 4] =
-    [Rgb(0xD0, 0x8F, 0x6E), Rgb(0xC6, 0xAC, 0x5E), Rgb(0x73, 0xAA, 0xC0), Rgb(0xA4, 0x97, 0xCC)];
+use crate::theme;
+
+/// The colours tracks without one of their own take in turn: the theme's first four track
+/// colours (`track.1` to `track.4`).
+pub fn track_palette() -> [Rgb; 4] {
+    [theme::track_color_1(), theme::track_color_2(), theme::track_color_3(), theme::track_color_4()].map(to_rgb)
+}
+
+/// The default colour of the track at `index` among the tracks.
+pub fn default_track_colour(index: usize) -> Rgb {
+    let palette = track_palette();
+    palette.get(index % palette.len()).copied().unwrap_or(Rgb(0x80, 0x80, 0x80))
+}
+
+/// A theme colour as a project's track colour.
+pub fn to_rgb(colour: egui::Color32) -> Rgb {
+    Rgb(colour.r(), colour.g(), colour.b())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnKind {
@@ -143,7 +158,7 @@ impl Grid {
             let column = Column {
                 track: track.id,
                 name: track.name.clone(),
-                color: track.color.unwrap_or(TRACK_PALETTE[index % TRACK_PALETTE.len()]),
+                color: track.color.unwrap_or_else(|| default_track_colour(index)),
                 kind,
                 launcher,
                 slots,

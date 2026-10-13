@@ -7,7 +7,7 @@ use suhina_engine::LauncherMonitor;
 
 use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Project, Rgb, TrackId};
 
-use crate::grid::{ColumnKind, TRACK_PALETTE, gain_to_db};
+use crate::grid::{ColumnKind, default_track_colour, gain_to_db};
 use crate::waveform::Waveforms;
 
 /// Note marks drawn per clip at most; the rest are left out.
@@ -172,7 +172,7 @@ impl Timeline {
             let lane = Lane {
                 track: track.id,
                 name: track.name.clone(),
-                color: track.color.unwrap_or(TRACK_PALETTE[position % TRACK_PALETTE.len()]),
+                color: track.color.unwrap_or_else(|| default_track_colour(position)),
                 kind,
                 depth: depth(project, track.parent),
                 position,

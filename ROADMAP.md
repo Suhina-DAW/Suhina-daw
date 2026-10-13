@@ -189,8 +189,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/suhina-format.md)).
-- Still to do: more commands (notes, clips, sends), MCP resources, asking before closing
-  a project with unsaved changes.
+- Still to do: more commands (notes, clips, sends), MCP resources.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -274,7 +273,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
   as `.suhina` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
   Save as template writes a copy to the templates folder. The tab and window title mark unsaved
-  changes with a dot.
+  changes with a dot, and closing a project, opening another in its place or quitting with
+  unsaved changes asks whether to save them.
 - The **browser** (Ctrl+B shows and hides it, left or right of the view): search (Ctrl+F),
   category filters (All, Samples, MIDI, Instruments, Effects, Presets, Plug-ins), a sidebar of
   Pinned, Recent (by kind) and the folders the user added (a path, or a folder dropped on the
@@ -295,7 +295,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   them by name in the browser's folders and the project's folder at once, or in a folder typed or
   dropped on it (walked in the background), best match first; Apply relinks them in one undo step
   ([spec](docs/spec/missing-files.md)).
-- The **sample map** (the browser's List | Map switch, or large in the main area): the samples
+- The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
   toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
   samples), as a free cloud or snapped to a grid, with the kinds' names over their regions and a
@@ -333,6 +333,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
+  renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
+  when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
+  lanes in tall clips; the samples with dots when zoomed in past one sample per pixel; a linear
+  or dB scale (Settings › Interface › Arrangement).
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
   gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
 - Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades

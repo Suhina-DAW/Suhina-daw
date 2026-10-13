@@ -14,7 +14,7 @@ use crate::menus::{self, TrackMenu};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
-use crate::waveform::Waveforms;
+use crate::waveform::{self, Waveforms};
 use crate::widgets::{self, Action, Drag};
 
 /// Width of the track header column: the default and how far it can be dragged.
@@ -1170,24 +1170,28 @@ fn paint_clip(
     if let Some(view) = clip.audio_view.as_ref().filter(|_| marks.height() >= 4.0)
         && let Some(peaks) = waveforms.get(&view.file)
     {
-        // One line per pixel column in view: the range of the samples it covers, scaled by
-        // the clip's gain and its fades and kept inside the clip.
+        // One column per point in view: the stretch of the file it shows, scaled by the clip's
+        // gain and its fades, drawn as `docs/spec/waveforms.md` says, inside the clip.
         let gain = if shown.gain_db.is_finite() { 10f32.powf(shown.gain_db as f32 / 20.0) } else { 0.0 };
-        let (middle, half) = (marks.center().y, marks.height() / 2.0);
         let from = rect.left().max(view_rect(painter).left()).floor();
         let to = rect.right().min(view_rect(painter).right()).ceil();
         let per_point = 1.0 / f64::from(beat_width);
-        let stroke = theme::hairline(dim(color));
-        let mut x = from;
-        while x < to {
-            let elapsed = f64::from(x - rect.left()) * per_point;
-            let (low, high) = peaks.range(view.seconds(elapsed), view.seconds(elapsed + per_point));
-            let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, &shown);
-            let top = middle - (high * gain).clamp(-1.0, 1.0) * half;
-            let bottom = (middle - (low * gain).clamp(-1.0, 1.0) * half).max(top + 1.0);
-            painter.vline(x + 0.5, egui::Rangef::new(top, bottom), stroke);
-            x += 1.0;
-        }
+        let count = (to - from).max(0.0) as usize;
+        let columns: Vec<waveform::Column> = (0..count)
+            .map(|i| {
+                let x = from + i as f32;
+                let elapsed = f64::from(x - rect.left()) * per_point;
+                let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, &shown);
+                let (a, b) = (view.seconds(elapsed), view.seconds(elapsed + per_point));
+                waveform::Column { x: x + 0.5, from: a.min(b), to: a.max(b), gain }
+            })
+            .collect();
+        let shape = waveform::geometry(peaks, marks, &columns, waveform::scale(painter.ctx()));
+        waveform::paint(
+            &painter.with_clip_rect(marks.intersect(painter.clip_rect())),
+            &shape,
+            waveform::Colors::from(dim(color)),
+        );
     } else if clip.audio {
         painter.hline(marks.x_range(), marks.center().y.round() + 0.5, theme::hairline(dim(color)));
     } else if !clip.notes.is_empty() && marks.height() >= 4.0 {

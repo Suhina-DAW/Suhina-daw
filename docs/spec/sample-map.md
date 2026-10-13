@@ -75,6 +75,18 @@ Both play a sample as soon as the pointer is over it.
   at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
   switches go back. The browser stays beside it and shows its list meanwhile. While something is
   dragged from the large map, the main view shows instead, so the drop can land on a track.
+- **In a window of its own.** The **Window** button on the map's bar (and View › Sample map in a
+  window, **Ctrl+Alt+M**) moves the map into a separate window, which can sit on another screen
+  while the arrangement or the Session view keeps the main window. The browser shows its list
+  meanwhile, as for the large map. Everything works there as in the browser: pointing previews,
+  Show similar, tags, pins, double-click adds to the selected track, and a drag from the map to
+  a track, a slot or a device chain in the main window drops there (the map's window has the
+  pointer while the button is down; the main window shows the drop label and takes the drop).
+  The keymap's keys work in that window too. **Dock**, Ctrl+Alt+M, closing the window, the
+  browser's Map switch or the large view put the map back. Whether the window is open, and where
+  it is and how big (`map_window`, `map_window_rect` in `settings.txt`: left, top, width and
+  height in points on the whole desktop, so a second screen counts), are kept for the next
+  start; a place no screen could show is not used.
 
 The map holds the samples of the browser's place, whichever category filter is chosen (the
 filters choose what the list shows).
@@ -105,7 +117,8 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
+  item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
+  aspect ratio as `aspect`.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
@@ -175,6 +188,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Input | Does |
 |---|---|
 | Pointer over a point | Highlights it and **previews it** (Settings › Interface › Browser › Map: preview on hover, on by default). Moving across points plays each in turn; a new one stops the one before. A point is played only after the pointer has rested on it for 40 ms, so a fast sweep does not play everything it crosses. |
+| Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
 | Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |
@@ -182,14 +196,14 @@ Every item has a kind. The kinds and the words in names that give them:
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |
 | Double-click empty space, the Fit button | Fits all points in view. |
-| Arrow keys | Moves the selection to the nearest point in that direction and previews it. |
+| Arrow keys | Moves the selection to the nearest point in that direction and previews it; with Show similar on, Up and Down step through the similar list instead. |
 | Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Show in folder (switches to the list with the item selected). |
 
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
-without Show similar).
+step through the list, starting from the item it was shown for, and preview each; Left and Right
+still move to the nearest point on the map.
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the
 same things.
@@ -231,7 +245,7 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); computes the layout when it is not cached |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
 | `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
 | `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
 

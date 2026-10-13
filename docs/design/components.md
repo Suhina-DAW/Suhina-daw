@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -103,9 +103,9 @@ from top to bottom:
 | Tree row | 17 px; indent 12 px per level; 10 px lead (a chevron in `text.hint` for what opens, a play triangle for a selected or hovered sample or MIDI file), 12 px type icon, 5 px, name 10 px `text.value` (`text.primary` selected), tag dots, meta right in 9 px mono `text.hint` (length, "plug-in", the folder a search found it in); selected row `control.activeBackground`, hover `panel.hoverBackground`; a 2 px `border.strong` bar at the right edge shows the scroll position |
 | Type icons | Our own strokes, 1.1 px, 12 px: folder and heading `text.secondary`; MIDI note `track.2` (ochre); audio wave `track.3` (steel blue); instrument and preset `track.4`; effect `track.1`; project page `text.secondary` |
 | Colour tag | 6 px dot after the name, 2 px apart, in the tag's colour |
-| Preview strip | 54 px, `window.background`, a 1 px `border` on top: 22 px play button (`control.background`, its glyph `accent` while playing), file name 10 px, length, BPM ("~" when detected) and key right in 9 px mono `text.secondary`; under them a waveform of 1 px bars (a MIDI file: 2 px note bars), played part `text.secondary`, rest `text.hint`, playhead 1 px `accent` |
+| Preview strip | 54 px, `window.background`, a 1 px `border` on top: 22 px play button (`control.background`, its glyph `accent` while playing), file name 10 px, length, BPM ("~" when detected) and key right in 9 px mono `text.secondary`; under them the waveform ([waveforms](../spec/waveforms.md); a MIDI file: 2 px note bars), played part `text.secondary`, rest `text.hint`, playhead 1 px `accent` |
 | List and Map | 22 px row above the results: two buttons like the category filters, List and Map; Map shows the [sample map](../spec/sample-map.md) in the results area |
-| Sample map | A 24 px top bar (Cloud and Grid, the status in 10 px `text.secondary`, then +, −, Fit, Large at the right), the map on `window.background`, a 20 px legend under it (a 7 px dot and "Kick 150" in 10 px, per kind, in the kind's colour; dimmed kinds at 30 %). Points: 2–6 px dots by zoom (a 1.2 px ring for a preset), or square cells 1 px apart in the grid; a guessed kind at 70 % and dimmed points at 18 %; rings: in use 1.5 px in the kind's colour, selected 1 px `text.primary`, previewed or under the pointer 1.5 px `accent`, similar 1 px `accent`. Kind names 17.6 px in the kind's colour with a 1 px `window.background` shadow, fading out from 4× to 6× zoom. Show similar adds a 180 px `panel.background` list at the right. Kind colours are our own muted hues (kick `#D06E5E`, snare `#73AAC0`, clap `#5EC0B0`, closed hat `#C6AC5E`, open hat `#D08F6E`, …; `sample_map::kind_colour`) |
+| Sample map | A 24 px top bar (Cloud and Grid, the status in 10 px `text.secondary`, then +, −, Fit, Large and Window at the right; in its own window Dock instead of Large and Window, the window `window.background` all over), the map on `window.background`, a 20 px legend under it (a 7 px dot and "Kick 150" in 10 px, per kind, in the kind's colour; dimmed kinds at 30 %). Points: 2–6 px dots by zoom (a 1.2 px ring for a preset), or square cells 1 px apart in the grid; a guessed kind at 70 % and dimmed points at 18 %; rings: in use 1.5 px in the kind's colour, selected 1 px `text.primary`, previewed or under the pointer 1.5 px `accent`, similar 1 px `accent`. Kind names 17.6 px in the kind's colour with a 1 px `window.background` shadow, fading out from 4× to 6× zoom. Show similar adds a 180 px `panel.background` list at the right. Kind colours are our own muted hues, the theme's `kind.*` tokens (kick `#D06E5E`, snare `#73AAC0`, clap `#5EC0B0`, closed hat `#C6AC5E`, open hat `#D08F6E`, …; [brief](brief.md) › Tokens) |
 | Footer | 20 px, `panel.background`, a 1 px `border` on top: the tags as 6 px dots (a filter ring in `text.primary` when on), the count right in 9 px mono `text.hint` ("12 items", "3 selected") |
 | Drag label | Beside the pointer while dragging from the browser: 10 px text on `control.activeBackground` with a 1 px `accent` outline when it can land (`border.strong` when not); the target is outlined 1.5 px `accent` (a 2 px `accent` mark at the beat on an Arrangement lane) |
 
@@ -175,7 +175,7 @@ track along the bottom edge.
 | Lanes | Default height 48 px, the lower edge of a header resizes it (20–400 px); separated by 1 px `border.strong`; empty area `window.background`. Overlapping (stacked) clips share the lane in equal sub-rows |
 | Clip | Fills its lane (or sub-row) from top to bottom, 1 px short of its end; `control.background` body; 2 px top strip in the track colour; name 10 px `#C9C4BB`, 4 px from the left and 3 px from the top (it stays in view while the clip's start is scrolled off); selected clip `control.activeBackground` with 1 px `text.primary` inset; a drag moves it along its lane or to another |
 | MIDI marks | Under the name: one 2 px line per note in the track colour, its length the note's; the clip's lowest note at the bottom, its highest at the top |
-| Audio marks | The waveform: one 1 px vertical line per pixel column in the track colour, from the lowest to the highest sample it covers (the engine's beat-to-file mapping: offset, loop, warp markers), scaled by the clip gain and its fades (both as they are dragged, before the edit lands); a centred line until the file is decoded. Clips at least 80 × 30 px show their gain 12 px from the top right (44 × 12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
+| Audio marks | The waveform ([waveforms](../spec/waveforms.md)) in the track colour: per pixel column the stretch of the file it covers (the engine's beat-to-file mapping: offset, loop, warp markers), a filled shape at 55 % with smoothed edges and the RMS band in the full colour, left and right lanes when the clip is at least 40 px tall, the samples with dots when zoomed in past one per pixel, scaled by the clip gain and its fades (both as they are dragged, before the edit lands); a centred line until the file is decoded. Clips at least 80 × 30 px show their gain 12 px from the top right (44 × 12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
 | Fades | On an audio clip: a 1 px `text.secondary` line from the bottom-left corner to where the fade-in ends at the top (2 px down, under the colour strip), and from where the fade-out starts to the bottom-right corner, following the fade's shape and curve (sampled every 2 px) |
 | Fade handles | 7 × 7 px squares at the clip's top corners, inside the clip, shown while it is hovered or selected (and while dragged) on clips at least 21 × 14 px; with a fade, at the fade's end along the top edge. `text.secondary`, `text.primary` hovered, 1 px `window.background` outline; an 11 × 11 px area takes the pointer, drawn and hit above the gain field. A horizontal drag sets the fade (`clip.setFades`): the fade's end snaps to the clip grid, Alt for free; double-click removes it; right-click opens a menu of the shapes with the current one checked |
 | Fade curve handle | A 7 px circle on the fade's line half-way through the fade, on fades at least 21 px wide, drawn and hit (11 × 11 px) like the fade handles. A vertical drag bends the curve (`clip.setFades` `inCurve`/`outCurve`): up towards +1, the clip's height being the range from −1 to +1; double-click sets it to 0 |
@@ -216,10 +216,13 @@ double-click to reset (typing a value is planned).
 | Dropdown | 15 px high, `control.background`, 4 px padding, 10 px text `#C9C4BB`, 6 × 4 chevron `text.hint` right |
 | Segmented | 15 px, equal parts 1 px apart (64 px each in Settings); selected `#C9C4BB` with `window.background` text, others `control.background` with `text.secondary`, 10 px text |
 
-## Settings page
+## Settings
 
-Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
-no dialogs. A centred block at most 724 px wide on `window.background`: the title "Settings" in 13 px
+Options › Settings (Ctrl+,) opens a dialog over the window until it is closed (Close, Escape or
+Ctrl+, again): the view stays behind it, dimmed with `window.background` at 60 % and taking no
+clicks; embedded plug-in editors hide while it shows. The dialog is at most 772 × 720 px (6 px
+less than the window on each side when that is smaller), `window.background` with a 1 px
+`border.strong` border. Inside, a centred block at most 724 px wide: the title "Settings" in 13 px
 with a 52 px Close button on the right; under it the list of pages (140 px), 24 px of space, and
 the page (560 px). A change applies at once and is saved; one that needs a restart (the
 renderer) says so in its note.
@@ -319,6 +322,13 @@ time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name a
 (the projects folder, the project's own folder, or the templates folder), the file that will be
 written under them (in the recording red when it is there already and will be replaced), Cancel
 and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
+
+Closing a project, opening another in its place or quitting while a project has unsaved changes
+first shows a 420 px "Unsaved changes" prompt in the same style: "Save the changes to *name*
+before closing it?" (or "opening another project in its place", "quitting") in 11 px
+`text.primary`, and Cancel, Don't save and Save (Enter) at the bottom right; Escape cancels.
+Quitting asks about each project with changes in turn; Save on a project without a file shows
+the save prompt first, and cancelling it cancels the close.
 
 ## Device panel
 
