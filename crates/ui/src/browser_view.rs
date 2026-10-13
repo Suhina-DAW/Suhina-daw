@@ -16,13 +16,12 @@ use crate::app::Status;
 use crate::browser::{BrowserState, Place, Row, duration_text};
 use crate::drop::{BrowserItem, ItemKind};
 use crate::settings::Settings;
-use crate::theme::{self, PAD};
+use crate::theme::{self, BROWSER_ROW as ROW, PAD};
 use crate::{motion, widgets};
 
 pub const SEARCH: f32 = 26.0;
 pub const FILTER: f32 = 16.0;
 pub const SIDEBAR: f32 = 104.0;
-pub const ROW: f32 = 17.0;
 pub const INDENT: f32 = 12.0;
 pub const PREVIEW: f32 = 54.0;
 pub const FOOTER: f32 = 20.0;
@@ -60,12 +59,11 @@ pub struct Context<'a> {
 }
 
 fn icon_color(kind: ItemKind) -> Color32 {
-    let rgb = |c: suhina_engine::model::Rgb| Color32::from_rgb(c.0, c.1, c.2);
     match kind {
-        ItemKind::Midi => rgb(crate::grid::TRACK_PALETTE[1]),
-        ItemKind::Sample => rgb(crate::grid::TRACK_PALETTE[2]),
-        ItemKind::Instrument | ItemKind::Preset => rgb(crate::grid::TRACK_PALETTE[3]),
-        ItemKind::Effect => rgb(crate::grid::TRACK_PALETTE[0]),
+        ItemKind::Midi => theme::track_color_2(),
+        ItemKind::Sample => theme::track_color_3(),
+        ItemKind::Instrument | ItemKind::Preset => theme::track_color_4(),
+        ItemKind::Effect => theme::track_color_1(),
         ItemKind::Folder | ItemKind::Heading | ItemKind::Project => theme::text_secondary(),
     }
 }

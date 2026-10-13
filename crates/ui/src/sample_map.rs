@@ -349,26 +349,25 @@ fn step(positions: &[[f32; 2]], from: usize, direction: [f32; 2]) -> Option<usiz
 
 /// A kind's colour: Suhina's muted palette, extended, with neighbouring kinds told apart.
 pub fn kind_colour(kind: Kind) -> Color32 {
-    let hex: u32 = match kind {
-        Kind::Kick => 0xD0_6E_5E,
-        Kind::Snare => 0x73_AA_C0,
-        Kind::Clap => 0x5E_C0_B0,
-        Kind::ClosedHat => 0xC6_AC_5E,
-        Kind::OpenHat => 0xD0_8F_6E,
-        Kind::Hat => 0xD8_C4_7A,
-        Kind::Rim => 0x8C_A8_E0,
-        Kind::Tom => 0xB0_74_A4,
-        Kind::Crash => 0xE0_A0_C8,
-        Kind::Ride => 0xC8_B8_E8,
-        Kind::Cymbal => 0xA4_97_CC,
-        Kind::Percussion => 0x8F_C0_6E,
-        Kind::Bass => 0xA8_4F_4F,
-        Kind::Tonal => 0x6E_B0_D0,
-        Kind::Vocal => 0xE8_D0_A0,
-        Kind::Effect => 0x9C_C4_9C,
-        Kind::Other => 0x8A_86_80,
-    };
-    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+    match kind {
+        Kind::Kick => theme::kind_kick(),
+        Kind::Snare => theme::kind_snare(),
+        Kind::Clap => theme::kind_clap(),
+        Kind::ClosedHat => theme::kind_closed_hat(),
+        Kind::OpenHat => theme::kind_open_hat(),
+        Kind::Hat => theme::kind_hat(),
+        Kind::Rim => theme::kind_rim(),
+        Kind::Tom => theme::kind_tom(),
+        Kind::Crash => theme::kind_crash(),
+        Kind::Ride => theme::kind_ride(),
+        Kind::Cymbal => theme::kind_cymbal(),
+        Kind::Percussion => theme::kind_percussion(),
+        Kind::Bass => theme::kind_bass(),
+        Kind::Tonal => theme::kind_tonal(),
+        Kind::Vocal => theme::kind_vocal(),
+        Kind::Effect => theme::kind_effect(),
+        Kind::Other => theme::kind_other(),
+    }
 }
 
 /// Draws the map in the space `ui` offers and reports what the user did.
