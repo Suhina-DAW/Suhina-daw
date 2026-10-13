@@ -336,6 +336,11 @@ fn close_editor_window() {
     let atom = |name: &[u8]| connection.intern_atom(false, name).unwrap().reply().unwrap().atom;
     let (protocols, delete) = (atom(b"WM_PROTOCOLS"), atom(b"WM_DELETE_WINDOW"));
     let children = connection.query_tree(root).unwrap().reply().unwrap().children;
+    for w in &children {
+        let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
+        let class = class.ok().and_then(|c| c.reply().ok()).map(|c| String::from_utf8_lossy(&c.value).into_owned());
+        eprintln!("TRACE test root child {w} class={class:?} delete_atom={delete}");
+    }
     let window = children
         .into_iter()
         .find(|w| {

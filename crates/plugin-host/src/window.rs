@@ -588,6 +588,9 @@ mod imp {
                 Ok(())
             };
             make()?;
+            if std::env::var_os("SUHINA_TRACE_X11").is_some() {
+                eprintln!("TRACE host opened window={window} delete_atom={}", atoms.WM_DELETE_WINDOW);
+            }
             let fresh = Open { connection, window, atoms, close_requested: false, size, clip: None };
             Self::keep(fresh)
         }
@@ -758,7 +761,12 @@ mod imp {
         OPEN.with(|open| {
             let Ok(mut open) = open.try_borrow_mut() else { return };
             for open in open.iter_mut() {
-                while let Ok(Some(event)) = open.connection.poll_for_event() {
+                loop {
+                    let polled = open.connection.poll_for_event();
+                    if std::env::var_os("SUHINA_TRACE_X11").is_some() {
+                        eprintln!("TRACE host pump window={} polled={polled:?}", open.window);
+                    }
+                    let Ok(Some(event)) = polled else { break };
                     match event {
                         Event::ClientMessage(message) => {
                             let [first, ..] = message.data.as_data32();
