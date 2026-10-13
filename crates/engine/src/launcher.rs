@@ -7,7 +7,7 @@
 //! from a [`LauncherMonitor`] (atomics).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use loopwerk_model::{LaneData, Project, TimeSignature};
 
@@ -29,6 +29,9 @@ const STRETCH_LOOP_BEATS: f64 = 8_192.0;
 const NONE: u32 = u32::MAX;
 /// Monitor value for "a stop is queued".
 const STOP: u32 = u32::MAX - 1;
+/// Columns a monitor reports at least: room for tracks added while the engine plays, since the
+/// monitor that other threads hold is the first graph's (ADR 0005).
+const MONITOR_COLUMNS: usize = 1024;
 /// The latest beat the play start marker can be at: over 16 hours at 120 bpm.
 pub const MAX_START_BEAT: f64 = 120_000.0;
 
@@ -116,6 +119,8 @@ pub struct LauncherMonitor {
     pub(crate) running: AtomicBool,
     beat: AtomicU64,
     tempo: AtomicU64,
+    /// Columns the playing graph has (at most the room below), written after their states.
+    columns: AtomicUsize,
     playing: Vec<AtomicU32>,
     queued: Vec<AtomicU32>,
     overrides: Vec<AtomicBool>,
@@ -133,13 +138,15 @@ pub struct LauncherMonitor {
 
 impl LauncherMonitor {
     fn new(columns: usize, tempo: f64) -> Self {
+        let room = columns.max(MONITOR_COLUMNS);
         Self {
             running: AtomicBool::new(false),
             beat: AtomicU64::new(0f64.to_bits()),
             tempo: AtomicU64::new(tempo.to_bits()),
-            playing: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
-            queued: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
-            overrides: (0..columns).map(|_| AtomicBool::new(false)).collect(),
+            columns: AtomicUsize::new(columns),
+            playing: (0..room).map(|_| AtomicU32::new(NONE)).collect(),
+            queued: (0..room).map(|_| AtomicU32::new(NONE)).collect(),
+            overrides: (0..room).map(|_| AtomicBool::new(false)).collect(),
             position: AtomicU64::new(0),
             arrangement: AtomicU64::new(0),
             stretch_underruns: AtomicU64::new(0),
@@ -175,10 +182,13 @@ impl LauncherMonitor {
     }
 
     pub fn columns(&self) -> usize {
-        self.playing.len()
+        self.columns.load(Ordering::Acquire).min(self.playing.len())
     }
 
     pub fn column(&self, column: usize) -> Option<ColumnStatus> {
+        if column >= self.columns() {
+            return None;
+        }
         let slot = |v: u32| (v < STOP).then_some(v as usize);
         let playing = slot(self.playing.get(column)?.load(Ordering::Relaxed));
         let queued = match self.queued.get(column)?.load(Ordering::Relaxed) {
@@ -400,6 +410,8 @@ impl Launcher {
             new.playing = carry(&mut new.slots, &mut old.slots, old.playing, frames_per_beat);
             new.fading = carry(&mut new.slots, &mut old.slots, old.fading, frames_per_beat);
         }
+        // The monitor is the old graph's: report this graph's columns, added ones included.
+        self.publish();
     }
 
     /// Whether the track behind `column` plays launched clips instead of its arrangement.
@@ -461,6 +473,7 @@ impl Launcher {
                 a.store(column.overrides_since.is_some(), Ordering::Relaxed);
             }
         }
+        m.columns.store(self.columns.len().min(m.playing.len()), Ordering::Release);
     }
 }
 
@@ -1383,6 +1396,43 @@ mod tests {
         assert!(monitor.running());
         assert!((monitor.beat() - 2.0).abs() < 0.01, "{}", monitor.beat());
         assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+    }
+
+    /// A track added while the engine plays reports its column: the monitor other threads hold
+    /// is the first graph's, and it must grow with the grid (#155).
+    #[test]
+    fn a_column_added_while_playing_reports_its_state() {
+        let p = two_loops();
+        let mut grown = p.clone();
+        let mut more = project(
+            vec![notes(1, vec![note(0.0, 60)]), notes(2, vec![note(0.5, 72)])],
+            vec![
+                vec![with(clip(1, 1.0, true)), with(clip(2, 1.0, true))],
+                vec![with(clip(1, 1.0, true)), with(clip(2, 1.0, true))],
+            ],
+        );
+        std::mem::swap(&mut grown.tracks, &mut more.tracks);
+        std::mem::swap(&mut grown.channels, &mut more.channels);
+        std::mem::swap(&mut grown.launcher, &mut more.launcher);
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        controller.send(LaunchCommand::LaunchClip { column: 0, slot: 0 }).unwrap();
+        let mut block = vec![0.0f32; 2 * 512];
+        renderer.process(&mut block);
+        assert_eq!(controller.monitor().columns(), 1);
+        controller.update(&grown).unwrap();
+        for _ in 0..200 {
+            renderer.process(&mut block);
+        }
+        controller.send(LaunchCommand::LaunchClip { column: 1, slot: 1 }).unwrap();
+        for _ in 0..200 {
+            renderer.process(&mut block);
+        }
+        let monitor = controller.monitor();
+        assert_eq!(monitor.columns(), 2);
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+        assert_eq!(monitor.column(1).unwrap().playing, Some(1));
+        assert_eq!(monitor.column(2), None);
     }
 
     #[test]
