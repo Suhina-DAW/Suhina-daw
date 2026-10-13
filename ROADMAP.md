@@ -142,7 +142,7 @@ Linux is the primary platform; Windows and macOS are supported.
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
   Windows and macOS when started by hand and in every release build.
 - A nightly build of `main` for Linux, Windows and macOS, with the desktop app, the CLI and the
-  plug-in host, published every night as the `nightly` pre-release
+  plug-in host, published every night as the `nightly` release
   ([`docs/releasing.md`](docs/releasing.md#nightly)).
 - Clean-room rules for people and agents ([`CONTRIBUTING.md`](CONTRIBUTING.md)) and the agent
   guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe` outside the two plug-in hosting crates, real-time safety, sandboxed plug-ins.

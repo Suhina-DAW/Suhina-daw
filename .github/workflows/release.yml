@@ -2,7 +2,7 @@ name: Release
 
 # Builds the release binaries. A `v*` tag builds them and attaches them to a draft GitHub Release:
 # `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Every night main is built as the
-# nightly, a pre-release under the tag `nightly` that each new one replaces, so people can try the
+# nightly, a release under the tag `nightly` that each new one replaces, so people can try the
 # current state; a night with no new commit on main builds nothing. Running the workflow by hand
 # only builds the packages, as workflow artifacts, or with "nightly" publishes the nightly from main
 # now. See docs/releasing.md.
@@ -88,8 +88,8 @@ jobs:
               skip=true
             fi
           fi
-          # Release candidates, nightlies and everything before 1.0 are pre-releases.
-          if [[ "$version" == *-* || "$version" == 0.* ]]; then prerelease=true; else prerelease=false; fi
+          # Release candidates and nightlies are pre-releases; a release, 0.x included, is the latest.
+          if [[ "$version" == *-* ]]; then prerelease=true; else prerelease=false; fi
           # Nightly packages keep one name, so a link to the latest one never changes.
           if [ "$nightly" = "true" ]; then name=nightly; else name="$version"; fi
           echo "Version $version, nightly $nightly, skip $skip"
@@ -355,12 +355,18 @@ jobs:
           $changes
           EOF
           )
+          # Until Suhina has a release of its own (published, not a candidate), the nightly is the
+          # repository's latest release, so the Releases box on the repository page offers it.
+          # From the first release on it is a pre-release that never becomes the latest.
+          releases=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts \
+            --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | length')
+          if [ "$releases" = "0" ]; then flags=(--latest); else flags=(--prerelease --latest=false); fi
+          echo "Releases of Suhina's own: $releases; nightly published with ${flags[*]}"
           gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           gh release create nightly dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false \
+            "${flags[@]}" \
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
       # Posts the new nightly to the Discord channel whose webhook is the secret DISCORD_WEBHOOK

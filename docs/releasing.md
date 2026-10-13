@@ -23,8 +23,9 @@ the final release is the last candidate unchanged, under the plain version:
 0.1.0-rc.1  →  testers find a bug, fixed on main  →  0.1.0-rc.2  →  no new bugs  →  0.1.0
 ```
 
-The workflow accepts only these two forms. Release candidates, and every release before 1.0, are
-published as GitHub pre-releases and never become the repository's "latest" release.
+The workflow accepts only these two forms. Release candidates are published as GitHub
+pre-releases and never become the repository's "latest" release; a release, `0.x` ones included,
+becomes the latest.
 
 ## Making a release
 
@@ -49,7 +50,7 @@ workflow artifacts without creating a release, to test the pipeline.
 ## Nightly
 
 The nightly is how people try the current state between releases: a build of `main`, not a
-release. Every night (02:17 UTC) the workflow builds `main` and publishes it as the pre-release
+release. Every night (02:17 UTC) the workflow builds `main` and publishes it as the release
 **`nightly`**, replacing the previous one: its release and tag are deleted and made again on the
 new commit, published at once without a draft. A night with no new commit on `main` builds
 nothing. Running the workflow by hand from `main` with **nightly** checked publishes one now.
@@ -71,8 +72,10 @@ Webhooks; GitHub: Settings › Secrets and variables › Actions). Without the s
 posted, and a failed post leaves the nightly published. Releases from version tags are not
 posted; they are announced by hand when the draft is published.
 
-The nightly never becomes the repository's "latest" release, and nothing is promoted from it: a
-release is made from a version tag as above.
+Until Suhina has a release of its own (published, not a release candidate), the nightly is the
+repository's **latest** release, so the Releases box on the repository page offers its downloads.
+From the first release on, the nightly is published as a pre-release that never becomes the
+latest. Nothing is promoted from it: a release is made from a version tag as above.
 
 ## Release notes
 
