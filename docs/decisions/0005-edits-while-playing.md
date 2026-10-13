@@ -62,7 +62,7 @@ clip; devices (ADR 0004) will add many more parameters.
    build and the swap), the swap moves the stretch voices to where the playhead really is
    (`AheadReader::move_to`); with the transport stopped, to the play start marker, where the
    next start begins. Until the worker has done so, stretched clips are silent; they
-   never play out of time.
+   never play out of time. That silence is the move's, so it is not counted as underruns.
 7. **The stretch worker thread serves every graph.** It owns a list of workers; a new graph's
    worker joins it before the graph is sent, and a worker leaves when its graph has been dropped.
 8. **The session notifies the player.** After an edit or undo/redo command changes the project,
