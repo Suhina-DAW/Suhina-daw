@@ -19,7 +19,7 @@ covers:
 
 - **Status:** accepted
 - **Date:** 2026-10-11
-- **Issue:** [#30](https://github.com/juhamikael/Loopwerk/issues/30)
+- **Issue:** [#30](https://github.com/suhina-daw/suhina-daw/issues/30)
 
 ## Context
 

@@ -13,6 +13,6 @@ you agree to release it under CC0.
 
 ## Adding presets
 
-Open a pull request with the [preset template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=preset.md)
+Open a pull request with the [preset template](https://github.com/suhina-daw/suhina-daw/compare/main...main?template=preset.md)
 (choose your branch on that page). Names and tags describe the sound in your own words and do
 not name commercial products; banks or files from commercial products are not accepted.
