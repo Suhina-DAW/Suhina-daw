@@ -1,15 +1,25 @@
 name: Release
 
 # Builds the release binaries. A `v*` tag builds them and attaches them to a draft GitHub Release:
-# `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Running the workflow by hand only
-# builds them, as workflow artifacts. See docs/releasing.md.
+# `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Every night main is built as the
+# nightly, a pre-release under the tag `nightly` that each new one replaces, so people can try the
+# current state; a night with no new commit on main builds nothing. Running the workflow by hand
+# only builds the packages, as workflow artifacts, or with "nightly" publishes the nightly from main
+# now. See docs/releasing.md.
 # The binaries are not signed yet (ROADMAP, M8): macOS Gatekeeper and Windows SmartScreen warn
 # about them.
 
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      nightly:
+        description: Publish the build as the nightly (from main only)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,7 +31,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   BIN: suhina-cli
-  # The process plug-ins run in (ADR 0006); suhina-cli looks for it next to itself.
+  # The desktop app.
+  APP: suhina
+  # The process plug-ins run in (ADR 0006); suhina-cli and suhina look for it next to themselves.
   HOST: suhina-plugin-host
 
 jobs:
@@ -31,12 +43,17 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      nightly: ${{ steps.version.outputs.nightly }}
+      skip: ${{ steps.version.outputs.skip }}
+      name: ${{ steps.version.outputs.name }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Read the version and check the tag
         id: version
         shell: bash
+        env:
+          NIGHTLY_INPUT: ${{ inputs.nightly }}
         run: |
           version=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "suhina-cli") | .version')
@@ -53,14 +70,41 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
             exit 1
           fi
-          # Release candidates and everything before 1.0 are pre-releases.
-          if [[ "$version" == *-rc.* || "$version" == 0.* ]]; then prerelease=true; else prerelease=false; fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          nightly=false
+          skip=false
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$NIGHTLY_INPUT" = "true" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::the nightly is built from main only"
+              exit 1
+            fi
+            nightly=true
+            # The night's build of this commit: 0.1.0-nightly.20261013+a15ad35. The commit is
+            # build metadata, so a hash with a leading zero is still a valid version.
+            version="${version%%-*}-nightly.$(date -u +%Y%m%d)+${GITHUB_SHA::7}"
+            # A scheduled night with nothing new on main builds nothing.
+            built=$(git ls-remote origin refs/tags/nightly | cut -f1)
+            if [ "$GITHUB_EVENT_NAME" = "schedule" ] && [ "$built" = "$GITHUB_SHA" ]; then
+              echo "The nightly is already this commit, $GITHUB_SHA."
+              skip=true
+            fi
+          fi
+          # Release candidates, nightlies and everything before 1.0 are pre-releases.
+          if [[ "$version" == *-* || "$version" == 0.* ]]; then prerelease=true; else prerelease=false; fi
+          # Nightly packages keep one name, so a link to the latest one never changes.
+          if [ "$nightly" = "true" ]; then name=nightly; else name="$version"; fi
+          echo "Version $version, nightly $nightly, skip $skip"
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "nightly=$nightly"
+            echo "skip=$skip"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: build (${{ matrix.name }})
     needs: version
+    if: needs.version.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +123,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      PACKAGE: suhina-${{ needs.version.outputs.version }}-${{ matrix.name }}
+      PACKAGE: suhina-${{ needs.version.outputs.name }}-${{ matrix.name }}
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +137,24 @@ jobs:
         with:
           key: release-${{ matrix.name }}
 
+      # The nightly's version, in [workspace.package] and so in every crate and Cargo.lock, so
+      # `--version` and the About page show which night and commit it is.
+      - name: Set the nightly version
+        if: needs.version.outputs.nightly == 'true'
+        shell: bash
+        run: |
+          perl -pi -e '
+            $in = /^\[workspace\.package\]/ if /^\[/;
+            $done ||= $in && s/^version = "[^"]*"/version = "$ENV{VERSION}"/;
+          ' Cargo.toml
+          cargo update --workspace
+          set_to=$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "suhina-cli") | .version')
+          if [ "$set_to" != "$VERSION" ]; then
+            echo "::error::the version is $set_to, not $VERSION"
+            exit 1
+          fi
+
       - name: Build
         shell: bash
         env:
@@ -102,7 +164,7 @@ jobs:
           TARGETS: ${{ matrix.targets }}
         run: |
           for target in ${TARGETS//,/ }; do
-            cargo build --release --locked -p suhina-cli -p suhina-plugin-host --target "$target"
+            cargo build --release --locked -p suhina-cli -p suhina -p suhina-plugin-host --target "$target"
           done
       - name: Collect the package
         shell: bash
@@ -110,18 +172,18 @@ jobs:
           mkdir -p "dist/$PACKAGE"
           case "$RUNNER_OS" in
             Windows)
-              for bin in "$BIN" "$HOST"; do
+              for bin in "$BIN" "$APP" "$HOST"; do
                 cp "target/x86_64-pc-windows-msvc/release/$bin.exe" "dist/$PACKAGE/"
               done ;;
             macOS)
-              for bin in "$BIN" "$HOST"; do
+              for bin in "$BIN" "$APP" "$HOST"; do
                 lipo -create -output "dist/$PACKAGE/$bin" \
                   "target/aarch64-apple-darwin/release/$bin" \
                   "target/x86_64-apple-darwin/release/$bin"
                 lipo -info "dist/$PACKAGE/$bin"
               done ;;
             *)
-              for bin in "$BIN" "$HOST"; do
+              for bin in "$BIN" "$APP" "$HOST"; do
                 cp "target/x86_64-unknown-linux-gnu/release/$bin" "dist/$PACKAGE/"
               done ;;
           esac
@@ -134,8 +196,9 @@ jobs:
         shell: bash
         run: |
           exe="dist/$PACKAGE/$BIN"
+          app="dist/$PACKAGE/$APP"
           host="dist/$PACKAGE/$HOST"
-          if [ "$RUNNER_OS" = "Windows" ]; then exe="$exe.exe"; host="$host.exe"; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then exe="$exe.exe"; app="$app.exe"; host="$host.exe"; fi
           output=$("$exe" --version)
           echo "$output"
           if [ "$output" != "$BIN $VERSION" ]; then
@@ -146,7 +209,8 @@ jobs:
           # the host, on a tenth of a second of silence.
           "$exe" plugin run test:vst3 - smoke.wav --seconds 0.1 --tail 0
           test -s smoke.wav
-          for binary in "$exe" "$host"; do
+          # The desktop app needs a window, so only its libraries are checked.
+          for binary in "$exe" "$app" "$host"; do
             case "$RUNNER_OS" in
               Linux)
                 # Only system libraries: libasound is the one a user may have to install.
@@ -200,6 +264,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The whole history and the tags, for the notes (scripts/release_notes.py).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -211,6 +280,21 @@ jobs:
           PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           ls -l dist
+          # The release the notes count from: for a candidate the tag before it, for a release the
+          # previous release (its candidates' changes belong to it). None for the first.
+          previous=$(git tag --merged "$GITHUB_SHA^" --list 'v*' --sort=-v:refname \
+            | { if [[ "$VERSION" == *-* ]]; then cat; else grep -v -- '-' || true; fi; } | head -n 1)
+          echo "Notes count from ${previous:-the beginning}."
+          changes=$(python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$previous" --head "$GITHUB_SHA" --style release)
+          notes=$(cat <<EOF
+          Pre-alpha build of the desktop app (\`$APP\`) and the command-line tool (\`$BIN\`). The binaries are not signed.
+
+          <!-- Generated from ROADMAP.md (What works now) and the changes since ${previous:-the beginning}. Edit before publishing. -->
+
+          $changes
+          EOF
+          )
           flags=()
           # A pre-release never becomes the "latest" release on the repository page.
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease --latest=false); fi
@@ -219,4 +303,83 @@ jobs:
             --draft \
             "${flags[@]}" \
             --title "Suhina $VERSION" \
-            --notes "Pre-alpha build of the headless command-line tool (\`$BIN\`). The binaries are not signed."
+            --notes "$notes"
+
+  # Replaces the previous nightly: its release and its tag go, and the new one is published at once
+  # (no draft), on the commit it was built from.
+  nightly:
+    name: nightly
+    needs: [version, build]
+    if: needs.version.outputs.nightly == 'true' && needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly
+      cancel-in-progress: false
+    steps:
+      # The whole history, for the list of changes (scripts/release_notes.py).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # The commit of the nightly being replaced; the changes are counted from it.
+      - name: Note the previous nightly
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)
+          echo "Previous nightly: ${sha:-none}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Publish the nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ steps.previous.outputs.sha }}
+        run: |
+          ls -l dist
+          changes=$(python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$PREVIOUS" --head "$GITHUB_SHA" --style nightly)
+          notes=$(cat <<EOF
+          **A development build, not a release.** Built from \`main\` at $GITHUB_SHA: whatever works there today, unfinished parts and bugs included. Projects saved with it may not open in later builds.
+
+          The desktop app is \`$APP\`; \`$BIN\` is the command-line tool, and \`$HOST\` is the process plug-ins run in, kept in the same folder. The binaries are not signed: macOS and Windows warn before running them. On Linux they need the ALSA library (\`libasound2\`).
+
+          Talk about it on Discord: https://discord.com/invite/e5JAZYMU. Bugs and ideas: https://github.com/$GITHUB_REPOSITORY/issues (say which nightly: \`$VERSION\`).
+
+          $changes
+          EOF
+          )
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false \
+            --title "Suhina nightly $VERSION" \
+            --notes "$notes"
+      # Posts the new nightly to the Discord channel whose webhook is the secret DISCORD_WEBHOOK
+      # (Discord: channel settings > Integrations > Webhooks); without the secret nothing is
+      # posted. A failed post leaves the nightly published.
+      - name: Tell Discord
+        continue-on-error: true
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ steps.previous.outputs.sha }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "No DISCORD_WEBHOOK secret; nothing posted."
+            exit 0
+          fi
+          python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
+            --base "$PREVIOUS" --head "$GITHUB_SHA" --style discord --version "$VERSION" > post.txt
+          cat post.txt
+          # allowed_mentions: a commit title never pings anyone.
+          jq -Rs '{content: ., allowed_mentions: {parse: []}}' post.txt \
+            | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"

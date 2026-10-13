@@ -1,6 +1,10 @@
 # Suhina
 <img width="12525" height="3663" alt="suhina-logo" src="https://github.com/user-attachments/assets/7efa72b4-fba5-42f3-9503-0ea9f4e864f6" />
 
+<p align="center">
+  <a href="https://discord.com/invite/e5JAZYMU"><img alt="Discord" src="https://img.shields.io/discord/1558859596783689758?label=Discord&logo=discord&logoColor=white&color=5865F2"></a>
+</p>
+
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
@@ -28,10 +32,14 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Downloads
 
-Tagged versions build the headless command-line tool `suhina-cli` and the plug-in host
-`suhina-plugin-host` for Linux (x86_64), Windows (x64) and macOS (universal) and attach them to a
-GitHub Release. The host is the process plug-ins run in: keep it next to `suhina-cli`, which needs
-it to play or render a project with plug-ins. The binaries are not signed yet,
+To try the current state, download the **nightly**: a build of `main` made every night, not a
+release, so expect unfinished parts and bugs
+([nightly downloads](https://github.com/suhina-daw/suhina-daw/releases/tag/nightly)).
+It and tagged versions hold the desktop app `suhina`, the command-line tool `suhina-cli` and the
+plug-in host `suhina-plugin-host`, for Linux (x86_64), Windows (x64) and macOS (universal). The
+host is the process plug-ins run in: keep the three in one folder. Tell us what works and what breaks
+on [Discord](https://discord.com/invite/e5JAZYMU) or in the
+[issues](https://github.com/suhina-daw/suhina-daw/issues). The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
 
@@ -144,10 +152,6 @@ trademark of Steinberg Media Technologies GmbH.
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 | [`docs/shortcuts.md`](docs/shortcuts.md) | Keyboard shortcuts in the desktop app, and how to change them |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is built and published |
-
-## Community
-
-- Discord: <https://discord.gg/ccQWu8rRcf>
 
 ## License
 

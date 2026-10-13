@@ -62,6 +62,8 @@ jobs:
       # docs/INDEX.md and docs/commands.md are generated on main (docs-generated.yml), not checked here.
       - name: Front matter and covered paths
         run: python3 scripts/docs.py check
+      - name: Script tests (release notes)
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       # Warnings only: documents that describe code this pull request changes, left unchanged.
       - name: Documents that describe the changed code
         if: github.event_name == 'pull_request'
