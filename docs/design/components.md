@@ -215,10 +215,13 @@ double-click to reset (typing a value is planned).
 | Dropdown | 15 px high, `control.background`, 4 px padding, 10 px text `#C9C4BB`, 6 × 4 chevron `text.hint` right |
 | Segmented | 15 px, equal parts 1 px apart (64 px each in Settings); selected `#C9C4BB` with `window.background` text, others `control.background` with `text.secondary`, 10 px text |
 
-## Settings page
+## Settings
 
-Options › Settings (Ctrl+,) replaces the main view until it is closed (Close or Escape); there are
-no dialogs. A centred block at most 724 px wide on `window.background`: the title "Settings" in 13 px
+Options › Settings (Ctrl+,) opens a dialog over the window until it is closed (Close, Escape or
+Ctrl+, again): the view stays behind it, dimmed with `window.background` at 60 % and taking no
+clicks; embedded plug-in editors hide while it shows. The dialog is at most 772 × 720 px (6 px
+less than the window on each side when that is smaller), `window.background` with a 1 px
+`border.strong` border. Inside, a centred block at most 724 px wide: the title "Settings" in 13 px
 with a 52 px Close button on the right; under it the list of pages (140 px), 24 px of space, and
 the page (560 px). A change applies at once and is saved; one that needs a restart (the
 renderer) says so in its note.
