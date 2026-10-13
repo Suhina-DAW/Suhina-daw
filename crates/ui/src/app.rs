@@ -1644,7 +1644,20 @@ impl App {
                 if matches!(id, "clip.cut" | "clip.delete") {
                     self.arrangement.clear_selected_clip();
                 }
-                actions.push(Action::new(id, json!({ "track": track.0, "index": index })));
+                let mut params = json!({ "track": track.0, "index": index });
+                // A copy follows the stacking setting for its kind, as a moved clip does.
+                if id == "clip.duplicate" {
+                    let audio = self
+                        .timeline
+                        .as_ref()
+                        .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
+                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                        .map(|c| c.audio);
+                    if audio.is_some_and(|audio| self.stacks(audio)) {
+                        params["stack"] = json!(true);
+                    }
+                }
+                actions.push(Action::new(id, params));
             }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.
@@ -1658,7 +1671,13 @@ impl App {
                 };
                 match target {
                     Some((track, start)) => {
-                        actions.push(Action::new("clip.paste", json!({ "track": track.0, "start": start })))
+                        let mut params = json!({ "track": track.0, "start": start });
+                        // The pasted clip follows the stacking setting for its kind, as a moved clip does.
+                        let audio = self.session().and_then(Session::copied_clip_is_audio);
+                        if audio.is_some_and(|audio| self.stacks(audio)) {
+                            params["stack"] = json!(true);
+                        }
+                        actions.push(Action::new("clip.paste", params))
                     }
                     None => self.status = Status::Hint("Select a clip or a track to paste on".into()),
                 }
@@ -1674,6 +1693,12 @@ impl App {
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
         }
+    }
+
+    /// Whether a clip of this kind (audio, or notes) leaves the clips it lands on as they are:
+    /// Options › Settings › sample stacking for audio, MIDI stacking for notes.
+    fn stacks(&self, audio: bool) -> bool {
+        if audio { self.settings.sample_stacking } else { self.settings.midi_stacking }
     }
 
     /// Makes the whole window `steps` zoom steps larger or smaller and keeps that in the settings.

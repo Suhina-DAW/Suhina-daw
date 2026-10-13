@@ -19,8 +19,8 @@ use serde_json::Value;
 
 use crate::scan::{PluginInfo, SCAN_MARKER, Scanned, apply_compatibility, parse_scan};
 
-/// How long a file a shell may take: one file that carries many plug-ins (Waves' WaveShell,
-/// PreSonus' VST3 Shell) loads each of them, which takes minutes in any host.
+/// How long a file a shell may take: one file that carries many plug-ins (a vendor's shell
+/// file) loads each of them, which takes minutes in any host.
 pub const SHELL_TIMEOUT: Duration = Duration::from_secs(180);
 /// Longest line a worker's answer may be.
 const MAX_LINE: u64 = 4 * 1024 * 1024;

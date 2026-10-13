@@ -17,6 +17,7 @@ Apache-2.0, OFL, CC0, CC BY) and keep their license file next to them.
 | `crates/ui/themes/catppuccin-mocha.json`, `catppuccin-latte.json` | Catppuccin Mocha and Latte colour palettes, mapped onto Suhina's tokens | Catppuccin | [catppuccin/palette](https://github.com/catppuccin/palette) | MIT (`crates/ui/themes/licenses/catppuccin.txt`) |
 | `crates/ui/themes/solarized-dark.json` | Solarized colour palette (dark), mapped onto Suhina's tokens | Ethan Schoonover | [altercation/solarized](https://github.com/altercation/solarized) | MIT (`crates/ui/themes/licenses/solarized.txt`) |
 | `crates/ui/themes/editor-dark.json`, `suhina-light.json`, `high-contrast.json` | Suhina's own themes | Suhina contributors | Original work | GPL-3.0-or-later |
+| egui's default fonts (`epaint_default_fonts` crate, compiled in as fallbacks) | Ubuntu Light, Hack, Noto Emoji, emoji-icon-font | Canonical / Dalton Maag; Source Foundry; Google; John Slegers | [crates.io: epaint_default_fonts](https://crates.io/crates/epaint_default_fonts) | Ubuntu Font Licence 1.0, MIT, OFL-1.1 and Apache-2.0 (per font, in the crate) |
 
 ## Documentation
 
@@ -50,6 +51,7 @@ feature.
 | `devices/fm-synth/tests/golden/scenarios.txt` | FM synth test voices and notes | Suhina contributors | Original work | GPL-3.0-or-later |
 | `devices/fm-synth/tests/golden/*.f32` | Reference renders of those scenarios | Suhina contributors | Rendered with the MSFA engine by `tests/reference/harness.cpp` | GPL-3.0-or-later |
 | `crates/engine/tests/golden/*.f32` | Reference renders of clip fades | Suhina contributors | Rendered by Suhina's engine (`src/fade_tests.rs`) | GPL-3.0-or-later |
+| `crates/media/tests/data/tones-*.stem.mp4`, `tones-alac.stem.m4a` | Stem files of sine tones | Suhina contributors | Generated with ffmpeg by `scripts/stems-fixture.py` | GPL-3.0-or-later |
 
 ## Test data (not committed, not shipped)
 

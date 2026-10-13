@@ -22,8 +22,8 @@ when the window closed. Templates, new projects and "save" all need a file that 
 itself and reads back with nothing lost. `docs/architecture.md` had it planned as a native
 format written and read by its own crate.
 
-The product is to be renamed Loopcraft; the file extension is chosen for that name now, so
-projects saved today keep working after the rename.
+The extension `.locr` was chosen when a rename of the product was planned; the product became
+Suhina (October 2026) and the extension stays, so projects saved before keep opening.
 
 ## Decision
 
