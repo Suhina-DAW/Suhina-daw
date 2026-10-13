@@ -352,7 +352,7 @@ pub(crate) struct Taken {
 
 impl Taken {
     /// Takes every plug-in processor out of `graph`'s chains, and what each slot knows.
-    fn from_graph(&mut self, graph: &mut Graph) {
+    fn take_graph(&mut self, graph: &mut Graph) {
         for chain in &mut graph.chains {
             for slot in chain.plugin_slots() {
                 self.info.insert(slot.key, PluginSlotInfo { instrument: slot.instrument, latency: slot.latency });
@@ -371,18 +371,18 @@ impl SwapState {
     /// slots knew about it.
     pub(crate) fn take_processors(&mut self, current: &mut Graph, taken: &mut Taken) {
         if let Some(held) = self.held.as_mut() {
-            taken.from_graph(held);
+            taken.take_graph(held);
         }
-        taken.from_graph(current);
+        taken.take_graph(current);
         for (key, processor) in self.parked.drain(..) {
             taken.processors.insert(key, processor);
         }
         if let Some(pending) = self.pending.as_mut() {
-            taken.from_graph(&mut pending.graph);
+            taken.take_graph(&mut pending.graph);
         }
         if let Some(incoming) = self.incoming.as_mut() {
             while let Ok(mut swap) = incoming.pop() {
-                taken.from_graph(&mut swap.graph);
+                taken.take_graph(&mut swap.graph);
             }
         }
         if let Some(queue) = self.plugins.as_mut() {

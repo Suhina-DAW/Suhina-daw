@@ -168,7 +168,7 @@ impl Projects {
         if !kept {
             session.restart_plugins();
         }
-        if let Some(player) = session.player_mut().ok() {
+        if let Ok(player) = session.player_mut() {
             transport.restore(player)?;
         }
         // Plug-ins that could not carry over (a new sample rate) start again.

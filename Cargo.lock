@@ -2307,297 +2307,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "suhina"
-version = "0.0.1"
-dependencies = [
- "eframe",
- "suhina-engine",
- "suhina-library",
- "suhina-media",
- "suhina-output",
- "suhina-session",
- "suhina-ui",
- "raw-window-handle",
- "winit",
- "zip",
-]
-
-[[package]]
-name = "suhina-als"
-version = "0.0.1"
-dependencies = [
- "flate2",
- "suhina-model",
- "roxmltree",
-]
-
-[[package]]
-name = "suhina-automation"
-version = "0.0.1"
-dependencies = [
- "hound",
- "suhina-engine",
- "suhina-library",
- "suhina-media",
- "suhina-session",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "suhina-cli"
-version = "0.0.1"
-dependencies = [
- "hound",
- "suhina-als",
- "suhina-automation",
- "suhina-device-api",
- "suhina-device-fm-synth",
- "suhina-device-registry",
- "suhina-engine",
- "suhina-library",
- "suhina-media",
- "suhina-output",
- "suhina-plugins",
- "suhina-session",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "suhina-device-api"
-version = "0.0.1"
-
-[[package]]
-name = "suhina-device-auto-pan"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-compressor"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-dj-eq"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-fm-synth"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
-]
-
-[[package]]
-name = "suhina-device-limiter"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-overdrive"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-registry"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-device-auto-pan",
- "suhina-device-compressor",
- "suhina-device-dj-eq",
- "suhina-device-fm-synth",
- "suhina-device-limiter",
- "suhina-device-overdrive",
- "suhina-device-utility",
- "suhina-device-vinyl-distortion",
-]
-
-[[package]]
-name = "suhina-device-utility"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-device-vinyl-distortion"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-dsp",
-]
-
-[[package]]
-name = "suhina-dsp"
-version = "0.0.1"
-
-[[package]]
-name = "suhina-engine"
-version = "0.0.1"
-dependencies = [
- "suhina-device-api",
- "suhina-device-registry",
- "suhina-model",
- "suhina-stretch",
- "rtrb",
-]
-
-[[package]]
-name = "suhina-ipc"
-version = "0.0.1"
-dependencies = [
- "libc",
- "memmap2",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "suhina-library"
-version = "0.0.1"
-dependencies = [
- "suhina-media",
- "notify-debouncer-full",
- "serde_json",
-]
-
-[[package]]
-name = "suhina-locr"
-version = "0.0.1"
-dependencies = [
- "base64",
- "suhina-model",
- "serde_json",
-]
-
-[[package]]
-name = "suhina-media"
-version = "0.0.1"
-dependencies = [
- "base64",
- "hound",
- "suhina-device-compressor",
- "suhina-device-limiter",
- "suhina-engine",
- "serde_json",
- "symphonia",
-]
-
-[[package]]
-name = "suhina-model"
-version = "0.0.1"
-
-[[package]]
-name = "suhina-output"
-version = "0.0.1"
-dependencies = [
- "audio_thread_priority",
- "cpal",
- "suhina-engine",
- "suhina-model",
- "suhina-session",
- "rtrb",
- "thread-priority",
- "wasapi",
-]
-
-[[package]]
-name = "suhina-plugin-host"
-version = "0.0.1"
-dependencies = [
- "clack-extensions",
- "clack-host",
- "clack-plugin",
- "interprocess",
- "libc",
- "libloading",
- "suhina-engine",
- "suhina-ipc",
- "suhina-model",
- "suhina-plugins",
- "suhina-session",
- "serde_json",
- "thread-priority",
- "vst3",
- "windows-sys 0.61.2",
- "x11rb",
-]
-
-[[package]]
-name = "suhina-plugins"
-version = "0.0.1"
-dependencies = [
- "interprocess",
- "json5",
- "suhina-ipc",
- "serde_json",
-]
-
-[[package]]
-name = "suhina-session"
-version = "0.0.1"
-dependencies = [
- "hound",
- "suhina-als",
- "suhina-device-api",
- "suhina-device-fm-synth",
- "suhina-device-registry",
- "suhina-engine",
- "suhina-library",
- "suhina-locr",
- "suhina-media",
- "suhina-model",
- "suhina-plugins",
- "serde_json",
-]
-
-[[package]]
-name = "suhina-stretch"
-version = "0.0.1"
-dependencies = [
- "hound",
- "rustfft",
-]
-
-[[package]]
-name = "suhina-ui"
-version = "0.0.1"
-dependencies = [
- "egui",
- "egui_kittest",
- "hound",
- "suhina-device-api",
- "suhina-device-registry",
- "suhina-engine",
- "suhina-library",
- "suhina-media",
- "suhina-plugins",
- "suhina-session",
- "serde_json",
-]
-
-[[package]]
 name = "mach2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4220,6 +3929,297 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "suhina"
+version = "0.0.1"
+dependencies = [
+ "eframe",
+ "raw-window-handle",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-session",
+ "suhina-ui",
+ "winit",
+ "zip",
+]
+
+[[package]]
+name = "suhina-als"
+version = "0.0.1"
+dependencies = [
+ "flate2",
+ "roxmltree",
+ "suhina-model",
+]
+
+[[package]]
+name = "suhina-automation"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-session",
+ "tokio",
+]
+
+[[package]]
+name = "suhina-cli"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "serde_json",
+ "suhina-als",
+ "suhina-automation",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-plugins",
+ "suhina-session",
+ "tokio",
+]
+
+[[package]]
+name = "suhina-device-api"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-device-auto-pan"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-compressor"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-dj-eq"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-fm-synth"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+]
+
+[[package]]
+name = "suhina-device-limiter"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-overdrive"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-registry"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-device-auto-pan",
+ "suhina-device-compressor",
+ "suhina-device-dj-eq",
+ "suhina-device-fm-synth",
+ "suhina-device-limiter",
+ "suhina-device-overdrive",
+ "suhina-device-utility",
+ "suhina-device-vinyl-distortion",
+]
+
+[[package]]
+name = "suhina-device-utility"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-vinyl-distortion"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-dsp"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-engine"
+version = "0.0.1"
+dependencies = [
+ "rtrb",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-model",
+ "suhina-stretch",
+]
+
+[[package]]
+name = "suhina-ipc"
+version = "0.0.1"
+dependencies = [
+ "libc",
+ "memmap2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "suhina-library"
+version = "0.0.1"
+dependencies = [
+ "notify-debouncer-full",
+ "serde_json",
+ "suhina-media",
+]
+
+[[package]]
+name = "suhina-locr"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "serde_json",
+ "suhina-model",
+]
+
+[[package]]
+name = "suhina-media"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "hound",
+ "serde_json",
+ "suhina-device-compressor",
+ "suhina-device-limiter",
+ "suhina-engine",
+ "symphonia",
+]
+
+[[package]]
+name = "suhina-model"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-output"
+version = "0.0.1"
+dependencies = [
+ "audio_thread_priority",
+ "cpal",
+ "rtrb",
+ "suhina-engine",
+ "suhina-model",
+ "suhina-session",
+ "thread-priority",
+ "wasapi",
+]
+
+[[package]]
+name = "suhina-plugin-host"
+version = "0.0.1"
+dependencies = [
+ "clack-extensions",
+ "clack-host",
+ "clack-plugin",
+ "interprocess",
+ "libc",
+ "libloading",
+ "serde_json",
+ "suhina-engine",
+ "suhina-ipc",
+ "suhina-model",
+ "suhina-plugins",
+ "suhina-session",
+ "thread-priority",
+ "vst3",
+ "windows-sys 0.61.2",
+ "x11rb",
+]
+
+[[package]]
+name = "suhina-plugins"
+version = "0.0.1"
+dependencies = [
+ "interprocess",
+ "json5",
+ "serde_json",
+ "suhina-ipc",
+]
+
+[[package]]
+name = "suhina-session"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "serde_json",
+ "suhina-als",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-locr",
+ "suhina-media",
+ "suhina-model",
+ "suhina-plugins",
+]
+
+[[package]]
+name = "suhina-stretch"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "rustfft",
+]
+
+[[package]]
+name = "suhina-ui"
+version = "0.0.1"
+dependencies = [
+ "egui",
+ "egui_kittest",
+ "hound",
+ "serde_json",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-plugins",
+ "suhina-session",
+]
 
 [[package]]
 name = "symphonia"

@@ -219,7 +219,7 @@ impl SuhinaMcp {
             Ok(path) => path,
             Err(e) => return Ok(fail(e)),
         };
-        let output = self.audio_output.clone();
+        let output = self.audio_output;
         let result = self
             .with_projects(move |projects| {
                 let (opened, mut warnings) = Session::open(&path).map_err(|e| e.0)?;
@@ -282,7 +282,7 @@ impl SuhinaMcp {
             Ok(params) => params,
             Err(e) => return Ok(fail(e)),
         };
-        let output = self.audio_output.clone();
+        let output = self.audio_output;
         let target = p.project.map(ProjectId);
         let result = self
             .with_projects(move |projects| {
@@ -306,7 +306,7 @@ impl SuhinaMcp {
             return Ok(fail(format!("a batch may have at most {MAX_BATCH_STEPS} steps, got {}", p.steps.len())));
         }
         let stop_on_error = p.stop_on_error.unwrap_or(true);
-        let output = self.audio_output.clone();
+        let output = self.audio_output;
         let workspace = Arc::clone(&self.workspace);
         let target = p.project.map(ProjectId);
         let result = self
