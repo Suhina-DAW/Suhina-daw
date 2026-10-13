@@ -1,5 +1,5 @@
 //! FM Synth: a six-operator FM instrument whose engine is a port of MSFA, the engine inside the
-//! Dexed synthesizer (ROADMAP › Built-in devices).
+//! Dexed synthesizer (ROADMAP › Built-in effects and instruments).
 //!
 //! Six sine operators, each with a four-stage envelope, keyboard level and rate scaling,
 //! velocity and amplitude-modulation sensitivity, ratio or fixed frequency and detune, connect

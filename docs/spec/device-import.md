@@ -21,7 +21,7 @@ from Live's library (presets, wavetables, samples, impulse responses) is used.
   (devices, plug-ins) and series 6 (Utility).
 
 The Suhina devices themselves, what they do and how far they are, are in
-[`ROADMAP.md`](../../ROADMAP.md) › Built-in devices. This document is the format side: which
+[`ROADMAP.md`](../../ROADMAP.md) › Built-in effects and instruments. This document is the format side: which
 stored device lands in which Suhina device.
 
 ## How a device gets its import
@@ -82,3 +82,9 @@ comes in as it (otherwise as a placeholder):
 | Drift, Analog | subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
 | Simpler, Sampler, Drum Rack | sampler, drum sampler | own | planned |
 | Collision, Tension, Electric | physical-modelling synth | Mutable Instruments Rings and Elements (MIT) | planned |
+
+## Devices Suhina cannot run
+
+Max for Live devices are planned to come in as placeholders that keep their parameters, with the
+device's own files copied along with the project, so a set opened in Suhina and saved again still
+has them.

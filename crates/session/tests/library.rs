@@ -1,5 +1,5 @@
 //! The `library.*` commands (`docs/spec/browser.md` › Commands): folders, search across files,
-//! built-in devices and plug-ins, pins, recent items recorded from what was added, tags.
+//! built-in effects and instruments, and plug-ins, pins, recent items recorded from what was added, tags.
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions
 
 use std::path::{Path, PathBuf};

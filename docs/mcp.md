@@ -103,7 +103,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Suhina's settings folder) and keeps it up to date while it runs
   ([ADR 0012](decisions/0012-file-library.md)). `library.search` finds samples, MIDI files,
-  presets and projects in it, the built-in devices and installed plug-ins; `library.list`,
+  presets and projects in it, the built-in effects and instruments, and installed plug-ins; `library.list`,
   `library.info`, `library.folders`, `library.refresh`, `library.recent`, `library.pinned`,
   `library.tags` read it; `library.pin`, `library.unpin`, `library.tag`, `library.setTag` and
   `library.removeTag` change pins and colour tags. `library.addFolder` and
@@ -118,7 +118,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
   `soundmap.analyse {folder?}` analyses again.
 
-- **Devices.** `devices.list` lists the built-in devices with every parameter (id, range,
+- **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
   `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).

@@ -45,7 +45,9 @@ that describe them (*Code and its documents*). Read only the documents that matc
    (`docs/design/brief.md`), to say what Suhina's look must not resemble. ROADMAP and README
    describe Suhina's own devices and features under their own names; which device of another
    product imports into which is a spec ([`docs/spec/device-import.md`](docs/spec/device-import.md)).
-   Product terms of other DAWs are not used as generic words either: "drum sampler", not "drum rack". The model, engine, CLI core and
+   Product terms and set phrases of other DAWs are not used as generic words either: "drum sampler",
+   not "drum rack"; "built-in effects and instruments", not "built-in devices". "Device" on its own
+   is a generic word and stays (the `device.*` commands, `devices/`). The model, engine, CLI core and
    UI describe concepts neutrally ("a clip that belongs to one track", "a shared pattern").
    User-facing text may name a file format when it imports or exports it ("a Live Set to
    import"), never as Suhina's own branding.
@@ -74,9 +76,9 @@ crates/
   output   L3 the audio device: lists hosts and devices (cpal; ASIO with the `asio` feature), opens the one
            chosen (WASAPI exclusive through `wasapi`), plays an engine in blocks of the chosen buffer
   ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command
-  dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
+  dsp      L0 signal-processing blocks for built-in effects and instruments: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
-  device-registry L1 every built-in device by its stable id: makes and lists them (ADR 0004)
+  device-registry L1 every built-in effect or instrument by its stable id: makes and lists them (ADR 0004)
   ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)
   plugins  L1 the engine's side of plug-in hosting: start a host process, control protocol, health, state, restart; scanning; offline runs
   plugin-host  the suhina-plugin-host executable plug-ins run in (ADR 0006; may use unsafe): CLAP, VST3, test plug-ins
@@ -113,7 +115,7 @@ until October 2026 (README); nothing new may use it, in names, text or code.
 | Kind | Directory | Package (`Cargo.toml`) | In Rust code |
 |---|---|---|---|
 | Library crate | `crates/<name>` | `suhina-<name>` | `suhina_<name>` |
-| Built-in device | `devices/<name>` | `suhina-device-<name>` | `suhina_device_<name>` |
+| Built-in effect or instrument | `devices/<name>` | `suhina-device-<name>` | `suhina_device_<name>` |
 | App (binary) | `apps/<name>` | `suhina` or `suhina-<name>` | |
 
 A new crate inherits the workspace settings (`version.workspace = true`, `edition`, `license`,

@@ -143,13 +143,13 @@ pub struct Device {
     /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
     /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,
-    /// Parameter values of a built-in device (`DeviceKind::Builtin`); empty for plug-ins and
+    /// Parameter values of a built-in effect or instrument (`DeviceKind::Builtin`); empty for plug-ins and
     /// placeholders. Parameters that are not listed keep their defaults.
     pub params: Vec<DeviceParam>,
     pub extensions: Extensions,
 }
 
-/// One parameter value of a built-in device, by the parameter's stable id (ADR 0004). The value
+/// One parameter value of a built-in effect or instrument, by the parameter's stable id (ADR 0004). The value
 /// is in the parameter's own unit (decibels, hertz, a fraction for a percentage, an option
 /// index for a choice); the device limits it to its range when it loads it.
 #[derive(Debug, Clone, PartialEq)]
