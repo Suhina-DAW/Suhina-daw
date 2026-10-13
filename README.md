@@ -9,6 +9,14 @@ An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ablet
 
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
 
+How much of the workflow it compares itself to exists today is measured, not guessed: chapter by
+chapter against the Live 12 reference manual, re-measured on `main` whenever the numbers change
+([the report](docs/research/parity-live-12.md), [the order the gap gets closed in](docs/decisions/0016-parity-target.md)).
+
+<a href="docs/research/parity-live-12-by-area.png">
+  <img width="700" alt="Parity with Ableton Live 12 by area: the share of each area of the manual that Suhina covers today" src="docs/research/parity-live-12-by-area.png">
+</a>
+
 > **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (audio clips with
 > real-time time-stretching, MIDI through the built-in FM synth, sandboxed CLAP and VST3 plug-ins,
 > or sine tones), and lets agents edit them over MCP. The desktop app has the Session and
@@ -20,13 +28,6 @@ trademark of Steinberg Media Technologies GmbH. DX7 is a trademark of Yamaha Cor
 and NKS are trademarks of Native Instruments. Other product names are trademarks of their
 owners. They are named only to describe file compatibility and comparable workflows. Suhina contains no code or content from Ableton
 products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
-
-How far Suhina is from the workflow it compares itself to is measured, not guessed: the report is
-[`docs/research/parity-live-12.md`](docs/research/parity-live-12.md), the order the gap gets closed
-in is [ADR 0016](docs/decisions/0016-parity-target.md), and the figure below is rebuilt on `main`
-from [`scripts/parity/`](scripts/parity/) whenever the numbers change.
-
-![Parity with Ableton Live 12 by area](docs/research/parity-live-12-by-area.png)
 
 ## Goals
 

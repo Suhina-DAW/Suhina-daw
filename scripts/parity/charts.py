@@ -37,7 +37,7 @@ LABELS = {
 def setup():
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
-        "font.size": 9,
+        "font.size": 10,
         "axes.edgecolor": "#888888",
         "axes.labelcolor": "#222222",
         "text.color": "#222222",
@@ -51,7 +51,7 @@ def setup():
 def stamp(fig):
     """Say on the figure which measurement it draws, so a stale one is visible at a glance."""
     fig.text(0.995, 0.005, f"measured {score.MEASURED_AT} at {score.MEASURED_COMMIT}",
-             ha="right", va="bottom", fontsize=7.5, color="#777777")
+             ha="right", va="bottom", fontsize=8, color="#777777")
 
 
 def fig_areas(path: Path):
@@ -62,19 +62,21 @@ def fig_areas(path: Path):
         rows.append((cov, pages, LABELS.get(name, name)))
     rows.sort()
 
-    fig, ax = plt.subplots(figsize=(8.6, 4.4))
+    # Drawn at a size that stays legible when the README shows it at ~700 px wide and the report
+    # at ~830: the label and value text must not fall below the body text around it.
+    fig, ax = plt.subplots(figsize=(7.6, 4.1))
     ys = list(range(len(rows)))
     colours = [COLOURS["green"] if c >= 0.6 else COLOURS["light"] if c >= 0.35
                else COLOURS["amber"] if c >= 0.1 else COLOURS["grey"] for c, _, _ in rows]
     ax.barh(ys, [c * 100 for c, _, _ in rows], color=colours, height=0.62)
     for y, (cov, pages, _) in zip(ys, rows):
-        ax.text(cov * 100 + 1.2, y, f"{cov*100:.0f}%  ({pages} manual pages)",
-                va="center", fontsize=8.5, color="#333333")
+        ax.text(cov * 100 + 1.2, y, f"{cov*100:.0f}%  ({pages} pages)",
+                va="center", fontsize=9.5, color="#333333")
     ax.set_yticks(ys)
-    ax.set_yticklabels(["\n".join(textwrap.wrap(n, 38)) for _, _, n in rows], fontsize=8.5)
-    ax.set_xlim(0, 62)
-    ax.set_xlabel("share of the manual's functionality that Suhina covers today (page-weighted)")
-    ax.set_title("Parity with Ableton Live 12 by area", fontsize=11, loc="left", pad=10)
+    ax.set_yticklabels(["\n".join(textwrap.wrap(n, 36)) for _, _, n in rows], fontsize=9.5)
+    ax.set_xlim(0, 60)
+    ax.set_xlabel("share of the manual's functionality Suhina covers (page-weighted)", fontsize=10)
+    ax.set_title("Parity with Ableton Live 12 by area", fontsize=12.5, loc="left", pad=10)
     ax.grid(axis="x", color="#e6e6e6", linewidth=0.8)
     ax.set_axisbelow(True)
     for side in ("top", "right"):
