@@ -175,6 +175,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Input | Does |
 |---|---|
 | Pointer over a point | Highlights it and **previews it** (Settings › Interface › Browser › Map: preview on hover, on by default). Moving across points plays each in turn; a new one stops the one before. A point is played only after the pointer has rested on it for 40 ms, so a fast sweep does not play everything it crosses. |
+| Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
 | Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |

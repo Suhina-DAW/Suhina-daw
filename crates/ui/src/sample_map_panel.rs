@@ -253,6 +253,13 @@ impl Panel {
         self.view.preview_on_hover = settings.map_hover_preview;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
+        // The waveform for the tooltip of the point the pointer rests on, read in the background.
+        let now = ui.input(|i| i.time);
+        let resting = self.view.resting(now);
+        self.view.hover_waveform = resting.and_then(|i| Some((i, state.waveform(&self.path(i)?)?)));
+        if resting.is_some() && self.view.hover_waveform.is_none() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
         let mut events = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             sample_map::show(ui, &mut self.view, &self.points, self.grid.as_ref(), &status, &tags, &mut events);

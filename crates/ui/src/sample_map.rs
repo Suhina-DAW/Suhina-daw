@@ -15,6 +15,10 @@ use crate::theme;
 /// How long the pointer rests on a point before it is previewed, so a fast sweep does not play
 /// everything it crosses.
 pub const HOVER_PREVIEW_SECONDS: f64 = 0.040;
+/// How long the pointer rests on a point before its tooltip reads the file for a waveform.
+pub const HOVER_WAVEFORM_SECONDS: f64 = 0.15;
+/// The size of the waveform in a point's tooltip.
+const TOOLTIP_WAVE: Vec2 = Vec2::new(220.0, 36.0);
 /// How near (in points of the screen) the pointer must be to a point to be over it.
 const HIT_RADIUS: f32 = 7.0;
 const MIN_ZOOM: f32 = 1.0;
@@ -109,6 +113,8 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
+    pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
 }
 
 impl Default for MapView {
@@ -125,6 +131,7 @@ impl Default for MapView {
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            hover_waveform: None,
         }
     }
 }
@@ -137,6 +144,11 @@ impl MapView {
 
     pub fn similar(&self) -> Option<&(usize, Vec<usize>)> {
         self.similar.as_ref()
+    }
+
+    /// The point the pointer has rested on for [`HOVER_WAVEFORM_SECONDS`] by `now`.
+    pub fn resting(&self, now: f64) -> Option<usize> {
+        self.hovered.filter(|(_, since)| now - since >= HOVER_WAVEFORM_SECONDS).map(|(i, _)| i)
     }
 
     /// Fits all points in view.
@@ -539,6 +551,15 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
             ui.label(egui::RichText::new(kind).color(theme::text_secondary()));
             if !point.detail.is_empty() {
                 ui.label(egui::RichText::new(&point.detail).color(theme::text_secondary()));
+            }
+            if let Some((_, peaks)) = view.hover_waveform.as_ref().filter(|(i, _)| Some(*i) == under) {
+                let (rect, _) = ui.allocate_exact_size(TOOLTIP_WAVE, Sense::hover());
+                let seconds = peaks.frames as f64 / f64::from(peaks.sample_rate.max(1));
+                let count = rect.width() as usize;
+                let columns =
+                    crate::waveform::steady_columns(rect.left(), count, 0.0, seconds / count.max(1) as f64, 1.0);
+                let shape = crate::waveform::geometry(peaks, rect, &columns, crate::waveform::scale(ui.ctx()));
+                crate::waveform::paint(ui.painter(), &shape, crate::waveform::Colors::from(theme::text_secondary()));
             }
         });
     }

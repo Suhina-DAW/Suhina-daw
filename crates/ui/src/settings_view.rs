@@ -438,6 +438,20 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         Page::Arrangement => {
             section(&mut y, "Arrangement");
             let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Waveform scale",
+                "Linear, or decibels so quiet parts show; clips, previews and the map",
+            );
+            let options = [("Linear", false), ("dB", true)];
+            if let Some(db) =
+                segmented(ui, &painter, control_rect(r, 2), "Waveform scale", &options, settings.waveform_db)
+            {
+                settings.waveform_db = db;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
             label(&painter, r, "Track headers", "Which side of the timeline they are on");
             let options = [("Left", Side::Left), ("Right", Side::Right)];
             if let Some(side) =

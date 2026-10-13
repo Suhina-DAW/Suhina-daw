@@ -150,7 +150,9 @@ with the part played so far brighter and a playhead.
 
 - **Auto-play** (Settings › Interface › Browser › Auto-play, on by default): selecting a sample
   or MIDI file previews it. Off, previewing takes the play button or a click on the waveform.
-- **Clicking the waveform** previews from there.
+- **Clicking the waveform** previews from there. The waveform is drawn as
+  [waveforms](waveforms.md) says: the whole file across the strip, both channels when there is
+  room, the part played brighter.
 - A preview plays once, from the start or the clicked point, at the file's own speed. It is
   not synced to the project's tempo or beat. It plays whether the project is playing or not,
   into the main output after the main channel, at the preview volume (Settings › Interface ›
