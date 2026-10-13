@@ -4,8 +4,8 @@
 //! renderer does: each clip's window of its content, a loop range repeating until the clip ends,
 //! at the project's tempo.
 
-use loopwerk_engine::model::*;
-use loopwerk_plugins::Event;
+use suhina_engine::model::*;
+use suhina_plugins::Event;
 
 /// Most notes read, so a malformed project cannot grow the list without end.
 const MAX_NOTES: usize = 100_000;
@@ -45,7 +45,7 @@ pub fn events(project: &Project, channel: ChannelId, from_beat: f64, frames: u64
         }
     }
     // Note-offs before note-ons at the same frame, so a repeated key starts again.
-    events.sort_by_key(|e| (e.frame, matches!(e.kind, loopwerk_plugins::EventKind::NoteOn { .. })));
+    events.sort_by_key(|e| (e.frame, matches!(e.kind, suhina_plugins::EventKind::NoteOn { .. })));
     events
 }
 
@@ -90,7 +90,7 @@ fn place<'a>(clip: &Clip, notes: &'a [Note], out: &mut Vec<(f64, f64, &'a Note)>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_plugins::EventKind;
+    use suhina_plugins::EventKind;
 
     fn project(clips: Vec<Clip>, notes: Vec<Note>) -> Project {
         Project {

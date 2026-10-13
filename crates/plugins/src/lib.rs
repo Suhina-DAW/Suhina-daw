@@ -1,9 +1,9 @@
-//! The engine's side of plug-in hosting (ADR 0006): starting `loopwerk-plugin-host` processes,
+//! The engine's side of plug-in hosting (ADR 0006): starting `suhina-plugin-host` processes,
 //! loading plug-in instances into them, talking to them, noticing when one crashes or hangs, and
 //! restarting it with its last state.
 //!
 //! [`Plugin::start`] returns two halves. [`PluginAudio`] goes to the audio thread and runs
-//! blocks through the plug-in with a deadline ([`loopwerk_ipc`]); [`Plugin`] stays on a control
+//! blocks through the plug-in with a deadline ([`suhina_ipc`]); [`Plugin`] stays on a control
 //! thread for everything else: health, ping, state, restart. They share only a counter of
 //! blocks in a row the host has not answered.
 //!
@@ -38,8 +38,8 @@ use interprocess::local_socket::{
     GenericFilePath, GenericNamespaced, ListenerNonblockingMode, ListenerOptions, Name, NameType, Stream, ToFsName,
     ToNsName,
 };
-pub use loopwerk_ipc::{Event, EventKind, MAX_EVENTS, Outcome};
-use loopwerk_ipc::{IpcError, Link};
+pub use suhina_ipc::{Event, EventKind, MAX_EVENTS, Outcome};
+use suhina_ipc::{IpcError, Link};
 
 use protocol::{MAX_LINE, Message, VERSION};
 pub use protocol::{ParamInfo, Placement};
@@ -91,7 +91,7 @@ impl From<IpcError> for PluginError {
 /// How to start a plug-in.
 #[derive(Debug, Clone)]
 pub struct Launch {
-    /// The `loopwerk-plugin-host` executable.
+    /// The `suhina-plugin-host` executable.
     pub host: PathBuf,
     /// What to load, as the host names it.
     pub plugin: String,
@@ -837,7 +837,7 @@ pub fn host_command(host: &std::path::Path) -> Command {
 /// A fresh name for the control socket: the address to pass to the host, and the name itself.
 fn control_name() -> Result<(String, Name<'static>), PluginError> {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
-    let id = format!("loopwerk-control-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
+    let id = format!("suhina-control-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
     parse_address(&if GenericNamespaced::is_supported() {
         format!("ns:{id}")
     } else {

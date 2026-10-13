@@ -50,7 +50,7 @@ impl Plugin for TestGain {
 
 impl DefaultPluginFactory for TestGain {
     fn get_descriptor() -> PluginDescriptor {
-        PluginDescriptor::new("org.loopwerk.test.gain", "Loopwerk Test Gain")
+        PluginDescriptor::new("org.suhina.test.gain", "Suhina Test Gain")
     }
 
     fn new_shared(_host: HostSharedHandle<'_>) -> Result<GainShared, PluginError> {

@@ -73,8 +73,8 @@ impl Region {
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .filter(|n| n.starts_with("loopwerk-ipc-"))
-            .ok_or(IpcError::BadLink("not a Loopwerk link name"))?
+            .filter(|n| n.starts_with("suhina-ipc-"))
+            .ok_or(IpcError::BadLink("not a Suhina link name"))?
             .to_string();
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         if (file.metadata()?.len() as usize) < HEADER_BYTES {
@@ -271,5 +271,5 @@ fn unique_name() -> String {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let count = COUNTER.fetch_add(1, Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-    format!("loopwerk-ipc-{}-{count}-{nanos}", std::process::id())
+    format!("suhina-ipc-{}-{count}-{nanos}", std::process::id())
 }

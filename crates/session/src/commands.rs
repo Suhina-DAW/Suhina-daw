@@ -1,9 +1,9 @@
 //! The command registry. Each command is a [`CommandSpec`]; new commands are added to
 //! [`COMMANDS`] with tests below.
 
-use loopwerk_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
-use loopwerk_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
+use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
+use suhina_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 
 use crate::{CommandError, Session, devices, files, preview};
 
@@ -21,17 +21,17 @@ pub enum CommandKind {
     /// Opens, switches or closes whole projects (the open projects, like tabs); never changes a
     /// project or its undo history. Runs on [`crate::Projects`], not on one session.
     Projects,
-    /// Scans for plug-ins or changes where scans look (ADR 0006); belongs to Loopwerk, not to
+    /// Scans for plug-ins or changes where scans look (ADR 0006); belongs to Suhina, not to
     /// one project. Runs on [`crate::Projects`].
     Plugins,
     /// Acts on one of the project's running plug-ins (opens or closes its editor, restarts
     /// it); never changes the project or its undo history.
     Plugin,
     /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
-    /// to Loopwerk, not to one project. Runs on [`crate::Projects`].
+    /// to Suhina, not to one project. Runs on [`crate::Projects`].
     Library,
     /// Lists or chooses the audio output (host, device, sample rate, buffer size) or reports
-    /// on it; belongs to Loopwerk, not to one project. Runs on [`crate::Projects`].
+    /// on it; belongs to Suhina, not to one project. Runs on [`crate::Projects`].
     Audio,
 }
 
@@ -150,7 +150,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.save",
-        label: "Save the project as a Loopwerk project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
+        label: "Save the project as a Suhina project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
         params: &[
             optional("path", ParamType::Text, "file to save to; .locr is added when missing"),
             optional(
@@ -682,7 +682,7 @@ fn save(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let path = match params.get("path") {
         Some(Value::String(path)) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
         Some(Value::String(_)) | None | Some(Value::Null) => match session.source() {
-            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION)) => {
+            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION)) => {
                 source.to_path_buf()
             }
             _ => return Err("the project has no .locr file yet; give a path to save it to".into()),
@@ -978,7 +978,7 @@ fn set_color(session: &mut Session, params: &Value) -> Result<Value, CommandErro
         let hex = text.strip_prefix('#').filter(|h| h.len() == 6).ok_or("color must be \"#rrggbb\" or \"none\"")?;
         let part = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
         match (part(0), part(2), part(4)) {
-            (Some(r), Some(g), Some(b)) => Some(loopwerk_model::Rgb(r, g, b)),
+            (Some(r), Some(g), Some(b)) => Some(suhina_model::Rgb(r, g, b)),
             _ => return Err("color must be \"#rrggbb\" or \"none\"".into()),
         }
     };
@@ -1131,8 +1131,8 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
         return Err(format!("track {:?} cannot hold {what}", target.name).into());
     }
     // The copy plays its own content, so editing one does not change the other.
-    let id = loopwerk_model::ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
-    p.contents.push(loopwerk_model::ClipContent { id, ..content });
+    let id = suhina_model::ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    p.contents.push(suhina_model::ClipContent { id, ..content });
     let placed = Clip { content: id, start, ..clip };
     let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
         Some(lane) => lane,

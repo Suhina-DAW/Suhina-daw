@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use loopwerk_model::{Project, TrackId};
 use rtrb::{Consumer, Producer, RingBuffer};
+use suhina_model::{Project, TrackId};
 
 use crate::ahead::StretchThread;
 use crate::audio::AudioPool;
@@ -529,8 +529,8 @@ impl Controller {
 
     /// A fallback instrument for [`crate::preview_notes`]: the FM synth with its first voice,
     /// prepared at the renderer's rate.
-    pub fn preview_instrument(&self) -> Option<Box<dyn loopwerk_device_api::Device>> {
-        let mut device = loopwerk_device_registry::create("fm-synth")?;
+    pub fn preview_instrument(&self) -> Option<Box<dyn suhina_device_api::Device>> {
+        let mut device = suhina_device_registry::create("fm-synth")?;
         device.prepare(f64::from(self.updater.sample_rate)).ok()?;
         device.reset();
         Some(device)

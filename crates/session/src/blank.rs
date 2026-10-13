@@ -2,7 +2,7 @@
 //! main channel and eight empty scenes, so there is somewhere to put clips and devices before
 //! tracks can be added.
 
-use loopwerk_model::{
+use suhina_model::{
     Arrangement, ArrangementLane, Channel, ChannelId, ChannelRole, ContentKinds, Extensions, Launcher, LauncherColumn,
     Project, Scene, Slot, Track, TrackId, Transport,
 };

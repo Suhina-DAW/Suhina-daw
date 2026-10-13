@@ -54,7 +54,7 @@ pub enum DeviceLayout {
 /// Where a plug-in's editor opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorPlacement {
-    /// In a window of its own, owned by Loopwerk's: above it, and minimised with it.
+    /// In a window of its own, owned by Suhina's: above it, and minimised with it.
     #[default]
     Window,
     /// Inside the device panel, as part of the device chain (Windows and X11; elsewhere the
@@ -212,9 +212,9 @@ impl Default for Settings {
 
 impl Settings {
     /// The audio output these settings choose.
-    pub fn output_choice(&self) -> loopwerk_session::OutputChoice {
+    pub fn output_choice(&self) -> suhina_session::OutputChoice {
         let text = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_string());
-        loopwerk_session::OutputChoice {
+        suhina_session::OutputChoice {
             host: text(&self.audio_host),
             device: text(&self.audio_device),
             sample_rate: (self.audio_sample_rate > 0).then_some(self.audio_sample_rate),
@@ -224,7 +224,7 @@ impl Settings {
     }
 
     /// Keeps `choice` as the audio output.
-    pub fn set_output_choice(&mut self, choice: &loopwerk_session::OutputChoice) {
+    pub fn set_output_choice(&mut self, choice: &suhina_session::OutputChoice) {
         self.audio_host = choice.host.clone().unwrap_or_default();
         self.audio_device = choice.device.clone().unwrap_or_default();
         self.audio_sample_rate = choice.sample_rate.unwrap_or(0);
@@ -257,7 +257,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -368,7 +368,7 @@ impl Settings {
     }
 }
 
-use loopwerk_session::audio::{MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
+use suhina_session::audio::{MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
 
 /// Whether `id` can name a theme file: not empty and not a path.
 pub fn is_theme_id(id: &str) -> bool {
@@ -436,7 +436,7 @@ mod tests {
         let mut back = Settings::default();
         back.set_output_choice(&choice);
         assert_eq!(back.output_choice(), choice);
-        assert_eq!(Settings::default().output_choice(), loopwerk_session::OutputChoice::default());
+        assert_eq!(Settings::default().output_choice(), suhina_session::OutputChoice::default());
 
         let (settings, warnings) =
             Settings::from_text("audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\n");

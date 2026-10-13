@@ -19,8 +19,8 @@
 
 use std::time::Instant;
 
-use loopwerk_device_api::{Device, NoteEvent, ProcessContext, Role};
-use loopwerk_model::{DeviceKind, Project, TrackId};
+use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
+use suhina_model::{DeviceKind, Project, TrackId};
 
 use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, plugin_devices};
 
@@ -88,7 +88,7 @@ pub(crate) struct Chain {
 
 impl Chain {
     /// The chain for `track` at `sample_rate`, or `None` when its channel holds no device
-    /// Loopwerk can run (other DAWs' devices and plug-ins that are not installed pass the sound
+    /// Suhina can run (other DAWs' devices and plug-ins that are not installed pass the sound
     /// through). Plug-in devices take their processors from `plugins` (one without a processor
     /// yet gets a slot that waits for it). `post` is the track's gains. Allocates: call it off
     /// the audio thread.
@@ -136,7 +136,7 @@ impl Chain {
                 }
                 _ => continue,
             };
-            let Some(mut device) = loopwerk_device_registry::create(id) else { continue };
+            let Some(mut device) = suhina_device_registry::create(id) else { continue };
             if device.prepare(f64::from(sample_rate)).is_err() {
                 continue;
             }

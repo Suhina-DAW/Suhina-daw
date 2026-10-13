@@ -1,4 +1,4 @@
-//! The themes the user can pick from: those that come with Loopwerk and those read from theme
+//! The themes the user can pick from: those that come with Suhina and those read from theme
 //! files, and what Settings › Interface › Theme does with them. The app reads and writes the
 //! files; this keeps the list, says what to do with the files, and picks the colours to draw with.
 
@@ -94,7 +94,7 @@ impl Themes {
         self.entries.iter().find(|e| same_id(&e.id, id)).map(|e| &e.theme)
     }
 
-    /// The colours of the theme `id`, or Loopwerk Dark's when there is no such theme.
+    /// The colours of the theme `id`, or Suhina Dark's when there is no such theme.
     pub fn palette(&self, id: &str) -> Palette {
         self.get(id).map_or(Palette::DARK, |t| t.colors)
     }
@@ -104,7 +104,7 @@ impl Themes {
         let shown = self.entries.iter().find(|e| same_id(&e.id, current)).map_or(BUILT_IN, |e| e.id.as_str());
         let theme = self.get(shown).cloned().unwrap_or_default();
         ThemesView {
-            // The user's own themes first, then those that come with Loopwerk.
+            // The user's own themes first, then those that come with Suhina.
             list: self.entries[self.built_in..]
                 .iter()
                 .map(|e| (e.id.clone(), e.theme.name.clone(), false))
@@ -128,7 +128,7 @@ impl Themes {
                 let (id, copied) = if editable {
                     (self.real_id(current), false)
                 } else {
-                    let name = format!("{} (custom)", self.get(current).map_or("Loopwerk Dark", |t| &t.name));
+                    let name = format!("{} (custom)", self.get(current).map_or("Suhina Dark", |t| &t.name));
                     (self.copy(current, &name), true)
                 };
                 if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
@@ -154,7 +154,7 @@ impl Themes {
                 (!same_id(&new, current)).then_some(new)
             }
             ThemeRequest::Duplicate => {
-                let name = format!("{} copy", self.get(current).map_or("Loopwerk Dark", |t| t.name.as_str()));
+                let name = format!("{} copy", self.get(current).map_or("Suhina Dark", |t| t.name.as_str()));
                 let id = self.copy(current, &name);
                 self.actions.push(Pending::Save(id.clone()));
                 Some(id)
@@ -264,11 +264,11 @@ mod tests {
     #[test]
     fn the_built_in_themes_come_first_and_stay() {
         let mut themes = Themes::default();
-        let fake = ThemeEntry { id: "Loopwerk-Dark".into(), theme: night().theme };
+        let fake = ThemeEntry { id: "Suhina-Dark".into(), theme: night().theme };
         themes.set(vec![night(), fake.clone(), night()], Some("themes".into()));
         let view = themes.view("night");
         assert_eq!(view.list.first(), Some(&("night".into(), "Night".into(), false)));
-        assert_eq!(view.list.get(1), Some(&(BUILT_IN.into(), "Loopwerk Dark".into(), true)));
+        assert_eq!(view.list.get(1), Some(&(BUILT_IN.into(), "Suhina Dark".into(), true)));
         assert!(view.list.iter().any(|(id, _, built_in)| id == "nord" && *built_in));
         assert_eq!(view.list.len(), theme::built_in_themes().len() + 1);
         assert_eq!(view.colors, night().theme.colors);
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_theme_draws_with_loopwerk_dark() {
+    fn a_missing_theme_draws_with_suhina_dark() {
         let themes = Themes::default();
         assert_eq!(themes.palette("gone"), Palette::DARK);
         assert_eq!(themes.view("gone").current, BUILT_IN);
@@ -362,7 +362,7 @@ mod tests {
         let themes = Themes::default();
         assert_eq!(themes.free_id("  Night Blue!! "), "night-blue");
         assert_eq!(themes.free_id("../.."), "theme");
-        assert_eq!(themes.free_id("Loopwerk Dark"), "loopwerk-dark-2");
+        assert_eq!(themes.free_id("Suhina Dark"), "suhina-dark-2");
         assert_eq!(slug("Ääni Teema"), "ääni-teema");
     }
 }

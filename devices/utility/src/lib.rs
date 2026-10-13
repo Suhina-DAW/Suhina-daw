@@ -8,11 +8,11 @@
 //! of them does not click. With every parameter at its default the output equals the input
 //! exactly.
 
-use loopwerk_device_api::{
+use suhina_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
-use loopwerk_dsp::{DcBlocker, LinkwitzRiley, Smoother};
+use suhina_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
+use suhina_dsp::{DcBlocker, LinkwitzRiley, Smoother};
 
 /// How long a parameter change takes to arrive.
 pub const RAMP_SECONDS: f64 = 0.02;

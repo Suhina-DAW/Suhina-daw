@@ -25,10 +25,10 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
-use loopwerk_engine::model::Project;
-use loopwerk_engine::{AudioPool, Controller, Plugins, Renderer};
-use loopwerk_session::Player;
-use loopwerk_session::audio::{
+use suhina_engine::model::Project;
+use suhina_engine::{AudioPool, Controller, Plugins, Renderer};
+use suhina_session::Player;
+use suhina_session::audio::{
     AudioSystem, HostInfo, LiveOutput, MAX_BUFFER_FRAMES, MIN_BUFFER_FRAMES, Opened, OutputChoice, OutputInfo,
 };
 
@@ -119,7 +119,7 @@ impl Progress {
 
 /// Keeps the calling thread at real-time priority while it lives: on Windows it joins MMCSS
 /// "Pro Audio" (time-critical scheduling and a fine timer), elsewhere the highest priority the
-/// system gives. `LOOPWERK_NO_REALTIME=1` leaves it at its normal priority, to compare.
+/// system gives. `SUHINA_NO_REALTIME=1` leaves it at its normal priority, to compare.
 pub(crate) struct RealTime {
     #[cfg(windows)]
     _mmcss: Option<audio_thread_priority::RtPriorityHandle>,
@@ -127,7 +127,7 @@ pub(crate) struct RealTime {
 
 impl RealTime {
     pub(crate) fn join(buffer_frames: usize, sample_rate: u32) -> Self {
-        if std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
+        if std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
             return Self {
                 #[cfg(windows)]
                 _mmcss: None,
@@ -179,10 +179,10 @@ pub(crate) fn measure_latency(queued_frames: usize, device: Duration, sample_rat
     ring.saturating_add(device)
 }
 
-/// The frames the engine renders per block: `LOOPWERK_ENGINE_BLOCK` (64 to 4096) when set, to
+/// The frames the engine renders per block: `SUHINA_ENGINE_BLOCK` (64 to 4096) when set, to
 /// try a size in tests; else the buffer size chosen, within 64 … 4096; else [`ENGINE_BLOCK`].
 pub fn engine_block(chosen: Option<u32>) -> usize {
-    let overridden = std::env::var("LOOPWERK_ENGINE_BLOCK").ok();
+    let overridden = std::env::var("SUHINA_ENGINE_BLOCK").ok();
     block_for(chosen, overridden.as_deref())
 }
 
@@ -473,7 +473,7 @@ impl Output {
         let stop = Arc::new(AtomicBool::new(false));
         let (stopping, watching, block) = (Arc::clone(&stop), Arc::clone(progress), self.block);
         let render = std::thread::Builder::new()
-            .name("loopwerk-render".into())
+            .name("suhina-render".into())
             .spawn(move || render_ahead(renderer, producer, block, &stopping, &watching))
             .map_err(|e| format!("could not start the render thread: {e}"))?;
         let _set = progress.render.set(render.thread().clone());
@@ -664,7 +664,7 @@ pub fn open_chosen(
     let (close, closed) = mpsc::channel::<()>();
     let (back_tx, back) = mpsc::channel();
     let thread = std::thread::Builder::new()
-        .name("loopwerk-audio".into())
+        .name("suhina-audio".into())
         .spawn(move || {
             let started = (|| {
                 let (output, device, producer, progress) = open_fitting(&choice)?;

@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 
 use egui::{Align2, Color32, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
-use loopwerk_library::find::{Found, Walked, rank_candidates, walk_for_names};
-use loopwerk_session::{ProjectId, Projects};
+use suhina_library::find::{Found, Walked, rank_candidates, walk_for_names};
+use suhina_session::{ProjectId, Projects};
 
 use crate::theme::{self, PAD, ROW};
 use crate::widgets;
@@ -163,7 +163,7 @@ impl MissingFiles {
         let walked = Arc::new(AtomicUsize::new(0));
         let (send, done) = channel();
         let (s, w, f) = (Arc::clone(&stop), Arc::clone(&walked), folder.clone());
-        let started = std::thread::Builder::new().name("loopwerk-find-files".into()).spawn(move || {
+        let started = std::thread::Builder::new().name("suhina-find-files".into()).spawn(move || {
             let _ = send.send(walk_for_names(&f, &names, &s, &w));
         });
         if started.is_ok() {
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn a_folder_walk_runs_in_the_background() {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        let dir = std::env::temp_dir().join(format!("loopwerk-missing-ui-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-missing-ui-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(dir.join("deep")).unwrap();
         std::fs::write(dir.join("deep").join("snare.wav"), b"x").unwrap();
         let mut missing = MissingFiles { rows: vec![row("snare.wav", "/old/snare.wav")], ..MissingFiles::default() };

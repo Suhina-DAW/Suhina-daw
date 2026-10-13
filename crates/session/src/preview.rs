@@ -3,9 +3,9 @@
 
 use std::path::Path;
 
-use loopwerk_media::info::{FileKind, kind_of};
-use loopwerk_model::TrackId;
 use serde_json::{Value, json};
+use suhina_media::info::{FileKind, kind_of};
+use suhina_model::TrackId;
 
 use crate::commands::track_at;
 use crate::files::absolute;
@@ -39,7 +39,7 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
             Ok(json!({ "path": path.display().to_string(), "kind": "sample", "seconds": seconds }))
         }
         Some(FileKind::Midi) => {
-            let midi = loopwerk_media::midi::read_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let midi = suhina_media::midi::read_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let bpm = midi.tempo_bpm.unwrap_or(120.0);
             let notes: Vec<(f64, f64, u8, f32)> = midi
                 .tracks
@@ -53,7 +53,7 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
             let rate = player.sample_rate();
             let controller = player.controller_mut();
             let fallback = controller.preview_instrument();
-            let prepared = loopwerk_engine::preview_notes(notes, bpm, rate, track, fallback);
+            let prepared = suhina_engine::preview_notes(notes, bpm, rate, track, fallback);
             let seconds = prepared.length as f64 / f64::from(rate.max(1));
             controller.preview_notes(prepared, gain).map_err(CommandError)?;
             Ok(json!({ "path": path.display().to_string(), "kind": "midi", "seconds": seconds, "bpm": bpm }))

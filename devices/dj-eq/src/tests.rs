@@ -1,4 +1,4 @@
-use loopwerk_device_api::conformance;
+use suhina_device_api::conformance;
 
 use super::*;
 

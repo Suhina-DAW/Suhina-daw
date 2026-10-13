@@ -1,17 +1,17 @@
 [package]
-name = "loopwerk-plugin-host"
+name = "suhina-plugin-host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "loopwerk-plugin-host"
+name = "suhina-plugin-host"
 path = "src/main.rs"
 
 [dependencies]
-loopwerk-ipc.workspace = true
-loopwerk-plugins.workspace = true
+suhina-ipc.workspace = true
+suhina-plugins.workspace = true
 interprocess = "2.4"  # 0BSD OR Apache-2.0
 clack-host = { version = "0.2", features = ["clack-plugin"] }  # MIT OR Apache-2.0
 # The test plug-in built into the host (`test:clap`).
@@ -35,9 +35,9 @@ libc = "0.2"  # MIT OR Apache-2.0
 
 [dev-dependencies]
 # Plug-ins in the engine's track chains, run through a session (tests/engine.rs).
-loopwerk-engine.workspace = true
-loopwerk-model.workspace = true
-loopwerk-session.workspace = true
+suhina-engine.workspace = true
+suhina-model.workspace = true
+suhina-session.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
