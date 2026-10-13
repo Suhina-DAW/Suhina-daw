@@ -208,6 +208,7 @@ pub struct Controller {
     pub(crate) updater: crate::swap::Updater,
     pub(crate) preview: crate::preview::PreviewSender,
     pub(crate) preview_monitor: Arc<crate::preview::PreviewMonitor>,
+    pub(crate) cpu_monitor: Arc<crate::cpu::CpuMonitor>,
 }
 
 impl Controller {
@@ -219,6 +220,12 @@ impl Controller {
 
     pub fn monitor(&self) -> &LauncherMonitor {
         &self.monitor
+    }
+
+    /// The audio thread's CPU load: the smoothed share of wall time it spends rendering, in
+    /// per mille (1000 is busy all of the time).
+    pub fn cpu_monitor(&self) -> &crate::cpu::CpuMonitor {
+        &self.cpu_monitor
     }
 }
 
@@ -630,12 +637,18 @@ impl Renderer {
             updater: self.updater(),
             preview: self.preview.sender(),
             preview_monitor: Arc::clone(&self.preview.monitor),
+            cpu_monitor: Arc::clone(&self.cpu.monitor),
         }
     }
 
     /// The launcher state, as other threads see it.
     pub fn monitor(&self) -> Arc<LauncherMonitor> {
         Arc::clone(&self.graph.launcher.monitor)
+    }
+
+    /// The audio thread's CPU load, as other threads see it.
+    pub fn cpu_monitor(&self) -> Arc<crate::cpu::CpuMonitor> {
+        Arc::clone(&self.cpu.monitor)
     }
 
     /// Applies one launch command now. Never allocates.

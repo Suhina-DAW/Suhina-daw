@@ -40,6 +40,7 @@ are changing (*Code and its documents*).
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
+| [Importing devices from Live Sets](spec/device-import.md) | spec | current | device import, importing devices, device mapping, placeholder device, Operator, Live device to Suhina device, which device imports into what, golden renders of imported sets | How a device stored in a Live Set is brought into Suhina: the three import levels, how each Suhina device is learnt and mapped, and which Live device maps to which Suhina device |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Suhina's own project file (.locr), field by field, with what a reader accepts |
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
@@ -65,7 +66,7 @@ Change this code, and check these documents.
 | `apps/suhina/src/main.rs` | [Architecture](architecture.md) |
 | `apps/suhina/src/recent.rs` | [0010: Suhina's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
-| `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md) |
+| `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md), [Importing devices from Live Sets](spec/device-import.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/src/vst2.rs` | [Live Set (`.als`) format](spec/als-format.md) |
 | `crates/als/tests/corpus.rs` | [Making the `.als` test corpus](spec/als-corpus.md) |
@@ -78,6 +79,7 @@ Change this code, and check these documents.
 | `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/audio.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/engine/src/cpu.rs` | [Architecture](architecture.md) |
 | `crates/engine/src/launcher.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/plugin.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
@@ -114,7 +116,7 @@ Change this code, and check these documents.
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
-| `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/app.rs` | [Architecture](architecture.md), [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/browser.rs` | [Browser](spec/browser.md) |
 | `crates/ui/src/browser_view.rs` | [Browser](spec/browser.md) |

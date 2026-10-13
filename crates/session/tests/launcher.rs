@@ -394,3 +394,15 @@ fn bad_positions_and_stop_returns_are_errors() {
     // The largest position is accepted.
     run(&mut session, "transport.setPosition", json!({ "beats": 120_000 })).unwrap();
 }
+
+#[test]
+fn launcher_state_reports_the_cpu_load() {
+    let (mut session, mut renderer) = playing();
+    advance(&mut renderer, 256 * 4);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    let cpu = state["cpu"].as_f64().unwrap();
+    assert!((0.0..=100.0).contains(&cpu), "{cpu}");
+    // The monitor the player reads is the one the renderer writes.
+    advance(&mut renderer, 2);
+    assert_eq!(session.player().unwrap().cpu_monitor().load_milli(), renderer.cpu_monitor().load_milli());
+}

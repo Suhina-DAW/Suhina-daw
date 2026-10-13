@@ -77,6 +77,8 @@ jobs:
             echo "::error::Live files are not committed; test sets stay in corpus/ (see CONTRIBUTING.md)."
             exit 1
           fi
+      - name: No old project name (AGENTS.md › Crate names)
+        run: python3 scripts/rename_suhina.py --check
       - name: Links between repository files resolve
         uses: lycheeverse/lychee-action@v2
         with:

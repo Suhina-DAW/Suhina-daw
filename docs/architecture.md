@@ -9,6 +9,7 @@ covers:
   - crates/*/Cargo.toml
   - devices/*/Cargo.toml
   - crates/engine/src/lib.rs
+  - crates/engine/src/cpu.rs
   - crates/session/src/lib.rs
   - apps/suhina-cli/src/play.rs
   - crates/output/src/lib.rs
@@ -144,8 +145,11 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   go of back, to be freed on the main thread (ADR 0011).
 - **From the audio thread:** a `LauncherMonitor` of atomics (running, beat, tempo, what each
   column plays and has queued, the playhead and the play start marker, stretch underruns), read by the `launcher.state`
-  command and by `Controller::update` to pick the frame a new graph takes over at; and a
-  `PreviewMonitor` (whether a preview plays, and where), which `launcher.state` reports too.
+  command and by `Controller::update` to pick the frame a new graph takes over at; a
+  `PreviewMonitor` (whether a preview plays, and where) and a `CpuMonitor` (the audio
+  thread's share of wall time spent inside the render call, smoothed over 0.2 s windows
+  and kept in per mille; nothing while offline renders run flat out), both of which
+  `launcher.state` reports too — the control bar draws the CPU load from it.
 
 ## Commands
 
