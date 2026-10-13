@@ -1384,4 +1384,31 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
     assert!(!unsaved(&harness));
     assert!(!harness.state().unsaved_prompt_open());
     let _clean = std::fs::remove_dir_all(&dir);
+
+/// Renders the Arrangement view with an audio clip, linear and in decibels, to
+/// `target/ui-snapshots/arrangement-waveform*.png`, to look at the clip waveform in the window:
+/// `cargo test -p suhina-ui --test window -- --ignored render_the_clip_waveform`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_clip_waveform() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    for db in [false, true] {
+        let mut app = audio_app();
+        app.set_browser_open(false);
+        let mut harness = Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        theme::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        let mut settings = harness.state().settings().clone();
+        settings.waveform_db = db;
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        let name = if db { "arrangement-waveform-db.png" } else { "arrangement-waveform.png" };
+        image.save(folder.join(name)).unwrap_or_else(|e| panic!("{e}"));
+    }
 }

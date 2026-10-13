@@ -85,6 +85,15 @@ struct Answer {
     info: FileInfo,
 }
 
+/// Lets go of a file's decoded audio, keeping its waveform (without the samples it would keep
+/// alive).
+fn forget_audio(info: &mut FileInfo) {
+    info.data = None;
+    if let Some(peaks) = info.peaks.as_mut().filter(|p| p.has_samples()) {
+        *peaks = Arc::new(peaks.without_samples());
+    }
+}
+
 /// Files whose headers are kept; the oldest are forgotten first.
 const MAX_INFO: usize = 4096;
 /// Samples longer than this get no tempo detection in the browser.
@@ -152,8 +161,9 @@ fn read_info(path: &Path, whole: bool) -> FileInfo {
                     Ok(data) => {
                         let seconds = data.frames() as f64 / f64::from(data.sample_rate.max(1));
                         info.seconds = Some(seconds);
+                        let data = Arc::new(data);
                         info.peaks = Some(Arc::new(peaks(&data)));
-                        info.data = Some(Arc::new(data));
+                        info.data = Some(data);
                         info.error = None;
                     }
                     Err(e) => info.error = Some(e),
@@ -583,7 +593,7 @@ impl BrowserState {
             let waiting = self.pending_preview.as_ref().is_some_and(|(p, _)| *p == answer.path);
             let mut info = answer.info;
             if !selected && !waiting {
-                info.data = None;
+                forget_audio(&mut info);
             }
             match self.info.get_mut(&answer.path) {
                 Some(known) if !answer.whole => {
@@ -604,9 +614,15 @@ impl BrowserState {
         let selected: HashSet<PathBuf> = self.selected.iter().filter_map(BrowserItem::path).collect();
         for (path, info) in &mut self.info {
             if !selected.contains(path) {
-                info.data = None;
+                forget_audio(info);
             }
         }
+    }
+
+    /// Asks for `path`'s waveform (decoding it in the background), for the sample map's hover;
+    /// `None` until it is read.
+    pub fn waveform(&mut self, path: &Path) -> Option<Arc<Peaks>> {
+        self.info(path, true).and_then(|i| i.peaks.clone())
     }
 
     /// Asks for `path` to preview from `from` seconds once it is decoded.
