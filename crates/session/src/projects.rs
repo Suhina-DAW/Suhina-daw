@@ -308,13 +308,14 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects = PROJECT_COMMANDS
-        .iter()
-        .chain(plugin_commands())
-        .chain(crate::library_commands())
-        .chain(crate::sound_map_commands())
-        .map(CommandSpec::describe);
+    let projects = projects_commands().map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
+}
+
+/// The commands that run on [`Projects`] rather than on one project's session, in the order
+/// [`all_commands`] and [`commands_markdown`] list them.
+fn projects_commands() -> impl Iterator<Item = &'static CommandSpec<Projects>> {
+    PROJECT_COMMANDS.iter().chain(plugin_commands()).chain(crate::library_commands()).chain(crate::sound_map_commands())
 }
 
 /// `docs/commands.md`: every command in the order of [`all_commands`], as `suhina-cli commands
@@ -329,11 +330,8 @@ pub fn commands_markdown() -> String {
          | Command | Kind | What it does | Parameters |\n\
          |---|---|---|---|\n",
     );
-    let rows = PROJECT_COMMANDS
-        .iter()
-        .chain(plugin_commands())
-        .map(CommandSpec::markdown_row)
-        .chain(commands().iter().map(CommandSpec::markdown_row));
+    let rows =
+        projects_commands().map(CommandSpec::markdown_row).chain(commands().iter().map(CommandSpec::markdown_row));
     for row in rows {
         out.push_str(&row);
         out.push('\n');
