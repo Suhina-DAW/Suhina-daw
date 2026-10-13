@@ -10,7 +10,8 @@ use suhina_soundmap::kinds::Kind;
 pub(crate) const DENSITY_ABOVE: usize = 20_000;
 /// A density cell's side, in screen pixels.
 pub(crate) const BIN: f32 = 3.0;
-/// The map is divided into this many cells a side to find clusters.
+/// The map is divided into at most this many cells a side to find clusters; fewer for fewer
+/// items (half the square root of the count, at least 4), so a cluster's cells touch.
 const CLUSTER_CELLS: usize = 48;
 /// A cluster needs this many items for a label (four times as many for Other)…
 const LABEL_MIN_ITEMS: usize = 8;
@@ -29,7 +30,7 @@ fn kind_index(kind: Kind) -> usize {
 }
 
 /// A group of map cells in which one kind holds a third or more of the points, joined across
-/// sides; its label goes at `spot`.
+/// sides and corners; its label goes at `spot`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Cluster {
     pub kind: Kind,
@@ -38,30 +39,30 @@ pub(crate) struct Cluster {
     pub count: usize,
 }
 
-/// The map cell a position (0–1) falls in.
-fn cell_of(p: [f32; 2]) -> Option<usize> {
-    if !(p[0].is_finite() && p[1].is_finite()) {
+/// The cell of a map divided into `side` by `side` cells a position (0–1) falls in.
+fn cell_of(p: [f32; 2], side: usize) -> Option<usize> {
+    if !(p[0].is_finite() && p[1].is_finite()) || side == 0 {
         return None;
     }
-    let side = CLUSTER_CELLS as f32;
-    let column = ((p[0] * side).floor().max(0.0) as usize).min(CLUSTER_CELLS - 1);
-    let row = ((p[1] * side).floor().max(0.0) as usize).min(CLUSTER_CELLS - 1);
-    Some(row * CLUSTER_CELLS + column)
+    let column = ((p[0] * side as f32).floor().max(0.0) as usize).min(side - 1);
+    let row = ((p[1] * side as f32).floor().max(0.0) as usize).min(side - 1);
+    Some(row * side + column)
 }
 
 /// The clusters of the items (`position`, `kind`) that get a label, largest first. Three passes
 /// over the items; call it when the points change, not every frame.
 pub(crate) fn clusters(items: &[([f32; 2], Kind)]) -> Vec<Cluster> {
-    let cells = CLUSTER_CELLS * CLUSTER_CELLS;
+    let side = (((items.len() as f32).sqrt() / 2.0) as usize).clamp(4, CLUSTER_CELLS);
+    let cells = side * side;
     let mut counts = vec![[0u32; KINDS]; cells];
     for (p, kind) in items {
-        if let Some(cell) = cell_of(*p)
+        if let Some(cell) = cell_of(*p, side)
             && let Some(slot) = counts.get_mut(cell).and_then(|c| c.get_mut(kind_index(*kind)))
         {
             *slot += 1;
         }
     }
-    // Per kind, the cells it holds a third of, joined across sides into components.
+    // Per kind, the cells it holds a third of, joined across sides and corners into components.
     let mut component = vec![[u32::MAX; KINDS]; cells];
     let mut found: Vec<(Kind, usize)> = Vec::new();
     for (k, kind) in Kind::ALL.iter().enumerate() {
@@ -86,18 +87,14 @@ pub(crate) fn clusters(items: &[([f32; 2], Kind)]) -> Vec<Cluster> {
                 }
                 *slot = id;
                 size += counts.get(cell).and_then(|c| c.get(k)).copied().unwrap_or(0) as usize;
-                let (row, column) = (cell / CLUSTER_CELLS, cell % CLUSTER_CELLS);
-                if column > 0 {
-                    stack.push(cell - 1);
-                }
-                if column + 1 < CLUSTER_CELLS {
-                    stack.push(cell + 1);
-                }
-                if row > 0 {
-                    stack.push(cell - CLUSTER_CELLS);
-                }
-                if row + 1 < CLUSTER_CELLS {
-                    stack.push(cell + CLUSTER_CELLS);
+                let (row, column) = (cell / side, cell % side);
+                for (dr, dc) in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)] {
+                    let (Some(r), Some(c)) = (row.checked_add_signed(dr), column.checked_add_signed(dc)) else {
+                        continue;
+                    };
+                    if r < side && c < side {
+                        stack.push(r * side + c);
+                    }
                 }
             }
             found.push((*kind, size));
@@ -113,7 +110,7 @@ pub(crate) fn clusters(items: &[([f32; 2], Kind)]) -> Vec<Cluster> {
         .collect();
     // The centre of each kept cluster, then the item nearest to it.
     let component_of = |p: [f32; 2], kind: Kind| -> Option<usize> {
-        let id = *component.get(cell_of(p)?)?.get(kind_index(kind))?;
+        let id = *component.get(cell_of(p, side)?)?.get(kind_index(kind))?;
         let id = usize::try_from(id).ok()?;
         keep.get(id).copied().unwrap_or(false).then_some(id)
     };
@@ -146,7 +143,7 @@ pub(crate) fn clusters(items: &[([f32; 2], Kind)]) -> Vec<Cluster> {
         .zip(&nearest)
         .zip(&keep)
         .filter(|(_, keep)| **keep)
-        .filter_map(|(((kind, count), nearest), _)| Some(Cluster { kind: *kind, spot: nearest?.0, count: *count }))
+        .filter_map(|(((kind, count), nearest), _)| Some(Cluster { kind: *kind, spot: (*nearest)?.0, count: *count }))
         .collect();
     out.sort_by(|a, b| b.count.cmp(&a.count).then(kind_index(a.kind).cmp(&kind_index(b.kind))));
     out
@@ -167,10 +164,12 @@ pub(crate) fn place_labels(labels: &[(Pos2, Vec2)], area: Rect) -> Vec<Option<Re
     labels
         .iter()
         .map(|(at, size)| {
-            let tries = [Vec2::ZERO, Vec2::new(0.0, -size.y), Vec2::new(0.0, size.y)];
-            let spot = tries.iter().map(|offset| Rect::from_center_size(*at + *offset, *size)).find(|r| {
-                area.contains_rect(*r) && placed.iter().all(|p| !p.expand(LABEL_GAP).intersects(*r))
-            });
+            let shift = size.y + LABEL_GAP + 1.0;
+            let tries = [Vec2::ZERO, Vec2::new(0.0, -shift), Vec2::new(0.0, shift)];
+            let spot = tries
+                .iter()
+                .map(|offset| Rect::from_center_size(*at + *offset, *size))
+                .find(|r| area.contains_rect(*r) && placed.iter().all(|p| !p.expand(LABEL_GAP).intersects(*r)));
             if let Some(r) = spot {
                 placed.push(r);
             }
@@ -244,9 +243,9 @@ pub(crate) fn density(screen: &[Pos2], colour: impl Fn(usize) -> Option<Color32>
 /// neighbours are drawn translucent.
 pub(crate) fn dot_style(visible: usize, area: f32) -> (f32, f32) {
     let room = (area.max(1.0) / visible.max(1) as f32).sqrt();
-    let radius = (room * 0.35).clamp(1.5, 6.0);
+    let radius = (room * 0.15).clamp(1.5, 6.0);
     let coverage = visible as f32 * std::f32::consts::PI * radius * radius / area.max(1.0);
-    let opacity = (1.6 / coverage.max(1e-6)).clamp(0.35, 1.0);
+    let opacity = (0.5 / coverage.max(1e-6)).clamp(0.35, 1.0);
     (radius, opacity)
 }
 
@@ -349,9 +348,10 @@ mod tests {
     fn dots_shrink_and_fade_as_they_crowd() {
         let (few, few_opacity) = dot_style(100, 400.0 * 300.0);
         let (many, many_opacity) = dot_style(20_000, 400.0 * 300.0);
-        assert_eq!((few, few_opacity), (6.0, 1.0));
+        assert!(few > 4.0 && few <= 6.0 && few_opacity == 1.0, "{few} {few_opacity}");
         assert!(many < few && many >= 1.5);
-        assert!(many_opacity < 1.0 && many_opacity >= 0.35);
-        assert_eq!(dot_style(0, 0.0).0, 6.0);
+        assert!((0.35..1.0).contains(&many_opacity));
+        let (radius, opacity) = dot_style(0, 0.0);
+        assert!((1.5..=6.0).contains(&radius) && (0.35..=1.0).contains(&opacity));
     }
 }

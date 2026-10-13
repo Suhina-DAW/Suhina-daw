@@ -524,15 +524,12 @@ impl App {
         self.saved_path.take()
     }
 
-    /// Saves the active project: to its own `.locr` file, or, the first time and when `ask`, to a
-    /// name and folder the user gives.
+    /// Saves the active project: to its own project file (`.suhina`, or the `.locr` it was
+    /// opened from), or, the first time and when `ask`, to a name and folder the user gives.
     fn save_active(&mut self, ask: bool) {
         let Some(id) = self.projects.active() else { return };
         let Some(session) = self.projects.get(id) else { return };
-        let own_file = session
-            .source()
-            .filter(|s| s.extension().is_some_and(|e| e.eq_ignore_ascii_case("locr")))
-            .map(Path::to_path_buf);
+        let own_file = session.source().filter(|s| suhina_session::is_project_file(s)).map(Path::to_path_buf);
         match own_file {
             Some(path) if !ask => self.save_to(&path, false),
             own => {
@@ -750,6 +747,8 @@ impl App {
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
+        let scale = if self.settings.waveform_db { crate::waveform::Scale::Db } else { crate::waveform::Scale::Linear };
+        crate::waveform::set_scale(ui.ctx(), scale);
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
@@ -1404,11 +1403,11 @@ impl App {
                 }
             } else if is(&path, "json") || is(&path, "zip") {
                 self.themes.import(path);
-            } else if (is(&path, "als") || is(&path, "locr")) && !opened {
+            } else if (is(&path, "als") || suhina_session::is_project_file(&path)) && !opened {
                 opened = true;
                 self.request_open(path);
             } else {
-                let what = "is not a project (.locr), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
+                let what = "is not a project (.suhina), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
                 self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
@@ -1808,8 +1807,9 @@ impl App {
                             suhina_media::decode_file(&path).map(|d| vec![(None, d)]).unwrap_or_default()
                         };
                     decoded.into_iter().map(move |(stream, data)| {
+                        let data = std::sync::Arc::new(data);
                         let peaks = crate::waveform::peaks(&data);
-                        (path.clone(), stream, std::sync::Arc::new(data), peaks)
+                        (path.clone(), stream, data, peaks)
                     })
                 })
                 .collect();
@@ -2147,7 +2147,10 @@ fn drop_overlay(ui: &Ui, area: Rect) {
     };
     let (project, themes) = ui.input(|i| {
         let files = &i.raw.hovered_files;
-        (files.iter().any(|f| is(f, "als")), files.iter().any(|f| is(f, "json") || is(f, "zip")))
+        (
+            files.iter().any(|f| is(f, "als") || f.path.as_deref().is_some_and(suhina_session::is_project_file)),
+            files.iter().any(|f| is(f, "json") || is(f, "zip")),
+        )
     });
     let shown = motion::toward(ui.ctx(), Id::new("drop-overlay"), project || themes, motion::HOVER);
     if shown <= 0.0 {

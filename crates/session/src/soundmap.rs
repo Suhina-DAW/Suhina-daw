@@ -42,6 +42,7 @@ static SOUND_MAP_COMMANDS: &[CommandSpec<Projects>] = &[
             optional("text", ParamType::Text, "words a matching sample's name or path holds"),
             optional("tags", ParamType::Texts, "a matching sample carries any of these tags"),
             optional("grid", ParamType::Bool, "also give each sample's cell in a grid (column, row)"),
+            optional("aspect", ParamType::Number, "the grid's width over its height, 0.1 to 10 (default 1, square)"),
             optional("maxSeconds", ParamType::Number, "leave out samples longer than this, 1 to 60 (default 10)"),
         ],
         kind: CommandKind::Library,
@@ -261,8 +262,14 @@ fn layout(projects: &mut Projects, params: &Value) -> Result<Value, CommandError
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or("grid must be true or false")?,
     };
+    let aspect = match params.get("aspect") {
+        None | Some(Value::Null) => 1.0,
+        Some(v) => {
+            v.as_f64().filter(|a| (0.1..=10.0).contains(a)).ok_or("aspect must be a number from 0.1 to 10")? as f32
+        }
+    };
     let map = map_of(projects, place, max_seconds(params)?)?;
-    let cells = grid.then(|| map.grid(1.0));
+    let cells = grid.then(|| map.grid(aspect));
     let mut items = Vec::with_capacity(map.points.len());
     for (i, point) in map.points.iter().enumerate() {
         let mut item = json!({

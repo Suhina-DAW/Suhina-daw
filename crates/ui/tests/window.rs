@@ -531,7 +531,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
     assert!(!harness.state().project_dialog_open());
 
-    // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
+    // Ctrl+S on a project without a .suhina file asks for a name, in the projects folder.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
     harness.run();
     harness.get_by_label("Name").click();
@@ -541,7 +541,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    let saved = dir.join("Projects").join("Night drive.locr");
+    let saved = dir.join("Projects").join("Night drive.suhina");
     assert!(saved.is_file(), "{:?}", harness.state().status());
     assert_eq!(harness.state_mut().take_saved_path(), Some(saved.clone()));
     let session = harness.state().session();
@@ -555,7 +555,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    assert!(dir.join("Templates").join("Night drive.locr").is_file());
+    assert!(dir.join("Templates").join("Night drive.suhina").is_file());
     assert_eq!(harness.state().session().and_then(|s| s.source()), Some(saved.as_path()));
     let _clean = std::fs::remove_dir_all(&dir);
 }
@@ -1118,8 +1118,8 @@ fn render_the_session_window() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     harness.state_mut().set_project_lists(
-        vec!["C:/Music/Suhina/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
-        vec!["C:/Music/Suhina/Templates/Beat starter.locr".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
+        vec!["C:/Music/Suhina/Projects/Night drive.suhina".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Suhina/Templates/Beat starter.suhina".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
     );
     harness.state_mut().open_project_dialog(false);
     harness.run();
@@ -1314,4 +1314,32 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     let mut harness = window(app);
     harness.run();
     assert!(harness.query_by_label("CPU load").is_none());
+}
+
+/// Renders the Arrangement view with an audio clip, linear and in decibels, to
+/// `target/ui-snapshots/arrangement-waveform*.png`, to look at the clip waveform in the window:
+/// `cargo test -p suhina-ui --test window -- --ignored render_the_clip_waveform`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_clip_waveform() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    for db in [false, true] {
+        let mut app = audio_app();
+        app.set_browser_open(false);
+        let mut harness = Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        theme::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        let mut settings = harness.state().settings().clone();
+        settings.waveform_db = db;
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        let name = if db { "arrangement-waveform-db.png" } else { "arrangement-waveform.png" };
+        image.save(folder.join(name)).unwrap_or_else(|e| panic!("{e}"));
+    }
 }

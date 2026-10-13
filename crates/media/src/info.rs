@@ -49,12 +49,15 @@ pub fn kind_of(path: &Path) -> Option<FileKind> {
     if crate::stems::is_stems_path(path) {
         return Some(FileKind::Stems);
     }
+    if suhina_project_file::is_project_file(path) {
+        return Some(FileKind::Project);
+    }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     match extension.as_str() {
         "wav" | "aif" | "aiff" | "flac" | "mp3" | "ogg" | "oga" => Some(FileKind::Sample),
         "mid" | "midi" => Some(FileKind::Midi),
         "syx" => Some(FileKind::Preset),
-        "locr" | "als" => Some(FileKind::Project),
+        "als" => Some(FileKind::Project),
         _ => None,
     }
 }
@@ -381,7 +384,9 @@ mod tests {
         assert_eq!(kind_of(Path::new("x.aiff")), Some(FileKind::Sample));
         assert_eq!(kind_of(Path::new("groove.MID")), Some(FileKind::Midi));
         assert_eq!(kind_of(Path::new("bank.syx")), Some(FileKind::Preset));
-        assert_eq!(kind_of(Path::new("song.locr")), Some(FileKind::Project));
+        assert_eq!(kind_of(Path::new("song.suhina")), Some(FileKind::Project));
+        assert_eq!(kind_of(Path::new("old song.LOCR")), Some(FileKind::Project));
+        assert_eq!(kind_of(Path::new("set.als")), Some(FileKind::Project));
         assert_eq!(kind_of(Path::new("readme.txt")), None);
         assert_eq!(kind_of(Path::new("noextension")), None);
         for kind in [FileKind::Sample, FileKind::Midi, FileKind::Preset, FileKind::Project] {

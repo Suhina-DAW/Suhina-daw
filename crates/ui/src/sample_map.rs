@@ -4,9 +4,7 @@
 
 use std::collections::HashSet;
 
-use egui::{
-    Align2, Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
-};
+use egui::{Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
 use suhina_soundmap::grid::Grid;
 use suhina_soundmap::kinds::Kind;
 
@@ -16,6 +14,10 @@ use crate::theme;
 /// How long the pointer rests on a point before it is previewed, so a fast sweep does not play
 /// everything it crosses.
 pub const HOVER_PREVIEW_SECONDS: f64 = 0.040;
+/// How long the pointer rests on a point before its tooltip reads the file for a waveform.
+pub const HOVER_WAVEFORM_SECONDS: f64 = 0.15;
+/// The size of the waveform in a point's tooltip.
+const TOOLTIP_WAVE: Vec2 = Vec2::new(220.0, 36.0);
 /// How near (in points of the screen) the pointer must be to a point to be over it.
 const HIT_RADIUS: f32 = 7.0;
 const MIN_ZOOM: f32 = 1.0;
@@ -108,18 +110,24 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
+    pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
     /// Counts [`MapView::points_changed`], so what is worked out from the points is kept until
     /// they change.
     revision: u64,
     cache: Cache,
 }
 
+/// The points the cache was worked out for: [`MapView::points_changed`]'s count, their number and
+/// address, the layout and the view's aspect (the grid's positions follow it).
+type PointsKey = (u64, usize, usize, Layout, u32);
+
 /// What the view works out from the points when they change, not every frame
 /// (docs/spec/sample-map.md › Many items).
 #[derive(Clone, Default)]
 struct Cache {
-    /// The points it was worked out for: the revision, their number and address, the layout.
-    key: Option<(u64, usize, usize, Layout)>,
+    /// The points it was worked out for.
+    key: Option<PointsKey>,
     /// Items per kind, for the legend, in the order of [`Kind::ALL`].
     counts: Vec<(Kind, usize)>,
     /// The clusters that get a label, largest first.
@@ -142,7 +150,7 @@ impl std::fmt::Debug for Cache {
 /// Everything the density raster depends on; it is drawn again only when one of these changes.
 #[derive(Debug, Clone, PartialEq)]
 struct DensityKey {
-    points: Option<(u64, usize, usize, Layout)>,
+    points: Option<PointsKey>,
     rect: Rect,
     scale: f32,
     centre: [f32; 2],
@@ -166,6 +174,7 @@ impl Default for MapView {
             area: Rect::NOTHING,
             revision: 0,
             cache: Cache::default(),
+            hover_waveform: None,
         }
     }
 }
@@ -178,8 +187,8 @@ impl MapView {
     }
 
     /// Works out the counts and clusters again when the points changed.
-    fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]]) {
-        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout));
+    fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]], aspect: f32) {
+        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect.to_bits()));
         if self.cache.key == key {
             return;
         }
@@ -194,6 +203,11 @@ impl MapView {
         self.cache = Cache { key, counts, clusters: crowd::clusters(&items), density: None };
     }
 
+    /// The width over the height of where the points were drawn last frame; 1 before the first.
+    pub fn aspect(&self) -> f32 {
+        aspect_of(self.area)
+    }
+
     /// Shows the answer to [`MapEvent::Similar`]: rings these items and lists them at the side.
     pub fn show_similar(&mut self, of: usize, items: Vec<usize>) {
         self.similar = Some((of, items));
@@ -201,6 +215,11 @@ impl MapView {
 
     pub fn similar(&self) -> Option<&(usize, Vec<usize>)> {
         self.similar.as_ref()
+    }
+
+    /// The point the pointer has rested on for [`HOVER_WAVEFORM_SECONDS`] by `now`.
+    pub fn resting(&self, now: f64) -> Option<usize> {
+        self.hovered.filter(|(_, since)| now - since >= HOVER_WAVEFORM_SECONDS).map(|(i, _)| i)
     }
 
     /// Fits all points in view.
@@ -253,15 +272,26 @@ impl Transform {
     }
 }
 
-/// Where each point is drawn: its cloud position, or the centre of its grid cell.
-fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>) -> Vec<[f32; 2]> {
+/// The width over the height of `rect`; 1 when it has no size.
+fn aspect_of(rect: Rect) -> f32 {
+    let aspect = rect.width() / rect.height();
+    if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
+}
+
+/// Where each point is drawn: its cloud position, or the centre of its grid cell. The grid
+/// fills a box of the view's `aspect` around the map's middle (the view shows 1 across its
+/// shorter side), with square cells.
+fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f32) -> Vec<[f32; 2]> {
     match (layout, grid) {
         (Layout::Grid, Some(grid)) if grid.cells.len() == points.len() => {
-            let side = grid.columns.max(grid.rows).max(1) as f32;
-            let offset = [(side - grid.columns as f32) / 2.0, (side - grid.rows as f32) / 2.0];
+            let (width, height) = if aspect >= 1.0 { (aspect, 1.0) } else { (1.0, 1.0 / aspect) };
+            let (columns, rows) = (grid.columns.max(1) as f32, grid.rows.max(1) as f32);
+            let cell = (width / columns).min(height / rows);
             grid.cells
                 .iter()
-                .map(|(c, r)| [(*c as f32 + 0.5 + offset[0]) / side, (*r as f32 + 0.5 + offset[1]) / side])
+                .map(|(c, r)| {
+                    [0.5 + (*c as f32 + 0.5 - columns / 2.0) * cell, 0.5 + (*r as f32 + 0.5 - rows / 2.0) * cell]
+                })
                 .collect()
         }
         _ => points.iter().map(|p| p.position).collect(),
@@ -344,8 +374,9 @@ pub fn show(
     });
 
     top_bar(ui, top, view, status, events);
-    let positions = positions(points, view.layout, grid);
-    view.refresh(points, &positions);
+    let aspect = aspect_of(area);
+    let positions = positions(points, view.layout, grid, aspect);
+    view.refresh(points, &positions, aspect);
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
@@ -571,7 +602,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     }
 
     draw_points(&painter, view, points, &screen, grid, transform, under);
-    draw_labels(&painter, view, points, positions, transform);
+    draw_labels(&painter, view, transform);
 
     if let Some(point) = under.and_then(|i| points.get(i)) {
         let kind =
@@ -581,6 +612,15 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
             ui.label(egui::RichText::new(kind).color(theme::text_secondary()));
             if !point.detail.is_empty() {
                 ui.label(egui::RichText::new(&point.detail).color(theme::text_secondary()));
+            }
+            if let Some((_, peaks)) = view.hover_waveform.as_ref().filter(|(i, _)| Some(*i) == under) {
+                let (rect, _) = ui.allocate_exact_size(TOOLTIP_WAVE, Sense::hover());
+                let seconds = peaks.frames as f64 / f64::from(peaks.sample_rate.max(1));
+                let count = rect.width() as usize;
+                let columns =
+                    crate::waveform::steady_columns(rect.left(), count, 0.0, seconds / count.max(1) as f64, 1.0);
+                let shape = crate::waveform::geometry(peaks, rect, &columns, crate::waveform::scale(ui.ctx()));
+                crate::waveform::paint(ui.painter(), &shape, crate::waveform::Colors::from(theme::text_secondary()));
             }
         });
     }
@@ -594,28 +634,65 @@ fn cell_size(view: &MapView, grid: Option<&Grid>, transform: Transform) -> f32 {
     }
 }
 
+/// The points: one dot each, or the density raster with the points that must be seen one by one
+/// drawn on top when too many are in view (docs/spec/sample-map.md › Many items).
 fn draw_points(
     painter: &egui::Painter,
-    view: &MapView,
+    view: &mut MapView,
     points: &[MapPoint],
     screen: &[Pos2],
     grid: Option<&Grid>,
     transform: Transform,
     under: Option<usize>,
 ) {
-    let visible = painter.clip_rect().expand(8.0);
+    let area = painter.clip_rect();
+    let visible = area.expand(8.0);
     let cell = cell_size(view, grid, transform);
-    let radius = (2.0 * view.zoom.sqrt()).clamp(2.0, 6.0);
+    let in_view = screen.iter().filter(|p| area.contains(**p)).count();
+    let crowded = if cell > 0.0 { cell < crowd::BIN } else { in_view > crowd::DENSITY_ABOVE };
+    let legend = view.legend.clone();
+    let similar_of = view.similar.as_ref().map(|(of, _)| *of);
     let similar: HashSet<usize> = view.similar.as_ref().map(|(_, s)| s.iter().copied().collect()).unwrap_or_default();
     let dimmed = |i: usize, p: &MapPoint| {
         !p.matches
-            || !view.legend.is_empty() && !view.legend.contains(&p.kind)
-            || view.similar.is_some() && !similar.contains(&i) && view.similar.as_ref().is_some_and(|(of, _)| *of != i)
+            || !legend.is_empty() && !legend.contains(&p.kind)
+            || similar_of.is_some_and(|of| of != i) && !similar.contains(&i)
     };
+    if crowded {
+        let mut kinds: Vec<Kind> = legend.iter().copied().collect();
+        kinds.sort();
+        let key = DensityKey {
+            points: view.cache.key,
+            rect: area,
+            scale: transform.scale,
+            centre: transform.centre,
+            legend: kinds,
+            similar: view.similar.clone(),
+        };
+        if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
+            let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
+            let image = crowd::density(screen, colour, area);
+            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::NEAREST);
+            view.cache.density = Some((key, handle));
+        }
+        if let Some((_, handle)) = view.cache.density.as_ref() {
+            let size = handle.size_vec2() * crowd::BIN;
+            let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+            painter.image(handle.id(), Rect::from_min_size(area.min, size), uv, Color32::WHITE);
+        }
+    }
+    let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
+    let cell = if crowded { 0.0 } else { cell };
     // Dimmed points first, so the others are drawn over them.
     for pass in [true, false] {
         for (i, (point, at)) in points.iter().zip(screen).enumerate() {
             if dimmed(i, point) != pass || !visible.contains(*at) {
+                continue;
+            }
+            let marked =
+                point.selected || point.in_use || similar.contains(&i) || view.previewed == Some(i) || under == Some(i);
+            // In the density view only the points that must be seen one by one are drawn.
+            if crowded && !marked {
                 continue;
             }
             let mut colour = kind_colour(point.kind);
@@ -624,6 +701,8 @@ fn draw_points(
             }
             if pass {
                 colour = colour.gamma_multiply(0.18);
+            } else if !marked {
+                colour = colour.gamma_multiply(opacity);
             }
             if cell > 0.0 {
                 let side = (cell - 1.0).max(1.0);
@@ -817,26 +896,41 @@ mod tests {
     }
 
     #[test]
-    fn labels_go_to_kinds_with_enough_items() {
+    fn the_legend_counts_and_the_clusters_follow_the_points() {
         let mut points: Vec<MapPoint> = (0..10).map(|i| point(0.1 + i as f32 * 0.01, 0.1, Kind::Kick)).collect();
         points.extend((0..3).map(|i| point(0.9, 0.9 + i as f32 * 0.01, Kind::Snare)));
         let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
-        let spots = label_spots(&points, &positions);
-        assert_eq!(spots.len(), 1);
-        assert_eq!(spots[0].0, Kind::Kick);
-        assert!((spots[0].1[0] - 0.145).abs() < 0.01);
+        let mut view = MapView::default();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.counts.contains(&(Kind::Kick, 10)) && view.cache.counts.contains(&(Kind::Snare, 3)));
+        // Only the kick cluster is large enough for a label.
+        assert_eq!(view.cache.clusters.iter().map(|c| c.kind).collect::<Vec<_>>(), vec![Kind::Kick]);
+        // Kept until the points change.
+        for p in &mut points {
+            p.matches = false;
+        }
+        view.refresh(&points, &positions, 1.0);
+        assert_eq!(view.cache.clusters.len(), 1);
+        view.points_changed();
+        view.refresh(&points, &positions, 1.0);
+        assert!(view.cache.clusters.is_empty());
     }
 
     #[test]
     fn grid_positions_are_cell_centres() {
         let points = vec![point(0.0, 0.0, Kind::Kick), point(1.0, 1.0, Kind::Kick)];
         let grid = Grid { columns: 2, rows: 1, cells: vec![(0, 0), (1, 0)] };
-        // A 2 by 1 grid sits in the middle of the square map.
-        assert_eq!(positions(&points, Layout::Grid, Some(&grid)), vec![[0.25, 0.5], [0.75, 0.5]]);
-        assert_eq!(positions(&points, Layout::Cloud, Some(&grid)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // A 2 by 1 grid sits in the middle of a square view.
+        assert_eq!(positions(&points, Layout::Grid, Some(&grid), 1.0), vec![[0.25, 0.5], [0.75, 0.5]]);
+        assert_eq!(positions(&points, Layout::Cloud, Some(&grid), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // In a view twice as wide, a 4 by 2 grid spreads over the whole width.
+        let wide: Vec<MapPoint> = (0..8).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let grid = Grid { columns: 4, rows: 2, cells: (0..8).map(|i| (i % 4, i / 4)).collect() };
+        let placed = positions(&wide, Layout::Grid, Some(&grid), 2.0);
+        assert_eq!((placed[0], placed[7]), ([-0.25, 0.25], [1.25, 0.75]));
         // A grid that does not match the points falls back to the cloud.
         let wrong = Grid { columns: 1, rows: 1, cells: vec![(0, 0)] };
-        assert_eq!(positions(&points, Layout::Grid, Some(&wrong)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        assert_eq!(positions(&points, Layout::Grid, Some(&wrong), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
     }
 
     #[test]
@@ -890,6 +984,85 @@ mod tests {
             "{:?}",
             harness.state().1
         );
+    }
+}
+
+#[cfg(test)]
+mod many {
+    use super::*;
+
+    /// `n` points in clusters of the 17 kinds, from a fixed seed.
+    pub(super) fn points(n: usize) -> Vec<MapPoint> {
+        let mut state = 7u32;
+        let mut noise = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as f32 / u32::MAX as f32
+        };
+        (0..n)
+            .map(|i| {
+                let k = i % Kind::ALL.len();
+                let kind = Kind::ALL[k];
+                let centre = [0.15 + (k % 5) as f32 * 0.18, 0.15 + (k / 5) as f32 * 0.22];
+                MapPoint {
+                    name: format!("{} {i}", kind.label()),
+                    detail: String::new(),
+                    position: [
+                        (centre[0] + (noise() - 0.5) * 0.2).clamp(0.0, 1.0),
+                        (centre[1] + (noise() - 0.5) * 0.2).clamp(0.0, 1.0),
+                    ],
+                    kind,
+                    guessed: false,
+                    in_use: i % 5_000 == 0,
+                    selected: i == 3,
+                    matches: true,
+                    preset: false,
+                    pinned: false,
+                    tags: Vec::new(),
+                }
+            })
+            .collect()
+    }
+
+    /// The slowest of `frames` frames (the view's work and tessellation) with the pointer moving
+    /// over the map and, when `pan`, the map moved every frame so the density is drawn anew.
+    fn slowest_frame(points: &[MapPoint], frames: usize, pan: bool) -> std::time::Duration {
+        let ctx = egui::Context::default();
+        let mut view = MapView::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let mut slowest = std::time::Duration::ZERO;
+        for frame in 0..frames + 2 {
+            let mut input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            input.events.push(egui::Event::PointerMoved(Pos2::new(300.0 + frame as f32 * 7.0, 400.0)));
+            if pan {
+                view.centre = [0.5 + frame as f32 * 0.001, 0.5];
+            }
+            let started = std::time::Instant::now();
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut events = Vec::new();
+                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+            });
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            // No renderer here takes the density texture.
+            output.textures_delta.clear();
+            // The first frames lay out the fonts and work out the clusters.
+            if frame >= 2 {
+                slowest = slowest.max(started.elapsed());
+            }
+        }
+        slowest
+    }
+
+    #[test]
+    fn a_map_of_200_000_points_draws_at_60_frames_a_second() {
+        let points = points(200_000);
+        let still = slowest_frame(&points, 10, false);
+        let panning = slowest_frame(&points, 10, true);
+        eprintln!("200 000 points: still {still:?}, panning {panning:?}");
+        // A frame at 60 Hz in an optimised build; unoptimised test builds get more room.
+        let budget = std::time::Duration::from_micros(if cfg!(debug_assertions) { 100_000 } else { 16_700 });
+        assert!(still < budget && panning < budget, "still {still:?}, panning {panning:?}");
     }
 }
 
@@ -957,5 +1130,23 @@ mod look {
             let name = format!("../../target/sample-map-{layout:?}.png").to_lowercase();
             image.save(name).unwrap();
         }
+    }
+
+    /// Renders 200 000 points (the density view) to `target/sample-map-crowded.png`.
+    #[test]
+    #[ignore]
+    fn render_a_crowded_map() {
+        use egui_kittest::Harness;
+        let points = super::many::points(200_000);
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 640.0)).build_ui_state(
+            |ui, view: &mut MapView| {
+                crate::theme::install(ui.ctx());
+                let mut events = Vec::new();
+                show(ui, view, &points, None, "200 000 samples", &[], &mut events);
+            },
+            MapView::default(),
+        );
+        harness.run();
+        harness.render().unwrap().save("../../target/sample-map-crowded.png").unwrap();
     }
 }

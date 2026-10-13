@@ -3,7 +3,7 @@ description: How the sample map analyses samples (features), lays them out (PCA 
 read_when: sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, RasterFairy, nearest neighbours, feature cache
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
@@ -73,7 +73,9 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
    separates kinds better at 200 000 stays open (*Alternatives*). Drawing that many points is the
    view's job: the spec's *Many items* (a density raster above 20 000 points in view, clusters
    labelled without overlap).
-5. **Grid:** recursive splitting (the RasterFairy method): the cells are cut in two along the
+5. **Grid:** its columns and rows follow the map view's aspect ratio (`soundmap.layout` takes it
+   as `aspect`), and the view makes the grid again when its shape changes. Recursive splitting
+   (the RasterFairy method): the cells are cut in two along the
    longer side and the points, sorted along the same axis, are shared between the halves in
    proportion to their cells, until a part holds at most 256 items. Each part's points are
    stretched over its cells and assigned exactly by the Hungarian method (least total squared

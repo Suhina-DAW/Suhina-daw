@@ -105,7 +105,8 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
+  item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
+  aspect ratio as `aspect`.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
@@ -140,17 +141,18 @@ number of points in view:
 **Labels.** Every cluster of a kind gets a label, not one label for the whole kind. Kinds
 that sit in several places are named in each of them.
 
-- A **cluster** is a group of map cells (a 48 by 48 division of the map) in which the kind holds
-  at least a third of the points, joined to its neighbours across sides. The cluster's items are
-  its kind's items in those cells.
+- A **cluster** is a group of map cells in which the kind holds at least a third of the points,
+  joined to its neighbours across sides and corners. The map is divided into a square of cells
+  half the square root of the item count a side (4 to 48), so a small map's sparse clusters stay
+  in one piece. The cluster's items are its kind's items in those cells.
 - A cluster gets a label when it holds at least 8 items (32 for Other) and at least one in
   2 000 of the items in the map, so a map of 200 000 shows at most about a hundred
   candidates.
 - The label sits at the cluster's item nearest to the cluster's centre. Its size grows with the
   cluster's size (the logarithm of its count), from the map's label size up to 1.7 times it.
 - **Labels never overlap.** They are placed from the largest cluster down. A label that would
-  overlap one already placed is moved up or down by its own height. If neither place is free,
-  it is left out for this zoom. Zooming in makes room, and smaller clusters appear. A label
+  overlap one already placed is moved up or down by its own height and a small gap. If neither
+  place is free, it is left out for this zoom. Zooming in makes room, and smaller clusters appear. A label
   that would fall outside the map area is left out too.
 - Labels fade out when zoomed in far enough to read point names, as before.
 
@@ -218,6 +220,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Input | Does |
 |---|---|
 | Pointer over a point | Highlights it and **previews it** (Settings › Interface › Browser › Map: preview on hover, on by default). Moving across points plays each in turn; a new one stops the one before. A point is played only after the pointer has rested on it for 40 ms, so a fast sweep does not play everything it crosses. |
+| Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
 | Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |
@@ -274,7 +277,7 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); computes the layout when it is not cached |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
 | `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
 | `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
 
