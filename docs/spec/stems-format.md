@@ -10,6 +10,7 @@ covers:
   - crates/session/tests/stems.rs
   - crates/media/tests/data/**
   - scripts/stems-fixture.py
+  - crates/media/src/stems_tests.rs
 ---
 
 # Stems files
@@ -80,7 +81,7 @@ as a disabled device, so it can be switched on.
 
 | File | Device parameter | Mapping |
 |---|---|---|
-| compressor `input_gain`, `output_gain` | compressor `input`, `output` (dB) | 0..1 → −12..+12 dB, 0.5 = 0 dB (assumed; to be checked against a file whose settings are known); a value outside 0..1 is taken as dB |
+| compressor `input_gain`, `output_gain` | compressor `input`, `output` (dB) | 0..1 → −12..+12 dB, 0.5 = 0 dB (assumed; to be checked against a file whose settings are known); a value outside 0..1 is taken as dB, kept to −24..+24 |
 | compressor `threshold` | `threshold` | dB, kept to −60..0 |
 | compressor `ratio` | `ratio` | kept to 1..20 |
 | compressor `attack`, `release` | `attack`, `release` | seconds, kept to 0.1–100 ms and 10 ms–2 s |
@@ -101,8 +102,9 @@ as a disabled device, so it can be switched on.
 | Edit list entries looked at | 1 024 | |
 | A track's length | 2 hours, as any sample | refused |
 
-A box whose size is zero (to the end), too small or past its parent's end ends the search at
-that level; a damaged packet is skipped as players do.
+A box whose size is 0 runs to the end of its parent. At the top level of the file, a box that is
+too small or runs past the end refuses the file as damaged; inside `moov` it ends the search at
+that level. A damaged packet is skipped as players do.
 
 ## Test files
 

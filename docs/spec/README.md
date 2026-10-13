@@ -10,5 +10,5 @@ last_verified: 2026-10-11
 
 Clean-room specifications, written in our own words from observation, self-authored test files
 and public documentation (see `CONTRIBUTING.md` › Clean-room). Code is implemented from these
-documents. Every spec names the Live version it was observed with and the test files it is
-based on.
+documents. Every spec names its sources: the program and version it was observed with, the public
+documentation it follows, and the test files it is based on.

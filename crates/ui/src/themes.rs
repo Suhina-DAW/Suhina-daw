@@ -363,6 +363,6 @@ mod tests {
         assert_eq!(themes.free_id("  Night Blue!! "), "night-blue");
         assert_eq!(themes.free_id("../.."), "theme");
         assert_eq!(themes.free_id("Suhina Dark"), "suhina-dark-2");
-        assert_eq!(slug("Ääni Teema"), "ääni-teema");
+        assert_eq!(slug("Café Thème"), "café-thème");
     }
 }

@@ -308,6 +308,37 @@ fn a_stacked_clip_leaves_the_others_alone() {
     );
 }
 
+#[test]
+fn a_stacked_paste_or_duplicate_leaves_the_others_alone() {
+    // Without stack, a pasted copy of the clip at 0 placed at 6 shortens the clip at 4.
+    let mut session = Session::new(lane_project());
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 6 })).unwrap();
+    assert!(spans(&session).contains(&(4.0, 2.0, 0.0)), "{:?}", spans(&session));
+
+    // With stack, every clip keeps its span and the copy lies over them.
+    let mut session = Session::new(lane_project());
+    let before = spans(&session);
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 6, "stack": true })).unwrap();
+    assert_eq!(spans(&session).len(), before.len() + 1);
+    assert!(before.iter().all(|s| spans(&session).contains(s)), "{:?}", spans(&session));
+    assert!(spans(&session).contains(&(6.0, 4.0, 0.0)));
+    assert!(run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 6, "stack": 1 })).is_err());
+
+    // A duplicate replaces the clip after it unless stacked.
+    let mut session = Session::new(lane_project());
+    run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0 })).unwrap();
+    assert_eq!(spans(&session).len(), 4, "the copy replaces the clip at 4");
+    let mut session = Session::new(lane_project());
+    let before = spans(&session);
+    let copy = run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0, "stack": true })).unwrap();
+    assert_eq!(copy["start"], 4.0);
+    assert_eq!(spans(&session).len(), before.len() + 1);
+    assert!(before.iter().all(|s| spans(&session).contains(s)), "{:?}", spans(&session));
+    assert!(run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0, "stack": "yes" })).is_err());
+}
+
 fn order(session: &Session) -> Vec<String> {
     session.project().tracks.iter().map(|t| t.name.clone()).collect()
 }

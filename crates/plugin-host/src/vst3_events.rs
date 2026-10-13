@@ -16,7 +16,7 @@ const CONTROLLERS: usize = 130;
 
 /// Which parameter MIDI controllers and pitch bend move, from the plug-in's `IMidiMapping`
 /// (event bus 0). Only the first MIDI channel is asked, and its mapping serves every channel:
-/// some plug-ins crash when asked about another channel (Serum 2 does on the second), and the
+/// some plug-ins fail when asked about another channel, and the
 /// notes a project plays come on the first.
 pub(crate) struct MidiMapping(Box<[Option<ParamID>; CONTROLLERS]>);
 
