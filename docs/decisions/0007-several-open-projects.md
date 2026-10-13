@@ -13,7 +13,7 @@ covers:
 
 - **Status:** accepted
 - **Date:** 2026-10-11
-- **Task:** [#36](https://github.com/juhamikael/Loopwerk/issues/36)
+- **Task:** [#36](https://github.com/suhina-daw/suhina-daw/issues/36)
 
 ## Context
 

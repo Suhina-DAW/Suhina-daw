@@ -6,8 +6,8 @@ body:
     attributes:
       value: |
         Stock presets live in `presets/<device id>/` and are released under CC0 1.0
-        ([ADR 0014](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0014-stock-presets.md)).
-        You can also open the pull request straight away with the [preset template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=preset.md).
+        ([ADR 0014](https://github.com/suhina-daw/suhina-daw/blob/main/docs/decisions/0014-stock-presets.md)).
+        You can also open the pull request straight away with the [preset template](https://github.com/suhina-daw/suhina-daw/compare/main...main?template=preset.md).
   - type: input
     id: device
     attributes:

@@ -109,11 +109,11 @@ any other work.
 
 - **A new built-in effect or instrument** follows [ADR 0004](docs/decisions/0004-built-in-devices.md):
   propose it with the *New effect or instrument* issue form, then open the pull request with the
-  [device template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=device.md)
+  [device template](https://github.com/suhina-daw/suhina-daw/compare/main...main?template=device.md)
   (choose your branch on that page).
 - **Presets** for them go in `presets/<device id>/` under CC0 1.0
   ([ADR 0014](docs/decisions/0014-stock-presets.md)); open the pull request with the
-  [preset template](https://github.com/juhamikael/Loopwerk/compare/main...main?template=preset.md).
+  [preset template](https://github.com/suhina-daw/suhina-daw/compare/main...main?template=preset.md).
   Presets need no clean-room review; their names don't name commercial products, and banks or
   files from commercial products are not accepted.
 

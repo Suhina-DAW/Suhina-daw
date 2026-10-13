@@ -131,7 +131,7 @@ before the rename catches up as the script's docstring describes.
 ## 3. Tasks
 
 Work is tracked in the GitHub project **Suhina**
-(<https://github.com/users/juhamikael/projects/12>), and nowhere else. New work, bugs found while
+(<https://github.com/orgs/suhina-daw/projects/1>), and nowhere else. New work, bugs found while
 testing and follow-ups a change leaves open go there as items, written in English, with a
 Status, a Priority (P0 to P2) and a Phase (the ROADMAP milestone). Work that a pull request will
 close gets an issue, so the pull request can say `Closes #N`. An issue gets a type label and
