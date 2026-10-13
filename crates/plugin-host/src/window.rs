@@ -772,7 +772,7 @@ mod imp {
                     let polled = open.connection.poll_for_event();
                     static POLLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
                     let n = POLLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if n % 500 == 0 {
+                    if n.is_multiple_of(500) {
                         eprintln!("TRACE host pump heartbeat {n} window={}", open.window);
                     }
                     if !matches!(polled, Ok(None)) {
