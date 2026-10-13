@@ -12,10 +12,11 @@ use suhina_engine::model::*;
 
 const USAGE: &str = "\
 usage: suhina-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>] [<fm>]
-       suhina-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>]
+       suhina-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>] [<output>]
        suhina-cli fm-synth voices <file.syx>
        suhina-cli commands [--markdown]
        suhina-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
+       suhina-cli audio devices
        suhina-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
                              | check <project.als> | set-hosting <plug-in> (binary | vendor | instance))
        suhina-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
@@ -32,7 +33,10 @@ commands:
             prints the table in docs/commands.md
   mcp       serve the Model Context Protocol on stdin/stdout for agents; files can be read only
             below --read-root and written only below --write-root (no root, no access); with
-            --audio, opened projects play on the default output so agents can launch clips
+            --audio, opened projects play on the default output so agents can launch clips,
+            and audio.setOutput chooses another
+  audio     audio devices: list the audio hosts (WASAPI, ASIO, ALSA...) and each one's output
+            devices with their sample rates and buffer sizes
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
             folders shows where scans look, add-folder and remove-folder change that; check
@@ -59,7 +63,10 @@ options:
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
   --launcher         play only: start stopped and read launcher commands (scene 2, clip Bass 1,
                      stop Bass, quit, help) from standard input
-  --sample-rate      sample rate in Hz (render only; default 48000)
+  --sample-rate      sample rate in Hz (render: default 48000; play: the device's when left out)
+  <output>           play only: --host <name> --device <name> --buffer <frames> --exclusive: the
+                     audio output to play on (from audio devices; the default output when left
+                     out); the engine renders in blocks of the buffer size (64 to 4096)
   <fm>               --fm [--voices <file.syx>] [--voice <n>]: play every track's notes on the
                      built-in FM synth, with voice n (from 1, default 1) of a DX7 voice or bank
                      file, or its initial voice";
@@ -78,6 +85,8 @@ struct Args {
     launcher: bool,
     sample_rate: u32,
     fm: Option<FmChoice>,
+    /// The audio output `play` uses.
+    audio_output: suhina_session::OutputChoice,
 }
 
 /// `--fm`, with the voice to load.
@@ -110,7 +119,11 @@ fn main() -> ExitCode {
                 Command::Render => render(&a),
                 Command::Play => {
                     let (project, audio) = load_project(&a)?;
-                    if a.launcher { play::launcher(project, &audio) } else { play::play(&project, &audio) }
+                    if a.launcher {
+                        play::launcher(project, &audio, &a.audio_output)
+                    } else {
+                        play::play(&project, &audio, &a.audio_output)
+                    }
                 }
             });
             match result {
@@ -129,6 +142,13 @@ fn main() -> ExitCode {
             }
         },
         Some("plugin") => match plugin(args.get(1..).unwrap_or_default()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("audio") => match audio_devices(args.get(1..).unwrap_or_default()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("error: {message}");
@@ -197,6 +217,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
     let mut launcher = false;
     let mut source = None;
     let mut fm: Option<FmChoice> = None;
+    let mut audio_output = suhina_session::OutputChoice::default();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let next = match arg.as_str() {
@@ -208,6 +229,26 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
             "--sample-rate" => {
                 let value = it.next().ok_or("--sample-rate needs a value")?;
                 sample_rate = value.parse().map_err(|_| format!("invalid sample rate: {value}"))?;
+                audio_output.sample_rate = Some(sample_rate);
+                None
+            }
+            "--host" => {
+                audio_output.host = Some(it.next().ok_or("--host needs a name, from audio devices")?.clone());
+                None
+            }
+            "--device" => {
+                audio_output.device = Some(it.next().ok_or("--device needs a name, from audio devices")?.clone());
+                None
+            }
+            "--buffer" => {
+                let value = it.next().ok_or("--buffer needs a number of frames")?;
+                let frames: u32 = value.parse().map_err(|_| format!("invalid buffer size: {value}"))?;
+                audio_output =
+                    audio_output.with_params(&serde_json::json!({ "buffer_frames": frames })).map_err(|e| e.0)?;
+                None
+            }
+            "--exclusive" => {
+                audio_output.exclusive = true;
                 None
             }
             "--scene" => {
@@ -261,6 +302,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         launcher,
         sample_rate,
         fm,
+        audio_output,
     })
 }
 
@@ -554,6 +596,18 @@ fn plugin(args: &[String]) -> Result<(), String> {
 }
 
 /// `plugins …`: runs the matching `plugins.*` command and prints its result.
+/// `audio devices`: runs `audio.devices` on the system's devices.
+fn audio_devices(args: &[String]) -> Result<(), String> {
+    if args.iter().map(String::as_str).ne(["devices"]) {
+        return Err(format!("unknown audio command\n\n{USAGE}"));
+    }
+    let mut projects = suhina_session::Projects::new();
+    projects.set_audio_system(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
+    let result = projects.execute("audio.devices", &serde_json::json!({})).map_err(|e| e.0)?;
+    println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
 fn plugins(args: &[String]) -> Result<(), String> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut projects = suhina_session::Projects::new();
@@ -751,7 +805,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
     let library = suhina_library::Library::new(suhina_plugins::library::settings_folder());
     let mut server = SuhinaMcp::new(workspace).with_file_library(library);
     if audio {
-        server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
+        server = server.with_audio_output(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

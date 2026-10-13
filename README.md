@@ -98,6 +98,28 @@ cargo build --release
 cargo test --workspace
 ```
 
+### ASIO on Windows
+
+A default Windows build plays through WASAPI (shared, or exclusive when chosen in Settings ›
+Audio). ASIO, which talks to an audio interface's own driver, is a Cargo feature, because
+building it compiles the Steinberg ASIO SDK with the C++ compiler and generates its bindings with
+bindgen, which needs libclang:
+
+1. Install LLVM (for libclang), for example `winget install LLVM.LLVM`, and set
+   `LIBCLANG_PATH` to its `bin` folder (`C:\Program Files\LLVM\bin`) if the build does not
+   find it.
+2. Build with the feature:
+
+```sh
+cargo build --release -p suhina -p suhina-cli -p suhina-plugin-host --features suhina/asio,suhina-cli/asio
+```
+
+The SDK's host files are in [`third_party/asiosdk`](third_party/asiosdk/VENDORED.md), used under
+the GPL-3.0 that Steinberg offers it under since October 2025, and `.cargo/config.toml` points the
+build at them (`CPAL_ASIO_DIR`); nothing is downloaded. The SDK is GPL-3.0 only, so a build with
+`asio` is distributed under the GPL-3.0; Suhina's own code stays GPL-3.0-or-later. "ASIO" is a
+trademark of Steinberg Media Technologies GmbH.
+
 ## Documentation
 
 | | |

@@ -24,12 +24,17 @@ const SEGMENT: f32 = 15.0;
 const FOLDER_FIELD: f32 = 300.0;
 /// Themes shown before their list scrolls.
 const THEME_ROWS: usize = 8;
+/// A dropdown on the right of its row (Settings › Audio).
+const DROPDOWN_FIELD: f32 = 260.0;
 
 /// Facts the page shows but does not change.
 #[derive(Debug, Clone, Default)]
 pub struct About {
-    /// The audio output in use, if any.
-    pub audio_output: Option<String>,
+    /// What the active project plays on now, read every frame (`audio.info`).
+    pub audio_live: Option<suhina_session::OutputInfo>,
+    /// The audio hosts and their output devices, listed when Settings › Audio opens or is
+    /// refreshed (`audio.devices`).
+    pub audio_hosts: Vec<suhina_session::audio::HostInfo>,
     /// How the window is drawn right now.
     pub graphics_now: Option<Graphics>,
     /// Plug-in editors can open inside the device panel here (the window is a Win32 or X11
@@ -145,6 +150,8 @@ pub struct PageState {
     pub theme_name: Option<(String, String)>,
     /// The theme the list was last scrolled to, so it shows the one in use when that changes.
     pub theme_shown: Option<String>,
+    /// The audio devices were listed since the Audio page was opened.
+    pub audio_listed: Option<bool>,
 }
 
 /// What the user did on the page this frame.
@@ -157,6 +164,10 @@ pub struct Outcome {
     pub keymap_changed: bool,
     /// The most colour tags the browser may have, as chosen.
     pub tag_limit: Option<usize>,
+    /// The audio output was chosen anew: the app runs `audio.setOutput` with it.
+    pub audio_output: Option<suhina_session::OutputChoice>,
+    /// The audio devices should be listed again.
+    pub audio_refresh: bool,
 }
 
 /// What the page shows and changes besides the settings.
@@ -219,6 +230,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
     if let Some(picked) = page_list(ui, &painter, sidebar, state.page) {
         state.page = picked;
         state.capture = None;
+        state.audio_listed = None;
         state.theme_shown = None;
     }
     let page = Rect::from_min_max(Pos2::new(sidebar.right() + SIDEBAR_GAP, top), whole.max);
@@ -489,10 +501,17 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             }
         }
         Page::Audio => {
-            section(&mut y, "Audio");
-            let r = row(&mut y);
-            let output = about.audio_output.as_deref().unwrap_or("None: no project is playing");
-            label(&painter, r, "Output", output);
+            if state.audio_listed != Some(true) {
+                outcome.audio_refresh = true;
+                state.audio_listed = Some(true);
+            }
+            let (picked, refresh) = audio_page(ui, &painter, page, &mut y, settings, about);
+            outcome.audio_refresh |= refresh;
+            if let Some(choice) = picked {
+                settings.set_output_choice(&choice);
+                outcome.audio_output = Some(choice);
+                outcome.changed = true;
+            }
         }
         Page::Shortcuts => {
             outcome.keymap_changed = shortcuts_page(ui, &painter, page, y, bottom, keymap, state);
@@ -922,6 +941,174 @@ fn plugin_section(
         });
     });
     request
+}
+
+/// Settings › Audio: host, device, sample rate and buffer size as dropdowns of what the driver
+/// allows, exclusive mode, and what plays now with its latency and underruns. Returns a new
+/// choice, and whether the devices should be listed again.
+fn audio_page(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    page: Rect,
+    y: &mut f32,
+    settings: &Settings,
+    about: &About,
+) -> (Option<suhina_session::OutputChoice>, bool) {
+    use suhina_session::audio::{DeviceInfo, HostInfo};
+    let section = |y: &mut f32, name: &str| {
+        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SIDEBAR_ROW));
+        widgets::text_in(
+            painter,
+            rect,
+            Align2::LEFT_CENTER,
+            name,
+            theme::ui_font(theme::TEXT_SMALL),
+            theme::text_hint(),
+        );
+        painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::border()));
+        *y = rect.bottom() + 8.0;
+    };
+    let row = |y: &mut f32| {
+        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SETTING_ROW));
+        *y += SETTING_ROW;
+        rect
+    };
+    let choice = settings.output_choice();
+    let mut picked: Option<suhina_session::OutputChoice> = None;
+    let default_host = about.audio_hosts.iter().find(|h| h.default).or(about.audio_hosts.first());
+    let host: Option<&HostInfo> = match &choice.host {
+        Some(name) => about.audio_hosts.iter().find(|h| h.name.eq_ignore_ascii_case(name)),
+        None => default_host,
+    };
+    let device: Option<&DeviceInfo> = host.and_then(|h| match &choice.device {
+        Some(name) => h.devices.iter().find(|d| d.name.eq_ignore_ascii_case(name)),
+        None => h.devices.iter().find(|d| d.default).or(h.devices.first()),
+    });
+
+    section(y, "Output");
+    // Host.
+    let r = row(y);
+    label(painter, r, "Driver", "WASAPI is Windows' own; ASIO talks to the interface's driver directly");
+    let mut options: Vec<(String, Option<String>)> =
+        vec![(format!("Default ({})", default_host.map_or("none", |h| h.name.as_str())), None)];
+    options.extend(about.audio_hosts.iter().map(|h| (h.name.clone(), Some(h.name.clone()))));
+    if let Some(host) = choice_dropdown(ui, painter, r, "Driver", &options, &choice.host) {
+        picked = choice.with_params(&serde_json::json!({ "host": host.unwrap_or_default() })).ok();
+    }
+    // Device.
+    let r = row(y);
+    let note = match (&choice.device, device) {
+        (Some(name), None) => format!("{name} is not there; the default output plays"),
+        _ => "The output device on that driver".to_string(),
+    };
+    label(painter, r, "Device", &note);
+    let default_device = host.and_then(|h| h.devices.iter().find(|d| d.default)).map_or("none", |d| d.name.as_str());
+    let mut options: Vec<(String, Option<String>)> = vec![(format!("Default ({default_device})"), None)];
+    if let Some(host) = host {
+        options.extend(host.devices.iter().map(|d| (d.name.clone(), Some(d.name.clone()))));
+    }
+    if let Some(name) = choice_dropdown(ui, painter, r, "Device", &options, &choice.device) {
+        picked = choice.with_params(&serde_json::json!({ "device": name.unwrap_or_default() })).ok();
+    }
+    // Sample rate.
+    let r = row(y);
+    label(painter, r, "Sample rate", "The rates the device offers");
+    let default_rate = device.and_then(|d| d.default_sample_rate);
+    let mut options: Vec<(String, Option<u32>)> =
+        vec![(default_rate.map_or_else(|| "Device's own".to_string(), |r| format!("Device's own ({r} Hz)")), None)];
+    if let Some(device) = device {
+        options.extend(device.sample_rates.iter().map(|r| (format!("{r} Hz"), Some(*r))));
+    }
+    if let Some(rate) = choice_dropdown(ui, painter, r, "Sample rate", &options, &choice.sample_rate) {
+        picked = choice.with_params(&serde_json::json!({ "sample_rate": rate.unwrap_or(0) })).ok();
+    }
+    // Buffer size.
+    let r = row(y);
+    let rate = f64::from(choice.sample_rate.or(default_rate).unwrap_or(48_000));
+    label(painter, r, "Buffer size", "The engine renders in blocks of it; smaller is quicker, larger is safer");
+    let mut options: Vec<(String, Option<u32>)> = vec![("Default (1024 frames)".to_string(), None)];
+    let sizes = device.map_or_else(Vec::new, |d| d.buffer_sizes.clone());
+    options.extend(sizes.iter().map(|n| (format!("{n} frames ({:.1} ms)", f64::from(*n) * 1000.0 / rate), Some(*n))));
+    if let Some(frames) = choice_dropdown(ui, painter, r, "Buffer size", &options, &choice.buffer_frames) {
+        picked = choice.with_params(&serde_json::json!({ "buffer_frames": frames.unwrap_or(0) })).ok();
+    }
+    // Exclusive mode, WASAPI only.
+    let wasapi = host.is_some_and(|h| h.name == "WASAPI");
+    let r = row(y);
+    let note = if !wasapi {
+        "WASAPI only; ASIO always has the device to itself"
+    } else if device.is_some_and(|d| !d.exclusive) {
+        "This device does not allow it; it plays shared"
+    } else {
+        "The device plays only Suhina, with less delay; other programs are not heard on it"
+    };
+    label(painter, r, "Exclusive mode", note);
+    let on_off = [("On", true), ("Off", false)];
+    if let Some(on) = segmented(ui, painter, control_rect(r, 2), "Exclusive mode", &on_off, choice.exclusive) {
+        picked = choice.with_params(&serde_json::json!({ "exclusive": on })).ok();
+    }
+
+    *y += 8.0;
+    section(y, "Now");
+    let r = row(y);
+    let (output, latency) = match &about.audio_live {
+        Some(info) => (
+            info.describe(),
+            format!(
+                "{:.1} ms, {} underrun{}{}",
+                info.latency_ms,
+                info.underruns,
+                if info.underruns == 1 { "" } else { "s" },
+                if info.failed { "; the device reported an error" } else { "" }
+            ),
+        ),
+        None => ("None: no project is playing".to_string(), "-".to_string()),
+    };
+    label(painter, r, "Output", &output);
+    let refresh = Rect::from_min_size(Pos2::new(r.right() - 120.0, r.top() + 1.0), Vec2::new(120.0, SEGMENT));
+    let response = widgets::button_area(ui, refresh, Id::new("audio-refresh"), "List the audio devices again");
+    let hover = widgets::hover(ui, &response);
+    painter.rect_filled(refresh, 0.0, motion::mix(theme::control_background(), theme::control_hover(), hover));
+    widgets::text_in(
+        painter,
+        refresh,
+        Align2::CENTER_CENTER,
+        "List devices again",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_primary(),
+    );
+    let r = row(y);
+    label(painter, r, "Latency", &format!("Engine to speaker, measured: {latency}"));
+    (picked, response.clicked())
+}
+
+/// A dropdown on the right of `row` listing `options` (text, value). Returns the value picked,
+/// if it is not the current one.
+fn choice_dropdown<T: Clone + PartialEq>(
+    ui: &Ui,
+    painter: &egui::Painter,
+    row: Rect,
+    name: &str,
+    options: &[(String, T)],
+    current: &T,
+) -> Option<T> {
+    let field = Rect::from_min_size(
+        Pos2::new(row.right() - DROPDOWN_FIELD, row.top() + 1.0),
+        Vec2::new(DROPDOWN_FIELD, SEGMENT + 2.0),
+    );
+    let shown = options.iter().find(|(_, v)| v == current).map_or("-", |(text, _)| text.as_str());
+    let response = widgets::button_area(ui, field, Id::new(("audio-setting", name)), format!("{name}: {shown}"));
+    widgets::dropdown(ui, painter, field, &response, shown);
+    let mut picked = None;
+    egui::Popup::menu(&response).show(|ui| {
+        let text = |t: &str| egui::RichText::new(t).font(theme::ui_font(theme::TEXT_SMALL));
+        for (label, value) in options {
+            if ui.selectable_label(value == current, text(label)).clicked() && value != current {
+                picked = Some(value.clone());
+            }
+        }
+    });
+    picked
 }
 
 /// A setting's name and a note under it, on the left of its row.

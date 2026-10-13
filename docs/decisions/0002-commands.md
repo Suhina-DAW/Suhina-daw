@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
@@ -88,6 +88,13 @@ never changes a project. A successful edit that adds something from the browser 
 texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings.
 The sample map's commands (`soundmap.*`, [ADR 0013](0013-sample-map-analysis.md)) are of the
 library kind too: they read the library's samples and the analysis `Projects` keeps beside it.
+
+A ninth kind, **audio**, also runs on `Projects`: `audio.devices` lists the system's audio hosts
+and output devices, `audio.setOutput` chooses one (host, device, sample rate, buffer size,
+WASAPI exclusive mode) and reopens the active project's output there, and `audio.info` says what
+plays now. The session only describes the choice; the output layer lists devices and opens
+streams through the `AudioSystem` trait it implements and the front end hands to `Projects`
+(the desktop app always, the MCP server with `--audio`). It never changes a project.
 
 ## Amendment: device commands (2026-10-12)
 

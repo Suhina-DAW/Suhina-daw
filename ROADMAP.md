@@ -168,7 +168,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
   leave the project unchanged ([ADR 0002](docs/decisions/0002-commands.md)).
-- Commands for the project, tracks, clips, undo, the open projects, plug-ins and devices:
+- Commands for the project, tracks, clips, undo, the open projects, plug-ins, devices, the audio output, the library and the sample map:
   [`docs/commands.md`](docs/commands.md) lists every one with its parameters (generated from the
   registry; `suhina-cli commands` prints them).
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
@@ -336,6 +336,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
+- Settings › Audio: the driver (WASAPI, or ASIO in a build with the `asio` feature), the output
+  device, sample rate and buffer size as dropdowns of what the driver allows, WASAPI exclusive
+  mode (off by default), and what plays now with its measured latency and underruns. A change
+  reopens the output with the transport where it was and the plug-ins running; the engine
+  renders in blocks of the buffer size, so the plug-ins' deadline follows it. A device that is
+  gone at start plays the default output, with a notice. `suhina-cli play` takes the same
+  choice (`--host`, `--device`, `--buffer`, `--exclusive`).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command

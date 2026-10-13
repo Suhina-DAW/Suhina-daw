@@ -6,18 +6,26 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use suhina_automation::AudioOutput;
 use suhina_engine::model::{LaneData, Project};
 use suhina_engine::{AudioPool, Renderer};
-use suhina_output::{Output, Progress, Stopped};
-use suhina_session::{Player, Session};
+use suhina_output::{Output, Progress};
+use suhina_session::{OutputChoice, Player, Session};
 
 /// Extra time to wait after the last frame, so the device can drain its buffer.
 const TAIL: Duration = Duration::from_millis(300);
 
-/// Plays the project's arrangement once on the default output device and returns when it ends.
-pub fn play(project: &Project, audio: &AudioPool) -> Result<(), String> {
-    let output = Output::open()?;
+/// Opens the output `choice` names, saying what could not be had as chosen.
+fn chosen_output(choice: &OutputChoice) -> Result<Output, String> {
+    let output = Output::choose(choice)?;
+    for notice in output.notices() {
+        eprintln!("note: {notice}");
+    }
+    Ok(output)
+}
+
+/// Plays the project's arrangement once on the output `choice` names and returns when it ends.
+pub fn play(project: &Project, audio: &AudioPool, choice: &OutputChoice) -> Result<(), String> {
+    let output = chosen_output(choice)?;
     let mut renderer = Renderer::with_audio(project, audio, output.sample_rate()).map_err(|e| e.to_string())?;
     let length = renderer.length();
     if length == 0 {
@@ -76,13 +84,17 @@ edits (heard while playing):
   <command.id> [json]   any command, e.g. track.setMute {\"track\": \"Bass\", \"mute\": true}
   help, quit";
 
-/// Plays the project on the default output with the transport stopped and reads launcher
+/// Plays the project on the output `choice` names with the transport stopped and reads launcher
 /// commands from standard input until `quit` or end of input.
-pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
+pub fn launcher(project: Project, audio: &AudioPool, choice: &OutputChoice) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let Stopped { controller, output, progress, stream } = suhina_output::start_stopped(&project, audio)?;
+    let output = chosen_output(choice)?;
+    let mut renderer = Renderer::stopped(&project, audio, output.sample_rate()).map_err(|e| e.to_string())?;
+    let mut controller = renderer.controller();
+    let progress = Arc::new(Progress::default());
+    let stream = output.start(renderer, &mut controller, &progress)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -114,15 +126,6 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     std::thread::sleep(TAIL);
     drop(stream);
     Ok(())
-}
-
-/// Plays projects opened over MCP on the default output device (see `suhina_output::open_player`).
-pub struct DeviceOutput;
-
-impl AudioOutput for DeviceOutput {
-    fn open(&self, project: &Project, audio: &AudioPool) -> Result<(Player, String), String> {
-        suhina_output::open_player(project, audio)
-    }
 }
 
 #[derive(Debug, PartialEq)]

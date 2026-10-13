@@ -30,6 +30,9 @@ pub enum CommandKind {
     /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
     /// to Suhina, not to one project. Runs on [`crate::Projects`].
     Library,
+    /// Lists or chooses the audio output (host, device, sample rate, buffer size) or reports
+    /// on it; belongs to Suhina, not to one project. Runs on [`crate::Projects`].
+    Audio,
 }
 
 impl ParamType {
@@ -58,6 +61,7 @@ impl CommandKind {
             Self::Plugins => "plugins",
             Self::Plugin => "plugin",
             Self::Library => "library",
+            Self::Audio => "audio",
         }
     }
 }

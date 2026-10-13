@@ -10,7 +10,7 @@ mod theme_files;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use suhina_session::Session;
+use suhina_session::{OutputChoice, Session};
 use suhina_ui::keymap::Keymap;
 use suhina_ui::settings::{Graphics, Settings};
 use suhina_ui::settings_view::About;
@@ -89,8 +89,10 @@ fn main() -> ExitCode {
     let (theme_list, theme_warnings) = themes.read_all();
     settings_warnings.extend(theme_warnings);
     let recent = recent::Recent::load(eframe::storage_dir(app_id()).map(|d| d.join(RECENT_FILE)));
-    let mut window =
-        Window { app: App::new(), graphics_now, editors_embeddable: false, audio_output: None, themes, recent };
+    let mut window = Window { app: App::new(), graphics_now, editors_embeddable: false, themes, recent };
+    // The audio devices, and the output the settings choose (Settings › Audio, `audio.*`).
+    window.app.projects_mut().set_audio_system(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
+    window.app.projects_mut().set_output_choice(settings.output_choice());
     // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
     let mut library = suhina_library::Library::new(eframe::storage_dir(app_id()));
     settings_warnings.extend(library.take_warnings());
@@ -106,8 +108,7 @@ fn main() -> ExitCode {
         Source::Nothing => {}
         Source::Demo => {
             let session = Session::new(suhina_ui::demo::demo_project());
-            let (session, warnings, output) = with_audio(session);
-            window.audio_output = output;
+            let (session, warnings) = with_audio(session, &settings.output_choice());
             window.app.open_project(session, &warnings, OpenAs::NewTab);
         }
         Source::Als(path) => window.open(&path, OpenAs::NewTab),
@@ -191,7 +192,6 @@ struct Window {
     graphics_now: Graphics,
     /// The main window is a Win32 or X11 one, which plug-in editors can be embedded in.
     editors_embeddable: bool,
-    audio_output: Option<String>,
     themes: theme_files::ThemeFiles,
     /// The projects opened and saved lately, for the project dialog.
     recent: recent::Recent,
@@ -216,15 +216,18 @@ impl eframe::App for Window {
         let _closed = self.app.take_closed();
         // Only the active project plays; one made active again gets an output.
         if let Some(id) = self.app.take_player_request() {
+            let choice = self.app.projects().output_choice().clone();
             let opened = self
                 .app
                 .projects()
                 .get(id)
-                .map(|session| suhina_output::open_player(session.project(), session.audio()));
+                .map(|session| suhina_output::open_chosen(session.project(), session.audio(), &choice, None));
             match opened {
-                Some(Ok((player, device))) => {
-                    self.app.attach_player(id, player);
-                    self.audio_output = Some(device);
+                Some(Ok(opened)) => {
+                    self.app.attach_player(id, opened.player);
+                    if let Some(notice) = opened.notice {
+                        self.app.set_status(Status::Hint(notice));
+                    }
                 }
                 Some(Err(e)) => self.app.set_status(Status::Error(format!("no audio output: {e}"))),
                 None => {}
@@ -277,9 +280,9 @@ impl Window {
         warnings.extend(audio_warnings);
         let waveforms = suhina_ui::waveform::from_pool(&audio);
         session.set_audio(audio);
-        let (session, output_warnings, output) = with_audio(session);
+        let choice = self.app.projects().output_choice().clone();
+        let (session, output_warnings) = with_audio(session, &choice);
         warnings.extend(output_warnings);
-        self.audio_output = output;
         if self.app.open_project(session, &warnings, how).is_some() {
             self.app.set_waveforms(waveforms);
         }
@@ -367,7 +370,6 @@ impl Window {
     /// Tells the Settings page what is in use.
     fn share_about(&mut self) {
         self.app.set_about(About {
-            audio_output: self.audio_output.clone(),
             graphics_now: Some(self.graphics_now),
             editors_embeddable: self.editors_embeddable,
             ..Default::default()
@@ -401,15 +403,16 @@ fn default_folders() -> (PathBuf, PathBuf) {
     (base.join("Projects"), base.join("Templates"))
 }
 
-/// Connects the default audio output to `session`, playing its audio; without one the project
-/// still opens. Returns the session, warnings and a description of the output.
-fn with_audio(mut session: Session) -> (Session, Vec<String>, Option<String>) {
-    match suhina_output::open_player(session.project(), session.audio()) {
-        Ok((player, device)) => {
-            session.attach_player(player);
-            (session, Vec::new(), Some(device))
+/// Connects the output `choice` names to `session`, playing its audio; a device that is gone
+/// falls back to the default with a warning, and without any output the project still opens.
+/// Returns the session and warnings.
+fn with_audio(mut session: Session, choice: &OutputChoice) -> (Session, Vec<String>) {
+    match suhina_output::open_chosen(session.project(), session.audio(), choice, None) {
+        Ok(opened) => {
+            session.attach_player(opened.player);
+            (session, opened.notice.into_iter().collect())
         }
-        Err(e) => (session, vec![format!("no audio output: {e}")], None),
+        Err(e) => (session, vec![format!("no audio output: {e}")]),
     }
 }
 

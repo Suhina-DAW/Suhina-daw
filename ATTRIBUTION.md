@@ -34,6 +34,15 @@ changed. The full list with copyright lines is in [`NOTICE`](NOTICE).
 | `crates/stretch` | Signalsmith Stretch, Signalsmith Linear (STFT) | Geraint Luff / Signalsmith Audio | https://github.com/Signalsmith-Audio/signalsmith-stretch, https://github.com/Signalsmith-Audio/linear | MIT |
 | `devices/fm-synth/src/{tables,env,lfo,core,voice}.rs` | MSFA engine as found in Dexed | Google Inc., Pascal Gauthier, Jean Pierre Cimalando | https://github.com/asb2m10/dexed (`Source/msfa`) | Apache-2.0 |
 
+## Vendored code
+
+Third-party source kept unchanged in `third_party/`, built into Suhina only with a Cargo
+feature.
+
+| Path | Title | Author | Source | License |
+|---|---|---|---|---|
+| `third_party/asiosdk` | Steinberg ASIO SDK 2.3.4, host part (`asio` feature) | Steinberg Media Technologies GmbH | https://www.steinberg.net/asiosdk | GPL-3.0 (`third_party/asiosdk/LICENSE.txt`; see `VENDORED.md`) |
+
 ## Test data in the repository
 
 | Path | Title | Author | Source | License |

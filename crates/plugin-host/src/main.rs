@@ -51,13 +51,20 @@ const UNLOAD_WAIT: Duration = Duration::from_secs(1);
 /// Most instances one process runs.
 const MAX_INSTANCES: usize = 1024;
 
-/// Gives the calling thread, an instance's audio thread, the highest priority the system
-/// allows it (time-critical on Windows), so it answers the engine's blocks as soon as they
-/// come: the engine waits only until each block's deadline (ADR 0006). Where that is not
-/// allowed (Linux without the right), the thread runs at its normal priority.
+/// Gives the calling thread, an instance's audio thread, real-time priority, so it answers the
+/// engine's blocks as soon as they come: the engine waits only until each block's deadline
+/// (ADR 0006). On Windows it joins MMCSS "Pro Audio" (time-critical scheduling and a fine
+/// timer) for as long as it runs; elsewhere, or when MMCSS refuses, it takes the highest
+/// priority the system allows. Where that is not allowed (Linux without the right), the thread
+/// runs at its normal priority.
 pub(crate) fn real_time_thread() {
     // `SUHINA_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
     if std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
+        return;
+    }
+    // The registration lasts until the thread ends; the handle only undoes it early.
+    #[cfg(windows)]
+    if audio_thread_priority::promote_current_thread_to_real_time(1024, 48_000).is_ok() {
         return;
     }
     let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);

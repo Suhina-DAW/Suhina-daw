@@ -1,10 +1,16 @@
 [package]
 name = "suhina-output"
-description = "Plays a Suhina engine on the default audio output device"
+description = "Plays a Suhina engine on an audio output device: lists the hosts and devices, opens the one chosen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[features]
+# ASIO on Windows, through cpal's asio host. Building it compiles the Steinberg ASIO SDK
+# (GPL-3.0 since 2025, vendored in third_party/asiosdk) with a C++ compiler and generates its
+# bindings with bindgen, which needs libclang (README › Building).
+asio = ["cpal/asio"]
 
 [dependencies]
 suhina-engine.workspace = true
@@ -14,6 +20,15 @@ cpal.workspace = true
 rtrb.workspace = true
 # Real-time priority for the render thread.
 thread-priority = "3.1.1"  # MIT
+
+[target.'cfg(windows)'.dependencies]
+# WASAPI in exclusive mode, which cpal does not open.
+wasapi = "0.19"  # MIT
+# The render and exclusive-mode threads join MMCSS "Pro Audio" (AvSetMmThreadCharacteristics).
+audio_thread_priority = { version = "0.38", default-features = false }  # MPL-2.0
+
+[dev-dependencies]
+suhina-model.workspace = true
 
 [lints]
 workspace = true
