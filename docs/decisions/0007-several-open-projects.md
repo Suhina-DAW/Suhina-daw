@@ -6,6 +6,7 @@ status: current
 last_verified: 2026-10-13
 covers:
   - crates/session/src/projects.rs
+  - crates/automation/src/server.rs
 ---
 
 # 0007: Several open projects
@@ -50,12 +51,12 @@ the layer that owns sessions.
 
 - The MCP server holds `Projects`: `project_open` adds a project and makes it active, and with
   `--audio` a switch starts the new project playing.
-- A switch with audio reloads the new project's audio files and opens a new output stream, so
-  it is not instant for large sets. Keeping one output open and swapping the engine graph
-  ([ADR 0005](0005-edits-while-playing.md)) makes it so; that is a follow-up.
-- Background projects stay in memory with their undo history; decoded audio is held only by
-  the active project's player over MCP. The desktop app shows the projects as tabs and keeps
-  each open project's decoded audio, so a switch there opens only a new output stream.
+- A switch with audio opens a new output stream (the project's audio was decoded when it was
+  opened and stays with its session), so it is not instant. Keeping one output open and swapping
+  the engine graph ([ADR 0005](0005-edits-while-playing.md)) would make it so; that is a
+  follow-up.
+- Background projects stay in memory with their undo history and their decoded audio, in the
+  desktop app (as tabs) and over MCP alike, so a switch opens only a new output stream.
 - Only the active project's plug-ins run: `Projects::poll_plugins` starts them while it plays,
   and a project that stops playing (another tab made active) stops them, each keeping its last
   state for when the project plays again ([ADR 0006](0006-plug-in-hosting.md)).
@@ -71,4 +72,5 @@ the layer that owns sessions.
   open project, with the files they refer to.
 - **Background playback:** whether a background project may keep playing (for example a
   reference track), and how its output is routed.
-- **Unsaved changes on close:** needs the native project format; today closing drops edits.
+- **Unsaved changes on close:** a tab marks unsaved changes (`Session::has_unsaved_changes`),
+  but closing still drops them without asking to save.

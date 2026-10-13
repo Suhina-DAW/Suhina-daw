@@ -53,7 +53,7 @@ fn pack(root: &Path) {
     wav(&root.join("Drums").join("Snare.wav"), 0.25);
     wav(&root.join("Loop 120bpm.wav"), 2.0);
     midi(&root.join("Groove.mid"));
-    std::fs::write(root.join("Song.locr"), b"{}").unwrap();
+    std::fs::write(root.join("Song.suhina"), b"{}").unwrap();
 }
 
 /// The window with the demo project and a browser whose library is kept in `settings` and
@@ -296,10 +296,10 @@ fn escape_cancels_a_drag_and_a_project_opens_with_a_double_click() {
     let mut harness = window(&settings, &folder);
     harness.state_mut().browser.search = "song".into();
     harness.run();
-    double_click(&mut harness, &row("Song.locr"));
+    double_click(&mut harness, &row("Song.suhina"));
     harness.run();
     let asked = harness.state_mut().take_open_request().is_some()
-        || harness.query_by_label_contains("Open Song.locr").is_some();
+        || harness.query_by_label_contains("Open Song.suhina").is_some();
     assert!(asked, "the project is asked to open");
 
     harness.state_mut().browser.search = "kick".into();

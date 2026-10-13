@@ -75,9 +75,9 @@ pub enum Graphics {
 /// How samples with a known tempo are stretched when dropped (`clip.addFiles`' `warp`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WarpMode {
-    /// Beats: keeps transients on the grid.
+    /// Keeps transients on the grid.
     #[default]
-    Beats,
+    Rhythmic,
     Tonal,
     Texture,
     Smooth,
@@ -88,12 +88,12 @@ pub enum WarpMode {
 
 impl WarpMode {
     pub const ALL: [WarpMode; 6] =
-        [Self::Beats, Self::Tonal, Self::Texture, Self::Smooth, Self::HighQuality, Self::Repitch];
+        [Self::Rhythmic, Self::Tonal, Self::Texture, Self::Smooth, Self::HighQuality, Self::Repitch];
 
     /// The value `clip.addFiles` takes, and the settings file keeps.
     pub fn param(self) -> &'static str {
         match self {
-            Self::Beats => "rhythmic",
+            Self::Rhythmic => "rhythmic",
             Self::Tonal => "tonal",
             Self::Texture => "texture",
             Self::Smooth => "smooth",
@@ -104,11 +104,11 @@ impl WarpMode {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Beats => "Beats",
+            Self::Rhythmic => "Rhythmic",
             Self::Tonal => "Tonal",
             Self::Texture => "Texture",
             Self::Smooth => "Smooth",
-            Self::HighQuality => "Pro",
+            Self::HighQuality => "High quality",
             Self::Repitch => "Re-pitch",
         }
     }
@@ -210,7 +210,7 @@ impl Default for Settings {
             preview_autoplay: true,
             preview_volume: PREVIEW_VOLUME,
             drop_separate: false,
-            warp_mode: WarpMode::Beats,
+            warp_mode: WarpMode::Rhythmic,
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
@@ -487,19 +487,19 @@ mod tests {
         let (settings, warnings) =
             Settings::from_text("browser_width = 5000\npreview_volume = -900\nwarp_mode = elastic\n");
         assert_eq!((settings.browser_width, settings.preview_volume), (BROWSER_WIDTHS.1, PREVIEW_VOLUMES.0));
-        assert_eq!(settings.warp_mode, WarpMode::Beats);
+        assert_eq!(settings.warp_mode, WarpMode::Rhythmic);
         assert_eq!(warnings.len(), 1);
     }
 
     #[test]
     fn the_audio_output_is_a_choice_and_nonsense_keeps_the_default() {
         let (settings, warnings) = Settings::from_text(
-            "audio_host = WASAPI\naudio_device = Speakers (Apollo)\naudio_sample_rate = 44100\naudio_buffer = 512\n",
+            "audio_host = WASAPI\naudio_device = Speakers (Interface)\naudio_sample_rate = 44100\naudio_buffer = 512\n",
         );
         assert!(warnings.is_empty(), "{warnings:?}");
         let choice = settings.output_choice();
         assert_eq!(choice.host.as_deref(), Some("WASAPI"));
-        assert_eq!(choice.device.as_deref(), Some("Speakers (Apollo)"));
+        assert_eq!(choice.device.as_deref(), Some("Speakers (Interface)"));
         assert_eq!((choice.sample_rate, choice.buffer_frames, choice.exclusive), (Some(44_100), Some(512), false));
         let mut back = Settings::default();
         back.set_output_choice(&choice);

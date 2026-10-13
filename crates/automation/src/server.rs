@@ -2,7 +2,7 @@
 //! one tool per command: agents discover commands with `command_list` and run them with
 //! `command_run` or `command_batch`, so the tool list stays small as commands grow.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -20,13 +20,14 @@ use suhina_session::{AudioSystem, CommandKind, Player, ProjectId, Projects, Sess
 use crate::render::{LaunchStep, render_launch_script, render_wav, scene_as_arrangement};
 use crate::workspace::{Workspace, display_path};
 
-const INSTRUCTIONS: &str = "Suhina, an open-source clip-launching DAW. Open a Live Set with project_open \
+const INSTRUCTIONS: &str = "Suhina, an open-source clip-launching DAW. Open a Suhina project (.suhina) or a Live Set (.als) with project_open \
 (paths are relative to the read root granted at launch), look at it with project_inspect, discover command ids \
 and parameters with command_list, and change it with command_run or command_batch (each editing command is one \
 undo step; edit.undo reverts it). Several projects can be open, like tabs: each project_open adds one and makes it \
 active; projects.list, projects.switch, projects.next and projects.close manage them, and the `project` argument \
 of a tool targets another open project without switching. project_render writes a WAV file below the write root; with `launches` it \
-renders clip launches offline. Transport commands (clip.launch, scene.launch, track.stop, transport.play, \
+renders clip launches offline. project.save writes a .suhina file only below the write root, and replaces an existing \
+file (the project's own included) only with overwrite: true in its params. Transport commands (clip.launch, scene.launch, track.stop, transport.play, \
 transport.stop, transport.setPosition, launcher.state) play on a real audio device only when the server was started with --audio.";
 
 /// Most steps a single `command_batch` may run.
@@ -44,7 +45,7 @@ pub struct SuhinaMcp {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenParams {
-    /// Path of a `.als` Live Set, relative to the read root.
+    /// Path of a Suhina project (`.suhina`, or `.locr` from before) or a Live Set (`.als`), relative to the read root.
     pub path: String,
 }
 
@@ -214,7 +215,7 @@ impl SuhinaMcp {
 #[tool_router]
 impl SuhinaMcp {
     #[tool(
-        description = "Open a Live Set (.als) below the read root and make it the session's project. Returns a summary and the importer's warnings (unsupported content is skipped, not fatal)."
+        description = "Open a Suhina project (.suhina, or .locr from before) or a Live Set (.als) below the read root and make it the active project. Returns a summary and the warnings from reading it (unsupported content is skipped, not fatal)."
     )]
     async fn project_open(&self, Parameters(p): Parameters<OpenParams>) -> Result<CallToolResult, McpError> {
         let path = match self.workspace.readable(&p.path) {
@@ -250,7 +251,7 @@ impl SuhinaMcp {
     }
 
     #[tool(
-        description = "List command ids with a description, kind (read, edit, history) and parameter schema. Run them with command_run."
+        description = "List command ids with a description, kind (read, edit, history, transport, projects, plugins, plugin, library, audio) and parameter schema. Run them with command_run."
     )]
     async fn command_list(&self, Parameters(p): Parameters<ListParams>) -> Result<CallToolResult, McpError> {
         let filter = p.filter.unwrap_or_default();
@@ -280,14 +281,13 @@ impl SuhinaMcp {
         if let Some(why) = refused(&p.id) {
             return Ok(fail(why));
         }
-        let params = match confine(&self.workspace, &p.id, p.params.unwrap_or_else(|| json!({}))) {
-            Ok(params) => params,
-            Err(e) => return Ok(fail(e)),
-        };
         let output = self.audio_output;
+        let workspace = Arc::clone(&self.workspace);
         let target = p.project.map(ProjectId);
         let result = self
             .with_projects(move |projects| {
+                let source = save_source(projects, target, &p.id);
+                let params = confine(&workspace, &p.id, p.params.unwrap_or_else(|| json!({})), source.as_deref())?;
                 let mut value = projects.execute_in(target, &p.id, &params).map_err(|e| e.0)?;
                 if let Some(audio_output) = play_active(projects, &p.id, output)
                     && let Some(object) = value.as_object_mut()
@@ -316,7 +316,9 @@ impl SuhinaMcp {
                 let mut results = Vec::new();
                 let mut failed = false;
                 for step in p.steps {
-                    let params = confine(&workspace, &step.id, step.params.unwrap_or_else(|| json!({})));
+                    let source = save_source(projects, target, &step.id);
+                    let params =
+                        confine(&workspace, &step.id, step.params.unwrap_or_else(|| json!({})), source.as_deref());
                     let outcome = match (refused(&step.id), params) {
                         (Some(why), _) => Err(why.into()),
                         (None, Err(e)) => Err(suhina_session::CommandError(e)),
@@ -460,11 +462,23 @@ fn project_audio(session: &Session, project: &Project) -> (suhina_media::AudioPo
     (have, warnings)
 }
 
+/// The file `project.save` without a path would write: the source of the project it runs in.
+/// `None` for every other command.
+fn save_source(projects: &mut Projects, target: Option<ProjectId>, id: &str) -> Option<PathBuf> {
+    if id != "project.save" {
+        return None;
+    }
+    projects.session_mut(target).ok()?.source().map(Path::to_path_buf)
+}
+
 /// `params` with every path a command reads checked against the read root and made real
 /// (`docs/spec/browser.md` › Commands): files for `clip.addFiles`, `preview.play` and presets,
-/// folders for `library.list` and a folder place, and file items for `library.*`.
-fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, String> {
+/// folders for `library.list` and a folder place, and file items for `library.*`. The file
+/// `project.save` writes is checked against the write root ([`confine_save`]); `source` is
+/// the file the project was opened from or last saved to.
+fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&Path>) -> Result<Value, String> {
     match id {
+        "project.save" => confine_save(workspace, &mut params, source)?,
         "clip.addFiles" => {
             if let Some(paths) = params.get_mut("paths").and_then(Value::as_array_mut) {
                 for path in paths.iter_mut() {
@@ -526,6 +540,41 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, 
         _ => {}
     }
     Ok(params)
+}
+
+/// `project.save` writes below the write root only. Its `path` (with `.suhina` added as the
+/// session adds it) must be there; without a path it saves over the project's own file (`.suhina`,
+/// or the `.locr` it was opened from), which must be there too. Either way an existing file is
+/// replaced only with `overwrite: true`, an MCP parameter that is taken out before the command
+/// runs.
+fn confine_save(workspace: &Workspace, params: &mut Value, source: Option<&Path>) -> Result<(), String> {
+    let overwrite = match params.get("overwrite") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err("overwrite must be true or false".into()),
+    };
+    if let Some(object) = params.as_object_mut() {
+        object.remove("overwrite");
+    }
+    let mut path = match params.get("path") {
+        Some(Value::String(path)) if !path.trim().is_empty() => PathBuf::from(path.trim()),
+        Some(Value::String(_)) | None | Some(Value::Null) => match source {
+            Some(source) if suhina_session::is_project_file(source) => source.to_path_buf(),
+            // The command itself says it needs a path.
+            _ => return Ok(()),
+        },
+        Some(_) => return Err("path must be text".into()),
+    };
+    if !suhina_session::is_project_file(&path) {
+        let mut name = path.file_name().map(|n| n.to_os_string()).ok_or("give the project a file name")?;
+        name.push(".");
+        name.push(suhina_session::PROJECT_EXTENSION);
+        path.set_file_name(name);
+    }
+    let text = path.to_str().ok_or("the path is not valid text")?;
+    let target = workspace.writable(text, overwrite)?;
+    params["path"] = json!(display_path(&target));
+    Ok(())
 }
 
 /// A folder `place` must be below the read root; `pinned` and `recent:…` are the library's own.
@@ -663,7 +712,8 @@ mod confine_tests {
     #[test]
     fn paths_agents_give_must_be_inside_the_read_root() {
         let (dir, workspace) = roots("paths");
-        let ok = confine(&workspace, "clip.addFiles", json!({ "paths": ["pack/kick.wav"], "start": 0.0 })).unwrap();
+        let ok =
+            confine(&workspace, "clip.addFiles", json!({ "paths": ["pack/kick.wav"], "start": 0.0 }), None).unwrap();
         assert!(ok["paths"][0].as_str().unwrap().ends_with("kick.wav"));
         assert!(Path::new(ok["paths"][0].as_str().unwrap()).is_absolute());
         let outside = dir.join("outside").join("secret.wav").display().to_string();
@@ -683,15 +733,69 @@ mod confine_tests {
             ("project.relinkFiles", json!({ "files": ["a.wav"], "to": [outside.clone()] })),
             ("library.findFiles", json!({ "names": ["a.wav"], "folder": dir.join("outside").display().to_string() })),
         ] {
-            assert!(confine(&workspace, id, params.clone()).is_err(), "{id} {params}");
+            assert!(confine(&workspace, id, params.clone(), None).is_err(), "{id} {params}");
         }
         let kept = json!({ "item": "device:overdrive" });
-        assert_eq!(confine(&workspace, "library.pin", kept.clone()).unwrap(), kept);
+        assert_eq!(confine(&workspace, "library.pin", kept.clone(), None).unwrap(), kept);
         let place = json!({ "place": "recent:samples" });
-        assert_eq!(confine(&workspace, "library.search", place.clone()).unwrap(), place);
-        assert_eq!(confine(&workspace, "soundmap.layout", place.clone()).unwrap(), place);
-        let voice = confine(&workspace, "library.info", json!({ "item": "bank.syx#4" })).unwrap();
+        assert_eq!(confine(&workspace, "library.search", place.clone(), None).unwrap(), place);
+        assert_eq!(confine(&workspace, "soundmap.layout", place.clone(), None).unwrap(), place);
+        let voice = confine(&workspace, "library.info", json!({ "item": "bank.syx#4" }), None).unwrap();
         assert!(voice["item"].as_str().unwrap().ends_with("bank.syx#4"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn project_save_writes_only_below_the_write_root() {
+        let (dir, read_only) = roots("save");
+        std::fs::create_dir_all(dir.join("out")).unwrap();
+        let workspace = Workspace::new(Some(&dir.join("inside")), Some(&dir.join("out"))).unwrap();
+        let save = |w: &Workspace, params: Value, source: Option<&Path>| confine(w, "project.save", params, source);
+
+        // Outside the write root, by an absolute path or by '..'.
+        let outside = dir.join("outside").join("song.suhina").display().to_string();
+        assert!(save(&workspace, json!({ "path": outside }), None).is_err());
+        assert!(save(&workspace, json!({ "path": "../outside/song" }), None).is_err());
+        // Without a write root nothing is written, with a path or over the project's own file.
+        assert!(save(&read_only, json!({ "path": "song.suhina" }), None).is_err());
+        let own = dir.join("inside").join("own.suhina");
+        std::fs::write(&own, b"x").unwrap();
+        let own = own.canonicalize().unwrap();
+        assert!(save(&read_only, json!({}), Some(&own)).is_err());
+        assert!(save(&read_only, json!({ "overwrite": true }), Some(&own)).is_err());
+        // Nor over a project file outside the write root.
+        assert!(save(&workspace, json!({ "overwrite": true }), Some(&own)).is_err());
+
+        // Below the write root it works; .suhina is added and `overwrite` is taken out.
+        let ok = save(&workspace, json!({ "path": "song", "copy": true }), None).unwrap();
+        let written = ok["path"].as_str().unwrap();
+        assert!(written.ends_with("song.suhina"), "{written}");
+        assert!(Path::new(written).is_absolute());
+        assert_eq!(ok["copy"], true);
+
+        // An existing file is replaced only with overwrite: true, also the project's own file.
+        let mine = dir.join("out").join("song.suhina");
+        std::fs::write(&mine, b"x").unwrap();
+        assert!(save(&workspace, json!({ "path": "song.suhina" }), None).is_err());
+        let ok = save(&workspace, json!({ "path": "song.suhina", "overwrite": true }), None).unwrap();
+        assert!(ok.get("overwrite").is_none());
+        let mine = mine.canonicalize().unwrap();
+        assert!(save(&workspace, json!({}), Some(&mine)).is_err());
+        let ok = save(&workspace, json!({ "overwrite": true }), Some(&mine)).unwrap();
+        assert!(ok["path"].as_str().unwrap().ends_with("song.suhina"));
+        assert!(save(&workspace, json!({ "path": "x", "overwrite": "yes" }), None).is_err());
+
+        // A project opened from a .locr file (saved before October 2026) is saved back to it.
+        let old = dir.join("out").join("old.locr");
+        std::fs::write(&old, b"x").unwrap();
+        let old = old.canonicalize().unwrap();
+        let ok = save(&workspace, json!({ "overwrite": true }), Some(&old)).unwrap();
+        assert!(ok["path"].as_str().unwrap().ends_with("old.locr"));
+        let ok = save(&workspace, json!({ "path": "old.locr", "overwrite": true }), None).unwrap();
+        assert!(ok["path"].as_str().unwrap().ends_with("old.locr"));
+
+        // A project without a project file and no path is left to the command, which asks for one.
+        assert_eq!(save(&workspace, json!({}), None).unwrap(), json!({}));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

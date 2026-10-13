@@ -289,7 +289,7 @@ mod tests {
     fn resolves_relative_paths_from_the_project_folder_then_absolute() {
         let dir = temp_dir("resolve");
         write_wav(&dir.join("shared.wav"), 1, 100);
-        // Relative to the set's folder, the way Live writes "../file.wav".
+        // Relative to the project's folder, as a Live Set (.als) stores "../file.wav".
         let (pool, warnings) = load_project_audio(&project_with_audio("../shared.wav", None), &dir.join("set"));
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(pool.files["../shared.wav"].channels, 1);

@@ -531,7 +531,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
     assert!(!harness.state().project_dialog_open());
 
-    // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
+    // Ctrl+S on a project without a .suhina file asks for a name, in the projects folder.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
     harness.run();
     harness.get_by_label("Name").click();
@@ -541,7 +541,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    let saved = dir.join("Projects").join("Night drive.locr");
+    let saved = dir.join("Projects").join("Night drive.suhina");
     assert!(saved.is_file(), "{:?}", harness.state().status());
     assert_eq!(harness.state_mut().take_saved_path(), Some(saved.clone()));
     let session = harness.state().session();
@@ -555,7 +555,7 @@ fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
     harness.run();
     harness.get_by_label("Save").click();
     harness.run();
-    assert!(dir.join("Templates").join("Night drive.locr").is_file());
+    assert!(dir.join("Templates").join("Night drive.suhina").is_file());
     assert_eq!(harness.state().session().and_then(|s| s.source()), Some(saved.as_path()));
     let _clean = std::fs::remove_dir_all(&dir);
 }
@@ -1001,6 +1001,35 @@ fn keys_copy_paste_and_delete_the_selected_clip() {
     assert!(!spans(&harness).contains(&(0.0, 64.0)));
 }
 
+#[test]
+fn paste_and_duplicate_keys_follow_the_midi_stacking_setting() {
+    let spans = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    for key in [Key::V, Key::D] {
+        let mut harness = arrangement_app();
+        let settings = suhina_ui::settings::Settings { midi_stacking: true, ..Default::default() };
+        let ctx = harness.ctx.clone();
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        let before = spans(&harness);
+        harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::C);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, key);
+        harness.run();
+        // The copy of Beat B (bars 17-28) lies over Fill (bars 29-32), which keeps its span.
+        let after = spans(&harness);
+        assert!(after.contains(&(112.0, 48.0)), "{key:?}: {after:?}");
+        assert_eq!(after.len(), before.len() + 1, "{key:?}: {after:?}");
+        assert!(before.iter().all(|s| after.contains(s)), "{key:?}: {before:?} -> {after:?}");
+    }
+}
+
 /// The demo project with a utility device on Drums.
 fn project_with_a_device() -> suhina_engine::model::Project {
     use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
@@ -1089,8 +1118,8 @@ fn render_the_session_window() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     harness.state_mut().set_project_lists(
-        vec!["C:/Music/Suhina/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
-        vec!["C:/Music/Suhina/Templates/Beat starter.locr".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
+        vec!["C:/Music/Suhina/Projects/Night drive.suhina".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Suhina/Templates/Beat starter.suhina".into(), "C:/Music/Suhina/Templates/Live rig.als".into()],
     );
     harness.state_mut().open_project_dialog(false);
     harness.run();

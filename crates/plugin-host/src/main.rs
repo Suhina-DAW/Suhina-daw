@@ -87,9 +87,9 @@ pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHan
 }
 
 /// Sets the main thread up as a plug-in's editor expects a host's window thread to be: on
-/// Windows with OLE (and so COM, apartment threaded) initialised, which editors use for drag
-/// and drop, the clipboard and text services, and which some crash without (Serum 2, Z3TA+ 2:
-/// a null object from a COM call made before `OleInitialize`).
+/// Windows with OLE (and so COM, apartment threaded) initialised: plug-in editors use OLE for
+/// drag and drop, the clipboard and text services, and some fail to open when the thread has not
+/// called `OleInitialize`.
 fn prepare_main_thread() {
     #[cfg(windows)]
     {
