@@ -137,6 +137,8 @@ trademark of Steinberg Media Technologies GmbH.
 | [`docs/decisions/`](docs/decisions/) | Architecture decisions: the model, commands, time-stretching, devices, plug-in hosting, project files and more |
 | [`docs/spec/`](docs/spec/) | Clean-room specs: file formats (Live Sets, stems, NKS, DX7 voices, `.locr`) and behaviour (clip launching, editing, the browser, the views) |
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
+| [`docs/shortcuts.md`](docs/shortcuts.md) | Keyboard shortcuts in the desktop app, and how to change them |
+| [`docs/releasing.md`](docs/releasing.md) | How a release is built and published |
 
 ## Community
 
