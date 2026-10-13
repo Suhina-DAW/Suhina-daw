@@ -9,7 +9,7 @@
 //! Warped clips follow their warp markers: a beat in the clip maps to a time in the file, piece
 //! by piece. Transpose applies to unwarped clips only: a warped clip's speed is set by the tempo,
 //! and without a stretcher its pitch is set with it, so there is nothing left for transpose to
-//! change (ADR 0003 › Transpose needs the stretcher). A warped clip in a stretching mode that
+//! change (Live greys Transpose out in Re-Pitch mode). A warped clip in a stretching mode that
 //! falls back to this reader loses its transpose for the same reason.
 
 use std::collections::HashMap;

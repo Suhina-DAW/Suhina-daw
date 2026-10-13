@@ -32,7 +32,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md) | decision | current | project file, save, open, .suhina, .locr, file extension, native format, project.save, templates, new project, blank project, unsaved changes, recent projects | Suhina's own project file (.suhina; .locr from before October 2026 still read): versioned JSON of the model, written by its own crate; saving, templates and new projects |
 | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) | decision | current | preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, MIDI preview, browser sound | How a sample added while the project plays reaches the engine, and how the browser previews samples and MIDI files through the engine without locks or allocation on the audio thread |
 | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md) | decision | current | file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed | How the browser's folders are indexed, kept on disk and kept up to date (start-up check, file-system watching, polling), and the limits that protect it from hostile folders |
-| [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md) | decision | current | sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, linear assignment, lapjv, RasterFairy, nearest neighbours, kiddo, feature cache | How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (k-d tree), caches the results, and which crates it uses |
+| [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md) | decision | current | sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, RasterFairy, nearest neighbours, feature cache | How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (a linear scan), caches the results, and which crates it uses |
 | [0014: Stock presets](decisions/0014-stock-presets.md) | decision | current | preset, stock preset, factory preset, preset contribution, CC0, presets folder, preset format, preset licence, DX7 bank | Presets that ship with Suhina for its built-in effects and instruments - where they live, their licence (CC0), what a contribution needs, and the proposed file format |
 | [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Suhina's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
@@ -49,7 +49,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Sample map](spec/sample-map.md) | spec | draft | sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands | How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map |
 | [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter |
 | [The .suhina project file](spec/suhina-format.md) | spec | current | .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state | The layout of Suhina's own project file (.suhina; .locr from before still read), field by field, with what a reader accepts |
-| [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
+| [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | planned | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
@@ -68,8 +68,10 @@ Change this code, and check these documents.
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/suhina-cli/src/main.rs` | [MCP server](mcp.md) |
 | `apps/suhina-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `apps/suhina/Cargo.toml` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) |
 | `apps/suhina/src/main.rs` | [Architecture](architecture.md), [Keyboard shortcuts](shortcuts.md) |
 | `apps/suhina/src/recent.rs` | [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md) |
+| `apps/suhina/src/theme_files.rs` | [Design brief](design/brief.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md), [Importing devices from Live Sets](spec/device-import.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -81,9 +83,11 @@ Change this code, and check these documents.
 | `crates/automation/src/workspace.rs` | [MCP server](mcp.md) |
 | `crates/device-api/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/device-registry/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
+| `crates/device-registry/src/lib.rs` | [0014: Stock presets](decisions/0014-stock-presets.md) |
 | `crates/dsp/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/ahead.rs` | [Architecture](architecture.md), [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/audio.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/engine/src/buses.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md), [MCP server](mcp.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/launcher.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
@@ -123,18 +127,19 @@ Change this code, and check these documents.
 | `crates/session/src/projects.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
-| `crates/session/src/soundmap.rs` | [Sample map](spec/sample-map.md) |
+| `crates/session/src/soundmap.rs` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
+| `crates/ui/Cargo.toml` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) |
 | `crates/ui/src/app.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/browser.rs` | [Architecture](architecture.md), [Browser](spec/browser.md) |
 | `crates/ui/src/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md) |
 | `crates/ui/src/detail_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
-| `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
@@ -146,12 +151,13 @@ Change this code, and check these documents.
 | `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/settings_view.rs` | [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/theme.rs` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md), [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/waveform.rs` | [Components](design/components.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/themes/**` | [Design brief](design/brief.md) |
 | `devices/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |

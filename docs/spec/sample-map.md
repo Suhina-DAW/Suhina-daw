@@ -105,7 +105,7 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows.
+  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
@@ -121,11 +121,11 @@ Every item has a kind. The kinds and the words in names that give them:
 
 | Kind | Words (whole words in the file name or its folders, any case) |
 |---|---|
-| Kick | kick, kik, kck, bd, bassdrum |
+| Kick | kick, kik, kck, bd, bassdrum, bass drum |
 | Snare | snare, snr, sd |
 | Clap | clap, clp, cp, snap |
-| Closed hat | chh, closedhat, closed hat, hhc, hat closed |
-| Open hat | ohh, openhat, open hat, hho, hat open |
+| Closed hat | chh, closedhat, closed hat, hhc, hat closed, closed hihat, hihat closed, hh closed |
+| Open hat | ohh, openhat, open hat, hho, hat open, open hihat, hihat open, hh open |
 | Hat | hat, hihat, hh |
 | Rim | rim, rimshot, rs, stick |
 | Tom | tom, toms, floor tom |
@@ -141,7 +141,9 @@ Every item has a kind. The kinds and the words in names that give them:
 
 - Names are split into words at spaces, punctuation, changes of case and between letters and
   digits (`KickHard_02` → kick, hard, 02); a word with a trailing *s* also counts as the word
-  without it (`Kicks`, `Hats`). The file name is read first, then its folders from the
+  without it (`Kicks`, `Hats`) when what is left has at least three letters and the word is not
+  itself in the table. Two words in a row (`closed hat`, `bass drum`) count before one word
+  alone. The file name is read first, then its folders from the
   nearest up to the library folder; the first word that names a kind wins, and a more specific
   kind (Closed hat) wins over a general one (Hat) in the same name.
 - **Guessed kinds.** An item whose name gives no kind is given the kind most of its 7 nearest
@@ -186,7 +188,8 @@ Every item has a kind. The kinds and the words in names that give them:
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list.
+step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
+without Show similar).
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the
 same things.
@@ -228,11 +231,11 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; computes the layout when it is not cached |
-| `soundmap.similar` | `item`, `count?` | the `count` (default 16, at most 100) items most similar to `item` in its scope, nearest first, with their distance |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); computes the layout when it is not cached |
+| `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
 | `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
 
-Over MCP, `item` and `place` paths must be inside the server's read roots
+Over MCP, `item`, `place` and `folder` paths must be inside the server's read roots
 ([`mcp.md`](../mcp.md)).
 
 ## Limits

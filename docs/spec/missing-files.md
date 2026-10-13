@@ -45,15 +45,14 @@ project opens and helps find the files again.
 A dialog over the window, 600 px wide, as high as it needs (at most the window), titled
 "Missing files · <project>". Escape or **Close** closes it; nothing changes until **Apply**.
 
-**Rows**, one per missing file:
+**Rows**, one per missing file. Each row shows three lines:
 
-| Column | Shows |
-|---|---|
-| State | a dot: red *missing*, accent *found*, `text.value` *several found* |
-| Name | the file name, and how many clips use it |
-| Where | the path it had (hint text) |
-| → | the candidate it will be linked to: a drop-down of the candidates, best first (below), and *Leave it missing* |
-| Locate | a field for a file path; Enter takes it as the candidate |
+1. A dot for its state (red *missing*, accent *found*, `text.value` *several found*; the state
+   is also the name's tooltip), the file name, how many clips use it, and at the right a
+   **Locate** field for a file path: Enter takes it as the candidate.
+2. The path it had (hint text).
+3. "→" and the candidate it will be linked to: a drop-down of the candidates, best first
+   (below), and *Leave it missing*.
 
 **Searching** (buttons above the rows):
 
@@ -96,7 +95,7 @@ Over MCP, `folder` and every `to` path must be inside the server's read root ([`
 | What | Limit | Beyond it |
 |---|---|---|
 | Walking a folder | depth 32, 1 000 000 entries, symbolic links not followed | the walk stops and says so |
-| Candidates per file | 32 | the rest are left out |
+| Candidates per file | 32 (today up to 32 from each source: index and project folder; [#191](https://github.com/juhamikael/Loopwerk/issues/191)) | the rest are left out |
 | Names in one `library.findFiles` | 4 096 | refused |
 | Files in one `project.relinkFiles` | 4 096 | refused |
 

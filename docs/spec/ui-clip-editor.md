@@ -2,8 +2,8 @@
 description: Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing
 read_when: piano roll, clip editor, velocity lane, zoom, detail area height, note editing
 type: spec
-status: draft
-last_verified: 2026-10-12
+status: planned
+last_verified: 2026-10-13
 ---
 
 # UI: clip editor (MIDI)
@@ -12,6 +12,9 @@ Functional spec of the editor that opens in the detail area for a MIDI clip, wri
 Live 12.4.6. Only structure and behaviour; the look comes from
 [`docs/design/brief.md`](../design/brief.md). Items marked **(to observe)** still need checking.
 
+Status: planned; nothing of the editor is built yet. The detail area's splitter exists with one
+height, not saved per view (`crates/ui/src/app.rs`).
+
 ## Size and navigation
 
 The editor is built to be used at any size, from a strip under the arrangement to most of the
@@ -19,7 +22,7 @@ window.
 
 - **The detail area is resizable.** A horizontal splitter between the main view and the detail
   area is dragged up or down; the editor can take nearly the whole window height. The height is
-  saved per view.
+  to be saved per view (planned; today one height for every view, kept while the app runs).
 - **Everything scales with it.** Key rows, the note grid and the velocity lane grow and shrink
   with the available height; nothing is fixed to one size.
 - **Vertical zoom** changes the height of key rows (more or fewer octaves visible). **Horizontal

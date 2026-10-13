@@ -10,7 +10,7 @@ Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `suhina-cli plugin run` puts a file through one; `suhina-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `suhina-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `suhina-cli plugin params` lists a plug-in's parameters, and `suhina-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
+| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `suhina-cli plugin run` puts a file through one; `suhina-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `suhina-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `suhina-cli plugin params` lists a plug-in's parameters, and `suhina-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
@@ -21,11 +21,13 @@ third-party plug-ins only), so they follow the real-time and never-crash rules l
 itself. Written in Rust; DSP from GPL-compatible open-source projects may be ported (rule 9) with
 its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
-- **Crates, in this repository:** `dsp` (filters, oscillators, envelopes, delay lines,
-  convolution, oversampling; no engine or model dependency), `device-api` (the device trait,
-  parameter descriptions, state) and one crate per device under `devices/`. Every parameter is a
-  command and can be automated, from the UI, CLI and MCP alike. Because devices do not depend on
-  the engine, they can later be split into their own repository or built as CLAP plug-ins.
+- **Crates, in this repository:** `dsp` (smoothing, gain, biquad filters, crossovers, DC filter,
+  LFOs, shapers, oversampling; later oscillators, envelopes, delay lines, convolution; no engine
+  or model dependency), `device-api` (the device trait, parameter descriptions, state) and one
+  crate per device under `devices/`. Every parameter is set through a command
+  (`device.setParam`), from the UI, CLI and MCP alike; automation comes later. Because devices
+  do not depend on the engine, they can later be split into their own repository or built as CLAP
+  plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
 - **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
   overdrive, the compressor, the limiter and the FM synth (the first instrument: the DX7-style
@@ -35,7 +37,8 @@ its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md).
   remove, switch and set them.
   A group with devices is a bus (ADR 0004 › 10). Chains on return and master channels, sends
   into chains, and automation come next.
-- **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
+- **Importing devices from Live Sets, in three levels:** a placeholder that keeps the device's
+  type, name and on/off state (its parameters are not kept yet);
   then an approximate mapping to an open-source plug-in over CLAP; then a Suhina device for the
   most used ones. Which stored device lands in which Suhina device, and how each mapping is learnt
   and tested: [`docs/spec/device-import.md`](docs/spec/device-import.md).
@@ -125,8 +128,8 @@ with the project ([device import](docs/spec/device-import.md)), bridging Windows
 plug-ins.
 
 **Patch devices:** devices built by the community as Pure Data patches, with access to
-commands; plugdata works as an ordinary plug-in once hosting lands
-([ADR 0008](docs/decisions/0008-patch-devices.md), proposed).
+commands; plugdata is expected to load as an ordinary CLAP or VST3 plug-in now that hosting works,
+but has not been tried yet ([ADR 0008](docs/decisions/0008-patch-devices.md), proposed).
 
 **ARA** after VST3 hosting works in the sandbox: Arrangement first, since looping, quantised
 Session clips do not fit ARA's linear timeline; Session view later. ADR before implementation.
@@ -153,8 +156,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - MIDI clips with notes (velocity, release velocity, deactivated notes), start and end markers,
   loop, deactivated clips
 - audio clips: file reference, warp on/off, warp markers, warp mode, clip gain, transpose
-- device chains: VST2 and VST3 plug-ins with their id and state kept, Live's own devices as
-  placeholders
+- device chains: VST2 and VST3 plug-ins with their id and state kept; Live's Utility as
+  Suhina's utility with its settings; Live's other devices as placeholders
+  ([device import](docs/spec/device-import.md))
 - anything not understood yet is skipped with a warning; the project still opens
 
 ### M2 Playing

@@ -3,7 +3,7 @@ description: DX7 voice data as system-exclusive messages (one voice, a bank of 3
 read_when: DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - devices/fm-synth/src/patch.rs
 ---
@@ -63,7 +63,7 @@ Six operator groups of 21 bytes, **operator 6 first**, then the global bytes:
 | 142 | LFO wave: triangle, saw down, saw up, square, sine, sample and hold | 0–5 |
 | 143 | pitch modulation sensitivity | 0–7 |
 | 144 | transpose, 24 is none (C3) | 0–48 |
-| 145–154 | name, 10 ASCII characters | 32–127 |
+| 145–154 | name, 10 ASCII characters | 0–127 |
 
 The synth keeps one more byte after these, not part of any message: bit `n` set means operator
 `6 - n` plays (the DX7's operator on/off switches, which it does not store in a voice).
@@ -93,7 +93,8 @@ Files in circulation are often damaged or written by other programs. The reader:
 - refuses data that is not one of the shapes above (wrong length, header or end byte);
 - **reports** a wrong checksum but still reads the voices, because many good banks carry one;
 - limits every value to its range, so any byte string of the right length becomes voices that
-  play (tested with random bytes).
+  play (tested with random bytes). Name bytes keep any value from 0 to 127; a byte below 32
+  (or 127) is shown as a space.
 
 Writing produces messages on channel 1 with a correct checksum; a bank written from fewer than
 32 voices is filled with the initial voice.

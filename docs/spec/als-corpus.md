@@ -3,7 +3,7 @@ description: How to author the Live Sets used to learn the .als format and test 
 read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
 type: howto
 status: current
-last_verified: 2026-10-11
+last_verified: 2026-10-13
 covers:
   - crates/als/tests/corpus.rs
   - scripts/test-signal.py
@@ -52,13 +52,16 @@ share one `Samples/` folder.
 | 08 | `08-clip-length-2-bars.als` | Set the clip length to 2 bars (Clip View, loop length). |
 | 09 | `09-clip-loop-off.als` | Turn the clip's Loop switch off. |
 | 10 | `10-clip-name-color.als` | Rename the clip to `Test` and pick a different clip colour. |
-| 11 | `11-second-scene.als` | Add a second scene (Create › Insert Scene). |
-| 12 | `12-second-clip.als` | Create a clip in scene 2 of the MIDI track with one note: G3 on beat 1. |
-| 13 | `13-clip-in-arrangement.als` | Switch to Arrangement View and drag the scene-1 clip to bar 1 of the MIDI track. |
-| 14 | `14-arrangement-moved.als` | Move that arrangement clip to bar 3. |
-| 15 | `15-track-volume-pan.als` | Set the MIDI track's volume to -6 dB and pan to 50L. |
-| 16 | `16-track-mute.als` | Mute the MIDI track (Track Activator off). |
-| 17 | `17-return-send.als` | Unmute. Turn the MIDI track's Send A up to -12 dB. |
+| 11 | `11-insert-scene.als` | Insert a scene (Create › Insert Scene). |
+| 12 | `12-session-clip.als` | Create a clip in the first Session slot of the MIDI track with one note: C3 on beat 1. |
+| 13 | `13-second-session-clip.als` | Create a clip in the second slot of the same track with one note: G3 on beat 1. |
+| 14 | `14-arrangement-moved.als` | In Arrangement View, move the MIDI track's arrangement clip to bar 3. |
+| 15 | `15-close-piano-roll.als` | Close the piano roll (Clip View). Nothing else. |
+| 16 | `16-extend-mixer.als` | Show the whole mixer section in Session View. Nothing else. |
+| 17 | `17-track-volume-pan.als` | Set the audio track's volume to -6 dB and pan to 50L (fully left). |
+| 18 | `18-track-mute.als` | Mute the audio track (Track Activator off). |
+| 19 | `19-return-send.als` | Unmute. Turn the audio track's Send A up to -12 dB. |
+| 20 | `20-clip-length-2-bars.als` | Set the length of the session clip in slot 1 to 2 bars (Clip View, loop length). |
 
 ## Series 2: audio
 
@@ -89,12 +92,13 @@ Continue from the last file of series 1 and use an audio track that has no clips
 | 43 | `43-device-off.als` | Turn EQ Eight off with its device activator. |
 
 If you have a CLAP or VST3 plug-in with a free licence, also save `44-plugin.als` with it on the
-track and note the plug-in's name and version.
+track and note the plug-in's name and version. (The authored file is named after the plug-in
+used.)
 
 ## Series 4: open questions
 
 Answers the open questions in [`als-format.md`](als-format.md). Start from
-`36-audio-clip-gain.als`, not from a `44-*` file, so no commercial plug-in state ends up in these
+`35-audio-in-arrangement.als`, not from a `44-*` file, so no commercial plug-in state ends up in these
 sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 
 | # | File name | Edit from the previous file |
@@ -111,7 +115,7 @@ sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 | 59 | `59-note-deactivated.als` | Open the G3 clip (1-MIDI slot 2), select the note and press `0` (deactivate note). |
 | 60 | `60-group-track.als` | Select the headers of 3-Audio and 4-loopwerk-demo (Ctrl-click) and press `Ctrl+G`. |
 | 61 | `61-audio-warp-off.als` | Session audio clip on 4-loopwerk-demo: Warp off. |
-| 62 | `62-audio-unwarped-loop-start.als` | Move the loop **Position** to about one second. Log the exact value Live shows. |
+| 62 | `62-audio-unwarped-start.als` | Move the clip's **Start** to about one second. Log the exact value Live shows. |
 
 ## Series 6: devices
 
@@ -207,12 +211,12 @@ corpus/devices/
 | 113 | `113-utility-gain-inf.als` | Gain: drag fully down, until it shows -inf. |
 | 114 | `114-utility-gain-max.als` | Gain: drag fully up. |
 | 115 | `115-utility-balance-25l.als` | Balance: type `25L`. |
-| 116 | `116-utility-balance-50r.als` | Balance: type `50R` (Balance shows 50L to 50R). |
+| 116 | `116-utility-balance-100r.als` | Balance: drag fully right (Balance shows 50L to 50R). |
 | 117 | `117-utility-width-0.als` | Width: type `0`. |
 | 118 | `118-utility-width-200.als` | Width: type `200`. |
 | 119 | `119-utility-width-max.als` | Width: drag fully up. |
-| 120 | `120-utility-midside-mode.als` | Switch Width to Mid/Side mode (it is not on the panel: right-click Width). Leave the knob where it lands; log what it shows. |
-| 121 | `121-utility-midside-mid.als` | Mid/Side mode, drag fully to Mid. |
+| 120 | `120-utility-midside-mid-50S.als` | Switch Width to Mid/Side mode (it is not on the panel: right-click Width). Leave the knob where it lands; log what it shows. |
+| 121 | `121-utility-midside-centre.als` | Mid/Side mode, drag fully to Mid. |
 | 122 | `122-utility-midside-side.als` | Mid/Side mode, drag fully to Side. |
 | 123 | `123-utility-mono.als` | Mono on. |
 | 124 | `124-utility-bassmono-120.als` | Bass Mono on, frequency `120`. |
@@ -483,7 +487,7 @@ length, 48 kHz, 32-bit float, no normalising, no dither) as `501-bounce.wav` and
 
 ### Log
 
-`corpus/als/README.md`, as in series 2, plus the fade preference from Setup, the exact fade
+`corpus/als/README.md`, as in the Log section at the end, plus the fade preference from Setup, the exact fade
 lengths Live shows, and the answer for 504.
 
 ## Tips from the first run

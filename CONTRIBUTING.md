@@ -50,6 +50,11 @@ force a rewrite of everything built on it, so it is not something we clean up la
 - Disassembling, decompiling or debugging the binaries of Ableton Live or any other proprietary
   DAW or plug-in, by hand or with tools (Ghidra, IDA, Hopper, REA, ida-pro-mcp, …). If you have
   done this for a product, do not contribute code for that product's features.
+  Running Suhina's own processes (the app, the CLI, the plug-in host) under a debugger is
+  allowed, also to see that a crash happened in a third-party module; stepping into,
+  disassembling or reading that module's code, or drawing conclusions about its internals from
+  it, is not. A fix then follows public documentation (for example what Windows requires of a
+  window thread), not the module.
 - Reading or using leaked source code, or decompiled scripts of a proprietary program (for
   example the control-surface scripts that circulate decompiled).
 - Notes, patches, write-ups or tools that come from someone else's debugging, disassembly or

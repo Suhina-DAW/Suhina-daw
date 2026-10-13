@@ -11,14 +11,18 @@ covers:
 # Importing devices from Live Sets
 
 Live's own devices in a Live Set (see [`als-format.md`](als-format.md) › Devices) come into
-Suhina at one of three levels: a placeholder that keeps the parameters; then an approximate
-mapping to an open-source plug-in over CLAP; then a Suhina device for the most used ones. After
-import, the user sees which devices came in exactly, approximately or as placeholders. No content
-from Live's library (presets, wavetables, samples, impulse responses) is used.
+Suhina at one of three levels: a placeholder that keeps the device's type, name and on/off state
+(keeping its parameters is planned); then an approximate mapping to an open-source plug-in over
+CLAP; then a Suhina device for the most used ones. After import, the user sees which devices did
+not come in: the import reports each placeholder ("imported as a placeholder") and the device
+chain shows it as "Not supported". Showing which devices came in approximately is planned, with
+that level. No content from Live's library (presets, wavetables, samples, impulse responses) is
+used.
 
 - **Observed with:** Live 12.4.6, as in [`als-format.md`](als-format.md).
 - **Test files:** the device series of the corpus ([`als-corpus.md`](als-corpus.md)): series 3
-  (devices, plug-ins) and series 6 (Utility).
+  (devices, plug-ins) and series 6 (Utility, Auto Pan-Tremolo, EQ Three, Vinyl Distortion,
+  Overdrive). Only the Utility files are imported and checked so far.
 
 The Suhina devices themselves, what they do and how far they are, are in
 [`ROADMAP.md`](../../ROADMAP.md) › Built-in effects and instruments. This document is the format side: which
@@ -38,8 +42,8 @@ A Suhina device that takes a Live device's parameters is built this way:
    The licence is checked before the first line is ported, and every ported file keeps its
    notices.
 4. **Write the import mapping** in `crates/als`: each stored parameter maps to ours, with a
-   conversion where the units or curves differ. Parameters with no counterpart are kept and
-   listed, so a later version can use them.
+   conversion where the units or curves differ. Parameters with no counterpart are to be kept
+   and listed, so a later version can use them (planned; the Utility mapping drops them today).
 5. **Test** with golden renders of the device alone and of imported sets, compared against the
    bounces we made in Live when authoring the sets. The goal is close, not identical.
 
@@ -54,8 +58,8 @@ A Suhina device that takes a Live device's parameters is built this way:
   filters and LFOs from our own `dsp` crate.
 - Import: a corpus series of Operator patches we make ourselves (one per algorithm, envelope
   shapes, ratios, feedback), each saved as a set and bounced, so the mapping is tested against
-  real sound. Until the device exists, Operator comes in as a placeholder that keeps all its
-  parameters.
+  real sound. Until the device exists, Operator comes in as a placeholder that keeps its type,
+  name and on/off state; its parameters are not kept yet (planned).
 
 ## Which device imports into what
 
