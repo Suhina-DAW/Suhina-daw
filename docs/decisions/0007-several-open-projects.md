@@ -6,6 +6,7 @@ status: current
 last_verified: 2026-10-13
 covers:
   - crates/session/src/projects.rs
+  - crates/automation/src/server.rs
 ---
 
 # 0007: Several open projects

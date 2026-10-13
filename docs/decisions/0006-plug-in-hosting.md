@@ -11,6 +11,7 @@ covers:
   - crates/engine/src/plugin.rs
   - crates/session/src/rack.rs
   - crates/output/src/lib.rs
+  - crates/session/src/devices.rs
 ---
 
 # 0006: Plug-in hosting

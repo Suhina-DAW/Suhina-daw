@@ -7,6 +7,8 @@ last_verified: 2026-10-13
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
+  - crates/ui/src/browser_view.rs
+  - apps/suhina/src/main.rs
 ---
 
 # Keyboard shortcuts

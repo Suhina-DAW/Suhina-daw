@@ -9,6 +9,7 @@ covers:
   - crates/als/src/devices.rs
   - crates/als/src/vst2.rs
   - crates/als/tests/synthetic.rs
+  - crates/als/tests/corpus.rs
 ---
 
 # Live Set (`.als`) format

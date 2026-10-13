@@ -6,9 +6,11 @@ status: draft
 last_verified: 2026-10-12
 covers:
   - crates/ui/src/session_view.rs
-  - crates/engine/src/lib.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/app.rs
+  - crates/ui/src/widgets.rs
+  - crates/ui/src/detail_view.rs
+  - crates/engine/src/cpu.rs
 ---
 
 # UI: main window and Session view

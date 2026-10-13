@@ -16,6 +16,7 @@ covers:
   - crates/ui/src/browser.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/drop.rs
+  - crates/ui/src/session_view.rs
 ---
 
 # Browser

@@ -11,8 +11,10 @@ covers:
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
   - crates/engine/src/launcher.rs
-  - crates/ui/src/settings.rs
   - apps/suhina-cli/src/play.rs
+  - crates/ui/src/menus.rs
+  - crates/ui/src/drop.rs
+  - crates/session/src/files.rs
 ---
 
 # Arrangement editing

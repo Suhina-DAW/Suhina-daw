@@ -8,6 +8,9 @@ covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
   - crates/session/src/audio.rs
+  - crates/automation/src/render.rs
+  - crates/engine/src/cpu.rs
+  - apps/suhina-cli/src/main.rs
 ---
 
 # MCP server

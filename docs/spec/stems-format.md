@@ -10,6 +10,7 @@ covers:
   - crates/session/tests/stems.rs
   - crates/media/tests/data/**
   - scripts/stems-fixture.py
+  - crates/media/src/stems_tests.rs
 ---
 
 # Stems files
