@@ -50,6 +50,7 @@ feature.
 |---|---|---|---|---|
 | `devices/fm-synth/tests/golden/scenarios.txt` | FM synth test voices and notes | Suhina contributors | Original work | GPL-3.0-or-later |
 | `devices/fm-synth/tests/golden/*.f32` | Reference renders of those scenarios | Suhina contributors | Rendered with the MSFA engine by `tests/reference/harness.cpp` | GPL-3.0-or-later |
+| `devices/fm-synth/tests/reference/harness.cpp`, `stubs/` | The reference renderer and the stand-in headers it builds Dexed's MSFA sources with (a logger, scale tuning, the MTS-ESP client: declarations only, so the build needs nothing else); not built into Suhina, and no Dexed source is committed | Suhina contributors | Original work | GPL-3.0-or-later |
 | `crates/engine/tests/golden/*.f32` | Reference renders of clip fades | Suhina contributors | Rendered by Suhina's engine (`src/fade_tests.rs`) | GPL-3.0-or-later |
 | `crates/media/tests/data/tones-*.stem.mp4`, `tones-alac.stem.m4a` | Stem files of sine tones | Suhina contributors | Generated with ffmpeg by `scripts/stems-fixture.py` | GPL-3.0-or-later |
 

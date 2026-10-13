@@ -6,8 +6,8 @@ render of the same scenario by the original MSFA engine as Dexed ships it. The p
 to within 1e-6.
 
 - `scenarios.txt`: the voices, performance settings and notes. The voices were written for
-  these tests; none comes from a product's library. `init` is the standard initialised voice
-  (full envelopes, operator 1 alone sounding), a firmware default rather than a library voice.
+  these tests; none comes from a product's library. `init` is the initialised voice as Dexed
+  defines it (full envelopes, operator 1 alone sounding), the same bytes as `Patch::default()`.
 - `<name>.f32`: the reference renders, little-endian 32-bit floats, one channel, every n-th
   frame as the scenario says.
 
