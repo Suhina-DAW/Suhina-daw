@@ -319,6 +319,13 @@ time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name a
 written under them (in the recording red when it is there already and will be replaced), Cancel
 and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
 
+Closing a project, opening another in its place or quitting while a project has unsaved changes
+first shows a 420 px "Unsaved changes" prompt in the same style: "Save the changes to *name*
+before closing it?" (or "opening another project in its place", "quitting") in 11 px
+`text.primary`, and Cancel, Don't save and Save (Enter) at the bottom right; Escape cancels.
+Quitting asks about each project with changes in turn; Save on a project without a file shows
+the save prompt first, and cancelling it cancels the close.
+
 ## Device panel
 
 | Part | Spec |

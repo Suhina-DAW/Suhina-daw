@@ -61,7 +61,10 @@ Suhina (October 2026) and the extension stays, so projects saved before keep ope
    templates folder, or a project to open from a typed path or the recent list (kept in
    `recent.txt`); Save (Ctrl+S), Save as (Ctrl+Shift+S) and Save as template ask for a name and
    folder. The projects and templates folders are settings. There is no system file dialog: the
-   dialog lists what Suhina knows, and a path can be typed or a file dropped.
+   dialog lists what Suhina knows, and a path can be typed or a file dropped. Closing a project,
+   opening another in its place or quitting while a project has unsaved changes asks first:
+   Save, Don't save or Cancel; quitting asks about each such project in turn, and Save on one
+   that has no file yet asks for a name before the app closes.
 
 ## Consequences
 
@@ -73,6 +76,6 @@ Suhina (October 2026) and the extension stays, so projects saved before keep ope
 
 ## Not decided yet
 
-- Asking before closing a project or quitting with unsaved changes; autosave.
+- Backups and autosave ([#202](https://github.com/juhamikael/Loopwerk/issues/202)).
 - A packaged format that carries its audio, and "collect and save".
 - A system file dialog for Open and Save as.
