@@ -15,7 +15,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 # The manual body starts after the table of contents; before that the same numbers appear as
-# page references, which would be read as headings.
+# page references, which would be read as headings. 23 is the first body page of the Live 12
+# manual the measurement was read from (MEASURED_AT in score.py); another edition or another
+# print of it needs this checked against its table of contents.
 BODY_START = 23
 
 CHAP = re.compile(r"^(\d{1,2})\s*\.\s+([A-Z][^.]{2,60})$")

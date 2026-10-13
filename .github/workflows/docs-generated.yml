@@ -57,7 +57,10 @@ jobs:
       # numbers the report's marked parts are rendered from.
       - name: Parity figures
         run: |
-          python3 -m pip install --quiet --disable-pip-version-check matplotlib
+          # Pinned so the figures are byte-for-byte the same between runs; a newer matplotlib draws
+          # slightly different pixels, and an unpinned one would make the bot commit new PNGs for
+          # nothing. Raise it on purpose, in a pull request of its own.
+          python3 -m pip install --quiet --disable-pip-version-check matplotlib==3.10.9
           python3 scripts/parity/charts.py
       - uses: actions/upload-artifact@v4
         with:
@@ -108,7 +111,9 @@ jobs:
             echo "Generated documentation is current."
             exit 0
           fi
-          if printf '%s\n' "$changed" | grep -Ev '^.. docs/(INDEX|commands)\.md$|^.. docs/research/parity-live-12(-by-area|-overview)?\.png$'; then
+          # Only modified (" M") or new ("??") files, never a deletion or a rename, and only the
+          # files generated above.
+          if printf '%s\n' "$changed" | grep -Ev '^( M|\?\?) docs/(INDEX|commands)\.md$|^( M|\?\?) docs/research/parity-live-12-(by-area|overview)\.png$'; then
             echo "::error::Only the generated docs and the parity figures may change (above: anything else)."
             exit 1
           fi

@@ -1,10 +1,10 @@
 """Parity scoring: how much of a reference manual's documented surface Suhina has today.
 
-    python scripts/parity/score.py [--dir target/parity] [--out target/parity/tables.md]
+    python scripts/parity/score.py [--dir target/parity]
 
 Page counts come from scripts/parity/headings.py; the coverage estimates and the prose notes are
-ours (see docs/research/parity-live-12.md, Sources and IP). Writes the two markdown tables that
-build_report.py embeds, and prints the roll-ups.
+ours (see docs/research/parity-live-12.md, Sources and IP). Prints the roll-ups; the tables of the
+report are rendered from the data here by update_report.py, and the figures by charts.py.
 """
 
 import argparse
@@ -28,7 +28,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # The manual the measurement was read from, and the command count the report quotes. Both are kept
 # by hand: the manual is not in the repository, and docs/commands.md is regenerated on main, so a
 # pull request cannot read the count of a command it just added from it.
-MANUAL_CHAPTERS = 42
+MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
 COMMANDS = 92
 
@@ -158,6 +158,7 @@ AREAS = {
 }
 
 # Chapters that describe products or hardware outside a clip-launching DAW's own scope.
+# ADR 0016 › Decision 2 lists the same chapters; change both together.
 OUT_OF_SCOPE = {28, 32, 33, 35, 36}  # video, Max for Live (+ its devices), Push 1, Push 2
 
 

@@ -37,7 +37,7 @@ Three things follow from reading it:
 2. **The device catalogue dominates the number.** The two device reference chapters are 259 of
    999 pages; no amount of polish elsewhere moves the headline as much. Whether Suhina should
    chase 63 devices is therefore a product decision, not a backlog accident.
-3. **Some of the manual describes things Suhina should not build.** Push 1, Max for Live and video
+3. **Some of the manual describes things Suhina should not build.** Push, Max for Live and video
    are in the manual because they are part of Live, not because they are part of clip-launching DAW
    work. Counting them makes the project look further behind than it is, and leaving them
    uncounted without saying so makes the number look better than it is.
@@ -60,7 +60,7 @@ agrees on. It does not schedule the work.
    |---|---|---|
    | Video (ch 28) | Not clip-launching work; a scoring feature with its own tooling | Nothing planned |
    | Max for Live and its devices (ch 32-33) | A separate runtime and a proprietary ecosystem | [ADR 0008](0008-patch-devices.md): community devices as Pure Data patches; imported Max devices stay placeholders |
-   | Push 1 (ch 35) | A hardware generation from before the current one, and the manual documents it for Live's own control scripts | Nothing planned |
+   | Push 1 and Push 2 (ch 35-36) | Manuals for one vendor's hardware controllers, written for Live's own control scripts; Push 1 is also a generation from before the current one | Nothing planned |
    | Writing `.als` (part of ch 5) | Suhina reads Live's format; its own project file is `.suhina` ([ADR 0010](0010-project-files.md)) | Other formats by their own specs (M7: DAWproject, `.flp`) |
 
 3. **In scope but unplanned today:** the gaps the roadmap names only in passing, or not at all.
@@ -134,7 +134,7 @@ material is not already a Live Set.
 
 ### The fourth tier: we are not building these
 
-Video, Max for Live, Push 1, packs and cloud browsing, `.asd` analysis files, amp and cabinet
+Video, Max for Live, Push 1 and 2, packs and cloud browsing, `.asd` analysis files, amp and cabinet
 models, the spectral and vocoder effects, and the remaining devices that exist to complete a
 catalogue rather than to make music. A request for one of these gets this ADR, and reopening it
 means superseding this record.
@@ -157,7 +157,7 @@ milestone).
 
 - "How far are we from Live?" now has an answer with a method behind it, and the answer separates
   *behind* from *not trying to*.
-- The out-of-scope list is a commitment to say no: a request to support Push 1 or Max devices gets
+- The out-of-scope list is a commitment to say no: a request to support Push or Max devices gets
   this ADR as the answer, and reopening it means superseding this record.
 - **The build order no longer follows the measurement.** The report ranks the gaps by manual pages
   and therefore puts the device catalogue first; this ADR puts the three things that make Suhina
@@ -178,6 +178,3 @@ milestone).
   sidechains and displays that Suhina's does not.
 - Where the second tier's small items land: they are issues, not a milestone, and any of them can
   ride along with whatever is in flight.
-- How deep a device must go to count as having a counterpart: the report counts a device as
-  equivalent when it is the same *kind*, which flatters Suhina where Live's device has modes,
-  sidechains and displays that Suhina's does not.

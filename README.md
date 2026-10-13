@@ -10,10 +10,10 @@ An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ablet
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
 
 <a href="docs/research/parity-live-12-by-area.png">
-  <img width="700" alt="Parity with Ableton Live 12 by area: the share of each area of the manual that Suhina covers today" src="docs/research/parity-live-12-by-area.png">
+  <img width="700" alt="Parity by area: the share of each area of a reference DAW's manual that Suhina covers today" src="docs/research/parity-live-12-by-area.png">
 </a>
 
-> How much of that workflow exists today, measured chapter by chapter against the Live 12 reference
+> How much of that workflow exists today, measured chapter by chapter against a reference DAW's
 > manual: [the report](docs/research/parity-live-12.md), [the order the gap gets closed in](docs/decisions/0016-parity-target.md).
 > Rebuilt on `main` whenever the numbers change.
 

@@ -83,7 +83,7 @@ def fig_areas(path: Path):
         ax.spines[side].set_visible(False)
     stamp(fig)
     fig.tight_layout()
-    fig.savefig(path, dpi=170)
+    fig.savefig(path, dpi=170, metadata={"Software": None})
     plt.close(fig)
     print(f"wrote {path}")
 
@@ -142,7 +142,7 @@ def fig_overview(path: Path):
 
     stamp(fig)
     fig.tight_layout()
-    fig.savefig(path, dpi=170)
+    fig.savefig(path, dpi=170, metadata={"Software": None})
     plt.close(fig)
     print(f"wrote {path}")
 

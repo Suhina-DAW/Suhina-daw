@@ -106,7 +106,7 @@ docs/
   design/     UI design brief, component measurements and reference mockups (ADR 0009)
   research/   status analysis of our own project: parity against another DAW's public manual
               (ADR 0016; an ordinary document whose marked parts scripts/parity/ keeps current)
-              and licence audits of third-party models
+              and its two figures
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
   commands.md generated list of every command (suhina-cli commands --markdown)
 third_party/  vendored source built behind a feature: the ASIO SDK's host part (GPL-3.0, `asio`)

@@ -63,7 +63,7 @@ documentation and UI). The scope decision it leads to is
 <!-- parity:begin headline-table -->
 | Measure | Value |
 |---|---|
-| The manual it was measured from | 42 chapters, 1039 PDF pages, 999 pages of feature text |
+| The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
 | Page-weighted coverage of everything the manual documents | **about 16 %** |
 | Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 19 %** |
 | Same, over the scope the roadmap aims at (also without accessibility) | **about 19 %** |
@@ -421,8 +421,9 @@ and the build order into a decision; the milestone assignment itself is still op
   chapters (device parameters) over the small chapters that decide whether a DAW is usable at all
   (recording, automation).
 - Parity with Live is not Suhina's stated goal: README says "comparable in workflow", and the
-  roadmap deliberately leaves out video, Max for Live, Push 1 and accessibility. The headline table
-  above is the measurement's reading of the gap; the area table is the useful part.
+  ADR 0016 deliberately leaves out video, Max for Live and both Push chapters. Accessibility is in
+  scope but has no work planned, so the headline table's last coverage row leaves it out as well.
+  The headline table is the measurement's reading of the gap; the area table is the useful part.
 
 ## 10. Reproducing this
 
