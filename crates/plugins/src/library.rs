@@ -76,14 +76,62 @@ pub fn group_for(hosting: Hosting, plugin: &PluginInfo) -> Option<String> {
 /// `~/Library/Application Support/Suhina` on macOS, `$XDG_CONFIG_HOME/suhina` (or
 /// `~/.config/suhina`) elsewhere. `None` when the system says nothing about where.
 pub fn settings_folder() -> Option<PathBuf> {
+    settings_folder_named("Suhina")
+}
+
+/// The settings folder from before the program was renamed Suhina, under its old name.
+pub fn old_settings_folder() -> Option<PathBuf> {
+    settings_folder_named("Loopwerk") // rename_suhina: keep
+}
+
+fn settings_folder_named(name: &str) -> Option<PathBuf> {
     let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     if cfg!(windows) {
-        env("APPDATA").map(|p| p.join("Suhina"))
+        env("APPDATA").map(|p| p.join(name))
     } else if cfg!(target_os = "macos") {
-        env("HOME").map(|p| p.join("Library/Application Support/Suhina"))
+        env("HOME").map(|p| p.join("Library/Application Support").join(name))
     } else {
-        env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|p| p.join(".config"))).map(|p| p.join("suhina"))
+        let config = env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|p| p.join(".config")));
+        config.map(|p| p.join(name.to_lowercase()))
     }
+}
+
+/// Copies the folder `old` to `new` when `old` exists and `new` does not, so the settings kept
+/// under the program's old name carry over while builds from before the rename keep theirs.
+/// The copy is made beside `new` and renamed into place, so a failed one is tried again on the
+/// next start. A warning when the copy fails; nothing to do is not one.
+pub fn adopt_old_folder(old: Option<PathBuf>, new: Option<PathBuf>) -> Option<String> {
+    let (old, new) = (old?, new?);
+    if !old.is_dir() || new.exists() {
+        return None;
+    }
+    let partial = new.with_extension("partial");
+    let _ = std::fs::remove_dir_all(&partial);
+    let copied = new
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| copy_folder(&old, &partial))
+        .and_then(|()| std::fs::rename(&partial, &new));
+    copied.err().map(|e| {
+        let _ = std::fs::remove_dir_all(&partial);
+        format!("could not copy the old settings {} to {}: {e}", old.display(), new.display())
+    })
+}
+
+/// Copies the files and folders in `from` to `to`; links are left out.
+fn copy_folder(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_folder(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 /// The `suhina-plugin-host` executable next to the running one.
@@ -309,6 +357,28 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("suhina-library-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         folder
+    }
+
+    #[test]
+    fn the_old_settings_folder_is_copied_to_the_new_name_once() {
+        let base = scratch("adopt");
+        let (old, new) = (base.join("old"), base.join("deeper").join("new"));
+        assert_eq!(adopt_old_folder(Some(old.clone()), Some(new.clone())), None, "no old folder: nothing to do");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("plugins.json"), "{}").unwrap();
+        std::fs::create_dir_all(old.join("data")).unwrap();
+        std::fs::write(old.join("data").join("app.ron"), "()").unwrap();
+        assert_eq!(adopt_old_folder(Some(old.clone()), Some(new.clone())), None);
+        assert_eq!(std::fs::read_to_string(new.join("plugins.json")).unwrap(), "{}");
+        assert_eq!(std::fs::read_to_string(new.join("data").join("app.ron")).unwrap(), "()");
+        assert!(old.join("plugins.json").exists(), "the old folder stays for builds from before the rename");
+        assert!(!new.with_extension("partial").exists());
+        // A new folder that already exists is never replaced.
+        std::fs::write(old.join("plugins.json"), "changed").unwrap();
+        assert_eq!(adopt_old_folder(Some(old.clone()), Some(new.clone())), None);
+        assert_eq!(std::fs::read_to_string(new.join("plugins.json")).unwrap(), "{}");
+        assert_eq!(adopt_old_folder(None, Some(new)), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn info(path: &str, vendor: &str) -> PluginInfo {

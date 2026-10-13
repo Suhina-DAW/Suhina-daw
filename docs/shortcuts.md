@@ -34,7 +34,7 @@ above the list.
 ## The keymap file
 
 The keys are kept in `keymap.json` beside `settings.txt`, in Suhina's folder of the user's app
-data (`%APPDATA%\Suhina\data` on Windows, `~/.local/share/Suhina` on Linux,
+data (`%APPDATA%\Suhina\data` on Windows, `~/.local/share/suhina` on Linux,
 `~/Library/Application Support/Suhina` on macOS). It maps action ids to lists of keys:
 
 ```json

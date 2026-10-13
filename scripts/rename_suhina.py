@@ -11,8 +11,17 @@
   (crates/als/tests/corpus.rs);
 - any line that contains `rename_suhina: keep`, such as code that finds the old settings folder.
 
-A branch made before the rename runs this on its own commits first and then merges main: both
-sides then hold the same text and the merge has no rename conflicts.
+A branch made before the rename catches up like this, so that only its own conflicts come up
+(RENAME is the commit on main that ran this script, PRE its parent):
+
+    git merge PRE                                   # main before the rename; old names
+    git checkout RENAME -- scripts/rename_suhina.py
+    python scripts/rename_suhina.py                 # renames the branch, main's part included
+    git add -A && git commit -m "Rename Loopwerk to Suhina in this branch"
+    git merge -s ours RENAME                        # the rename is already in the branch
+    git merge origin/main                           # what main got after the rename
+
+A branch that already ran the script on its own starts with `git revert <its rename commit>`.
 """
 
 from __future__ import annotations

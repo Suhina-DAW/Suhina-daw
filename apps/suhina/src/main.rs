@@ -32,6 +32,8 @@ in Suhina's folder of the user's app data.";
 
 /// The folder eframe keeps Suhina's window state in; the settings file lives beside it.
 const APP_ID: &str = "Suhina";
+/// The app id before the program was renamed: where its settings were kept.
+const OLD_APP_ID: &str = "Loopwerk"; // rename_suhina: keep
 const SETTINGS_FILE: &str = "settings.txt";
 const KEYMAP_FILE: &str = "keymap.json";
 const THEMES_FOLDER: &str = "themes";
@@ -64,7 +66,15 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Settings kept under the program's old name are copied to the new one on the first start.
+    let old_folders = [
+        (suhina_plugins::library::old_settings_folder(), suhina_plugins::library::settings_folder()),
+        (eframe::storage_dir(OLD_APP_ID), eframe::storage_dir(APP_ID)),
+    ];
+    let copied: Vec<String> =
+        old_folders.into_iter().filter_map(|(old, new)| suhina_plugins::library::adopt_old_folder(old, new)).collect();
     let (settings, mut settings_warnings) = load_settings();
+    settings_warnings.extend(copied);
     let (keymap, keymap_warnings) = load_keymap();
     settings_warnings.extend(keymap_warnings);
     let renderer = args.renderer.unwrap_or(match settings.graphics {
@@ -365,11 +375,13 @@ fn saved(path: &Path, what: &str) -> String {
 }
 
 /// Where projects are saved and templates kept until the settings say otherwise: `Suhina`
-/// in the user's documents folder.
+/// in the user's documents folder, or the folder made under the program's old name while only
+/// that one exists (projects there stay where recent lists and links expect them).
 fn default_folders() -> (PathBuf, PathBuf) {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
     let documents = home.map(|h| h.join("Documents")).unwrap_or_default();
-    let base = documents.join("Suhina");
+    let (new, old) = (documents.join("Suhina"), documents.join(OLD_APP_ID));
+    let base = if !new.exists() && old.is_dir() { old } else { new };
     (base.join("Projects"), base.join("Templates"))
 }
 
