@@ -50,6 +50,9 @@ fn process_runs(pid: u32) -> bool {
         let filter = format!("PID eq {pid}");
         let output = std::process::Command::new("tasklist").args(["/FI", &filter, "/NH", "/FO", "CSV"]).output();
         output.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
+    } else if cfg!(target_os = "macos") {
+        // No `/proc` here; `ps` says whether a process with this id exists at all.
+        std::process::Command::new("ps").args(["-p", &pid.to_string()]).output().is_ok_and(|o| o.status.success())
     } else {
         PathBuf::from(format!("/proc/{pid}")).exists()
     }

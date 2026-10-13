@@ -10,6 +10,7 @@ mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
+mod cpu;
 #[cfg(test)]
 mod fade_tests;
 mod launcher;
@@ -33,6 +34,7 @@ pub use ahead::StretchWorker;
 pub use audio::{AudioData, AudioPool};
 use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
+pub use cpu::CpuMonitor;
 use launcher::Launcher;
 pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
 use plugin::{DEADLINE_SHARE, Delay};
@@ -220,6 +222,8 @@ pub struct Renderer {
     plugin_info: HashMap<u64, PluginSlotInfo>,
     /// The browser's preview voice (ADR 0011).
     preview: preview::Preview,
+    /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
+    cpu: cpu::CpuMeter,
 }
 
 impl Renderer {
@@ -270,6 +274,7 @@ impl Renderer {
             offline: false,
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
+            cpu: cpu::CpuMeter::new(),
         })
     }
 
@@ -339,6 +344,8 @@ impl Renderer {
     /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
     /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
+        // The CPU load is measured only in real time: an offline render runs flat out.
+        let measured = if self.offline { None } else { Some(Instant::now()) };
         self.receive_swap();
         self.receive_plugins();
         let mut rest = out;
@@ -363,6 +370,9 @@ impl Renderer {
             self.process_block(rest);
         }
         self.publish_position();
+        if let Some(started) = measured {
+            self.cpu.measured(started, Instant::now());
+        }
     }
 
     fn process_block(&mut self, out: &mut [f32]) {
@@ -1850,5 +1860,31 @@ mod tests {
         let out = frames(&mut renderer, SR as usize / 2);
         // The first click is at beat 2, a quarter of a second in.
         assert_onsets(&out, &[SR as usize / 4]);
+    }
+
+    #[test]
+    fn the_cpu_load_is_measured_only_in_real_time() {
+        let mut renderer = Renderer::stopped(&Project::default(), &AudioPool::new(), SR).unwrap();
+        let controller = renderer.controller();
+        let mut block = vec![0.0f32; 2 * 256];
+        // Offline renders run flat out: nothing is measured.
+        renderer.set_offline(true);
+        for _ in 0..100 {
+            renderer.process(&mut block);
+        }
+        assert!(!renderer.cpu.measured_any());
+        assert_eq!(controller.cpu_monitor().load_milli(), 0);
+        // Real-time playback is measured, and what it measures reaches the controller. The
+        // block's own work is tiny, so the test gives the meter known busy times, as an
+        // audio thread busy with a big project would have.
+        renderer.set_offline(false);
+        renderer.process(&mut block);
+        assert!(renderer.cpu.measured_any());
+        for _ in 0..30 {
+            let started = Instant::now();
+            renderer.process(&mut block);
+            renderer.cpu.measured(started, started + Duration::from_millis(10));
+        }
+        assert!(controller.cpu_monitor().load_milli() > 200);
     }
 }
