@@ -1,12 +1,12 @@
 //! Tests against the local, uncommitted Live Set corpus (`corpus/als`, see
-//! `docs/spec/als-corpus.md`). Run with `cargo test -p loopwerk-als --features corpus`.
+//! `docs/spec/als-corpus.md`). Run with `cargo test -p suhina-als --features corpus`.
 #![cfg(feature = "corpus")]
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
 use std::path::PathBuf;
 
-use loopwerk_als::{Import, read_file};
-use loopwerk_model::LaneData;
+use suhina_als::{Import, read_file};
+use suhina_model::LaneData;
 
 fn open(name: &str) -> Import {
     let path: PathBuf =
@@ -106,7 +106,7 @@ fn session_clip_length_2_bars() {
     assert_eq!(clip.length, 8.0);
 }
 
-fn audio_clip(p: &loopwerk_model::Project, arrangement: bool) -> (loopwerk_model::Clip, loopwerk_model::AudioRegion) {
+fn audio_clip(p: &suhina_model::Project, arrangement: bool) -> (suhina_model::Clip, suhina_model::AudioRegion) {
     let track = p.tracks.iter().find(|t| t.name == "4-loopwerk-demo").unwrap().id;
     let clip = if arrangement {
         p.arrangement.lanes.iter().find(|l| l.track == Some(track)).unwrap().clips[0].clone()
@@ -165,14 +165,14 @@ fn audio_clip_in_arrangement() {
     assert_eq!(audio.file, "../loopwerk-demo.wav");
 }
 
-fn devices(name: &str, track: &str) -> Vec<loopwerk_model::Device> {
+fn devices(name: &str, track: &str) -> Vec<suhina_model::Device> {
     let p = open(name).project;
     p.channels.into_iter().find(|c| c.name == track).unwrap().devices
 }
 
 #[test]
 fn live_devices_become_placeholders() {
-    use loopwerk_model::DeviceKind;
+    use suhina_model::DeviceKind;
     let foreign = |id: &str| DeviceKind::Foreign { format: "als".into(), id: id.into() };
     let d = devices("40-midi-track-instrument", "1-Simpler");
     assert_eq!(d.iter().map(|d| d.kind.clone()).collect::<Vec<_>>(), [foreign("OriginalSimpler")]);
@@ -184,7 +184,7 @@ fn live_devices_become_placeholders() {
 
 #[test]
 fn plugins_keep_id_and_state() {
-    use loopwerk_model::DeviceKind;
+    use suhina_model::DeviceKind;
     let d = devices("44-plugin-add-sylenth1-vst3", "1-Sylenth1");
     let names: Vec<&str> = d.iter().map(|d| d.name.as_str()).collect();
     assert_eq!(names, ["Sylenth1", "Eq8", "ShaperBox 3", "ShaperBox 3"]);
@@ -216,7 +216,7 @@ fn time_signatures_come_from_the_automation_default() {
 #[test]
 fn clip_start_loop_and_end_markers() {
     let clip = |name: &str| open(name).project.launcher.columns[0].slots[0].clip.clone().unwrap();
-    let range = |c: &loopwerk_model::Clip| c.loop_range.map(|r| (r.start, r.end));
+    let range = |c: &suhina_model::Clip| c.loop_range.map(|r| (r.start, r.end));
 
     // Start 1.2.1 inside a 2-bar loop from 1.1.1.
     let c = clip("54-clip-start-marker");
@@ -272,7 +272,7 @@ fn unwarped_audio_times_are_seconds() {
 
 /// The Utility of a file in corpus series 6 (`corpus/devices`, docs/spec/als-corpus.md), in
 /// whichever Live project folder under `corpus/devices` holds it.
-fn utility(name: &str) -> loopwerk_model::Device {
+fn utility(name: &str) -> suhina_model::Device {
     let root: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "corpus", "devices"].iter().collect();
     let file = format!("{name}.als");
     let path = std::fs::read_dir(&root)
@@ -282,15 +282,15 @@ fn utility(name: &str) -> loopwerk_model::Device {
         .unwrap_or_else(|| panic!("{file} is missing under {}", root.display()));
     let project = read_file(&path).unwrap_or_else(|e| panic!("{name}: {e}")).project;
     let devices: Vec<_> = project.channels.into_iter().flat_map(|c| c.devices).collect();
-    devices.into_iter().find(|d| d.kind == loopwerk_model::DeviceKind::Builtin("utility".into())).unwrap()
+    devices.into_iter().find(|d| d.kind == suhina_model::DeviceKind::Builtin("utility".into())).unwrap()
 }
 
-fn param(device: &loopwerk_model::Device, id: &str) -> f64 {
+fn param(device: &suhina_model::Device, id: &str) -> f64 {
     device.params.iter().find(|p| p.id == id).unwrap().value
 }
 
 #[test]
-fn utility_series_maps_onto_the_loopwerk_utility() {
+fn utility_series_maps_onto_the_suhina_utility() {
     let default = utility("110-utility-default.als");
     assert_eq!(default.name, "Utility");
     assert!(default.enabled);

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Loopwerk's own project files.
+/// Suhina's own project files.
 const LOCR: &str = "locr";
 /// How many are kept.
 const KEPT: usize = 12;
@@ -48,7 +48,7 @@ impl Recent {
     }
 }
 
-/// The projects in the templates folder, Loopwerk projects and Live Sets, by name.
+/// The projects in the templates folder, Suhina projects and Live Sets, by name.
 pub fn templates(folder: &Path) -> Vec<PathBuf> {
     let Ok(dir) = std::fs::read_dir(folder) else { return Vec::new() };
     let mut found: Vec<PathBuf> = dir
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn the_newest_comes_first_and_doubles_go() {
-        let dir = std::env::temp_dir().join(format!("loopwerk-recent-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-recent-{}", std::process::id()));
         let _fresh = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap_or_default();
         let file = dir.join("recent.txt");
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn templates_are_projects_by_name() {
-        let dir = std::env::temp_dir().join(format!("loopwerk-templates-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-templates-{}", std::process::id()));
         let _fresh = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap_or_default();
         for name in ["b.locr", "A.als", "notes.txt", "c.LOCR"] {

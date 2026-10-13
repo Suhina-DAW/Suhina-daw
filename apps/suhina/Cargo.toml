@@ -1,24 +1,24 @@
 [package]
-name = "loopwerk"
-description = "Loopwerk, the desktop app"
+name = "suhina"
+description = "Suhina, the desktop app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "loopwerk"
+name = "suhina"
 path = "src/main.rs"
 
 [dependencies]
 # The main window's native handle, for plug-in editors to float above it.
 raw-window-handle = "0.6"  # MIT OR Apache-2.0 OR Zlib
-loopwerk-engine.workspace = true
-loopwerk-session.workspace = true
-loopwerk-media.workspace = true
-loopwerk-library.workspace = true
-loopwerk-output.workspace = true
-loopwerk-ui.workspace = true
+suhina-engine.workspace = true
+suhina-session.workspace = true
+suhina-media.workspace = true
+suhina-library.workspace = true
+suhina-output.workspace = true
+suhina-ui.workspace = true
 zip.workspace = true
 eframe = { version = "0.36", features = ["glow", "persistence"] }  # MIT OR Apache-2.0
 

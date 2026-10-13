@@ -1,6 +1,6 @@
 # Rights and clean-room reports
 
-Loopwerk reimplements the behaviour of commercial software without using its code, content or
+Suhina reimplements the behaviour of commercial software without using its code, content or
 visual design ([`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room). If you believe something in
 this repository breaks that rule, or infringes your copyright, trademark or design rights,
 please tell us. These reports are handled before any other work.

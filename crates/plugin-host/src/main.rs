@@ -1,10 +1,10 @@
-//! `loopwerk-plugin-host`: the process plug-ins run in, never the engine's (ADR 0006).
+//! `suhina-plugin-host`: the process plug-ins run in, never the engine's (ADR 0006).
 //!
-//! `loopwerk-plugin-host --control <address>` connects to the engine's control socket and
-//! answers its messages (`loopwerk_plugins::protocol`) on the main thread, which also serves the
+//! `suhina-plugin-host --control <address>` connects to the engine's control socket and
+//! answers its messages (`suhina_plugins::protocol`) on the main thread, which also serves the
 //! plug-ins' main-thread callbacks and their editors. It runs any number of plug-in instances,
 //! each loaded and unloaded on its own and named by the number the engine gave it; each has
-//! its own link and a thread of its own that serves its audio blocks through `loopwerk-ipc`.
+//! its own link and a thread of its own that serves its audio blocks through `suhina-ipc`.
 //! When the control connection closes, the engine is gone and the process exits.
 //!
 //! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-in built in for tests
@@ -31,10 +31,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use interprocess::TryClone;
-use loopwerk_ipc::Served;
-use loopwerk_plugins::ParamInfo;
-use loopwerk_plugins::protocol::{Message, VERSION};
 use processors::Processor;
+use suhina_ipc::Served;
+use suhina_plugins::ParamInfo;
+use suhina_plugins::protocol::{Message, VERSION};
 
 /// How long the audio thread of a test processor waits for a block before checking whether it
 /// should stop.
@@ -74,24 +74,24 @@ fn main() {
         (Some("--scan"), Some(file)) => scan(file),
         (Some("--scan-worker"), None) => scan_worker(),
         _ => {
-            eprintln!("usage: loopwerk-plugin-host --control <address> | --scan <file> | --scan-worker");
+            eprintln!("usage: suhina-plugin-host --control <address> | --scan <file> | --scan-worker");
             std::process::exit(2);
         }
     };
     if let Err(e) = run(address) {
-        eprintln!("loopwerk-plugin-host: {e}");
+        eprintln!("suhina-plugin-host: {e}");
         std::process::exit(1);
     }
 }
 
 /// `--scan <file>`: prints the plug-ins the file holds on one line after
-/// [`loopwerk_plugins::scan::SCAN_MARKER`] and exits. A plug-in that crashes or hangs while
+/// [`suhina_plugins::scan::SCAN_MARKER`] and exits. A plug-in that crashes or hangs while
 /// loading takes this process with it, and the scanner in the engine notices.
 ///
 /// For tests, `test:clap` describes the built-in test plug-in, `test:crash` exits without an
 /// answer and `test:hang` never answers.
 fn scan(file: &str) -> ! {
-    use loopwerk_plugins::scan::{SCAN_MARKER, scan_error_json, scan_json};
+    use suhina_plugins::scan::{SCAN_MARKER, scan_error_json, scan_json};
     let result = describe(file);
     let (line, code) = match result {
         Ok(plugins) => (scan_json(&plugins), 0),
@@ -103,7 +103,7 @@ fn scan(file: &str) -> ! {
 }
 
 /// The plug-ins `file` holds (see [`scan`] for the `test:` names).
-fn describe(file: &str) -> Result<Vec<loopwerk_plugins::scan::PluginInfo>, String> {
+fn describe(file: &str) -> Result<Vec<suhina_plugins::scan::PluginInfo>, String> {
     match file {
         "test:crash" => std::process::exit(3),
         "test:hang" => loop {
@@ -117,12 +117,12 @@ fn describe(file: &str) -> Result<Vec<loopwerk_plugins::scan::PluginInfo>, Strin
 }
 
 /// `--scan-worker`: reads one file name per line from standard input and prints each answer on
-/// a line after [`loopwerk_plugins::scan::SCAN_MARKER`], until the input ends. The engine's
+/// a line after [`suhina_plugins::scan::SCAN_MARKER`], until the input ends. The engine's
 /// scanner keeps a few of these running so a scan does not start a process per file; one that
 /// crashes or hangs on a file is ended and replaced.
 fn scan_worker() -> ! {
-    use loopwerk_plugins::scan::{SCAN_MARKER, scan_answer};
     use std::io::BufRead;
+    use suhina_plugins::scan::{SCAN_MARKER, scan_answer};
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(file) = line else { break };
@@ -328,9 +328,9 @@ fn next_message(messages: &std::sync::mpsc::Receiver<Message>) -> Result<Message
 type Instances = BTreeMap<u32, Loaded>;
 
 fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let stream = loopwerk_plugins::connect(address)?;
+    let stream = suhina_plugins::connect(address)?;
     let mut writer = stream.try_clone()?;
-    let messages = wakeful(loopwerk_plugins::read_lines(stream));
+    let messages = wakeful(suhina_plugins::read_lines(stream));
     let mut instances = Instances::new();
     loop {
         // Between messages: the plug-ins' main-thread callbacks and their editors' windows.

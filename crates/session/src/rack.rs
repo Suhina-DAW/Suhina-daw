@@ -13,13 +13,13 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use loopwerk_engine::{
+use suhina_engine::{
     DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, model::DeviceKind, plugin_devices,
 };
-use loopwerk_model::{Device, Project};
-use loopwerk_plugins::library::{Hosting, group_for};
-use loopwerk_plugins::scan::{Catalog, PluginInfo};
-use loopwerk_plugins::{Event, EventKind, Health, Launch, MAX_EVENTS, Plugin, PluginAudio, PluginError, SavedState};
+use suhina_model::{Device, Project};
+use suhina_plugins::library::{Hosting, group_for};
+use suhina_plugins::scan::{Catalog, PluginInfo};
+use suhina_plugins::{Event, EventKind, Health, Launch, MAX_EVENTS, Plugin, PluginAudio, PluginError, SavedState};
 
 use crate::{CommandError, Player};
 
@@ -57,7 +57,7 @@ impl PluginEnv {
 
     /// What `library` gives: its catalog, its host, and how each plug-in is hosted (its
     /// `plugins.setHosting` choice, else one process per plug-in file).
-    pub fn from_library(library: &mut loopwerk_plugins::library::Library) -> Self {
+    pub fn from_library(library: &mut suhina_plugins::library::Library) -> Self {
         let host = library.host().to_path_buf();
         let catalog = library.catalog().clone();
         let chosen: HashMap<String, Hosting> = catalog
@@ -226,14 +226,14 @@ impl PluginProcessor for Hosted {
             push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
         }
         match self.audio.process_with_events(input, &self.events, output, timeout) {
-            loopwerk_plugins::Outcome::Done => {
+            suhina_plugins::Outcome::Done => {
                 buffer.copy_from_slice(output);
                 true
             }
             // Sent, but late: the host still gets its events.
-            loopwerk_plugins::Outcome::Missed => false,
+            suhina_plugins::Outcome::Missed => false,
             // Not sent: its releases wait for the next block; new notes are dropped.
-            loopwerk_plugins::Outcome::Busy => {
+            suhina_plugins::Outcome::Busy => {
                 carry_releases(&self.events, &mut self.carried);
                 false
             }
@@ -243,7 +243,7 @@ impl PluginProcessor for Hosted {
 
 /// The installed plug-in for `device` and whether it is an instrument; `None` when nothing
 /// installed stands for it (or it is not a plug-in).
-fn find<'a>(catalog: &'a Catalog, device: &Device) -> Option<(loopwerk_plugins::matching::Match<'a>, bool)> {
+fn find<'a>(catalog: &'a Catalog, device: &Device) -> Option<(suhina_plugins::matching::Match<'a>, bool)> {
     let (found, _) = crate::plugins::device_plugin(catalog, device)?;
     let instrument = is_instrument(found.plugin);
     Some((found, instrument))
@@ -407,7 +407,7 @@ impl Rack {
     /// back to be kept for when the device's plug-in starts again.
     fn stop(&self, key: u64, mut control: Plugin) {
         let sender = self.returned_sender.clone();
-        let _detached = std::thread::Builder::new().name("loopwerk-plugin-stop".into()).spawn(move || {
+        let _detached = std::thread::Builder::new().name("suhina-plugin-stop".into()).spawn(move || {
             let state = (control.health() == Health::Running).then(|| control.save_state().ok()).flatten();
             drop(control);
             let _gone = sender.send(Returned { key, generation: 0, control: None, done: Done::Stopped(state) });
@@ -422,7 +422,7 @@ impl Rack {
         let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
         let mut control = instance.control.take().ok_or("the plug-in is busy; try again in a moment")?;
         let (sender, generation) = (self.returned_sender.clone(), instance.generation);
-        let spawned = std::thread::Builder::new().name("loopwerk-plugin-control".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("suhina-plugin-control".into()).spawn(move || {
             let done = work(&mut control);
             let _gone = sender.send(Returned { key, generation, control: Some(control), done });
         });
@@ -705,7 +705,7 @@ impl Rack {
         instance.generation = self.next_generation;
         instance.status = PluginStatus::Loading;
         let (sender, generation) = (self.sender.clone(), self.next_generation);
-        let spawned = std::thread::Builder::new().name("loopwerk-plugin-restart".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("suhina-plugin-restart".into()).spawn(move || {
             let mut control = control;
             let result = control.restart().map(|audio| (control, audio, None)).map_err(|e| e.to_string());
             let _gone = sender.send(Started { key, generation, result });
@@ -799,7 +799,7 @@ fn missing_notice(env: &PluginEnv, missing: &[String]) -> String {
 /// Starts a plug-in on a thread of its own and sends the result.
 fn spawn_start(sender: Sender<Started>, key: u64, generation: u64, launch: Launch, state: Option<SavedState>) {
     let fallback = sender.clone();
-    let spawned = std::thread::Builder::new().name("loopwerk-plugin-start".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("suhina-plugin-start".into()).spawn(move || {
         let result = start(launch, state).map_err(|e| e.to_string());
         let _gone = sender.send(Started { key, generation, result });
     });

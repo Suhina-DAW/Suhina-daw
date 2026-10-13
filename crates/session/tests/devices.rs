@@ -1,6 +1,6 @@
-use loopwerk_model::*;
-use loopwerk_session::Session;
 use serde_json::{Value, json};
+use suhina_model::*;
+use suhina_session::Session;
 
 fn project() -> Project {
     Project {
@@ -109,8 +109,8 @@ fn bad_device_edits_are_refused_and_change_nothing() {
 }
 
 /// A catalog with one installed effect and one instrument, as a scan would have found them.
-fn plugin_env() -> std::sync::Arc<loopwerk_session::PluginEnv> {
-    use loopwerk_plugins::scan::{Catalog, PluginInfo};
+fn plugin_env() -> std::sync::Arc<suhina_session::PluginEnv> {
+    use suhina_plugins::scan::{Catalog, PluginInfo};
     let mut catalog = Catalog::new();
     let plugin = |file: &str, id: &str, name: &str, features: &[&str]| PluginInfo {
         path: std::path::PathBuf::from(file),
@@ -125,7 +125,7 @@ fn plugin_env() -> std::sync::Arc<loopwerk_session::PluginEnv> {
     let synth = plugin("Synth.clap", "com.vendor.synth", "Synth", &["instrument", "synthesizer"]);
     catalog.insert(verb.path.clone(), vec![verb]);
     catalog.insert(synth.path.clone(), vec![synth]);
-    std::sync::Arc::new(loopwerk_session::PluginEnv::new(catalog, "no-such-host".into()))
+    std::sync::Arc::new(suhina_session::PluginEnv::new(catalog, "no-such-host".into()))
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn plug_in_commands_need_a_plug_in_and_a_playing_project() {
     assert!(run(&mut session, "device.restart", device).is_err());
     let built_in = run(&mut session, "device.openEditor", json!({ "track": 1, "device": 0 })).unwrap_err();
     assert!(built_in.contains("not a plug-in"), "{built_in}");
-    let kinds: Vec<(&str, &str)> = loopwerk_session::commands()
+    let kinds: Vec<(&str, &str)> = suhina_session::commands()
         .iter()
         .filter(|c| c.id.starts_with("device.") && c.id.contains("Editor") || c.id == "device.restart")
         .map(|c| (c.id, c.kind.name()))
