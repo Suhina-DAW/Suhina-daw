@@ -76,6 +76,7 @@ Change this code, and check these documents.
 | `crates/engine/src/ahead.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/audio.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in devices](decisions/0004-built-in-devices.md) |
+| `crates/engine/src/cpu.rs` | [Architecture](architecture.md) |
 | `crates/engine/src/launcher.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/plugin.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
@@ -110,7 +111,7 @@ Change this code, and check these documents.
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
-| `crates/ui/src/app.rs` | [Architecture](architecture.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/app.rs` | [Architecture](architecture.md), [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/browser.rs` | [Browser](spec/browser.md) |
 | `crates/ui/src/browser_view.rs` | [Browser](spec/browser.md) |

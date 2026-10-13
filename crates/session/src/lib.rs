@@ -110,6 +110,12 @@ impl Player {
         self.controller.preview_monitor()
     }
 
+    /// The audio thread's CPU load: the smoothed share of wall time it spends rendering,
+    /// in per mille (1000 is busy all of the time).
+    pub fn cpu_monitor(&self) -> &loopwerk_engine::CpuMonitor {
+        self.controller.cpu_monitor()
+    }
+
     pub(crate) fn controller_mut(&mut self) -> &mut Controller {
         &mut self.controller
     }

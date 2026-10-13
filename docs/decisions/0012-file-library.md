@@ -52,8 +52,11 @@ or full of odd names.
    - Windows and macOS: one recursive watch per folder.
    - Linux: a recursive watch (one inotify watch per sub-folder) only while the folder's
      sub-folders fit the budget: half of `fs.inotify.max_user_watches` shared by all folders.
-   - An event re-reads only the sub-folder it names. An event that says events were lost
-     (rescan, overflow) re-reads the whole folder.
+    - An event re-reads only the sub-folder it names. An event's paths are matched against the
+      folder's root as it was added and against that root with its symlinks resolved, because
+      FSEvents (macOS) reports resolved paths (`/var` … as `/private/var` …) while inotify
+      reports the paths as given. An event that says events were lost
+      (rescan, overflow) re-reads the whole folder.
 6. **Polling when watching cannot be trusted.** A folder is polled (every 5 minutes, the
    sub-folders' modification times compared with the index, as at start-up) when the watch
    cannot be made or fails later, when it is over the Linux budget, or when it is on a network

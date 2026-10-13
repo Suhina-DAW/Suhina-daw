@@ -77,6 +77,10 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
   `preview.stop` stops it; `launcher.state` reports `preview`.
 
+- **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
+  rendering, in percent, smoothed over the last fifth of a second (`0.0` when nothing is
+  measured). The control bar shows the same number.
+
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Loopwerk's settings folder) and keeps it up to date while it runs
   ([ADR 0012](decisions/0012-file-library.md)). `library.search` finds samples, MIDI files,
