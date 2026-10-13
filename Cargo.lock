@@ -2534,6 +2534,7 @@ dependencies = [
  "loopwerk-engine",
  "loopwerk-library",
  "loopwerk-media",
+ "loopwerk-output",
  "loopwerk-plugins",
  "loopwerk-session",
  "loopwerk-soundmap",

@@ -216,7 +216,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `library.refresh`, `library.list`, `library.search`, `library.info`, `library.pinned`,
   `library.pin`, `library.unpin`, `library.recent`, `library.tags`, `library.setTag`,
   `library.removeTag`, `library.tag`; for the sample map `soundmap.status`, `soundmap.analyse`,
-  `soundmap.layout`, `soundmap.similar`, `soundmap.info`.
+  `soundmap.layout`, `soundmap.similar`, `soundmap.info`; for missing files `project.missingFiles`,
+  `library.findFiles`, `project.relinkFiles`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
 - `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
@@ -330,6 +331,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- **Missing files**: a project whose audio files cannot be found says so in a bar when it opens
+  (Find…, Later; View › Missing files). The panel lists them with the clips that use them, finds
+  them by name in the browser's folders and the project's folder at once, or in a folder typed or
+  dropped on it (walked in the background), best match first; Apply relinks them in one undo step
+  ([spec](docs/spec/missing-files.md)).
 - The **sample map** (the browser's List | Map switch, or large in the main area): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
   toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar

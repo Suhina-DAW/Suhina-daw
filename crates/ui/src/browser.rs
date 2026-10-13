@@ -107,8 +107,24 @@ impl Reader {
                     Request::Whole(path) => (path, true),
                 };
                 let info = read_info(&path, whole);
-                if answers.send(Answer { path, whole, info }).is_err() {
+                // The decoded audio goes back at once, so a preview starts without waiting for
+                // the tempo; a short sample's tempo is detected after and sent on its own.
+                let detect = info
+                    .data
+                    .clone()
+                    .filter(|_| info.tempo.is_none() && info.seconds.is_some_and(|s| s <= DETECT_SECONDS));
+                if answers.send(Answer { path: path.clone(), whole, info }).is_err() {
                     return;
+                }
+                if let Some(data) = detect {
+                    let tempo =
+                        loopwerk_media::tempo::detect(&data).map(|bpm| Tempo { bpm, source: TempoSource::Detected });
+                    if tempo.is_some() {
+                        let info = FileInfo { tempo, ..FileInfo::default() };
+                        if answers.send(Answer { path, whole: false, info }).is_err() {
+                            return;
+                        }
+                    }
                 }
             }
         });
@@ -136,10 +152,6 @@ fn read_info(path: &Path, whole: bool) -> FileInfo {
                     Ok(data) => {
                         let seconds = data.frames() as f64 / f64::from(data.sample_rate.max(1));
                         info.seconds = Some(seconds);
-                        if info.tempo.is_none() && seconds <= DETECT_SECONDS {
-                            info.tempo = loopwerk_media::tempo::detect(&data)
-                                .map(|bpm| Tempo { bpm, source: TempoSource::Detected });
-                        }
                         info.peaks = Some(Arc::new(peaks(&data)));
                         info.data = Some(Arc::new(data));
                         info.error = None;
@@ -192,6 +204,10 @@ pub struct BrowserState {
     pub previewing: Option<String>,
     /// A sample waiting to be read whole before it previews.
     pending_preview: Option<(PathBuf, f64)>,
+    /// The row a button press selected, so its release does not select it again.
+    pub(crate) handled_press: Option<String>,
+    /// Why the sample waiting to preview could not be read, to show once.
+    preview_error: Option<String>,
     pub scroll: f32,
     rows: Vec<Row>,
     rows_key: Option<String>,
@@ -224,6 +240,8 @@ impl Default for BrowserState {
             drag: None,
             previewing: None,
             pending_preview: None,
+            preview_error: None,
+            handled_press: None,
             scroll: 0.0,
             rows: Vec::new(),
             rows_key: None,
@@ -565,10 +583,12 @@ impl BrowserState {
             if self.info.len() >= MAX_INFO {
                 self.info.clear();
             }
-            // Decoded audio is kept only for the selected file.
+            // Decoded audio is kept only for the selected file and the one waiting to preview (the
+            // sample map previews what the pointer is over, which is not selected).
             let selected = self.selected.iter().any(|s| s.path().as_deref() == Some(answer.path.as_path()));
+            let waiting = self.pending_preview.as_ref().is_some_and(|(p, _)| *p == answer.path);
             let mut info = answer.info;
-            if !selected {
+            if !selected && !waiting {
                 info.data = None;
             }
             match self.info.get_mut(&answer.path) {
@@ -604,13 +624,19 @@ impl BrowserState {
     pub fn take_ready_preview(&mut self) -> Option<(PathBuf, f64, Arc<AudioData>)> {
         let (path, from) = self.pending_preview.clone()?;
         let info = self.info.get(&path)?;
-        if info.error.is_some() {
+        if let Some(e) = &info.error {
+            self.preview_error = Some(format!("{}: {e}", path.display()));
             self.pending_preview = None;
             return None;
         }
         let data = Arc::clone(info.data.as_ref()?);
         self.pending_preview = None;
         Some((path, from, data))
+    }
+
+    /// Why the last sample asked to preview could not be read, once.
+    pub fn take_preview_error(&mut self) -> Option<String> {
+        self.preview_error.take()
     }
 
     pub fn cancel_preview(&mut self) {
@@ -644,5 +670,90 @@ mod tests {
         assert_eq!(duration_text(0.06), "0:00.1");
         assert_eq!(duration_text(201.7), "3:21");
         assert_eq!(duration_text(f64::NAN), "");
+    }
+
+    /// A sample previewed without being selected (the sample map previews what the pointer is
+    /// over) keeps its decoded audio until it plays.
+    #[test]
+    fn an_unselected_sample_waiting_to_preview_keeps_its_audio() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("loopwerk-browser-preview-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hat.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 8000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for i in 0..800 {
+            writer.write_sample(((i % 50) * 400) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        let mut state = BrowserState::default();
+        assert!(state.selected().is_empty());
+        let _ = state.info(&path, true);
+        state.want_preview(path.clone(), 0.0);
+        let mut ready = None;
+        for _ in 0..400 {
+            state.poll();
+            ready = state.take_ready_preview();
+            if ready.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let (got, from, data) = ready.expect("the preview's audio arrives");
+        assert_eq!((got, from, data.frames()), (path, 0.0, 800));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A loop's audio arrives for its preview, and its tempo is detected and taken in too (it is
+    /// sent after the audio, so the preview does not wait for it).
+    #[test]
+    fn a_previewed_loop_gets_its_tempo_too() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("loopwerk-browser-tempo-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("loop.wav");
+        let rate = 44_100u32;
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        // Four bars of clicks at 120 BPM: 8 seconds, a beat every half second.
+        for i in 0..(rate * 8) {
+            let since_beat = i % (rate / 2);
+            let s = if since_beat < 400 { ((since_beat as f32 * 0.3).sin() * 20_000.0) as i16 } else { 0 };
+            writer.write_sample(s).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        let mut state = BrowserState::default();
+        let started = std::time::Instant::now();
+        let _ = state.info(&path, true);
+        state.want_preview(path.clone(), 0.0);
+        let mut ready_after = None;
+        for _ in 0..2000 {
+            state.poll();
+            if ready_after.is_none() && state.take_ready_preview().is_some() {
+                ready_after = Some(started.elapsed());
+            }
+            if ready_after.is_some() && state.info.get(&path).and_then(|i| i.tempo).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(ready_after.is_some(), "the preview's audio arrives");
+        let detected = state.info.get(&path).and_then(|i| i.tempo).expect("the tempo follows");
+        assert!((detected.bpm - 120.0).abs() < 1.0, "{}", detected.bpm);
+        assert_eq!(detected.source, TempoSource::Detected);
+        println!("audio ready after {:?}, tempo after {:?}", ready_after.unwrap_or_default(), started.elapsed());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

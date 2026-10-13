@@ -247,11 +247,19 @@ pub fn show(ui: &mut Ui, area: Rect, state: &mut BrowserState, cx: Context<'_>) 
             session.provide_audio(&path, data);
         }
         let params = json!({ "path": path.display().to_string(), "from": from, "gain": settings.preview_volume });
-        if projects.execute("preview.play", &params).is_ok() {
-            state.previewing = Some(path.display().to_string());
+        match projects.execute("preview.play", &params) {
+            Ok(_) => state.previewing = Some(path.display().to_string()),
+            Err(e) => out.status = Some(Status::Error(format!("Cannot preview: {}", e.0))),
         }
     }
-    if state.preview_pending() || state.previewing.is_some() {
+    if let Some(e) = state.take_preview_error() {
+        out.status = Some(Status::Error(format!("Cannot preview: {e}")));
+    }
+    // While a sample is being read for its preview, every frame looks for it, so it plays the
+    // moment it is ready.
+    if state.preview_pending() {
+        ui.ctx().request_repaint();
+    } else if state.previewing.is_some() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
     }
     out
@@ -520,6 +528,7 @@ fn results_view(
     let mono = theme::mono_font(theme::TEXT_TINY);
     let font = theme::ui_font(theme::TEXT_SMALL);
     let mut clicked: Option<(usize, Modifiers)> = None;
+    let mut pressed: Option<(usize, Modifiers)> = None;
     let mut double: Option<usize> = None;
     let mut drag: Option<usize> = None;
     let mut play: Option<usize> = None;
@@ -604,6 +613,9 @@ fn results_view(
                 Rect::from_min_max(Pos2::new(rect.right() - meta_width, rect.top()), rect.max - Vec2::new(PAD, 0.0));
             widgets::text_in(&painter, meta_rect, Align2::RIGHT_CENTER, &meta, mono.clone(), theme::text_hint());
         }
+        if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+            pressed = Some((index, ui.input(|i| i.modifiers)));
+        }
         if response.clicked() {
             clicked = Some((index, ui.input(|i| i.modifiers)));
         }
@@ -612,12 +624,29 @@ fn results_view(
         }
         if response.drag_started() {
             drag = Some(index);
+            state.handled_press = None;
         }
         let item = row.item.clone();
         response.context_menu(|ui| row_menu(ui, &item, &tags, state, projects, out));
     }
+    // A row is selected (and previews) when the button goes down, not when it comes up, so a
+    // preview starts at once. A row already in a selection of several waits for the release, so
+    // pressing it to drag them all keeps the selection.
+    if let Some((index, modifiers)) = pressed
+        && let Some(row) = rows.get(index)
+    {
+        let in_selection = state.selected.iter().any(|s| s.key == row.item.key);
+        if !in_selection || state.selected.len() == 1 || modifiers.command || modifiers.shift {
+            click_row(state, &rows, index, modifiers);
+            state.handled_press = Some(row.item.key.clone());
+        }
+    }
     if let Some((index, modifiers)) = clicked {
-        click_row(state, &rows, index, modifiers);
+        let key = rows.get(index).map(|r| r.item.key.clone());
+        // The press of this click selected the row already.
+        if state.handled_press.take() != key {
+            click_row(state, &rows, index, modifiers);
+        }
     }
     if let Some(index) = double
         && let Some(row) = rows.get(index)
@@ -658,7 +687,8 @@ fn results_view(
         let items: Vec<BrowserItem> =
             items.into_iter().filter(|i| i.kind != ItemKind::Heading && i.kind != ItemKind::Folder).collect();
         if !items.is_empty() {
-            stop_preview(state, projects);
+            // The preview goes on while dragging (a press held still also starts a drag); it
+            // stops when the items are dropped into the project.
             state.start_drag(items);
         }
     }
@@ -781,16 +811,12 @@ fn start_preview(
     out: &mut BrowserOut,
 ) {
     let Some(path) = item.path() else { return };
-    if active(projects).is_none_or(|s| s.player().is_none()) {
+    if let Err(why) = can_preview(projects) {
+        out.status = Some(Status::Hint(why));
         return;
     }
     match item.kind {
-        ItemKind::Sample => {
-            state.previewing = None;
-            let _ = projects.execute("preview.stop", &json!({}));
-            let _ = state.info(&path, true);
-            state.want_preview(path, from);
-        }
+        ItemKind::Sample => preview_sample(state, projects, path, from),
         ItemKind::Midi => {
             state.cancel_preview();
             let mut params =
@@ -830,6 +856,26 @@ fn mode_switch(ui: &mut Ui, area: Rect, state: &mut BrowserState) {
         widgets::text_in(&painter, rect, Align2::CENTER_CENTER, name, small.clone(), text);
         x = rect.right() + FILTER_GAP;
     }
+}
+
+/// Why nothing can preview now, if so: previews play through the active project's audio output.
+pub fn can_preview(projects: &Projects) -> Result<(), String> {
+    match active(projects) {
+        None => Err("Open or make a project to preview: previews play through its audio output".into()),
+        Some(s) if s.player().is_none() => {
+            Err("Cannot preview: the project has no audio output (see the warnings when it opened)".into())
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// Previews a sample from `from` seconds: it is decoded on the browser's reader thread, then
+/// played (`preview.play`) when it is ready. The caller checks [`can_preview`] first.
+pub fn preview_sample(state: &mut BrowserState, projects: &mut Projects, path: PathBuf, from: f64) {
+    state.previewing = None;
+    let _ = projects.execute("preview.stop", &json!({}));
+    let _ = state.info(&path, true);
+    state.want_preview(path, from);
 }
 
 /// Stops any preview.

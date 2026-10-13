@@ -42,6 +42,8 @@ pub struct Panel {
     flags_key: Option<String>,
     /// An item double-clicked, for the window to add to the selected track.
     pub add: Vec<BrowserItem>,
+    /// Something to say in the status bar (a preview that cannot play).
+    pub status: Option<String>,
 }
 
 impl Default for Panel {
@@ -56,6 +58,7 @@ impl Default for Panel {
             points: Vec::new(),
             flags_key: None,
             add: Vec::new(),
+            status: None,
         }
     }
 }
@@ -275,8 +278,10 @@ impl Panel {
     ) -> bool {
         match event {
             MapEvent::Preview(i) => {
-                if let Some(path) = self.path(i) {
-                    preview(state, projects, path);
+                if let Some(path) = self.path(i)
+                    && let Err(why) = preview(state, projects, path)
+                {
+                    self.status = Some(why);
                 }
             }
             MapEvent::Select { items, add } => {
@@ -302,7 +307,6 @@ impl Panel {
             }
             MapEvent::StartDrag(items) => {
                 let items: Vec<BrowserItem> = items.iter().filter_map(|i| self.path(*i)).map(|p| item_of(&p)).collect();
-                crate::browser_view::stop_preview(state, projects);
                 state.start_drag(items);
             }
             MapEvent::Add(i) => {
@@ -362,14 +366,10 @@ impl Panel {
 }
 
 /// Previews a sample as the browser does: decoded on the browser's reader thread, then played.
-fn preview(state: &mut BrowserState, projects: &mut Projects, path: PathBuf) {
-    if projects.active().and_then(|id| projects.get(id)).is_none_or(|s| s.player().is_none()) {
-        return;
-    }
-    state.previewing = None;
-    let _ = projects.execute("preview.stop", &json!({}));
-    let _ = state.info(&path, true);
-    state.want_preview(path, 0.0);
+fn preview(state: &mut BrowserState, projects: &mut Projects, path: PathBuf) -> Result<(), String> {
+    crate::browser_view::can_preview(projects)?;
+    crate::browser_view::preview_sample(state, projects, path, 0.0);
+    Ok(())
 }
 
 #[cfg(test)]
