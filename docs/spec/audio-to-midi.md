@@ -65,7 +65,7 @@ The context menu of an audio clip has, together:
    **(hypothesis)**
 5. The source audio clip is left as it is.
 
-**Suhina:** presets are our own, starting with one per instrument (drum rack, sampler). A
+**Suhina:** presets are our own, starting with one per instrument (drum sampler, sampler). A
 slice with no audible content is still created, so note numbers stay predictable.
 
 ## Converting

@@ -41,7 +41,11 @@ that describe them (*Code and its documents*). Read only the documents that matc
    formats, golden-file renders for DSP and engine behaviour.
 8. **Other DAWs are named only where a format is handled.** Product names such as Ableton,
    Live or FL Studio may appear in format crates (`crates/als`), their tests, `docs/spec/` and
-   `docs/decisions/`, to say which file format the code reads. The model, engine, CLI core and
+   `docs/decisions/`, to say which file format the code reads, and in the design brief
+   (`docs/design/brief.md`), to say what Suhina's look must not resemble. ROADMAP and README
+   describe Suhina's own devices and features under their own names; which device of another
+   product imports into which is a spec ([`docs/spec/device-import.md`](docs/spec/device-import.md)).
+   Product terms of other DAWs are not used as generic words either: "drum sampler", not "drum rack". The model, engine, CLI core and
    UI describe concepts neutrally ("a clip that belongs to one track", "a shared pattern").
    User-facing text may name a file format when it imports or exports it ("a Live Set to
    import"), never as Suhina's own branding.
@@ -71,6 +75,7 @@ crates/
   ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
+  device-registry L1 every built-in device by its stable id: makes and lists them (ADR 0004)
   ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)
   plugins  L1 the engine's side of plug-in hosting: start a host process, control protocol, health, state, restart; scanning; offline runs
   plugin-host  the suhina-plugin-host executable plug-ins run in (ADR 0006; may use unsafe): CLAP, VST3, test plug-ins
@@ -81,6 +86,7 @@ devices/
   vinyl-distortion  tracing (even), pinch (odd, out of phase) and crackle, oversampled
   overdrive  pedal-style: band, drive, tone, dynamics, dry/wet; oversampled
   compressor stereo-linked, soft knee, side-chain high-pass, attack/release, dry/wet
+  fm-synth six operators, 32 algorithms, DX7 voice files; the engine is a port of MSFA (Apache-2.0)
   limiter  brickwall peak limiter with 1.5 ms lookahead; never over the ceiling
 apps/
   suhina-cli   headless CLI: render, play, mcp
@@ -96,6 +102,26 @@ scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py
 ```
 
 A crate may depend only on lower layers. Nothing below the UI layer may depend on a GUI toolkit.
+
+### Crate names
+
+Every package is named `suhina-*`; the directory has no prefix. The project had another name
+until October 2026 (README); nothing new may use it, in names, text or code.
+
+| Kind | Directory | Package (`Cargo.toml`) | In Rust code |
+|---|---|---|---|
+| Library crate | `crates/<name>` | `suhina-<name>` | `suhina_<name>` |
+| Built-in device | `devices/<name>` | `suhina-device-<name>` | `suhina_device_<name>` |
+| App (binary) | `apps/<name>` | `suhina` or `suhina-<name>` | |
+
+A new crate inherits the workspace settings (`version.workspace = true`, `edition`, `license`,
+`rust-version`, `[lints] workspace = true`), is added to `[workspace.dependencies]` in the root
+`Cargo.toml` (`suhina-<name> = { path = "crates/<name>" }`), and other crates depend on it with
+`suhina-<name>.workspace = true`. Add it to the map above and to
+[`docs/architecture.md`](docs/architecture.md). Environment variables start with `SUHINA_`.
+CI runs `python scripts/rename_suhina.py --check`, which fails when the old name is left anywhere
+in the tree (links to the repository and lines marked `rename_suhina: keep` excepted). A branch started
+before the rename catches up as the script's docstring describes.
 
 ## 3. Tasks
 

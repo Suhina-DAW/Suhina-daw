@@ -16,6 +16,9 @@
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
   *Before you finish a task* lists which document covers what.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
+- **Names:** packages are `suhina-<name>` (`suhina-device-<name>` for devices), used in code as
+  `suhina_<name>`; directories have no prefix. `AGENTS.md` › *Crate names* says how a new crate
+  is added; CI rejects the project's old name (`python scripts/rename_suhina.py --check`).
 - **Commits:** small, focused, with a clear subject line, and signed off (see
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
 - **Issues:** small and scoped, with acceptance criteria (the issue template asks for them);
