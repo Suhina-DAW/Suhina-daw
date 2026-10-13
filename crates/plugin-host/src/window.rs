@@ -770,6 +770,11 @@ mod imp {
             for open in open.iter_mut() {
                 loop {
                     let polled = open.connection.poll_for_event();
+                    static POLLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    let n = POLLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n % 500 == 0 {
+                        eprintln!("TRACE host pump heartbeat {n} window={}", open.window);
+                    }
                     if !matches!(polled, Ok(None)) {
                         eprintln!("TRACE host pump window={} polled={polled:?}", open.window);
                     }

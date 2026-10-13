@@ -356,7 +356,8 @@ fn close_editor_window() {
         .unwrap_or_else(|| panic!("no editor window"));
     let message = ClientMessageEvent::new(32, window, protocols, [delete, 0, 0, 0, 0]);
     connection.send_event(false, window, EventMask::NO_EVENT, message).unwrap();
-    connection.flush().unwrap();
+    // A round trip before the connection closes, so the server has taken the request.
+    connection.get_input_focus().unwrap().reply().unwrap();
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
