@@ -19,9 +19,9 @@
 - [ ] Nothing here comes from disassembled, decompiled or leaked material, or from the content
       of a proprietary product (samples, presets, artwork, icons, interface text, visual design),
       and none of it was given to an agent. Screenshots used only to see where things are are
-      fine ([ADR 0009](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0009-ui-toolkit-and-look.md)).
+      fine ([ADR 0009](https://github.com/suhina-daw/suhina-daw/blob/main/docs/decisions/0009-ui-toolkit-and-look.md)).
 - [ ] Every commit ends with a `Signed-off-by:` line (`git commit -s`): you confirm you may contribute
-      the code under the project's licence ([DCO](https://github.com/juhamikael/Loopwerk/blob/main/CONTRIBUTING.md#developer-certificate-of-origin)).
+      the code under the project's licence ([DCO](https://github.com/suhina-daw/suhina-daw/blob/main/CONTRIBUTING.md#developer-certificate-of-origin)).
 
 **Works and is tested**
 - [ ] I tried every change by hand and it works as intended, also the parts an AI agent wrote.
@@ -29,7 +29,7 @@
 - [ ] `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
       and `python scripts/rename_suhina.py --check` pass.
 
-**Fits the architecture** ([AGENTS.md › Golden rules](https://github.com/juhamikael/Loopwerk/blob/main/AGENTS.md#1-golden-rules))
+**Fits the architecture** ([AGENTS.md › Golden rules](https://github.com/suhina-daw/suhina-daw/blob/main/AGENTS.md#1-golden-rules))
 - [ ] New things a user can do to a project are commands, so an agent can do them over MCP and
       core features work from the CLI (e.g. moving a clip, setting a track's volume, grouping
       tracks). Purely visual changes need none.

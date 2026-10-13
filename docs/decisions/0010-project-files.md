@@ -87,6 +87,6 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
 
 ## Not decided yet
 
-- Backups and autosave ([#202](https://github.com/juhamikael/Loopwerk/issues/202)).
+- Backups and autosave ([#202](https://github.com/suhina-daw/suhina-daw/issues/202)).
 - A packaged format that carries its audio, and "collect and save".
 - A system file dialog for Open and Save as.
