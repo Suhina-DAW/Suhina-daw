@@ -1,6 +1,6 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
 last_verified: 2026-10-12
@@ -53,16 +53,18 @@ at most the clip's length; a project that breaks this does not validate
 negative length, fades together longer than the clip, a MIDI clip, and a call with neither.
 `project.clips` lists each clip's `fade_in` and `fade_out`.
 
-**The curve is linear in amplitude.** `beats` into a clip of `length` beats the clip's gain is
+**The curve is linear in amplitude.** On the frame `beats` into a clip of `length` beats, with
+`frame` the length of one frame in beats, the clip's gain is
 
 ```text
-fade_in_gain  = min(1, beats / fade_in)              (1 when fade_in is 0)
-fade_out_gain = min(1, (length - beats) / fade_out)  (1 when fade_out is 0)
+fade_in_gain  = min(1, beats / fade_in)                      (1 when fade_in is 0)
+fade_out_gain = min(1, (length - frame - beats) / fade_out)  (1 when fade_out is 0)
 gain          = fade_in_gain × fade_out_gain × click guard
 ```
 
-The click guard is the engine's 2 ms linear ramp at both ends of every audio clip; the fades
-multiply with it rather than replacing it. The engine works it out per frame from the clip's
+The fade-in counts the time before the frame and the fade-out the time after it, so the first and
+the last frame are both silent. The click guard is the engine's 2 ms linear ramp at both ends of
+every audio clip, counted the same way, and the fades multiply with it rather than replacing it. The engine works it out per frame from the clip's
 start and end in frames (`audio::Fades`), so fades are sample-accurate and the same in offline
 renders and real-time playback, unwarped (direct reader) or warped (time-stretched): the envelope
 is applied after the stretcher. A fade follows the tempo, since it is in beats. Fades belong to
@@ -80,6 +82,14 @@ horizontal drag sets the fade with its end on the grid (Alt held: free), up to t
 the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
 double-click on a handle removes that fade. Measurements are in
 [components](../design/components.md) › Arrangement view.
+
+## Start marker and loop
+
+A clip plays from its start marker (`Clip::offset`, in content beats) and, with a loop, around
+the loop from then on. Live keeps the start marker inside the loop: moving the loop moves the
+marker with it ([als-format](als-format.md) › Markers). **Suhina:** a project whose start marker
+is at or past the loop end starts at the loop start, in every reader alike (notes, audio read
+directly or time-stretched, and launched clips).
 
 ## Play position
 

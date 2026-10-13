@@ -1,14 +1,28 @@
 //! Audio clip playback. Each clip placement becomes an [`AudioEvent`] when the renderer is built;
 //! `process` only reads decoded samples that are already in memory.
 //!
+//! This is the direct reader: it reads the file faster or slower, so speed and pitch change
+//! together ("re-pitch"). It plays unwarped clips, warped clips in Repitch mode, and warped
+//! clips the stretcher refuses (a segment outside 0.25x-4x, or a file it cannot take); the
+//! time-stretched path is `stretch.rs` (ADR 0003).
+//!
 //! Warped clips follow their warp markers: a beat in the clip maps to a time in the file, piece
-//! by piece. There is no time-stretching yet, so a clip that plays faster or slower than its file
-//! also sounds higher or lower ("re-pitch"); transpose applies to unwarped clips only.
+//! by piece. Transpose applies to unwarped clips only: a warped clip's speed is set by the tempo,
+//! and without a stretcher its pitch is set with it, so there is nothing left for transpose to
+//! change (Live greys Transpose out in Re-Pitch mode). A warped clip in a stretching mode that
+//! falls back to this reader loses its transpose for the same reason.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use suhina_model::{AudioRegion, Clip};
+
+/// File sample rates the direct reader plays; a file outside them is not read (a rate of 0 would
+/// freeze on one frame). Wider than [`STRETCH_SAMPLE_RATES`], since the direct reader is where a
+/// clip the stretcher refuses goes.
+pub(crate) const FILE_SAMPLE_RATES: std::ops::RangeInclusive<u32> = 1_000..=384_000;
+/// File sample rates the stretcher takes.
+pub(crate) const STRETCH_SAMPLE_RATES: std::ops::RangeInclusive<u32> = 8_000..=192_000;
 
 /// Decoded audio, interleaved f32.
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +79,37 @@ impl AudioPool {
     }
 }
 
+/// Most warp markers the engine reads from one region, so a malformed project cannot make every
+/// clip placement copy an unbounded list; markers past it are ignored (the last segment extends).
+pub(crate) const MAX_WARP_MARKERS: usize = 100_000;
+
+/// A region's usable warp markers as (beat, seconds): finite, sorted by beat, one per beat, at
+/// most [`MAX_WARP_MARKERS`].
+pub(crate) fn warp_markers(region: &AudioRegion) -> Vec<(f64, f64)> {
+    let mut markers: Vec<(f64, f64)> = region
+        .warp_markers
+        .iter()
+        .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
+        .map(|m| (m.time, m.audio_time))
+        .collect();
+    markers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    markers.dedup_by(|a, b| a.0 == b.0);
+    markers.truncate(MAX_WARP_MARKERS);
+    markers
+}
+
+/// File seconds at clip beat `beat` through sorted `markers`, extending the first and last
+/// segments. A binary search: this runs per frame on the audio thread.
+pub(crate) fn seconds_at(markers: &[(f64, f64)], beat: f64) -> f64 {
+    // The segment that contains `beat`, or the first or last one to extend.
+    let i = markers.partition_point(|(b, _)| *b <= beat).clamp(1, markers.len().max(2) - 1);
+    let (Some(&(b0, s0)), Some(&(b1, s1))) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
+    if b1 <= b0 {
+        return s0;
+    }
+    s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
+}
+
 /// How a beat in the clip maps to seconds in the file.
 #[derive(Debug, Clone, PartialEq)]
 enum TimeMap {
@@ -78,16 +123,7 @@ impl TimeMap {
     fn seconds(&self, beat: f64) -> f64 {
         match self {
             Self::Linear { seconds_per_beat } => beat * seconds_per_beat,
-            Self::Warp(markers) => {
-                // The segment that contains `beat`, or the first or last one to extend.
-                let i =
-                    markers.iter().position(|(b, _)| *b > beat).unwrap_or(markers.len()).clamp(1, markers.len() - 1);
-                let (Some(&(b0, s0)), Some(&(b1, s1))) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
-                if b1 <= b0 {
-                    return s0;
-                }
-                s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
-            }
+            Self::Warp(markers) => seconds_at(markers, beat),
         }
     }
 }
@@ -122,12 +158,24 @@ impl Fades {
     }
 
     /// The gain `since_start` frames after the clip starts and `until_end` frames before it
-    /// ends, 0 … 1.
+    /// ends (the end is the frame after the last), 0 … 1. The ramps count the frames before and
+    /// after this one, so the first and the last frame are both 0.
     pub(crate) fn gain(&self, since_start: f64, until_end: f64) -> f32 {
+        let until_end = until_end - 1.0;
         let guard = (since_start / self.click).min(until_end / self.click);
         let fade_in = if self.fade_in > 0.0 { since_start / self.fade_in } else { 1.0 };
         let fade_out = if self.fade_out > 0.0 { until_end / self.fade_out } else { 1.0 };
         (guard.clamp(0.0, 1.0) * fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
+    }
+}
+
+/// The clip beat a clip starts playing from: its offset, or the loop start when the offset is at
+/// or past the loop end (`docs/spec/arrangement-editing.md` › Start marker and loop). Every
+/// reader (notes, direct and stretched audio, launched clips) starts there.
+pub(crate) fn start_beat(offset: f64, loop_range: Option<(f64, f64)>) -> f64 {
+    match loop_range {
+        Some((start, end)) if offset >= end => start,
+        _ => offset,
     }
 }
 
@@ -172,18 +220,17 @@ impl AudioEvent {
     ) -> Option<Self> {
         let Timing { frames_per_beat, tempo_bpm, sample_rate } = timing;
         let finite = [clip.start, clip.length, clip.offset, frames_per_beat, tempo_bpm].iter().all(|v| v.is_finite());
-        if !finite || clip.length <= 0.0 || frames_per_beat <= 0.0 || data.frames() == 0 {
+        if !finite
+            || clip.length <= 0.0
+            || frames_per_beat <= 0.0
+            || tempo_bpm <= 0.0
+            || data.frames() == 0
+            || !FILE_SAMPLE_RATES.contains(&data.sample_rate)
+        {
             return None;
         }
         let linear = TimeMap::Linear { seconds_per_beat: 60.0 / tempo_bpm };
-        let mut markers: Vec<(f64, f64)> = region
-            .warp_markers
-            .iter()
-            .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
-            .map(|m| (m.time, m.audio_time))
-            .collect();
-        markers.sort_by(|a, b| a.0.total_cmp(&b.0));
-        markers.dedup_by(|a, b| a.0 == b.0);
+        let markers = warp_markers(region);
         let (map, rate) = if region.warped {
             (if markers.len() >= 2 { TimeMap::Warp(markers) } else { linear }, 1.0)
         } else {
@@ -192,15 +239,16 @@ impl AudioEvent {
         };
         let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
         let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+        let loop_range = clip
+            .loop_range
+            .filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start)
+            .map(|r| (r.start, r.end));
         Some(Self {
             start: to_frame(clip.start),
             end: to_frame(clip.start + clip.length),
             frames_per_beat,
-            offset: clip.offset,
-            loop_range: clip
-                .loop_range
-                .filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start)
-                .map(|r| (r.start, r.end)),
+            offset: start_beat(clip.offset, loop_range),
+            loop_range,
             rate,
             map,
             data,
@@ -278,14 +326,14 @@ mod tests {
 
     /// One second of a ramp, so the sample value tells the file position: value = seconds.
     fn ramp() -> Arc<AudioData> {
-        Arc::new(AudioData { sample_rate: 1000, channels: 1, samples: (0..1000).map(|i| i as f32 / 1000.0).collect() })
+        Arc::new(AudioData { sample_rate: 8000, channels: 1, samples: (0..8000).map(|i| i as f32 / 8000.0).collect() })
     }
 
     fn region(warped: bool, markers: &[(f64, f64)], transpose: f64) -> AudioRegion {
         AudioRegion {
             file: "ramp.wav".into(),
             absolute_file: None,
-            sample_rate: Some(1000),
+            sample_rate: Some(8000),
             channels: Some(1),
             duration_seconds: Some(1.0),
             warped,
@@ -337,10 +385,26 @@ mod tests {
         // Half-way into the fade-in; the guard is over after two frames.
         assert!((fades.gain(75.0, 125.0) - 0.5).abs() < 1e-6);
         assert!((fades.gain(1.0, 199.0) - 0.5 / 150.0).abs() < 1e-6, "guard and fade multiply");
-        assert_eq!(fades.gain(160.0, 40.0), 0.8);
+        assert!((fades.gain(160.0, 40.0) - 0.78).abs() < 1e-6, "39 frames after this one, of 50");
+        assert_eq!(fades.gain(100.0, 1.0), 0.0, "the last frame");
         assert_eq!(fades.gain(0.0, 200.0), 0.0);
         let c = Clip { fade_in: f64::NAN, fade_out: -1.0, ..clip(2.0, 0.0, None) };
         assert_eq!(Fades::new(&c, 100.0, 1000).gain(100.0, 100.0), 1.0, "bad fades are no fades");
+    }
+
+    /// The direct reader refuses a tempo of 0 and a file sample rate outside 1 to 384 kHz, as the
+    /// stretcher refuses them (#164).
+    #[test]
+    fn a_zero_tempo_or_an_unplayable_sample_rate_is_no_event() {
+        let timing = |tempo_bpm: f64| Timing { frames_per_beat: 24_000.0, tempo_bpm, sample_rate: SR };
+        let c = clip(2.0, 0.0, None);
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(0.0), (1.0, 1.0)).is_none());
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(-120.0), (1.0, 1.0)).is_none());
+        for rate in [0, 999, 384_001, 1_000_000] {
+            let data = Arc::new(AudioData { sample_rate: rate, ..(*ramp()).clone() });
+            assert!(AudioEvent::new(&c, &region(false, &[], 0.0), data, timing(120.0), (1.0, 1.0)).is_none(), "{rate}");
+        }
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(120.0), (1.0, 1.0)).is_some());
     }
 
     /// Hostile warp markers and offsets put the read position far past the file (or at
@@ -375,6 +439,44 @@ mod tests {
         assert!((file_seconds_at(&e, 1.5) - 0.75).abs() < 1e-3);
     }
 
+    /// Without a stretcher a warped clip's pitch follows the tempo, so transpose changes nothing
+    /// (Repitch mode, and clips the stretcher refuses; #168).
+    #[test]
+    fn transpose_leaves_a_warped_clip_read_directly_unchanged() {
+        let markers = [(0.0, 0.0), (2.0, 0.75)];
+        let plain = event(&clip(2.0, 0.0, None), &region(true, &markers, 0.0));
+        let transposed = event(&clip(2.0, 0.0, None), &region(true, &markers, 7.0));
+        for beat in [0.0, 0.3, 1.0, 1.7] {
+            assert_eq!(file_seconds_at(&plain, beat), file_seconds_at(&transposed, beat), "beat {beat}");
+        }
+    }
+
+    /// The binary search finds the same segment as a scan from the start (#162), at, between,
+    /// before and after markers.
+    #[test]
+    fn warp_lookup_matches_a_linear_scan() {
+        let linear = |markers: &[(f64, f64)], beat: f64| {
+            let i = markers.iter().position(|(b, _)| *b > beat).unwrap_or(markers.len()).clamp(1, markers.len() - 1);
+            let ((b0, s0), (b1, s1)) = (markers[i - 1], markers[i]);
+            s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
+        };
+        let markers: Vec<(f64, f64)> = (0..500).map(|i| (f64::from(i) * 0.37, f64::from(i * i) * 0.001)).collect();
+        for k in -40..2000 {
+            let beat = f64::from(k) * 0.0925;
+            assert_eq!(seconds_at(&markers, beat), linear(&markers, beat), "beat {beat}");
+        }
+        for &(beat, _) in &markers {
+            assert_eq!(seconds_at(&markers, beat), linear(&markers, beat), "on the marker at {beat}");
+        }
+    }
+
+    /// Markers past the cap are ignored, so no clip placement copies an unbounded list.
+    #[test]
+    fn warp_markers_are_capped() {
+        let many: Vec<(f64, f64)> = (0..MAX_WARP_MARKERS + 10).map(|i| (i as f64, i as f64 * 0.01)).collect();
+        assert_eq!(warp_markers(&region(true, &many, 0.0)).len(), MAX_WARP_MARKERS);
+    }
+
     #[test]
     fn transpose_speeds_up_unwarped_clips() {
         let e = event(&clip(2.0, 0.0, None), &region(false, &[], 12.0));
@@ -398,6 +500,16 @@ mod tests {
         assert!((file_seconds_at(&e, 0.25) - 0.625).abs() < 1e-3);
         // After 0.5 beats the loop end is reached and playback wraps to its start.
         assert!((file_seconds_at(&e, 0.75) - 0.125).abs() < 1e-3);
+    }
+
+    /// An offset past the loop end starts at the loop start, as the notes do (#166).
+    #[test]
+    fn an_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let e = event(&clip(4.0, 5.0, Some((0.0, 1.5))), &region(false, &[], 0.0));
+        assert!((file_seconds_at(&e, 0.25) - 0.125).abs() < 1e-3);
+        assert!((file_seconds_at(&e, 1.75) - 0.125).abs() < 1e-3, "and loops from there");
+        let at_end = event(&clip(4.0, 1.5, Some((0.0, 1.5))), &region(false, &[], 0.0));
+        assert!((file_seconds_at(&at_end, 0.25) - 0.125).abs() < 1e-3);
     }
 
     #[test]

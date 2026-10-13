@@ -66,10 +66,20 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    - Audio that already plays at its own speed and pitch everywhere (within 0.01 %) skips the
      stretcher and is read directly. Segments slower than 0.25x or faster than 4x re-pitch the
      clip.
+   - **Transpose needs the stretcher.** Read directly, a warped clip's speed is set by the tempo
+     and its pitch with it, so transpose has nothing left to change: `Repitch` mode has no
+     transpose (as in Live, which greys Transpose out in Re-Pitch mode), and a clip in a
+     stretching mode that falls back to re-pitch (a segment outside 0.25x-4x) loses its
+     transpose. Scaling the read speed by the transpose instead would take the clip off the
+     beat.
    - **Timing.** The input runs ahead of what is heard by `input_latency + speed *
-     output_latency`. The voice feeds each call up to exactly that point for the speed playing,
-     so a speed change (a new warp segment) is evened out over one call instead of shifting the
-     clip. Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
+     output_latency`. What is fed now is heard `output_latency` frames later, so the voice feeds
+     each call up to the input position heard then, plus `input_latency`: a speed change (a new
+     warp segment) reaches the input that much before it is heard, and nothing has to be evened
+     out afterwards. A call never gets less than half its speed's input, so the stretcher never
+     runs dry. (Feeding for the speed playing now left the input ahead after a speed drop, and
+     the stretcher got nothing for a few calls: 2x to 1x froze the sound for about 80 ms, 2x to
+     0.5x for about 200 ms.) Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
      with no drift; the timestretch backend needed restarts before every onset and measured
      corrections to get there (see the measurements).
 3. **Loading a project only decodes.** `suhina-media` decodes every file on all cores. The
@@ -99,7 +109,8 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    timing: late frames are dropped. When the transport stops or the play start marker moves, a
    lock-free handshake (request, worker paused, rings emptied) lets the worker move the voices to
    the marker and fill the rings again before the next start; a jump while playing moves them the
-   same way, silent until the worker has caught up. Without a worker thread (offline rendering) the renderer fills the
+   same way, silent until the worker has caught up; that silence is the jump's and is not
+   counted as underruns. Without a worker thread (offline rendering) the renderer fills the
    rings itself just before reading them, through the same voices and rings (rule 4); tests
    check that both give the same samples. Launched clips' voices still run on the audio thread.
 

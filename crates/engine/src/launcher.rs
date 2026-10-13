@@ -7,14 +7,14 @@
 //! from a [`LauncherMonitor`] (atomics).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use suhina_model::{LaneData, Project, TimeSignature};
 
 use crate::audio::{AudioEvent, AudioPool, Timing};
 use crate::chain::Chain;
 use crate::stretch::StretchVoice;
-use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, route, start_note};
+use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, note_velocity, route, start_note};
 
 /// Commands that can wait in the queue between two audio blocks.
 const QUEUE_CAPACITY: usize = 256;
@@ -29,6 +29,9 @@ const STRETCH_LOOP_BEATS: f64 = 8_192.0;
 const NONE: u32 = u32::MAX;
 /// Monitor value for "a stop is queued".
 const STOP: u32 = u32::MAX - 1;
+/// Columns a monitor reports at least: room for tracks added while the engine plays, since the
+/// monitor that other threads hold is the first graph's (ADR 0005).
+const MONITOR_COLUMNS: usize = 1024;
 /// The latest beat the play start marker can be at: over 16 hours at 120 bpm.
 pub const MAX_START_BEAT: f64 = 120_000.0;
 
@@ -116,6 +119,8 @@ pub struct LauncherMonitor {
     pub(crate) running: AtomicBool,
     beat: AtomicU64,
     tempo: AtomicU64,
+    /// Columns the playing graph has (at most the room below), written after their states.
+    columns: AtomicUsize,
     playing: Vec<AtomicU32>,
     queued: Vec<AtomicU32>,
     overrides: Vec<AtomicBool>,
@@ -133,13 +138,15 @@ pub struct LauncherMonitor {
 
 impl LauncherMonitor {
     fn new(columns: usize, tempo: f64) -> Self {
+        let room = columns.max(MONITOR_COLUMNS);
         Self {
             running: AtomicBool::new(false),
             beat: AtomicU64::new(0f64.to_bits()),
             tempo: AtomicU64::new(tempo.to_bits()),
-            playing: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
-            queued: (0..columns).map(|_| AtomicU32::new(NONE)).collect(),
-            overrides: (0..columns).map(|_| AtomicBool::new(false)).collect(),
+            columns: AtomicUsize::new(columns),
+            playing: (0..room).map(|_| AtomicU32::new(NONE)).collect(),
+            queued: (0..room).map(|_| AtomicU32::new(NONE)).collect(),
+            overrides: (0..room).map(|_| AtomicBool::new(false)).collect(),
             position: AtomicU64::new(0),
             arrangement: AtomicU64::new(0),
             stretch_underruns: AtomicU64::new(0),
@@ -175,10 +182,13 @@ impl LauncherMonitor {
     }
 
     pub fn columns(&self) -> usize {
-        self.playing.len()
+        self.columns.load(Ordering::Acquire).min(self.playing.len())
     }
 
     pub fn column(&self, column: usize) -> Option<ColumnStatus> {
+        if column >= self.columns() {
+            return None;
+        }
         let slot = |v: u32| (v < STOP).then_some(v as usize);
         let playing = slot(self.playing.get(column)?.load(Ordering::Relaxed));
         let queued = match self.queued.get(column)?.load(Ordering::Relaxed) {
@@ -284,6 +294,9 @@ impl ClipPlan {
 
 struct SlotPlan {
     clip: Option<ClipPlan>,
+    /// The slot holds a clip, even one that cannot play (deactivated or unplannable): launching
+    /// it does nothing, rather than what an empty slot's stop button does.
+    has_clip: bool,
     has_stop: bool,
 }
 
@@ -349,6 +362,7 @@ impl Launcher {
                         clip: slot.clip.as_ref().filter(|c| c.enabled).and_then(|c| {
                             plan_clip(project, audio, chains, c, column.track, frames_per_beat, sample_rate)
                         }),
+                        has_clip: slot.clip.is_some(),
                         has_stop: slot.has_stop,
                     })
                     .collect(),
@@ -403,6 +417,8 @@ impl Launcher {
             new.playing = carry(&mut new.slots, &mut old.slots, old.playing, frames_per_beat);
             new.fading = carry(&mut new.slots, &mut old.slots, old.fading, frames_per_beat);
         }
+        // The monitor is the old graph's: report this graph's columns, added ones included.
+        self.publish();
     }
 
     /// Whether the track behind `column` plays launched clips instead of its arrangement.
@@ -464,6 +480,7 @@ impl Launcher {
                 a.store(column.overrides_since.is_some(), Ordering::Relaxed);
             }
         }
+        m.columns.store(self.columns.len().min(m.playing.len()), Ordering::Release);
     }
 }
 
@@ -541,7 +558,7 @@ fn plan_clip(
         match &lane.data {
             LaneData::Notes(lane_notes) => {
                 for note in lane_notes.iter().filter(|n| n.time.is_finite() && n.duration.is_finite()) {
-                    let velocity = note.velocity.clamp(0.0, 1.0);
+                    let velocity = note_velocity(note.velocity);
                     notes.push(PlanNote {
                         time: note.time,
                         duration: note.duration.max(0.0),
@@ -599,7 +616,13 @@ fn plan_clip(
         }
     }
     notes.sort_by(|a, b| a.time.total_cmp(&b.time));
-    Some(ClipPlan { offset: clip.offset, length: clip.length, loop_range, notes, audio: audio_plans })
+    Some(ClipPlan {
+        offset: crate::audio::start_beat(clip.offset, loop_range),
+        length: clip.length,
+        loop_range,
+        notes,
+        audio: audio_plans,
+    })
 }
 
 impl Renderer {
@@ -647,10 +670,10 @@ impl Renderer {
                 let Some(target) = self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else {
                     return;
                 };
-                let action = match (&target.clip, target.has_stop) {
-                    (Some(_), _) => Queued::Launch(slot),
-                    (None, true) => Queued::Stop,
-                    (None, false) => return,
+                let action = match (&target.clip, target.has_clip, target.has_stop) {
+                    (Some(_), _, _) => Queued::Launch(slot),
+                    (None, false, true) => Queued::Stop,
+                    (None, _, _) => return,
                 };
                 if matches!(action, Queued::Stop) && !self.running {
                     return;
@@ -666,7 +689,7 @@ impl Renderer {
                 for column in 0..self.graph.launcher.columns.len() {
                     let action = match self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
                         Some(SlotPlan { clip: Some(_), .. }) => Queued::Launch(scene),
-                        Some(SlotPlan { clip: None, has_stop: true }) => Queued::Stop,
+                        Some(SlotPlan { clip: None, has_clip: false, has_stop: true }) => Queued::Stop,
                         _ => continue,
                     };
                     self.graph.launcher.queue(column, action);
@@ -689,8 +712,20 @@ impl Renderer {
             }
             LaunchCommand::SetQuantization(q) => self.graph.launcher.quantization = q,
             LaunchCommand::BackToArrangement => {
-                for column in &mut self.graph.launcher.columns {
-                    column.overrides_since = None;
+                // Every track that plays launched clips stops them (fading out, as a stop does)
+                // and plays its arrangement again.
+                for index in 0..self.graph.launcher.columns.len() {
+                    let launcher = &mut self.graph.launcher;
+                    let Some(column) = launcher.columns.get_mut(index) else { continue };
+                    if column.overrides_since.take().is_none() {
+                        continue;
+                    }
+                    column.pending = None;
+                    if let Some(mut playing) = column.playing.take() {
+                        playing.fade_left = launcher.stop_fade_frames;
+                        column.fading = Some(playing);
+                    }
+                    self.release_column(index);
                 }
             }
         }
@@ -1248,6 +1283,48 @@ mod tests {
         assert!(monitor.column(0).unwrap().overrides_arrangement);
     }
 
+    /// A slot whose clip is deactivated does nothing when launched, alone or in a scene: the
+    /// column playing keeps playing, where an empty slot's stop button would stop it (#154).
+    #[test]
+    fn a_deactivated_clip_neither_plays_nor_stops_its_column() {
+        let off = Clip { enabled: false, ..clip(2, 1.0, true) };
+        let p = project(
+            vec![notes(1, vec![note(0.0, 60)]), notes(2, vec![note(0.5, 72)])],
+            vec![vec![with(clip(1, 1.0, true)), with(off)]],
+        );
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::LaunchScene { scene: 0 });
+        let mut out = vec![0.0f32; 2 * BAR];
+        renderer.process(&mut out);
+        renderer.handle(LaunchCommand::LaunchScene { scene: 1 });
+        renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 1 });
+        let monitor = renderer.monitor();
+        assert_eq!(monitor.column(0).unwrap().queued, None);
+        let mut out = vec![0.0f32; 2 * 2 * BAR];
+        renderer.process(&mut out);
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+        assert_onsets(&out, &(0..8).map(|b| b * BEAT).collect::<Vec<_>>());
+    }
+
+    /// A launched note with a NaN velocity is silent instead of making the mix NaN (#161).
+    #[test]
+    fn a_nan_velocity_note_leaves_the_launcher_finite() {
+        let bad = Note { velocity: f32::NAN, ..note(0.0, 60) };
+        let p = project(vec![notes(1, vec![bad, note(0.5, 72)])], vec![vec![with(clip(1, 1.0, true))]]);
+        let out = render(&p, &[(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })], 1.0);
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert_onsets(&out, &[BEAT / 2, BEAT + BEAT / 2]);
+    }
+
+    /// A launched clip whose offset is past its loop end starts at the loop start (#166).
+    #[test]
+    fn a_launched_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let late = Clip { offset: 1.75, ..clip(1, 1.0, true) };
+        let p = project(vec![notes(1, vec![note(0.0, 60), note(0.5, 72)])], vec![vec![with(late)]]);
+        let out = render(&p, &[(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })], 1.0);
+        assert_onsets(&out, &[0, BEAT / 2, BEAT, BEAT + BEAT / 2]);
+    }
+
     #[test]
     fn a_scene_tempo_changes_the_tempo_at_the_launch() {
         let mut p = two_loops();
@@ -1315,6 +1392,33 @@ mod tests {
         assert_eq!(onsets(&out).len(), 4);
     }
 
+    /// Back to arrangement while a launched clip plays stops that clip, so the track plays its
+    /// arrangement alone rather than both at once (#153).
+    #[test]
+    fn back_to_arrangement_stops_the_launched_clip() {
+        let mut p = two_loops();
+        let looped = Clip { length: 32.0, ..clip(1, 1.0, true) };
+        p.arrangement.lanes.push(ArrangementLane { name: String::new(), track: Some(TrackId(1)), clips: vec![looped] });
+        let mut renderer = Renderer::with_audio(&p, &AudioPool::new(), SR).unwrap();
+        let mut out = vec![0.0f32; 2 * (BAR + BEAT)];
+        let (first, rest) = out.split_at_mut(2 * (BEAT / 4));
+        renderer.process(first);
+        renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 1 });
+        renderer.process(rest);
+        renderer.handle(LaunchCommand::BackToArrangement);
+        let status = renderer.monitor().column(0).unwrap();
+        assert_eq!((status.playing, status.queued, status.overrides_arrangement), (None, None, false));
+        // Only the arrangement's on-beat notes sound from here, none of the clip's off-beats.
+        let mut out = vec![0.0f32; 2 * BAR];
+        renderer.process(&mut out);
+        let found = onsets(&out);
+        assert!(found.len() >= 3, "{found:?}");
+        for onset in &found {
+            let from_beat = (onset + BEAT / 2) % BEAT;
+            assert!(from_beat.abs_diff(BEAT / 2) <= 2, "an off-beat onset at {onset}: {found:?}");
+        }
+    }
+
     #[test]
     fn commands_from_a_controller_take_the_same_path() {
         let p = two_loops();
@@ -1330,6 +1434,43 @@ mod tests {
         assert!(monitor.running());
         assert!((monitor.beat() - 2.0).abs() < 0.01, "{}", monitor.beat());
         assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+    }
+
+    /// A track added while the engine plays reports its column: the monitor other threads hold
+    /// is the first graph's, and it must grow with the grid (#155).
+    #[test]
+    fn a_column_added_while_playing_reports_its_state() {
+        let p = two_loops();
+        let mut grown = p.clone();
+        let mut more = project(
+            vec![notes(1, vec![note(0.0, 60)]), notes(2, vec![note(0.5, 72)])],
+            vec![
+                vec![with(clip(1, 1.0, true)), with(clip(2, 1.0, true))],
+                vec![with(clip(1, 1.0, true)), with(clip(2, 1.0, true))],
+            ],
+        );
+        std::mem::swap(&mut grown.tracks, &mut more.tracks);
+        std::mem::swap(&mut grown.channels, &mut more.channels);
+        std::mem::swap(&mut grown.launcher, &mut more.launcher);
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        controller.send(LaunchCommand::LaunchClip { column: 0, slot: 0 }).unwrap();
+        let mut block = vec![0.0f32; 2 * 512];
+        renderer.process(&mut block);
+        assert_eq!(controller.monitor().columns(), 1);
+        controller.update(&grown).unwrap();
+        for _ in 0..200 {
+            renderer.process(&mut block);
+        }
+        controller.send(LaunchCommand::LaunchClip { column: 1, slot: 1 }).unwrap();
+        for _ in 0..200 {
+            renderer.process(&mut block);
+        }
+        let monitor = controller.monitor();
+        assert_eq!(monitor.columns(), 2);
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+        assert_eq!(monitor.column(1).unwrap().playing, Some(1));
+        assert_eq!(monitor.column(2), None);
     }
 
     #[test]

@@ -924,6 +924,11 @@ pub fn render_launches_with_plugins(
 /// Solo: while any channel is soloed, a track sounds only if a channel on its way to the master
 /// is soloed (its own, or a group it plays into), or a soloed track plays into it (a group), or
 /// it is a return track, so effects stay audible.
+/// A note's velocity, 0 … 1; a NaN or infinite one is 0, so it cannot reach the mix.
+pub(crate) fn note_velocity(velocity: f32) -> f32 {
+    if velocity.is_finite() { velocity.clamp(0.0, 1.0) } else { 0.0 }
+}
+
 pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
@@ -1011,10 +1016,10 @@ fn collect_notes(
                 end: to_frame(end),
                 frequency: 440.0 * 2f64.powf((f64::from(note.key) - 69.0) / 12.0),
                 key: note.key.min(127),
-                velocity: note.velocity.clamp(0.0, 1.0),
+                velocity: note_velocity(note.velocity),
                 track,
-                gain_left: gain_left * note.velocity.clamp(0.0, 1.0),
-                gain_right: gain_right * note.velocity.clamp(0.0, 1.0),
+                gain_left: gain_left * note_velocity(note.velocity),
+                gain_right: gain_right * note_velocity(note.velocity),
                 column,
                 bus,
             });
@@ -1358,6 +1363,17 @@ mod tests {
         }
     }
 
+    /// A NaN velocity is silence for its note, not NaN in the whole mix (#161).
+    #[test]
+    fn a_nan_velocity_note_leaves_the_mix_finite() {
+        let mut bad = note(0.0, 1.0, 60);
+        bad.velocity = f32::NAN;
+        let project = project_with(untargeted(vec![bad, note(1.0, 1.0, 69)]), vec![clip(0.0, 4.0)], 1);
+        let out = render_offline(&project, SR, 256).unwrap();
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert_onsets(&out, &[SR as usize / 2]);
+    }
+
     #[test]
     fn hostile_input_returns_errors_or_silence_instead_of_panicking() {
         assert_eq!(render_offline(&Project::default(), 0, 256).err(), Some(RenderError::InvalidSampleRate(0)));
@@ -1443,6 +1459,23 @@ mod tests {
         let again = blocks(&mut renderer, 50, 441, |_| worker.fill());
         assert_eq!(max_diff(&first, &again), 0.0);
         assert_eq!(renderer.stretch_underruns(), 0);
+    }
+
+    /// A jump of the playhead while playing is silent until the worker has moved its voices, but
+    /// that silence is intended, not an underrun (#169). Two block sizes, since the engine's
+    /// block follows the device's buffer.
+    #[test]
+    fn a_transport_jump_is_not_counted_as_underruns() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        for frames in [128, 441] {
+            let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+            let mut worker = renderer.take_stretch_worker().unwrap();
+            blocks(&mut renderer, 20, frames, |_| worker.fill());
+            renderer.handle(LaunchCommand::SetPosition { beat: 1.0 });
+            let after = blocks(&mut renderer, 40, frames, |_| worker.fill());
+            assert!(after.iter().any(|s| s.abs() > 0.1), "the clip plays on from the new place");
+            assert_eq!(renderer.stretch_underruns(), 0, "blocks of {frames}");
+        }
     }
 
     #[test]

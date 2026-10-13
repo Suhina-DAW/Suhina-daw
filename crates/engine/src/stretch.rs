@@ -16,7 +16,7 @@ use std::sync::Arc;
 use suhina_model::{AudioRegion, Clip, StretchMode};
 use suhina_stretch::Stretch;
 
-use crate::audio::AudioData;
+use crate::audio::{AudioData, STRETCH_SAMPLE_RATES, seconds_at, warp_markers};
 
 /// Stretcher frames made per call.
 const CHUNK_FRAMES: usize = 1024;
@@ -24,7 +24,9 @@ const CHUNK_FRAMES: usize = 1024;
 const UNITY_TOLERANCE: f64 = 1e-4;
 /// Speeds the stretcher is given; a clip with a segment outside them is re-pitched.
 const RATES: std::ops::RangeInclusive<f64> = 0.25..=4.0;
-/// Most playlist pieces per clip, so a malformed clip cannot exhaust memory.
+/// Most playlist pieces per clip, so a malformed clip cannot exhaust memory. A looping clip that
+/// needs more is cut after its last whole loop, and the voice repeats the loops after the first
+/// loop start ([`Repeat`]), so it keeps looping.
 const MAX_PIECES: usize = 100_000;
 
 /// A stretch of the playlist: from `out_start` seconds after the clip starts, play file frames
@@ -39,18 +41,34 @@ struct Piece {
     stream_start: f64,
 }
 
+/// Where a playlist cut at [`MAX_PIECES`] repeats: from piece `first` to the end the pieces cover
+/// whole loops, `out` seconds of output and `stream` frames of input, played again and again.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Repeat {
+    first: usize,
+    out: f64,
+    stream: f64,
+}
+
+/// A position in a playlist that may repeat: piece `index`, in repeat `turn` (0 for the pieces as
+/// listed).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Place {
+    index: usize,
+    turn: u64,
+}
+
 /// Works out which part of the file plays when, from the clip's offset, loop and length and the
 /// region's warp markers at `tempo_bpm`. `None` when the clip cannot be stretched (fewer than two
-/// usable warp markers, or a speed that is not a finite positive number).
-fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64) -> Option<(Vec<Piece>, f64)> {
-    let mut markers: Vec<(f64, f64)> = region
-        .warp_markers
-        .iter()
-        .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
-        .map(|m| (m.time, m.audio_time))
-        .collect();
-    markers.sort_by(|a, b| a.0.total_cmp(&b.0));
-    markers.dedup_by(|a, b| a.0 == b.0);
+/// usable warp markers, a speed that is not a finite positive number, or more than `MAX_PIECES`
+/// pieces without a whole loop to repeat).
+fn playlist(
+    clip: &Clip,
+    region: &AudioRegion,
+    data: &AudioData,
+    tempo_bpm: f64,
+) -> Option<(Vec<Piece>, f64, Option<Repeat>)> {
+    let markers = warp_markers(region);
     if markers.len() < 2 || markers.windows(2).any(|w| matches!(w, [a, b] if b.1 <= a.1)) {
         return None;
     }
@@ -62,12 +80,16 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
     let loop_range = clip.loop_range.filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start);
 
     let mut pieces = Vec::new();
-    let mut beat = clip.offset;
+    let mut beat = crate::audio::start_beat(clip.offset, loop_range.map(|r| (r.start, r.end)));
     let mut played = 0.0;
     let mut stream = 0.0;
     let mut max_rate: f64 = 0.0;
+    // Where each pass of the loop began (piece, output beats, input frames): the first and the
+    // latest, for a cut playlist.
+    let mut first_loop: Option<(usize, f64, f64)> = None;
+    let mut last_loop: Option<(usize, f64, f64)> = None;
     while played < clip.length - 1e-9 && pieces.len() < MAX_PIECES {
-        let next_marker = markers.iter().map(|m| m.0).find(|b| *b > beat + 1e-9);
+        let next_marker = markers.get(markers.partition_point(|m| m.0 <= beat + 1e-9)).map(|m| m.0);
         let loop_end = loop_range.map(|r| r.end).filter(|e| *e > beat + 1e-9);
         let clip_end = beat + (clip.length - played);
         let next = [next_marker, loop_end, Some(clip_end)].into_iter().flatten().fold(f64::INFINITY, f64::min);
@@ -87,25 +109,29 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
             && beat >= r.end - 1e-9
         {
             beat = r.start;
+            let here = (pieces.len(), played, stream);
+            first_loop.get_or_insert(here);
+            last_loop = Some(here);
         }
     }
-    Some((pieces, max_rate))
-}
-
-/// File seconds at a clip beat, extending the first and last marker segments.
-fn seconds_at(markers: &[(f64, f64)], beat: f64) -> f64 {
-    let i = markers.iter().position(|m| m.0 > beat).unwrap_or(markers.len()).clamp(1, markers.len().max(2) - 1);
-    let (Some(a), Some(b)) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
-    if b.0 <= a.0 {
-        return a.1;
+    if played < clip.length - 1e-9 {
+        // Cut at the cap: keep whole loops and repeat them, or refuse the clip.
+        let (Some(first), Some(last)) = (first_loop, last_loop) else { return None };
+        let repeat = Repeat { first: first.0, out: (last.1 - first.1) * seconds_per_beat, stream: last.2 - first.2 };
+        if last.0 <= first.0 || !(repeat.out > 0.0 && repeat.stream > 0.0) {
+            return None;
+        }
+        pieces.truncate(last.0);
+        return Some((pieces, max_rate, Some(repeat)));
     }
-    a.1 + (beat - a.0) * (b.1 - a.1) / (b.0 - a.0)
+    Some((pieces, max_rate, None))
 }
 
 /// One warped clip placement being stretched in real time.
 pub(crate) struct StretchVoice {
     data: Arc<AudioData>,
     pieces: Vec<Piece>,
+    repeat: Option<Repeat>,
     stretch: Stretch,
     channels: usize,
     /// Stretcher output frames per second of the clip (the file's sample rate).
@@ -137,13 +163,13 @@ impl StretchVoice {
         sample_rate: u32,
     ) -> Option<Self> {
         let channels = usize::from(data.channels);
-        if !(1..=8).contains(&channels) || data.frames() == 0 || !(8_000..=192_000).contains(&data.sample_rate) {
+        if !(1..=8).contains(&channels) || data.frames() == 0 || !STRETCH_SAMPLE_RATES.contains(&data.sample_rate) {
             return None;
         }
         if region.stretch == StretchMode::Repitch {
             return None;
         }
-        let (pieces, max_rate) = playlist(clip, region, &data, tempo_bpm)?;
+        let (pieces, max_rate, repeat) = playlist(clip, region, &data, tempo_bpm)?;
         let pitch = 2f64.powf(region.transpose / 12.0);
         let pitch = if pitch.is_finite() && pitch > 0.0 { pitch } else { 1.0 };
         // Audio that already plays at its own speed and pitch needs no stretcher: the caller reads
@@ -171,6 +197,7 @@ impl StretchVoice {
         let mut voice = Self {
             data,
             pieces,
+            repeat,
             stretch,
             channels,
             file_rate,
@@ -198,8 +225,7 @@ impl StretchVoice {
     /// Never allocates; runs the stretcher's start-up on the calling thread.
     pub(crate) fn seek(&mut self, frames: u64) {
         let at = (frames as f64 * self.step).round() as u64;
-        let index = self.piece_at(at);
-        let Some(piece) = self.pieces.get(index).copied() else { return };
+        let Some(piece) = self.piece(self.piece_at(at)) else { return };
         let into_piece = (at as f64 - piece.out_start * self.file_rate).max(0.0);
         let stream = (piece.stream_start + into_piece * piece.rate).floor();
         let length = self.stretch.output_seek_length(piece.rate as f32);
@@ -220,20 +246,75 @@ impl StretchVoice {
 
     /// Where in the input stream voice frame `at` plays.
     fn stream_at(&self, at: u64) -> f64 {
-        let Some(piece) = self.pieces.get(self.piece_at(at)) else { return 0.0 };
+        let Some(piece) = self.piece(self.piece_at(at)) else { return 0.0 };
         piece.stream_start + (at as f64 - piece.out_start * self.file_rate).max(0.0) * piece.rate
     }
 
-    /// How far the input must run ahead of what is heard, at `rate`: the stretcher analyses a block
-    /// `input_latency` frames behind its input and is heard `output_latency` frames after that.
-    fn lead(&self, rate: f64) -> f64 {
-        self.stretch.input_latency() as f64 + rate * self.stretch.output_latency() as f64
+    /// The piece at `place`, moved to its repeat.
+    fn piece(&self, place: Place) -> Option<Piece> {
+        let mut piece = *self.pieces.get(place.index)?;
+        if let Some(r) = self.repeat {
+            piece.out_start += place.turn as f64 * r.out;
+            piece.stream_start += place.turn as f64 * r.stream;
+        }
+        Some(piece)
     }
 
-    /// The piece playing at voice frame `at` (the last one past the end).
-    fn piece_at(&self, at: u64) -> usize {
+    /// The voice frame where the piece at `place` starts.
+    fn out_frame(&self, place: Place) -> Option<u64> {
+        self.piece(place).map(|p| (p.out_start * self.file_rate).round() as u64)
+    }
+
+    /// The place after `place`: the next piece, or the repeat's first one again.
+    fn next(&self, place: Place) -> Option<Place> {
+        if place.index + 1 < self.pieces.len() {
+            return Some(Place { index: place.index + 1, turn: place.turn });
+        }
+        self.repeat.map(|r| Place { index: r.first, turn: place.turn + 1 })
+    }
+
+    /// The place playing at voice frame `at` (the last piece past the end of a playlist that does
+    /// not repeat).
+    fn piece_at(&self, at: u64) -> Place {
         let file_rate = self.file_rate;
-        self.pieces.iter().rposition(|p| (p.out_start * file_rate).round() as u64 <= at).unwrap_or(0)
+        let first = |turn: u64| Place { index: self.repeat.map_or(0, |r| r.first), turn };
+        let mut turn = 0;
+        if let (Some(r), Some(start)) = (self.repeat, self.out_frame(first(0)))
+            && at >= start
+        {
+            let estimate = ((at - start) as f64 / file_rate / r.out).floor();
+            turn = if estimate.is_finite() && estimate > 0.0 { estimate as u64 } else { 0 };
+            // The estimate can be off by one at a turn's first frame.
+            while turn > 0 && self.out_frame(first(turn)).is_some_and(|f| at < f) {
+                turn -= 1;
+            }
+            while self.out_frame(first(turn + 1)).is_some_and(|f| at >= f) {
+                turn += 1;
+            }
+        }
+        // The pieces are sorted by `out_start`: a binary search, as this runs per chunk.
+        let from = if turn > 0 { first(turn).index } else { 0 };
+        let shift = self.repeat.map_or(0.0, |r| turn as f64 * r.out);
+        let rest = self.pieces.get(from..).unwrap_or_default();
+        let count = rest.partition_point(|p| ((p.out_start + shift) * file_rate).round() as u64 <= at);
+        Place { index: (from + count).saturating_sub(1), turn }
+    }
+
+    /// The place whose input-stream frames include `position`.
+    fn piece_in_stream(&self, position: f64) -> Place {
+        let mut turn = 0;
+        let mut position = position;
+        if let Some(r) = self.repeat
+            && let Some(first) = self.pieces.get(r.first)
+            && position >= first.stream_start + r.stream
+        {
+            let turns = ((position - first.stream_start) / r.stream).floor();
+            turn = if turns.is_finite() && turns > 0.0 { turns as u64 } else { 0 };
+            position -= turn as f64 * r.stream;
+        }
+        let from = if turn > 0 { self.repeat.map_or(0, |r| r.first) } else { 0 };
+        let rest = self.pieces.get(from..).unwrap_or_default();
+        Place { index: (from + rest.partition_point(|p| p.stream_start <= position)).saturating_sub(1), turn }
     }
 
     /// Fills `out` (interleaved) with the input stream from frame `from` on. Past the playlist
@@ -241,15 +322,19 @@ impl StretchVoice {
     fn read_stream(&self, from: f64, out: &mut [f32]) {
         let channels = self.channels;
         let file_frames = self.data.frames();
-        let mut index = self.pieces.partition_point(|p| p.stream_start <= from).saturating_sub(1);
+        let mut place = self.piece_in_stream(from);
+        let mut piece = self.piece(place);
+        let mut next = self.next(place).and_then(|n| Some((n, self.piece(n)?)));
         for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
             let position = from + i as f64;
-            while let Some(next) = self.pieces.get(index + 1)
-                && next.stream_start <= position
+            while let Some((n, p)) = next
+                && p.stream_start <= position
             {
-                index += 1;
+                place = n;
+                piece = Some(p);
+                next = self.next(place).and_then(|n| Some((n, self.piece(n)?)));
             }
-            let file_frame = self.pieces.get(index).map_or(-1.0, |p| p.src_start + (position - p.stream_start));
+            let file_frame = piece.map_or(-1.0, |p| p.src_start + (position - p.stream_start));
             let file_frame = file_frame.floor();
             for (c, s) in frame.iter_mut().enumerate() {
                 *s = if file_frame >= 0.0 && (file_frame as usize) < file_frames {
@@ -279,19 +364,24 @@ impl StretchVoice {
         if frames == 0 {
             return;
         }
-        // One speed per call: stop at the next piece.
-        let index = self.piece_at(self.produced);
-        if let Some(next) = self.pieces.get(index + 1) {
-            let boundary = (next.out_start * self.file_rate).round() as u64;
-            if boundary > self.produced {
-                frames = frames.min(boundary - self.produced);
-            }
+        // What is fed now is heard `output_latency` frames after these frames are made, so the
+        // input follows the piece heard then: a speed change reaches the input that much before
+        // it is heard, and the input never runs ahead or behind the timing. One speed per call:
+        // stop where that piece ends.
+        let latency = self.stretch.output_latency() as u64;
+        let heard = self.produced + latency;
+        let place = self.piece_at(heard);
+        if let Some(boundary) = self.next(place).and_then(|n| self.out_frame(n))
+            && boundary > heard
+        {
+            frames = frames.min(boundary - heard);
         }
-        let rate = self.pieces.get(index).map_or(1.0, |p| p.rate);
-        // Feed up to where the input should be once these frames are out. The lead depends on the
-        // speed, so a speed change is evened out over the next call instead of shifting the
-        // timing for good.
-        let fed = (self.stream_at(self.produced + frames) + self.lead(rate)).max(self.fed);
+        let rate = self.piece(place).map_or(1.0, |p| p.rate);
+        // Never less than half the speed's input: a call without input makes the stretcher freeze
+        // its sound (after a seek, or a playlist that jumps). At half the input the stretch stays
+        // clean at 1x and above, and any lead left over drains within a few calls.
+        let want = self.stream_at(heard + frames) + self.stretch.input_latency() as f64;
+        let fed = want.max(self.fed + frames as f64 * rate * 0.5);
         let input_frames = ((fed.floor() - self.fed.floor()).max(0.0) as usize).min(self.input.len() / channels);
         let frames = frames as usize;
         let mut input = std::mem::take(&mut self.input);
@@ -390,7 +480,7 @@ mod tests {
         let data = sine(440.0, 4.0, 1000);
         // Beats 0–4 = 0–2 s, beats 4–6 = 2–4 s; loop beats 2–6; play 8 beats from beat 3.
         let r = region(&[(0.0, 0.0), (4.0, 2.0), (6.0, 4.0)], StretchMode::Smooth);
-        let (pieces, _) = playlist(&clip(8.0, 3.0, Some((2.0, 6.0))), &r, &data, 120.0).unwrap();
+        let (pieces, _, _) = playlist(&clip(8.0, 3.0, Some((2.0, 6.0))), &r, &data, 120.0).unwrap();
         let summary: Vec<(f64, f64, f64, f64, f64)> =
             pieces.iter().map(|p| (p.out_start, p.src_start, p.src_end, p.rate, p.stream_start)).collect();
         assert_eq!(
@@ -403,6 +493,146 @@ mod tests {
                 (3.5, 1000.0, 1500.0, 1.0, 5500.0), // beat 2–3, clip ends
             ]
         );
+    }
+
+    /// A clip with tens of thousands of warp markers builds its playlist and plays: lookups are
+    /// binary searches, so the playlist is no longer quadratic in the markers (#162).
+    #[test]
+    fn a_clip_with_many_warp_markers_builds_and_plays() {
+        let data = sine(440.0, 30.0, 8000);
+        // 40 000 segments over 60 beats (30 s at 120 bpm), alternating 1.1x and 0.9x.
+        let markers: Vec<(f64, f64)> = (0..=40_000)
+            .scan(0.0, |seconds, i| {
+                let beat = f64::from(i) * 60.0 / 40_000.0;
+                let here = (beat, *seconds);
+                *seconds += 60.0 / 40_000.0 * 0.5 * if i % 2 == 0 { 1.1 } else { 0.9 };
+                Some(here)
+            })
+            .collect();
+        let r = region(&markers, StretchMode::Smooth);
+        let c = clip(60.0, 0.0, None);
+        let (pieces, _, _) = playlist(&c, &r, &data, 120.0).unwrap();
+        assert_eq!(pieces.len(), 40_000);
+        let mut voice = StretchVoice::new(&c, &r, data, 120.0, 48_000).unwrap();
+        voice.seek(48_000 * 15);
+        let mut out = vec![0.0f32; 2 * 4096];
+        for _ in 0..4 {
+            voice.render(&mut out);
+        }
+        assert!(out.iter().all(|s| s.is_finite()) && out.iter().any(|s| s.abs() > 0.1));
+    }
+
+    /// The level of a 440 Hz sine stretched at 2x for four beats and then at `slower`, in 10 ms
+    /// windows, with how far each window is from a clean sine (the residual of the best-fitting
+    /// 440 Hz sine, relative to the window's level).
+    fn seam(slower: f64) -> Vec<(f64, f32, f32)> {
+        let rate = 48_000;
+        let data = sine(440.0, 8.0, rate);
+        let r = region(&[(0.0, 0.0), (4.0, 4.0), (8.0, 4.0 + 2.0 * slower)], StretchMode::Smooth);
+        let c = clip(8.0, 0.0, None);
+        let mut voice = StretchVoice::new(&c, &r, data, 120.0, rate).unwrap();
+        let mut out = vec![0.0f32; 2 * 4 * rate as usize];
+        for block in out.chunks_mut(2 * 512) {
+            voice.render(block);
+        }
+        let left: Vec<f64> = out.as_chunks::<2>().0.iter().map(|[l, _]| f64::from(*l)).collect();
+        let window = rate as usize / 100;
+        left.chunks_exact(window)
+            .enumerate()
+            .map(|(i, w)| {
+                let t0 = (i * window) as f64;
+                let w_hz = std::f64::consts::TAU * 440.0 / f64::from(rate);
+                let (mut ss, mut sc, mut cc, mut ys, mut yc, mut yy) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+                for (k, y) in w.iter().enumerate() {
+                    let (sn, cs) = ((t0 + k as f64) * w_hz).sin_cos();
+                    ss += sn * sn;
+                    sc += sn * cs;
+                    cc += cs * cs;
+                    ys += y * sn;
+                    yc += y * cs;
+                    yy += y * y;
+                }
+                let det = ss * cc - sc * sc;
+                let (a, b) = ((ys * cc - yc * sc) / det, (yc * ss - ys * sc) / det);
+                let fitted = a * ys + b * yc;
+                let rms = (yy / w.len() as f64).sqrt();
+                let residual = ((yy - fitted).max(0.0) / yy.max(1e-12)).sqrt();
+                (i as f64 * 0.01, rms as f32, residual as f32)
+            })
+            .collect()
+    }
+
+    /// A speed drop at a warp marker keeps the sound: before, the stretcher got no input for a
+    /// few calls after the drop and froze its sound, a 60-200 ms dip (#165).
+    #[test]
+    fn a_speed_drop_keeps_the_level() {
+        for slower in [1.0, 0.5] {
+            let windows = seam(slower);
+            let level = |from: f64, to: f64| {
+                let w: Vec<f32> = windows.iter().filter(|(t, _, _)| (from..to).contains(t)).map(|w| w.1).collect();
+                w.iter().sum::<f32>() / w.len() as f32
+            };
+            let (before, after) = (level(1.0, 1.9), level(2.5, 3.9));
+            for &(t, rms, residual) in windows.iter().filter(|(t, _, _)| (1.0..3.9).contains(t)) {
+                assert!(
+                    rms > 0.85 * before.min(after) && rms < 1.15 * before.max(after),
+                    "{slower}x at {t:.2} s: {rms}"
+                );
+                assert!(residual < 0.05, "{slower}x at {t:.2} s: {residual} off a clean sine");
+            }
+        }
+    }
+
+    /// A looping clip that needs more than `MAX_PIECES` pieces keeps looping where its playlist
+    /// was cut, instead of running on through the file and going silent (#167).
+    #[test]
+    fn a_loop_past_the_piece_cap_keeps_looping() {
+        let data = sine(330.0, 2.0, 8000);
+        // A half-beat loop of five 0.1-beat segments at alternating speeds: 5 pieces a loop, so a
+        // 30 000-beat clip (60 000 loops) needs 300 000 pieces, three times the cap.
+        let markers: Vec<(f64, f64)> = (0..=10)
+            .scan(0.0, |seconds, i| {
+                let here = (f64::from(i) * 0.1, *seconds);
+                *seconds += 0.05 * if i % 2 == 0 { 1.2 } else { 0.8 };
+                Some(here)
+            })
+            .collect();
+        let r = region(&markers, StretchMode::Smooth);
+        let c = clip(30_000.0, 0.0, Some((0.0, 0.5)));
+        let (pieces, _, _) = playlist(&c, &r, &data, 120.0).unwrap();
+        assert!(pieces.len() <= MAX_PIECES);
+        // At 120 bpm a beat is 24 000 project frames. Beats 1 000 and 25 000 are both at the
+        // loop's start, the second far past where the playlist was cut; and playing on across
+        // the cut sounds like playing on across any other loop start.
+        let last = pieces.last().unwrap();
+        let cut = (last.out_start + (last.src_end - last.src_start) / 8000.0 / last.rate) * 2.0;
+        assert!(cut > 1_000.0 && cut < 30_000.0 && (cut * 2.0 - (cut * 2.0).round()).abs() < 1e-6, "{cut}");
+        let render_from = |beat: f64| {
+            let mut voice = StretchVoice::new(&c, &r, data.clone(), 120.0, 48_000).unwrap();
+            voice.seek((beat * 24_000.0).round() as u64);
+            let mut out = vec![0.0f32; 2 * 24_000];
+            voice.render(&mut out);
+            out
+        };
+        let level = |s: &[f32]| (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt();
+        let same = |a: &[f32], b: &[f32]| {
+            let diff: Vec<f32> = a.iter().zip(b).map(|(x, y)| x - y).collect();
+            assert!(level(a) > 0.1, "{}", level(a));
+            assert!(level(&diff) < 0.01 * level(a), "{} vs {}, apart by {}", level(b), level(a), level(&diff));
+        };
+        same(&render_from(1_000.0), &render_from(25_000.0));
+        same(&render_from(1_000.25), &render_from(cut - 0.25));
+    }
+
+    /// An offset past the loop end starts at the loop start, like the direct reader and the
+    /// notes, instead of playing what lies past the loop first (#166).
+    #[test]
+    fn an_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let data = sine(440.0, 4.0, 1000);
+        let r = region(&[(0.0, 0.0), (4.0, 2.0), (6.0, 4.0)], StretchMode::Smooth);
+        let (pieces, _, _) = playlist(&clip(4.0, 7.0, Some((2.0, 6.0))), &r, &data, 120.0).unwrap();
+        let summary: Vec<(f64, f64, f64)> = pieces.iter().map(|p| (p.out_start, p.src_start, p.src_end)).collect();
+        assert_eq!(summary, [(0.0, 1000.0, 2000.0), (1.0, 2000.0, 4000.0)]);
     }
 
     /// Clicks every `every` seconds: a 2 ms burst at full scale, silence between.
@@ -487,6 +717,21 @@ mod tests {
             let errors = click_errors(&markers, 46.0, 0.0, 0.0);
             assert!(errors.len() >= 30, "{markers:?}: {} clicks found", errors.len());
             assert!(worst(&errors) < limit, "{markers:?}: {errors:?}");
+        }
+    }
+
+    /// Clicks stay on the grid after a speed drop: feeding the stretcher at least some input
+    /// after the drop must not leave the input ahead for good (#165).
+    #[test]
+    fn transients_stay_on_the_grid_after_a_speed_drop() {
+        // 16 beats at 2x (16 s of file in 8 s), then 24 beats at 1x or 0.5x.
+        for markers in [vec![(0.0, 0.0), (16.0, 16.0), (40.0, 28.0)], vec![(0.0, 0.0), (16.0, 16.0), (40.0, 22.0)]] {
+            let errors = click_errors(&markers, 40.0, 0.0, 0.0);
+            // At 0.5x a stretched click can show a second onset 120 ms in (as before #165): only
+            // the clicks themselves are timed here.
+            let clicks: Vec<f64> = errors.iter().copied().filter(|e| e.abs() < 50.0).collect();
+            assert!(clicks.len() >= 45, "{markers:?}: {} clicks found", clicks.len());
+            assert!(worst(&clicks) < 4.0, "{markers:?}: {errors:?}");
         }
     }
 

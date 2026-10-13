@@ -119,7 +119,8 @@ fn max_diff(a: &[f32], b: &[f32]) -> f32 {
 /// over `fade_in` frames, a linear fade-out over the last `fade_out` frames, and the click guard.
 fn expected_gain(frame: usize, frames: usize, fade_in: f64, fade_out: f64) -> f64 {
     let since_start = frame as f64;
-    let until_end = (frames - frame) as f64;
+    // Frames after this one, so the last frame is 0 like the first.
+    let until_end = (frames - frame - 1) as f64;
     let guard = (since_start / GUARD).min(until_end / GUARD).min(1.0);
     let fade_in = if fade_in > 0.0 { (since_start / fade_in).min(1.0) } else { 1.0 };
     let fade_out = if fade_out > 0.0 { (until_end / fade_out).min(1.0) } else { 1.0 };
@@ -217,10 +218,45 @@ fn stretched_clips_have_the_same_fades() {
     let frames = plain.len();
     let (fade_in, fade_out) = (BEAT as f64, 1.5 * BEAT as f64);
     for (frame, (p, f)) in plain.iter().zip(&faded).enumerate() {
-        let fades = (frame as f64 / fade_in).min(1.0) * ((frames - frame) as f64 / fade_out).min(1.0);
+        let fades = (frame as f64 / fade_in).min(1.0) * ((frames - frame - 1) as f64 / fade_out).min(1.0);
         let expected = f64::from(*p) * fades;
         assert!((f64::from(*f) - expected).abs() < 1e-5, "frame {frame}: {f}, expected {expected}");
     }
+}
+
+/// The click guard ramps to 0 on a clip's last frame as it starts from 0 on its first, in the
+/// direct, the stretched and the launched reader, so no clip ends with a step (#163).
+#[test]
+fn a_clip_ends_on_silence_like_it_starts() {
+    let (region, pool) = constant();
+    let direct = render_constant(0.0, 0.0, 512);
+    assert_eq!(direct.len(), 2 * BEAT);
+    let last = direct.len() - 1;
+    assert_eq!((direct[0], direct[last]), (0.0, 0.0));
+    for k in 0..GUARD as usize + 2 {
+        assert_eq!(direct[k], direct[last - k], "the guard is symmetric, {k} frames in");
+    }
+
+    let sines = sine();
+    let warped = region_for_stretch();
+    let stretched = left(&render_offline_with_audio(&project(warped, 4.0, 0.0, 0.0), &sines, SR, 512).unwrap());
+    assert_eq!(stretched.last().copied(), Some(0.0));
+    assert!(stretched[stretched.len() - 2].abs() < 0.5 / GUARD as f32 + 1e-6);
+
+    let commands = [
+        (0.0, LaunchCommand::SetQuantization(crate::Quantization::None)),
+        (0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
+    ];
+    let mut p = project(region, 2.0, 0.0, 0.0);
+    p.arrangement.lanes.clear();
+    let launched = left(&render_launches(&p, &pool, SR, &commands, 1.5).unwrap());
+    // The clip plays once, two beats: its last frame is silent, and so is everything after.
+    assert!(launched[2 * BEAT - 2] > 0.0);
+    assert!(launched[2 * BEAT - 1..].iter().all(|s| *s == 0.0), "{:?}", &launched[2 * BEAT - 3..2 * BEAT + 1]);
+}
+
+fn region_for_stretch() -> AudioRegion {
+    region("sine.wav", true, StretchMode::Smooth, 2.0)
 }
 
 #[test]

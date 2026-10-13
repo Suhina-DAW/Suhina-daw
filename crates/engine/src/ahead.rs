@@ -66,6 +66,9 @@ struct Reader {
     length: u64,
     /// The clip frame at the head of the ring.
     next: u64,
+    /// Rewound, and nothing has arrived since: the silence until the worker catches up is the
+    /// jump's, not an underrun.
+    rewound: bool,
 }
 
 /// Renders stretched clips ahead into the rings the [`AheadReader`] reads. A
@@ -203,7 +206,7 @@ impl AheadReader {
         let mut writers = Vec::with_capacity(voices.len());
         for (voice, start, length) in voices {
             let (producer, consumer) = RingBuffer::new(frames * 2);
-            readers.push(Reader { consumer, start, length, next: 0 });
+            readers.push(Reader { consumer, start, length, next: 0, rewound: false });
             writers.push(Writer { voice, producer, start, produced: 0, length });
         }
         let worker =
@@ -251,6 +254,7 @@ impl AheadReader {
                 chunk.commit_all();
             }
             reader.next = to.saturating_sub(reader.start).min(reader.length);
+            reader.rewound = true;
         }
         self.shared.drained.store(requested, Ordering::Release);
         if let Some(worker) = self.inline.as_mut() {
@@ -259,7 +263,9 @@ impl AheadReader {
     }
 
     /// Fills `out` (interleaved stereo) with voice `index`'s frames from clip frame `from` on.
-    /// Frames that are not ready are silence and are counted; never blocks or allocates.
+    /// Frames that are not ready are silence and are counted as underruns, except while a rewind
+    /// is under way or has delivered nothing yet (that silence is the jump's); never blocks or
+    /// allocates.
     pub(crate) fn read(&mut self, index: usize, from: u64, out: &mut [f32]) {
         out.fill(0.0);
         let wanted = (out.len() / 2) as u64;
@@ -268,9 +274,16 @@ impl AheadReader {
         }
         let ready = self.shared.drained.load(Ordering::Acquire) == self.shared.requested.load(Ordering::Acquire);
         let Some(reader) = self.readers.get_mut(index) else { return };
+        // A rewind under way, or done with nothing rendered since: silence the transport asked
+        // for, not frames the worker failed to deliver.
         if !ready {
-            self.shared.underruns.fetch_add(wanted, Ordering::Relaxed);
             return;
+        }
+        if reader.rewound {
+            if reader.consumer.slots() == 0 {
+                return;
+            }
+            reader.rewound = false;
         }
         // Drop what was due before `from` (frames that arrived too late to play).
         if reader.next < from {
