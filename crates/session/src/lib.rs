@@ -12,6 +12,8 @@ mod plugins;
 mod preview;
 mod projects;
 mod rack;
+mod relink;
+mod soundmap;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,8 @@ pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project
 pub use rack::{
     Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, is_instrument, start_offline,
 };
+pub use relink::{MAX_RELINK, search as find_candidates};
+pub use soundmap::{scope_files, sound_map_commands};
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;

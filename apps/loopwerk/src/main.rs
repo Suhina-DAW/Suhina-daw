@@ -90,6 +90,8 @@ fn main() -> ExitCode {
         settings_warnings.push(e);
     }
     window.app.set_file_library(library);
+    // The sample map analyses the library's samples in the background (ADR 0013).
+    window.app.projects_mut().start_sound_map();
     let (projects, templates) = default_folders();
     window.app.set_default_folders(projects, templates);
     match args.source {

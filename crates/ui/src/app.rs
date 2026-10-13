@@ -12,7 +12,7 @@ use loopwerk_session::{CommandKind, ProjectId, Projects, Session};
 use serde_json::json;
 
 use crate::arrangement_view::{self, ArrangementViewState};
-use crate::browser::BrowserState;
+use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
 use crate::detail_view;
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
@@ -115,6 +115,8 @@ pub struct App {
     stashes: HashMap<ProjectId, Stash>,
     /// A dropped file waiting for the user to choose a new tab or replace.
     open_prompt: Option<PathBuf>,
+    /// The active project's missing audio files, their bar and panel.
+    missing: crate::missing_files::MissingFiles,
     remember_choice: bool,
     /// A project that became active and needs an audio output.
     player_request: Option<ProjectId>,
@@ -173,6 +175,8 @@ pub struct App {
     window_title: String,
     /// The browser panel (`docs/spec/browser.md`), the same for every project.
     pub browser: BrowserState,
+    /// The sample map, in the browser's results or large in the main area.
+    pub sample_map: crate::sample_map_panel::Panel,
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
@@ -191,6 +195,7 @@ impl App {
             shown_project: None,
             stashes: HashMap::new(),
             open_prompt: None,
+            missing: crate::missing_files::MissingFiles::default(),
             remember_choice: false,
             player_request: None,
             closed: Vec::new(),
@@ -229,6 +234,7 @@ impl App {
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
             window_title: String::new(),
             browser: BrowserState::default(),
+            sample_map: crate::sample_map_panel::Panel::default(),
             pending_drop: None,
             detail_drop: None,
         }
@@ -565,6 +571,10 @@ impl App {
 
     /// The project dialog and the save prompt, over the window, and what was chosen in them.
     fn project_dialogs(&mut self, ui: &Ui, window: Rect) {
+        let name = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
+        if let Some(crate::missing_files::Outcome::Apply(files)) = self.missing.panel(ui, window, &name) {
+            self.relink(files);
+        }
         if let Some(mut state) = self.project_dialog.take() {
             match project_dialog::show(ui, window, &mut state, &self.project_lists) {
                 Some(Choice::Open(path)) => self.request_open(path),
@@ -734,6 +744,8 @@ impl App {
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
+        // The sample map's analysis goes on in the background; take in what it finished.
+        self.projects.poll_sound_map();
         self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
@@ -769,13 +781,17 @@ impl App {
                 self.place_editors(&[]);
                 return;
             }
-            let prompt_height = if self.open_prompt.is_some() { theme::ROW + 12.0 } else { 0.0 };
+            self.missing.sync(&mut self.projects, self.revision);
+            let missing_bar = self.open_prompt.is_none() && self.missing.bar_shows();
+            let prompt_height = if self.open_prompt.is_some() || missing_bar { theme::ROW + 12.0 } else { 0.0 };
             let (prompt, inner) = (
                 Rect::from_min_size(inner.min, Vec2::new(inner.width(), prompt_height)),
                 Rect::from_min_max(inner.min + Vec2::new(0.0, prompt_height), inner.max),
             );
             if self.open_prompt.is_some() {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
+            } else if missing_bar {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
             let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
             let view_area = inner;
@@ -794,38 +810,50 @@ impl App {
                 .and_then(|items| ui.ctx().pointer_latest_pos().map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
-                (Some(grid), View::Session) => session_view::show(ui, grid, &progress, &mut self.view, &mut actions),
-                (Some(_), View::Arrangement) => {
-                    if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
-                        self.arrangement.stack_audio = self.settings.sample_stacking;
-                        self.arrangement.stack_midi = self.settings.midi_stacking;
-                        let monitor = session.player().map(|p| p.monitor());
-                        // Clips and their notes are rebuilt only after the project changed; the
-                        // playhead is read every frame.
-                        let timeline = match self.timeline.take() {
-                            Some((revision, mut timeline)) if revision == self.revision => {
-                                timeline.follow(monitor);
-                                timeline
+            // The large sample map takes the main area, except while something is dragged from
+            // it, so the drop can land on a track.
+            if self.sample_map.view.large && self.browser.drag.is_none() {
+                let (panel, browser, projects, settings) =
+                    (&mut self.sample_map, &mut self.browser, &mut self.projects, &mut self.settings);
+                if panel.show(ui, inner, browser, projects, settings, self.revision) {
+                    self.settings_changed = true;
+                }
+            } else {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
+                    (Some(grid), View::Session) => {
+                        session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
+                    }
+                    (Some(_), View::Arrangement) => {
+                        if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
+                            self.arrangement.stack_audio = self.settings.sample_stacking;
+                            self.arrangement.stack_midi = self.settings.midi_stacking;
+                            let monitor = session.player().map(|p| p.monitor());
+                            // Clips and their notes are rebuilt only after the project changed; the
+                            // playhead is read every frame.
+                            let timeline = match self.timeline.take() {
+                                Some((revision, mut timeline)) if revision == self.revision => {
+                                    timeline.follow(monitor);
+                                    timeline
+                                }
+                                _ => {
+                                    let mut timeline = Timeline::build(session.project(), monitor);
+                                    timeline.waveforms = self.waveforms.clone();
+                                    timeline
+                                }
+                            };
+                            arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                            self.timeline = Some((self.revision, timeline));
+                            // The headers can be moved from the view itself; that is the setting too.
+                            let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
+                            if side != self.settings.track_headers {
+                                self.settings.track_headers = side;
+                                self.settings_changed = true;
                             }
-                            _ => {
-                                let mut timeline = Timeline::build(session.project(), monitor);
-                                timeline.waveforms = self.waveforms.clone();
-                                timeline
-                            }
-                        };
-                        arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
-                        self.timeline = Some((self.revision, timeline));
-                        // The headers can be moved from the view itself; that is the setting too.
-                        let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
-                        if side != self.settings.track_headers {
-                            self.settings.track_headers = side;
-                            self.settings_changed = true;
                         }
                     }
-                }
-                (None, _) => empty(ui),
-            });
+                    (None, _) => empty(ui),
+                });
+            }
             drop_overlay(ui, view_area);
         });
         self.browser_drag(ui);
@@ -1282,6 +1310,18 @@ impl App {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
+                let label = if self.sample_map.view.large { "Hide sample map" } else { "Sample map" };
+                if ui.add(egui::Button::new(label).shortcut_text(keys("view.sampleMap"))).clicked() {
+                    self.settings_open = false;
+                    self.toggle_large_map();
+                }
+                let missing = self.missing.rows.len();
+                let label =
+                    if missing == 0 { "Missing files…".to_string() } else { format!("Missing files ({missing})…") };
+                if ui.add_enabled(missing > 0, egui::Button::new(label)).clicked() {
+                    self.missing.open = true;
+                    self.settings_open = false;
+                }
                 let label = if self.settings.browser_open { "Hide browser" } else { "Show browser" };
                 if ui.add(egui::Button::new(label).shortcut_text(keys("view.browser"))).clicked() {
                     self.toggle_browser();
@@ -1322,6 +1362,10 @@ impl App {
     }
 
     fn dropped_files(&mut self, ui: &Ui) {
+        // The missing files panel takes a dropped folder as the folder to search.
+        if self.missing.open {
+            return;
+        }
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect()
         });
@@ -1371,6 +1415,10 @@ impl App {
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
             "view.browser" => self.toggle_browser(),
+            "view.sampleMap" => {
+                self.settings_open = false;
+                self.toggle_large_map();
+            }
             "browser.search" => {
                 if !self.settings.browser_open {
                     self.toggle_browser();
@@ -1388,9 +1436,15 @@ impl App {
                     View::Arrangement => View::Session,
                 };
             }
-            "view.session" => self.shown = View::Session,
+            "view.session" => {
+                self.shown = View::Session;
+                self.close_large_map();
+            }
             "view.detail" => self.detail_open = !self.detail_open,
-            "view.arrangement" => self.shown = View::Arrangement,
+            "view.arrangement" => {
+                self.shown = View::Arrangement;
+                self.close_large_map();
+            }
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
@@ -1493,6 +1547,12 @@ impl App {
         }
         let search_key = self.keymap.label("browser.search").unwrap_or_default();
         let selected_track = self.selected_track();
+        let revision = self.revision;
+        let mut map_settings = self.settings.clone();
+        let map_panel = &mut self.sample_map;
+        let mut draw_map = |ui: &mut Ui, rect: Rect, state: &mut BrowserState, projects: &mut Projects| {
+            map_panel.show(ui, rect, state, projects, &mut map_settings, revision);
+        };
         let out = ui
             .scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| {
                 let cx = browser_view::Context {
@@ -1500,11 +1560,22 @@ impl App {
                     settings: &self.settings,
                     selected_track,
                     search_key,
-                    other_results: None,
+                    other_results: Some(&mut draw_map),
                 };
                 browser_view::show(ui, panel, &mut self.browser, cx)
             })
             .inner;
+        if map_settings != self.settings {
+            self.settings = map_settings;
+            self.settings_changed = true;
+        }
+        if let Some(why) = self.sample_map.status.take() {
+            self.status = Status::Hint(why);
+        }
+        let added = std::mem::take(&mut self.sample_map.add);
+        if !added.is_empty() {
+            self.add_to_selected(added);
+        }
         if let Some(status) = out.status {
             self.status = status;
         }
@@ -1515,6 +1586,19 @@ impl App {
             self.add_to_selected(out.add);
         }
         rest
+    }
+
+    /// Shows the sample map large in the main area, or closes it back into the browser.
+    fn toggle_large_map(&mut self) {
+        let large = !self.sample_map.view.large;
+        self.sample_map.view.large = large;
+        self.browser.mode = if large { ResultsMode::List } else { ResultsMode::Other };
+    }
+
+    fn close_large_map(&mut self) {
+        if self.sample_map.view.large {
+            self.toggle_large_map();
+        }
     }
 
     /// Adds browser items to the selected track, as Enter and a double-click do: devices to its
@@ -1595,6 +1679,8 @@ impl App {
             self.view.drop = None;
             self.arrangement.drop = None;
             if let Some(target) = target {
+                // Dropped into the project: the preview has done its job.
+                browser_view::stop_preview(&mut self.browser, &mut self.projects);
                 self.drop_items(&items, target, separate);
             }
         }
@@ -1615,12 +1701,26 @@ impl App {
             self.status = Status::Hint("Nothing to add there".into());
             return;
         };
-        if plan.samples.is_empty() {
-            self.run_drop(plan.commands);
+        self.decode_then_run(plan.samples, plan.commands);
+    }
+
+    /// Relinks missing files (`project.relinkFiles`), their audio decoded on another thread first.
+    fn relink(&mut self, files: Vec<(String, PathBuf)>) {
+        let names: Vec<String> = files.iter().map(|(f, _)| f.clone()).collect();
+        let to: Vec<String> = files.iter().map(|(_, p)| p.display().to_string()).collect();
+        let samples = files.into_iter().map(|(_, p)| p).collect();
+        self.decode_then_run(samples, vec![("project.relinkFiles", json!({ "files": names, "to": to }))]);
+    }
+
+    /// Decodes `samples` on another thread, so the window never waits, then runs `commands`
+    /// with them at hand (ADR 0011).
+    fn decode_then_run(&mut self, samples: Vec<PathBuf>, commands: Vec<(&'static str, serde_json::Value)>) {
+        if samples.is_empty() {
+            self.run_drop(commands);
             return;
         }
         let (send, decoded) = std::sync::mpsc::channel();
-        let samples = plan.samples.clone();
+        let count = samples.len();
         let started = std::thread::Builder::new().name("loopwerk-drop".into()).spawn(move || {
             // A Stems file gives every audio track, each under its stream number.
             let done: Vec<_> = samples
@@ -1644,11 +1744,10 @@ impl App {
         });
         match started {
             Ok(_) => {
-                let count = plan.samples.len();
                 self.status = Status::Hint(format!("Reading {count} sample{}", if count == 1 { "" } else { "s" }));
-                self.pending_drop = Some(PendingDrop { commands: plan.commands, decoded });
+                self.pending_drop = Some(PendingDrop { commands, decoded });
             }
-            Err(_) => self.run_drop(plan.commands),
+            Err(_) => self.run_drop(commands),
         }
     }
 

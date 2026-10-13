@@ -41,6 +41,12 @@ pub struct Projects {
     /// The browser's library (ADR 0012); kept nowhere until one is given with
     /// [`Projects::set_file_library`].
     files: loopwerk_library::Library,
+    /// The sample map's analysis (ADR 0013), made when first needed.
+    pub(crate) sound_map: Option<loopwerk_soundmap::SoundMap>,
+    /// Analysis runs only once started ([`Projects::start_sound_map`]), as indexing does.
+    pub(crate) sound_map_started: bool,
+    /// The library revision the sound map was last brought in line with.
+    pub(crate) sound_map_revision: Option<u64>,
     /// The system's audio devices, when this program plays out loud (the desktop app, the MCP
     /// server with `--audio`).
     audio: Option<std::sync::Arc<dyn crate::AudioSystem>>,
@@ -295,6 +301,9 @@ impl Projects {
     /// MCP server give it Loopwerk's settings folder.
     pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
         self.files = library;
+        // The sound map keeps its caches beside the library's indexes.
+        self.sound_map = None;
+        self.sound_map_revision = None;
     }
 
     /// The browser's library.
@@ -380,6 +389,7 @@ impl Projects {
             .iter()
             .chain(plugin_commands())
             .chain(crate::library_commands())
+            .chain(crate::sound_map_commands())
             .chain(crate::audio_commands())
             .find(|c| c.id == id)
         {
@@ -426,6 +436,7 @@ pub fn all_commands() -> Value {
         .iter()
         .chain(plugin_commands())
         .chain(crate::library_commands())
+        .chain(crate::sound_map_commands())
         .chain(crate::audio_commands())
         .map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())

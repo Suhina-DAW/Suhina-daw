@@ -189,6 +189,29 @@ fn a_bus_does_not_depend_on_the_block_size() {
     assert!(max_diff(&live[..reference.len()], &reference) < 1e-6);
 }
 
+/// A device that follows the song position (auto-pan synced to the beat) gets the block's own
+/// transport wherever it is: on a track that plays into a group, on one that plays straight to
+/// the output (both run in the stages plug-ins share) and on the group's bus (run after them).
+/// Given the previous block's, its LFO would jump back a block at every block boundary, and the
+/// render would depend on the block size.
+#[test]
+fn a_synced_device_gets_its_blocks_own_transport_on_a_track_and_on_a_bus() {
+    let synced = || device("auto-pan", &[("sync", 1.0), ("amount", 1.0)]);
+    for place in ["track in the group", "track to the output", "group"] {
+        let mut project = grouped(vec![], true);
+        match place {
+            "track in the group" => project.channels[0].devices.push(synced()),
+            "track to the output" => project.channels[3].devices.push(synced()),
+            _ => project.channels[2].devices.push(synced()),
+        }
+        let reference = render_offline(&project, SR, 1024).unwrap();
+        for size in [1usize, 256, 333, 4096] {
+            let out = render_offline(&project, SR, size).unwrap();
+            assert!(max_diff(&out, &reference) < 1e-6, "{place}, block {size}: {}", max_diff(&out, &reference));
+        }
+    }
+}
+
 #[test]
 fn a_routing_cycle_through_buses_is_silence_not_a_hang() {
     let mut project = grouped(vec![device("utility", &[])], false);

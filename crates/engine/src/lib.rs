@@ -359,7 +359,6 @@ impl Renderer {
     pub fn process(&mut self, out: &mut [f32]) {
         self.receive_swap();
         self.receive_plugins();
-        self.preview.receive(&mut self.graph.chains);
         let mut rest = out;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
@@ -409,6 +408,12 @@ impl Renderer {
             chain.begin(frames, deadline);
         }
         self.block_frame = 0;
+        // Preview commands apply once the chains have begun the block, so a stopped preview's
+        // note-offs land on this block's first frame, not the previous block's length later
+        // (#156); the playing preview finds its chain first (the graph may have been swapped),
+        // and a new one after.
+        self.preview.begin(&self.graph.chains);
+        self.preview.receive(&mut self.graph.chains);
         self.preview.begin(&self.graph.chains);
         self.drain_commands();
         self.receive_params();
@@ -500,16 +505,10 @@ impl Renderer {
         // deadline is shared by the slowest plug-in rather than by all of them in turn. A bus
         // runs after the chains that play into it, in order below.
         let chains = &mut self.graph.chains;
-        let is_bus = |index: usize, chains: &[Chain]| chains.iter().any(|c| c.target == Some(index));
         loop {
             let mut out_for_an_answer = false;
-            for index in 0..chains.len() {
-                if is_bus(index, chains) {
-                    continue;
-                }
-                if let Some(chain) = chains.get_mut(index) {
-                    out_for_an_answer |= chain.advance(frames);
-                }
+            for chain in chains.iter_mut().filter(|c| !c.is_bus) {
+                out_for_an_answer |= chain.advance(frames, &context);
             }
             if !out_for_an_answer {
                 break;

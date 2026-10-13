@@ -148,6 +148,16 @@ static LIBRARY_COMMANDS: &[CommandSpec<Projects>] = &[
         kind: CommandKind::Library,
         run: tag,
     },
+    CommandSpec {
+        id: "library.findFiles",
+        label: "Find files by name (without regard to case), best first: in the browser's folders and the active project's folder, or by walking a folder; for missing files",
+        params: &[
+            param("names", ParamType::Texts, "file names, such as kick.wav; at most 4096"),
+            optional("folder", ParamType::Text, "walk this folder instead (depth 32, at most 1 000 000 entries)"),
+        ],
+        kind: CommandKind::Library,
+        run: crate::relink::find_files,
+    },
 ];
 
 /// The library commands, as `commands.list` shows them.

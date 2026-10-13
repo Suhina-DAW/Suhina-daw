@@ -86,6 +86,12 @@ pub(crate) fn build(
         chain.set_post(post);
         chain.target = target.map(|(index, _)| index);
     }
+    for index in 0..chains.len() {
+        let fed = targets.iter().any(|t| t.is_some_and(|(target, _)| target == index));
+        if let Some(chain) = chains.get_mut(index) {
+            chain.is_bus = fed;
+        }
+    }
 
     // Latency compensation. A chain's sources start without delay; a bus's input is the latest
     // of the chains that feed it, each delayed to it; everything reaching the output is delayed

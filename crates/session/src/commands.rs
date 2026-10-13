@@ -513,6 +513,23 @@ static COMMANDS: &[CommandSpec] = &[
         run: files::add_track,
     },
     CommandSpec {
+        id: "project.missingFiles",
+        label: "List the audio files the project's clips name that cannot be found, with where they were and how many clips play each",
+        params: &[],
+        kind: CommandKind::Read,
+        run: crate::relink::missing_files,
+    },
+    CommandSpec {
+        id: "project.relinkFiles",
+        label: "Point every clip that plays a missing (or any) audio file at another file, as one undo step; library.findFiles finds candidates",
+        params: &[
+            param("files", ParamType::Texts, "the files as project.missingFiles names them"),
+            param("to", ParamType::Texts, "for each, the file to play instead (the same order); at most 4096"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::relink::relink_files,
+    },
+    CommandSpec {
         id: "clip.addFiles",
         label: "Place samples and MIDI files as clips: on a track (or new tracks when none is given), one after another from a beat in the arrangement or down the clip slots from a scene; separate gives each clip a track of its own",
         params: &[

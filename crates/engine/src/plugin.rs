@@ -204,7 +204,9 @@ impl PluginSlot {
         let timeout = deadline.map_or(OFFLINE_TIMEOUT, |d| d.saturating_duration_since(Instant::now()));
         let answered = self.processor.as_mut().is_some_and(|processor| processor.wait(span, timeout));
         if !answered {
-            self.missed += 1;
+            if self.processor.is_some() {
+                self.missed += 1;
+            }
             if self.instrument {
                 span.fill(0.0);
             }

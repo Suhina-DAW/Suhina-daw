@@ -388,6 +388,30 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 outcome.changed = true;
             }
             let r = row(&mut y);
+            label(&painter, r, "Map layout", "The sample map as a free cloud or snapped to a grid");
+            let options = [("Cloud", false), ("Grid", true)];
+            if let Some(grid) = segmented(ui, &painter, control_rect(r, 2), "Map layout", &options, settings.map_grid) {
+                settings.map_grid = grid;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Map preview on hover", "Pointing at a sample on the map previews it");
+            if let Some(on) =
+                segmented(ui, &painter, control_rect(r, 2), "Map preview on hover", &on_off, settings.map_hover_preview)
+            {
+                settings.map_hover_preview = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Map: longest sample", "Longer samples are left off the map");
+            let options = [("5 s", 5u32), ("10 s", 10), ("30 s", 30), ("60 s", 60)];
+            if let Some(seconds) =
+                segmented(ui, &painter, control_rect(r, 4), "Map longest sample", &options, settings.map_max_seconds)
+            {
+                settings.map_max_seconds = seconds;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
             label(&painter, r, "Tag limit", "The most colour tags there may be");
             let options = [("64", 64usize), ("128", 128), ("256", 256), ("1024", 1024)];
             if let Some(limit) = segmented(ui, &painter, control_rect(r, 4), "Tag limit", &options, tag_limit) {

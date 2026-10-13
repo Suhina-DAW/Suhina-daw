@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 19] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 20] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -94,6 +94,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 19] = [
     ("view.detail", "Show or hide the detail area", "View"),
     ("view.browser", "Show or hide the browser", "View"),
     ("browser.search", "Search in the browser", "View"),
+    ("view.sampleMap", "Show or hide the sample map in the main area", "View"),
     ("selection.copy", "Copy the selected clip", "Edit"),
     ("selection.cut", "Cut the selected clip", "Edit"),
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
@@ -127,7 +128,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 20] = [
+const DEFAULTS: [(&str, &[&str]); 21] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -137,6 +138,7 @@ const DEFAULTS: [(&str, &[&str]); 20] = [
     ("view.detail", &["Shift+Tab"]),
     ("view.browser", &["Ctrl+B"]),
     ("browser.search", &["Ctrl+F"]),
+    ("view.sampleMap", &["Ctrl+Shift+M"]),
     ("settings.open", &["Ctrl+Comma"]),
     ("edit.undo", &["Ctrl+Z"]),
     ("edit.redo", &["Ctrl+Shift+Z", "Ctrl+Y"]),

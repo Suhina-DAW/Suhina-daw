@@ -122,6 +122,9 @@ impl WarpMode {
 pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
 pub const BROWSER_WIDTH: u32 = 300;
 /// The preview's level, in dB: its range and its default.
+/// The longest sample the sample map shows by default, and the range it may be set to.
+pub const MAP_MAX_SECONDS: u32 = 10;
+pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
 pub const PREVIEW_VOLUME: i32 = -6;
 
@@ -158,6 +161,11 @@ pub struct Settings {
     /// Several dropped files go one track each without Ctrl (and onto one track with it).
     pub drop_separate: bool,
     pub warp_mode: WarpMode,
+    /// The sample map (`docs/spec/sample-map.md`): grid rather than cloud, preview on hover,
+    /// and the longest sample it shows, in seconds.
+    pub map_grid: bool,
+    pub map_hover_preview: bool,
+    pub map_max_seconds: u32,
     /// The audio output (Settings › Audio, `audio.setOutput`): host and device by name, empty
     /// for the default; sample rate and buffer size, 0 for the device's own.
     pub audio_host: String,
@@ -190,6 +198,9 @@ impl Default for Settings {
             preview_volume: PREVIEW_VOLUME,
             drop_separate: false,
             warp_mode: WarpMode::Beats,
+            map_grid: false,
+            map_hover_preview: true,
+            map_max_seconds: MAP_MAX_SECONDS,
             audio_host: String::new(),
             audio_device: String::new(),
             audio_sample_rate: 0,
@@ -246,7 +257,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\n",
+            "# Loopwerk settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -258,11 +269,14 @@ impl Settings {
             on(self.preview_autoplay),
             self.preview_volume,
             self.warp_mode.param(),
+            on(self.map_hover_preview),
+            self.map_max_seconds,
             self.audio_host,
             self.audio_device,
             self.audio_sample_rate,
             self.audio_buffer,
             on(self.audio_exclusive),
+            map_layout = if self.map_grid { "grid" } else { "cloud" },
             stop = self.stop.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
@@ -318,6 +332,14 @@ impl Settings {
                 ("preview_volume", db) if db.parse::<i32>().is_ok() => {
                     settings.preview_volume =
                         db.parse::<i32>().unwrap_or(PREVIEW_VOLUME).clamp(PREVIEW_VOLUMES.0, PREVIEW_VOLUMES.1);
+                }
+                ("map_layout", "cloud" | "grid") => settings.map_grid = value == "grid",
+                ("map_hover_preview", "on" | "off") => settings.map_hover_preview = value == "on",
+                ("map_max_seconds", seconds) if seconds.parse::<u32>().is_ok() => {
+                    settings.map_max_seconds = seconds
+                        .parse::<u32>()
+                        .unwrap_or(MAP_MAX_SECONDS)
+                        .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
                 }
                 ("drop_files", "one_track") => settings.drop_separate = false,
                 ("drop_files", "separate") => settings.drop_separate = true,
@@ -379,6 +401,9 @@ mod tests {
             preview_volume: -12,
             drop_separate: true,
             warp_mode: WarpMode::Tonal,
+            map_grid: true,
+            map_hover_preview: false,
+            map_max_seconds: 30,
             audio_host: "ASIO".into(),
             audio_device: "Universal Audio Thunderbolt".into(),
             audio_sample_rate: 48_000,

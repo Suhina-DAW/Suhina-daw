@@ -1,0 +1,357 @@
+//! The sample map's commands (`docs/spec/sample-map.md` › Commands, ADR 0013): analysis of the
+//! library's samples, layouts of a scope, similar items. Like the library they belong to
+//! Loopwerk, not to one project, so they run on [`Projects`] and never change a project.
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use loopwerk_library::{FileKind, Group, Item};
+use loopwerk_soundmap::cache::Analysis;
+use loopwerk_soundmap::{DEFAULT_MAX_SECONDS, MAX_SECONDS_RANGE, MAX_SIMILAR, Map, SoundMap, SourceFile};
+use serde_json::{Value, json};
+
+use crate::commands::{CommandKind, CommandSpec, ParamType, optional, param};
+use crate::{CommandError, Projects};
+
+const PLACE: &str = "pinned, recent:samples, or a folder (default: every folder)";
+
+static SOUND_MAP_COMMANDS: &[CommandSpec<Projects>] = &[
+    CommandSpec {
+        id: "soundmap.status",
+        label: "How far the sample map's analysis of the browser's samples is, per folder: analysed, queued, failed",
+        params: &[],
+        kind: CommandKind::Library,
+        run: status,
+    },
+    CommandSpec {
+        id: "soundmap.analyse",
+        label: "Analyse a folder's samples, or every folder's, again for the sample map, ignoring what was kept",
+        params: &[optional(
+            "folder",
+            ParamType::Text,
+            "a folder, as library.folders lists them (default: every folder)",
+        )],
+        kind: CommandKind::Library,
+        run: analyse,
+    },
+    CommandSpec {
+        id: "soundmap.layout",
+        label: "Lay out samples by how they sound: each analysed sample's position (0–1), kind (kick, snare, hat…, and whether it was guessed) and whether it matches the text and tags; and how many are not analysed yet, too long or unreadable",
+        params: &[
+            optional("place", ParamType::Text, PLACE),
+            optional("text", ParamType::Text, "words a matching sample's name or path holds"),
+            optional("tags", ParamType::Texts, "a matching sample carries any of these tags"),
+            optional("grid", ParamType::Bool, "also give each sample's cell in a grid (column, row)"),
+            optional("maxSeconds", ParamType::Number, "leave out samples longer than this, 1 to 60 (default 10)"),
+        ],
+        kind: CommandKind::Library,
+        run: layout,
+    },
+    CommandSpec {
+        id: "soundmap.similar",
+        label: "The samples that sound most like a sample, nearest first, with their distance",
+        params: &[
+            param("item", ParamType::Text, "a sample's path"),
+            optional("count", ParamType::Integer, "how many, 1 to 100 (default 16)"),
+            optional("place", ParamType::Text, PLACE),
+        ],
+        kind: CommandKind::Library,
+        run: similar,
+    },
+    CommandSpec {
+        id: "soundmap.info",
+        label: "What the sample map knows of a sample: its kind and where it comes from (its name or a guess), its length and its features",
+        params: &[param("item", ParamType::Text, "a sample's path")],
+        kind: CommandKind::Library,
+        run: info,
+    },
+];
+
+/// The sample map commands, as `commands.list` shows them.
+pub fn sound_map_commands() -> &'static [CommandSpec<Projects>] {
+    SOUND_MAP_COMMANDS
+}
+
+impl Projects {
+    /// The sample map's analysis, kept beside the library's indexes.
+    pub fn sound_map_mut(&mut self) -> &mut SoundMap {
+        let folder = self.file_library_mut().data_folder();
+        self.sound_map.get_or_insert_with(|| SoundMap::new(folder, SoundMap::default_threads()))
+    }
+
+    /// Starts analysing the library's samples in the background, and keeps doing so as files
+    /// come and go. The desktop app and the MCP server start it, as they start the library;
+    /// tests and the CLI never analyse a user's folders unasked.
+    pub fn start_sound_map(&mut self) {
+        self.sound_map_started = true;
+        self.poll_sound_map();
+    }
+
+    /// Waits until every queued sample is analysed (tests, the CLI).
+    pub fn wait_sound_map(&mut self) {
+        self.poll_sound_map();
+        if let Some(map) = &mut self.sound_map {
+            map.wait();
+        }
+    }
+
+    /// Takes in finished analyses and, once started, queues new and changed samples when the
+    /// library changed. Call it often (the window calls it every frame); returns whether
+    /// anything changed.
+    pub fn poll_sound_map(&mut self) -> bool {
+        let mut changed = false;
+        if self.sound_map_started {
+            let library = self.file_library_mut();
+            library.poll();
+            let revision = library.revision();
+            if self.sound_map_revision != Some(revision) {
+                let files = sample_files(self);
+                self.sound_map_mut().update(&files);
+                self.sound_map_revision = Some(revision);
+                changed = true;
+            }
+        }
+        if let Some(map) = &mut self.sound_map {
+            changed |= map.poll();
+        }
+        changed
+    }
+}
+
+fn sample_files(projects: &mut Projects) -> Vec<SourceFile> {
+    projects
+        .file_library_mut()
+        .files(Some(FileKind::Sample))
+        .map(|f| SourceFile { folder: f.folder, path: f.path, size: f.size, modified: f.modified })
+        .collect()
+}
+
+/// The samples of a place: `None` for every folder, `pinned`, `recent:samples`, or a folder.
+pub fn scope_files(projects: &mut Projects, place: Option<&str>) -> Result<Vec<SourceFile>, CommandError> {
+    let files = sample_files(projects);
+    let keys: Option<Vec<String>> = match place {
+        None => return Ok(files),
+        Some("pinned") => Some(projects.file_library_mut().pinned()),
+        Some(p) if p.starts_with("recent:") => {
+            let group = Group::parse(&p["recent:".len()..]).ok_or_else(|| format!("unknown recent group in {p:?}"))?;
+            Some(projects.file_library_mut().recent(group))
+        }
+        Some(_) => None,
+    };
+    Ok(match (keys, place) {
+        (Some(keys), _) => {
+            let wanted: HashSet<PathBuf> = keys
+                .iter()
+                .filter_map(|k| match Item::parse(k)? {
+                    Item::File(path) => Some(path),
+                    _ => None,
+                })
+                .collect();
+            files.into_iter().filter(|f| wanted.contains(&f.path)).collect()
+        }
+        (None, Some(folder)) => {
+            let folder = Path::new(folder);
+            files.into_iter().filter(|f| f.path.starts_with(folder)).collect()
+        }
+        (None, None) => files,
+    })
+}
+
+fn text<'a>(params: &'a Value, name: &str) -> Result<&'a str, CommandError> {
+    params
+        .get(name)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| CommandError(format!("{name} must be a text")))
+}
+
+fn optional_text<'a>(params: &'a Value, name: &str) -> Result<Option<&'a str>, CommandError> {
+    match params.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => text(params, name).map(Some),
+    }
+}
+
+fn status(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
+    projects.poll_sound_map();
+    let files = sample_files(projects);
+    let started = projects.sound_map_started;
+    let folders: Vec<Value> = projects
+        .sound_map_mut()
+        .status(&files)
+        .into_iter()
+        .map(|s| {
+            json!({ "folder": s.folder.display().to_string(), "analysed": s.analysed, "queued": s.queued, "failed": s.failed })
+        })
+        .collect();
+    Ok(json!({ "started": started, "folders": folders }))
+}
+
+fn analyse(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let folder = optional_text(params, "folder")?;
+    projects.start_sound_map();
+    let files = sample_files(projects);
+    let folders: Vec<PathBuf> = match folder {
+        Some(f) => {
+            let f = PathBuf::from(f);
+            if !files.iter().any(|file| file.folder == f) {
+                return Err(format!("{} is not a browser folder with samples", f.display()).into());
+            }
+            vec![f]
+        }
+        None => {
+            let mut all: Vec<PathBuf> = files.iter().map(|f| f.folder.clone()).collect();
+            all.sort();
+            all.dedup();
+            all
+        }
+    };
+    let map = projects.sound_map_mut();
+    for folder in &folders {
+        map.reanalyse(folder, &files);
+    }
+    let queued = files.iter().filter(|f| folders.contains(&f.folder)).count();
+    Ok(json!({ "queued": queued }))
+}
+
+fn max_seconds(params: &Value) -> Result<f32, CommandError> {
+    match params.get("maxSeconds") {
+        None | Some(Value::Null) => Ok(DEFAULT_MAX_SECONDS),
+        Some(v) => v
+            .as_f64()
+            .map(|s| s as f32)
+            .filter(|s| (MAX_SECONDS_RANGE.0..=MAX_SECONDS_RANGE.1).contains(s))
+            .ok_or_else(|| "maxSeconds must be a number from 1 to 60".into()),
+    }
+}
+
+fn tags(params: &Value) -> Result<Vec<String>, CommandError> {
+    match params.get("tags") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(v) => v
+            .as_array()
+            .ok_or("tags must be a list of tag names")?
+            .iter()
+            .map(|t| t.as_str().map(str::to_string).ok_or_else(|| "tags must be a list of tag names".into()))
+            .collect(),
+    }
+}
+
+/// The map of a place, laid out here when it was not before.
+fn map_of(projects: &mut Projects, place: Option<&str>, max_seconds: f32) -> Result<Map, CommandError> {
+    projects.poll_sound_map();
+    let files = scope_files(projects, place)?;
+    Ok(projects.sound_map_mut().map(&files, max_seconds))
+}
+
+/// Whether a sample matches search words and tags, as the browser's search decides.
+pub fn matches(projects: &mut Projects, path: &Path, words: &[String], tags: &[String]) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let key = path.display().to_string();
+    (words.is_empty() || loopwerk_library::rank(words, &name, &key).is_some())
+        && (tags.is_empty() || projects.file_library_mut().item_tags(&key).iter().any(|t| tags.contains(t)))
+}
+
+fn layout(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let place = optional_text(params, "place")?;
+    let words = loopwerk_library::words(optional_text(params, "text")?.unwrap_or(""));
+    let tags = tags(params)?;
+    let grid = match params.get("grid") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or("grid must be true or false")?,
+    };
+    let map = map_of(projects, place, max_seconds(params)?)?;
+    let cells = grid.then(|| map.grid(1.0));
+    let mut items = Vec::with_capacity(map.points.len());
+    for (i, point) in map.points.iter().enumerate() {
+        let mut item = json!({
+            "item": point.path.display().to_string(),
+            "x": point.position[0],
+            "y": point.position[1],
+            "kind": point.kind.id(),
+            "guessed": point.guessed,
+            "matches": matches(projects, &point.path, &words, &tags),
+        });
+        if let Some((column, row)) = cells.as_ref().and_then(|g| g.cells.get(i)) {
+            item["column"] = json!(column);
+            item["row"] = json!(row);
+        }
+        items.push(item);
+    }
+    let mut out = json!({
+        "items": items,
+        "pending": map.pending,
+        "tooLong": map.too_long,
+        "failed": map.failed,
+        "overLimit": map.over_limit,
+    });
+    if let Some(g) = &cells {
+        out["columns"] = json!(g.columns);
+        out["rows"] = json!(g.rows);
+    }
+    Ok(out)
+}
+
+fn similar(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let item = PathBuf::from(text(params, "item")?);
+    let count = match params.get("count") {
+        None | Some(Value::Null) => 16,
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|n| (1..=MAX_SIMILAR).contains(n))
+            .ok_or("count must be a whole number from 1 to 100")?,
+    };
+    let place = optional_text(params, "place")?;
+    let map = map_of(projects, place, MAX_SECONDS_RANGE.1)?;
+    if !map.points.iter().any(|p| p.path == item) {
+        return Err(format!("{} is not an analysed sample of this place", item.display()).into());
+    }
+    let items: Vec<Value> = map
+        .similar(&item, count)
+        .into_iter()
+        .map(|(path, distance)| json!({ "item": path.display().to_string(), "distance": distance }))
+        .collect();
+    Ok(json!({ "items": items }))
+}
+
+fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let path = PathBuf::from(text(params, "item")?);
+    projects.poll_sound_map();
+    let file = sample_files(projects)
+        .into_iter()
+        .find(|f| f.path == path)
+        .ok_or_else(|| format!("{} is not a sample in the browser's folders", path.display()))?;
+    let named = loopwerk_soundmap::kinds::kind_of_path(&file.path, &file.folder);
+    let analysis = projects.sound_map_mut().analysis(&file);
+    let mut out = json!({ "item": path.display().to_string() });
+    match analysis {
+        None => out["state"] = json!("queued"),
+        Some(Analysis::Failed(reason)) => {
+            out["state"] = json!("failed");
+            out["reason"] = json!(reason);
+        }
+        Some(Analysis::Analysed { features, seconds }) => {
+            out["state"] = json!("analysed");
+            out["seconds"] = json!(seconds);
+            out["features"] = json!(features.to_vec());
+            out["featureVersion"] = json!(loopwerk_soundmap::features::FEATURE_VERSION);
+        }
+    }
+    match named {
+        Some(kind) => {
+            out["kind"] = json!(kind.id());
+            out["kindFrom"] = json!("name");
+        }
+        None => {
+            // A guess needs the neighbours: the map of the sample's folder.
+            let folder = file.folder.display().to_string();
+            let map = map_of(projects, Some(&folder), MAX_SECONDS_RANGE.1)?;
+            let guess = map.points.iter().find(|p| p.path == path);
+            out["kind"] = json!(guess.map_or("other", |p| p.kind.id()));
+            out["kindFrom"] = json!(if guess.is_some_and(|p| p.guessed) { "guess" } else { "none" });
+        }
+    }
+    Ok(out)
+}

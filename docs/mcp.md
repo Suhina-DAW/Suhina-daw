@@ -26,7 +26,14 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   Commands that read files take the same paths and are checked the same way before they run:
   `clip.addFiles` (`paths`), `preview.play` (`path`), `device.add` and `track.add` (`preset`),
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
-  `library.info`, `library.pin`, `library.unpin` and `library.tag`.
+  `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
+  (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` and `soundmap.info`
+  (`item`, a folder `place`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  `to` file).
+- **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
+  find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
+  the project's folder, or a folder below the read root); `project.relinkFiles {files, to}`
+  points the clips at them, one undo step ([spec](spec/missing-files.md)).
 - **Several projects.** The server keeps every opened project with its own undo history, like
   tabs ([ADR 0007](decisions/0007-several-open-projects.md)). `project_open` adds one and makes
   it active; `projects.list`, `projects.switch`, `projects.next`, `projects.previous` and
@@ -97,6 +104,15 @@ loopwerk-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `library.tags` read it; `library.pin`, `library.unpin`, `library.tag`, `library.setTag` and
   `library.removeTag` change pins and colour tags. `library.addFolder` and
   `library.removeFolder` are refused for agents: the user chooses the browser's folders.
+
+- **The sample map.** The server also analyses the library's samples in the background, as the
+  desktop app does ([sample map spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)).
+  `soundmap.status` tells how far it is per folder; `soundmap.layout {place?, text?, tags?,
+  grid?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
+  such as kick, snare or hat and whether it was guessed, whether it matches `text` and `tags`,
+  and with `grid` a cell); `soundmap.similar {item, count?, place?}` gives the samples that sound
+  most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
+  `soundmap.analyse {folder?}` analyses again.
 
 - **Devices.** `devices.list` lists the built-in devices with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
