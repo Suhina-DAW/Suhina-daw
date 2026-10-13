@@ -122,7 +122,9 @@ click on its chevron or a double-click; its contents are read from disk when it 
 folders first then by name (natural order: "Kick 2" before "Kick 10"). A preset bank opens
 into its 32 voices.
 
-**Selection:** a click selects a row; Ctrl+click adds or removes a row; Shift+click selects the
+**Selection:** a click selects a row, as soon as the button goes down (so auto-play starts at
+once; a row that is part of a selection of several is selected alone when the button comes up,
+so pressing it to drag them all keeps the selection); Ctrl+click adds or removes a row; Shift+click selects the
 range from the last clicked row. A sample row shows a play button at its left while it is
 selected or under the pointer; clicking it previews the sample (a second click stops).
 
