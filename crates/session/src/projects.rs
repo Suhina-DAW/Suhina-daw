@@ -430,7 +430,7 @@ pub fn all_commands() -> Value {
 }
 
 /// The commands that run on [`Projects`] rather than on one project's session: the ones
-/// `execute` finds, in the order [`all_commands`] and [`commands_markdown`] list them.
+/// [`Projects::execute_in`] runs, in the order [`all_commands`] and [`commands_markdown`] list them.
 fn projects_commands() -> impl Iterator<Item = &'static CommandSpec<Projects>> {
     PROJECT_COMMANDS
         .iter()
