@@ -677,13 +677,17 @@ mod imp {
     }
 
     impl Open {
-        /// Destroys the window (and an embedded one's clip).
+        /// Destroys the window (and an embedded one's clip), and waits until the X server has
+        /// done so: it serves its clients in no set order, so without the round trip another
+        /// client told the editor closed could still find the window (#237).
         fn close(self) {
             let _ = self.connection.destroy_window(self.window);
             if let Some(clip) = self.clip {
                 let _ = self.connection.destroy_window(clip);
             }
-            let _ = self.connection.flush();
+            if let Ok(cookie) = self.connection.get_input_focus() {
+                let _ = cookie.reply();
+            }
         }
     }
 

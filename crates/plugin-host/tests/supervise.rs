@@ -326,7 +326,9 @@ fn close_editor_window() {
 }
 
 /// Asks the editor's window to close, as the user does with its close button: the window
-/// manager's WM_DELETE_WINDOW message, sent to the window whose class is the editor's.
+/// manager's WM_DELETE_WINDOW message, sent to the window whose class is the editor's. The
+/// newest one: the root's children come bottom to top, and an editor closed just before may
+/// still be below it (#237).
 #[cfg(target_os = "linux")]
 fn close_editor_window() {
     use x11rb::connection::Connection;
@@ -338,7 +340,7 @@ fn close_editor_window() {
     let children = connection.query_tree(root).unwrap().reply().unwrap().children;
     let window = children
         .into_iter()
-        .find(|w| {
+        .rfind(|w| {
             let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
             class.ok().and_then(|c| c.reply().ok()).is_some_and(|c| c.value.starts_with(b"suhina-plugin-editor"))
         })
