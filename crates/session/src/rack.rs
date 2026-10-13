@@ -27,8 +27,10 @@ use loopwerk_plugins::{
 
 use crate::{CommandError, Player};
 
-/// How long starting a plug-in (the host process, loading it, its state) may take.
-pub const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long starting a plug-in (the host process, loading it, its state) may take. Generous:
+/// a plug-in that reads a library as it loads (Nexus 5 took 33 s on a fast machine) is not a
+/// hung one, and the loading dialog shows which plug-ins are still at it.
+pub const START_TIMEOUT: Duration = Duration::from_secs(120);
 /// How often the session looks whether its plug-ins still run.
 const HEALTH_EVERY: Duration = Duration::from_millis(250);
 /// How often the state of each running plug-in is read, so a restart after a crash gets back

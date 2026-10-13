@@ -30,6 +30,26 @@ fn launch() -> Option<Launch> {
     })
 }
 
+/// Loads two instances of the plug-in into one host process, one after the other, and
+/// reports how long each took (a second instance that takes longer than the first is the
+/// plug-in's doing, not the host's).
+#[test]
+#[ignore = "needs LOOPWERK_PLUGIN; looks into one installed plug-in by hand"]
+fn two_instances_load_into_one_process() {
+    let Some(launch) = launch() else {
+        eprintln!("LOOPWERK_PLUGIN not set; nothing to look into");
+        return;
+    };
+    let launch = Launch { group: Some("manual".into()), ..launch };
+    let started = std::time::Instant::now();
+    let (first, _first_audio) = Plugin::start(launch.clone()).unwrap_or_else(|e| panic!("first: {e}"));
+    eprintln!("first loaded in {:.1} s (latency {})", started.elapsed().as_secs_f64(), first.latency());
+    let started = std::time::Instant::now();
+    let (second, _second_audio) = Plugin::start(launch).unwrap_or_else(|e| panic!("second: {e}"));
+    eprintln!("second loaded in {:.1} s (latency {})", started.elapsed().as_secs_f64(), second.latency());
+    assert_eq!(first.process_id(), second.process_id());
+}
+
 /// Loads the plug-in, opens its editor in a window of its own, keeps it open for a while and
 /// reports whether the host stayed alive.
 #[test]
