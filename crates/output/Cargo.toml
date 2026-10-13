@@ -10,6 +10,10 @@ rust-version.workspace = true
 loopwerk-engine.workspace = true
 loopwerk-session.workspace = true
 cpal.workspace = true
+# The ring the engine renders ahead into, read by the device's callback.
+rtrb.workspace = true
+# Real-time priority for the render thread.
+thread-priority = "3.1.1"  # MIT
 
 [lints]
 workspace = true

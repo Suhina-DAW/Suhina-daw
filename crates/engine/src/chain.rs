@@ -74,6 +74,10 @@ pub(crate) struct Chain {
     context: ProcessContext,
     /// Frames of the current block the devices have run over.
     done: usize,
+    /// When the block runs in stages with other chains ([`Chain::advance`]): the next slot to
+    /// run, and the plug-in slot whose block is out, if one is.
+    stage: usize,
+    waiting: Option<usize>,
     /// Per key, the renderer frame its note ends at, or `NOT_HELD`.
     held: [u64; 128],
     next_off: u64,
@@ -173,6 +177,8 @@ impl Chain {
             deadline: None,
             context: ProcessContext::default(),
             done: 0,
+            stage: 0,
+            waiting: None,
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
         })
@@ -199,6 +205,8 @@ impl Chain {
             deadline: None,
             context: ProcessContext::default(),
             done: 0,
+            stage: 0,
+            waiting: None,
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
         }
@@ -224,7 +232,67 @@ impl Chain {
             buffer.fill(0.0);
         }
         self.done = 0;
+        self.stage = 0;
+        self.waiting = None;
         self.deadline = deadline;
+    }
+
+    /// Runs the devices over the rest of the block one stage further, for chains that run
+    /// their plug-ins at the same time: built-in devices run here; at the next plug-in that
+    /// takes the block without waiting, the block is handed over and this returns true, for
+    /// [`Chain::collect`] to wait for it once every chain has handed its block over. Returns
+    /// false once every device has run (a plug-in that cannot take a block that way runs as
+    /// in [`Chain::finish`]).
+    pub(crate) fn advance(&mut self, frames: usize) -> bool {
+        if self.waiting.is_some() {
+            return true;
+        }
+        let to = frames.min(MAX_BLOCK);
+        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, .. } = self;
+        let from = (*done).min(to);
+        while let Some(slot) = slots.get_mut(*stage) {
+            match slot {
+                Slot::Device(device) => {
+                    let mut at_done = from;
+                    for &(at, event) in pending.iter() {
+                        let at = at.clamp(at_done, to);
+                        process(device, buffer, at_done, at, context);
+                        at_done = at;
+                        device.event(event);
+                    }
+                    process(device, buffer, at_done, to, context);
+                }
+                Slot::Plugin(plugin) => {
+                    let last = (to - from).saturating_sub(1);
+                    span_events.clear();
+                    span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
+                        if plugin.send(span, span_events) {
+                            *waiting = Some(*stage);
+                            return true;
+                        }
+                        plugin.run(span, span_events, *deadline);
+                    }
+                }
+            }
+            *stage += 1;
+        }
+        pending.clear();
+        *done = to;
+        false
+    }
+
+    /// Waits for the block [`Chain::advance`] handed over, if one is out, and takes its result.
+    pub(crate) fn collect(&mut self, frames: usize) {
+        let Some(index) = self.waiting.take() else { return };
+        let to = frames.min(MAX_BLOCK);
+        let from = self.done.min(to);
+        if let (Some(Slot::Plugin(plugin)), Some(span)) =
+            (self.slots.get_mut(index), self.buffer.get_mut(from * 2..to * 2))
+        {
+            plugin.finish(span, self.deadline);
+        }
+        self.stage = index + 1;
     }
 
     /// Adds a frame of the track's sound at `frame` of the block.

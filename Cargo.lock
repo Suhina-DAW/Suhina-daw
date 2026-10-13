@@ -2424,6 +2424,8 @@ dependencies = [
  "cpal",
  "loopwerk-engine",
  "loopwerk-session",
+ "rtrb",
+ "thread-priority",
 ]
 
 [[package]]
@@ -2442,6 +2444,7 @@ dependencies = [
  "loopwerk-plugins",
  "loopwerk-session",
  "serde_json",
+ "thread-priority",
  "vst3",
  "windows-sys 0.61.2",
  "x11rb",
@@ -4308,6 +4311,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "thread-priority"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2e834949be5111506bb252643498af1514f600d9e1dceedaa42afae155b67f"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows",
 ]
 
 [[package]]

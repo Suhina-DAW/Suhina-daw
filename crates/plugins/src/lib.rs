@@ -139,12 +139,36 @@ impl PluginAudio {
         timeout: Duration,
     ) -> Outcome {
         let outcome = self.link.process_with_events(input, events, output, timeout);
+        self.note(outcome);
+        outcome
+    }
+
+    /// The first half of [`PluginAudio::process_with_events`]: sends the block (at most
+    /// `room` samples, the output's size) without waiting, so several plug-ins' blocks can be
+    /// out at once; `false` when the host is still busy with an earlier block (counted as
+    /// unanswered). Real-time safe.
+    pub fn send(&mut self, input: &[f32], events: &[Event], room: usize) -> bool {
+        let sent = self.link.send_with_events(input, events, room);
+        if !sent {
+            self.note(Outcome::Busy);
+        }
+        sent
+    }
+
+    /// The second half: waits at most `timeout` for the block sent with [`PluginAudio::send`]
+    /// and reads its result into `output`. Real-time safe.
+    pub fn finish(&mut self, output: &mut [f32], timeout: Duration) -> Outcome {
+        let outcome = self.link.wait(output, Instant::now() + timeout);
+        self.note(outcome);
+        outcome
+    }
+
+    fn note(&self, outcome: Outcome) {
         if outcome == Outcome::Done {
             self.unanswered.store(0, Ordering::Relaxed);
         } else {
             self.unanswered.fetch_add(1, Ordering::Relaxed);
         }
-        outcome
     }
 }
 

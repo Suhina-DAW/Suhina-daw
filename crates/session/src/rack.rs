@@ -133,6 +133,10 @@ pub struct PluginReport {
     /// (the chain went on without it for that block).
     pub blocks: u32,
     pub late_blocks: u32,
+    /// The longest a block's round trip took, in microseconds.
+    pub longest_us: u32,
+    /// Blocks that came with no time left before the deadline (an earlier plug-in used it).
+    pub no_time: u32,
     /// Why it runs with its own defaults, when it did not take the saved state.
     pub state_refused: Option<String>,
 }
@@ -158,12 +162,26 @@ pub struct PluginProgress {
 pub struct BlockCounts {
     blocks: AtomicU32,
     late: AtomicU32,
+    /// The longest a block's round trip took, in microseconds.
+    longest_us: AtomicU32,
+    /// Blocks that came with no time left before the deadline (an earlier plug-in used it).
+    no_time: AtomicU32,
 }
 
 impl BlockCounts {
     /// Blocks given and blocks not answered in time, so far.
     pub fn read(&self) -> (u32, u32) {
         (self.blocks.load(Ordering::Relaxed), self.late.load(Ordering::Relaxed))
+    }
+
+    /// The longest a block's round trip took, in microseconds.
+    pub fn longest_us(&self) -> u32 {
+        self.longest_us.load(Ordering::Relaxed)
+    }
+
+    /// Blocks that came with no time left before the deadline.
+    pub fn no_time(&self) -> u32 {
+        self.no_time.load(Ordering::Relaxed)
     }
 }
 
@@ -246,12 +264,10 @@ fn push_event(out: &mut Vec<Event>, frame: u32, event: DeviceEvent) {
     }
 }
 
-impl PluginProcessor for Hosted {
-    fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
-        let samples = buffer.len();
-        let (Some(input), Some(output)) = (self.input.get_mut(..samples), self.output.get_mut(..samples)) else {
-            return false;
-        };
+impl Hosted {
+    /// Copies the block and its events in, ready to send; `false` for a block too big.
+    fn take(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
+        let Some(input) = self.input.get_mut(..buffer.len()) else { return false };
         input.copy_from_slice(buffer);
         self.events.clear();
         // What earlier blocks could not send goes first.
@@ -260,9 +276,16 @@ impl PluginProcessor for Hosted {
             push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
         }
         self.counts.blocks.fetch_add(1, Ordering::Relaxed);
-        match self.audio.process_with_events(input, &self.events, output, timeout) {
+        true
+    }
+
+    /// Takes in what a block's round trip gave: the output into `buffer` when it was answered.
+    fn outcome(&mut self, outcome: loopwerk_plugins::Outcome, buffer: &mut [f32]) -> bool {
+        match outcome {
             loopwerk_plugins::Outcome::Done => {
-                buffer.copy_from_slice(output);
+                if let Some(output) = self.output.get(..buffer.len()) {
+                    buffer.copy_from_slice(output);
+                }
                 true
             }
             // Sent, but late: the host still gets its events.
@@ -277,6 +300,48 @@ impl PluginProcessor for Hosted {
                 false
             }
         }
+    }
+
+    /// Waits for the block out, noting how long it took and whether any time was left.
+    fn wait_for(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        if timeout.is_zero() {
+            self.counts.no_time.fetch_add(1, Ordering::Relaxed);
+        }
+        let started = std::time::Instant::now();
+        let outcome = match self.output.get_mut(..buffer.len()) {
+            Some(output) => self.audio.finish(output, timeout),
+            None => loopwerk_plugins::Outcome::Busy,
+        };
+        let took = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
+        self.counts.longest_us.fetch_max(took, Ordering::Relaxed);
+        self.outcome(outcome, buffer)
+    }
+}
+
+impl PluginProcessor for Hosted {
+    fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
+        if !self.send(buffer, events) {
+            return false;
+        }
+        self.wait_for(buffer, timeout)
+    }
+
+    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
+        if !self.take(buffer, events) {
+            return false;
+        }
+        let Some(input) = self.input.get(..buffer.len()) else { return false };
+        if self.audio.send(input, &self.events, buffer.len()) {
+            return true;
+        }
+        // The host is still busy with an earlier block: this one is lost, as a miss.
+        self.counts.late.fetch_add(1, Ordering::Relaxed);
+        carry_releases(&self.events, &mut self.carried);
+        false
+    }
+
+    fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        self.wait_for(buffer, timeout)
     }
 }
 
@@ -588,6 +653,8 @@ impl Rack {
             editor_embedded: instance.editor_size.filter(|_| instance.editor_embedded && instance.editor_open),
             blocks: instance.counts.as_ref().map_or(0, |c| c.read().0),
             late_blocks: instance.counts.as_ref().map_or(0, |c| c.read().1),
+            longest_us: instance.counts.as_ref().map_or(0, |c| c.longest_us()),
+            no_time: instance.counts.as_ref().map_or(0, |c| c.no_time()),
             state_refused: instance.state_refused.clone(),
         })
     }

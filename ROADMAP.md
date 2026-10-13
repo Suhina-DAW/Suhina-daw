@@ -286,6 +286,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the chain. On Linux the window is an X11 one whenever an X server (or XWayland) is there,
   so this works on Wayland desktops too.
 - Renders (`loopwerk-cli render`, MCP `project_render`) run the same plug-ins.
+- The plug-ins of different tracks run at the same time (one block out to every host, then
+  every answer collected), the engine renders ahead of the audio device in blocks of its own,
+  and host audio threads run at real-time priority: a project with 25 plug-ins plays without a
+  late block. The device panel says when a plug-in does fall behind ("N% of blocks late").
 - Still to do: plug-ins of one process in one round trip, plug-in parameters as automation,
   Wayland and macOS editors, VST2 hosting (not decided).
 

@@ -51,6 +51,18 @@ const UNLOAD_WAIT: Duration = Duration::from_secs(1);
 /// Most instances one process runs.
 const MAX_INSTANCES: usize = 1024;
 
+/// Gives the calling thread, an instance's audio thread, the highest priority the system
+/// allows it (time-critical on Windows), so it answers the engine's blocks as soon as they
+/// come: the engine waits only until each block's deadline (ADR 0006). Where that is not
+/// allowed (Linux without the right), the thread runs at its normal priority.
+pub(crate) fn real_time_thread() {
+    // `LOOPWERK_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
+    if std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
+        return;
+    }
+    let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
+}
+
 /// Asks an audio thread to stop and waits up to `wait` for it to end; whether it did (or there
 /// was none).
 pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHandle<T>>, wait: Duration) -> bool {
@@ -293,6 +305,7 @@ fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let audio = thread::Builder::new()
         .name("plug-in audio".into())
         .spawn(move || {
+            real_time_thread();
             while !audio_stop.load(Ordering::Acquire) {
                 served.serve(POLL, |input, output| audio_processor.process(input, output));
             }

@@ -477,6 +477,29 @@ impl Renderer {
         }
         // What went straight to the output waits for the slowest chain (latency compensation).
         self.graph.direct_delay.run(out);
+        // The chains no chain plays into run their plug-ins at the same time, a stage at a
+        // time (every chain hands its block over, then every chain waits), so the block's
+        // deadline is shared by the slowest plug-in rather than by all of them in turn. A bus
+        // runs after the chains that play into it, in order below.
+        let chains = &mut self.graph.chains;
+        let is_bus = |index: usize, chains: &[Chain]| chains.iter().any(|c| c.target == Some(index));
+        loop {
+            let mut out_for_an_answer = false;
+            for index in 0..chains.len() {
+                if is_bus(index, chains) {
+                    continue;
+                }
+                if let Some(chain) = chains.get_mut(index) {
+                    out_for_an_answer |= chain.advance(frames);
+                }
+            }
+            if !out_for_an_answer {
+                break;
+            }
+            for chain in chains.iter_mut() {
+                chain.collect(frames);
+            }
+        }
         // In order, so a bus has every chain that plays into it before it runs.
         for i in 0..self.graph.chains.len() {
             let (done, later) = self.graph.chains.split_at_mut(i + 1);

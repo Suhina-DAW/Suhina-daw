@@ -127,6 +127,23 @@ workspace forbids.
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
+   *Built:* the host's audio threads and the desktop app's render thread take the highest
+   priority the system gives them (`thread-priority`: time-critical on Windows; on Linux the
+   normal priority until real-time rights are set up). The deadline is 60 % of a block's
+   playing time for all of a block's plug-ins together, one after another, so it depends on
+   the block: the audio output renders the engine in blocks of its own (`ENGINE_BLOCK`, 1024
+   frames) ahead of the device into a ring, rather than in the device's buffers, after a
+   driver that gave 3 ms buffers left 25 plug-ins 30 to 50 % of their blocks late (notes
+   dropped, "stopped answering"). The session counts each plug-in's blocks and late blocks
+   (`device.plugin`: `blocks`, `late_blocks`, `longest_us`, `no_time`), and the device panel
+   shows the share. Even so the sum of 25 plug-ins' times (Serum 2 up to 9 ms a block)
+   passed the budget on half the blocks, so the chains no chain plays into now run their
+   plug-ins *at the same time*, a stage at a time: every chain hands its block to its next
+   plug-in (`Link::send_with_events`, `PluginProcessor::send`), then every chain waits for
+   its answer (`Link::wait`, `PluginProcessor::wait`), and so on until every chain is done;
+   a bus runs after the chains that play into it. The budget is then set by the slowest
+   plug-in, not the sum: the same project went from 30 to 50 % of blocks late to none, the
+   longest wait 6 ms.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it

@@ -324,7 +324,10 @@ impl ClapPlugin {
         let audio_pending = pending.clone();
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
-            .spawn(move || serve(stopped, served, has_input, audio_pending, &audio_stop))
+            .spawn(move || {
+                crate::real_time_thread();
+                serve(stopped, served, has_input, audio_pending, &audio_stop)
+            })
             .map_err(|e| e.to_string())?;
         let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
         Ok(Self { instance, audio: Some(audio), stop, latency, pending, editor: None, name })

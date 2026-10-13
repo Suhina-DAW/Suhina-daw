@@ -652,6 +652,8 @@ mod tests {
             editor_embedded: None,
             blocks: 0,
             late_blocks: 0,
+            longest_us: 0,
+            no_time: 0,
             state_refused: None,
         }
     }
