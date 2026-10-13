@@ -1,5 +1,5 @@
 ---
-description: Loopwerk's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens
+description: Suhina's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens
 read_when: UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups
 type: spec
 status: draft
@@ -11,8 +11,8 @@ covers:
 
 # Design brief
 
-How Loopwerk looks. Read with [ADR 0009](../decisions/0009-ui-toolkit-and-look.md): the workflow
-is familiar to Ableton Live users, the look is Loopwerk's own. This brief is what a designer (or a
+How Suhina looks. Read with [ADR 0009](../decisions/0009-ui-toolkit-and-look.md): the workflow
+is familiar to Ableton Live users, the look is Suhina's own. This brief is what a designer (or a
 design tool) gets, together with the functional specs in `docs/spec/ui-*.md`. A screenshot of Live
 may show a design tool where things are; the look always comes from this brief, never from the
 screenshot (ADR 0009, decision 4).
@@ -61,7 +61,7 @@ From [research](#sources) and the first design rounds:
 
 ## Make our own (appearance)
 
-| Area | Loopwerk | Avoid |
+| Area | Suhina | Avoid |
 |---|---|---|
 | Base palette | Warm graphite surfaces in four lightness steps (see tokens) | Live's neutral mid-grey |
 | Accent | Iris `#A6A3FF`, used sparingly: transport play, solo, queued, device on, selected parameter | Orange as the active colour; cyan as the value colour |
@@ -78,7 +78,7 @@ From [research](#sources) and the first design rounds:
 | Browser | Search, category filters as buttons, sidebar of places only (Pinned, Recent, Folders), tree with type icons, colour tags as dots on rows, preview with waveform, BPM and key | Live's sidebar of Collections, Library categories and Places |
 | Icons | Lucide (ISC) or our own simple strokes | Any glyph traced from Live |
 | Text | Our own wording ("Drop clips or devices to add a track", "All MIDI in") | Live's interface strings |
-| Logo, name, splash | Entirely Loopwerk's own | Anything resembling Ableton or Push branding |
+| Logo, name, splash | Entirely Suhina's own | Anything resembling Ableton or Push branding |
 
 ## Layout decisions
 
@@ -97,10 +97,10 @@ From [research](#sources) and the first design rounds:
 ## Tokens
 
 All colours, spacing, radii, stroke widths and type sizes are named tokens in one theme module.
-Widgets never contain literal colours. The colours below are the built-in theme, Loopwerk Dark;
+Widgets never contain literal colours. The colours below are the built-in theme, Suhina Dark;
 a theme file can change any of them (see Themes). Current values:
 
-| Token | Loopwerk Dark | Use |
+| Token | Suhina Dark | Use |
 |---|---|---|
 | `window.background` | `#1D1C1A` | The window behind everything: grid, empty slots, lanes, Settings |
 | `panel.background` | `#252421` | Panels and headers: menu, control and status bars, track headers, beat lines |
@@ -131,7 +131,7 @@ a theme file can change any of them (see Themes). Current values:
 
 ## Themes
 
-A theme is a JSON file in the `themes` folder of Loopwerk's app-data folder, beside
+A theme is a JSON file in the `themes` folder of Suhina's app-data folder, beside
 `settings.txt`; its file name without `.json` is its id, which `settings.txt` keeps as
 `theme = <id>`. It names the theme and gives colour tokens as `#RRGGBB`:
 
@@ -139,21 +139,21 @@ A theme is a JSON file in the `themes` folder of Loopwerk's app-data folder, bes
 { "name": "Night", "colors": { "window.background": "#14161A", "accent": "#7FD1B9" } }
 ```
 
-A token the file leaves out keeps Loopwerk Dark's colour, so a file needs only the colours it
+A token the file leaves out keeps Suhina Dark's colour, so a file needs only the colours it
 changes; an unknown token or a value that is not `#RRGGBB` is skipped with a warning. Files with
 the first token names (`surface.0`, `line`, `text.tertiary` …) still read. Only colours belong to
 a theme: sizes, spacing and type stay the design's. Track colours come from the project.
 
-Themes that come with Loopwerk (`crates/ui/themes/`, read-only; editing one makes a copy):
-Loopwerk Dark (the default), Editor Dark (cool greys and blue, like a code editor), Loopwerk
+Themes that come with Suhina (`crates/ui/themes/`, read-only; editing one makes a copy):
+Suhina Dark (the default), Editor Dark (cool greys and blue, like a code editor), Suhina
 Light, High Contrast, and four popular open palettes mapped onto the tokens: Dracula, Nord,
 Catppuccin Mocha and Latte, Solarized Dark (all MIT, licences in `crates/ui/themes/licenses/`).
 
 Settings › Interface › Theme picks a theme and changes its colours (writing the file); the name
 of a theme file is changed there too, and its file is renamed to match. Duplicate copies the
 theme in use, Reload reads the files again, Open folder shows the themes folder, Back up writes
-every theme file into `exports/loopwerk-themes-<date>.zip`, and Export template writes
-`exports/loopwerk-theme-template.zip`: `template.json` (every token written out), `README.md`
+every theme file into `exports/suhina-themes-<date>.zip`, and Export template writes
+`exports/suhina-theme-template.zip`: `template.json` (every token written out), `README.md`
 (the format and every token, written so an AI agent can make a theme from it alone) and the
 built-in themes in `examples/`. A theme file or a zip of them (a backup) dropped on the window is
 added; a theme already there is not doubled, and one whose id is taken gets `-2`. A theme file

@@ -38,7 +38,7 @@ pub const MAX_FRAMES: u32 = 65_536;
 pub enum IpcError {
     /// Creating, opening or mapping the shared memory or a doorbell failed.
     Io(std::io::Error),
-    /// The address does not name a link made by this version of Loopwerk.
+    /// The address does not name a link made by this version of Suhina.
     BadLink(&'static str),
     /// Channel count or block size out of range.
     BadSize { channels: u32, max_frames: u32 },

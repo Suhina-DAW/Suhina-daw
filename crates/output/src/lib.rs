@@ -11,9 +11,9 @@ use std::sync::{Arc, mpsc};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
-use loopwerk_engine::model::Project;
-use loopwerk_engine::{AudioPool, Controller, Renderer};
-use loopwerk_session::Player;
+use suhina_engine::model::Project;
+use suhina_engine::{AudioPool, Controller, Renderer};
+use suhina_session::Player;
 
 /// Frames rendered per engine call; output buffers larger than this are filled in several calls.
 const SCRATCH_FRAMES: usize = 4096;
@@ -117,7 +117,7 @@ pub fn open_player(project: &Project, audio: &AudioPool) -> Result<(Player, Stri
     let (ready, opened) = mpsc::channel();
     let (close, closed) = mpsc::channel::<()>();
     std::thread::Builder::new()
-        .name("loopwerk-audio".into())
+        .name("suhina-audio".into())
         .spawn(move || match start_stopped(&project, &audio) {
             Ok(Stopped { controller, output, stream, .. }) => {
                 if ready.send(Ok((controller, output.describe()))).is_ok() {

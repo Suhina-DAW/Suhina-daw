@@ -20,9 +20,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  BIN: loopwerk-cli
-  # The process plug-ins run in (ADR 0006); loopwerk-cli looks for it next to itself.
-  HOST: loopwerk-plugin-host
+  BIN: suhina-cli
+  # The process plug-ins run in (ADR 0006); suhina-cli looks for it next to itself.
+  HOST: suhina-plugin-host
 
 jobs:
   version:
@@ -39,9 +39,9 @@ jobs:
         shell: bash
         run: |
           version=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "loopwerk-cli") | .version')
+            | jq -r '.packages[] | select(.name == "suhina-cli") | .version')
           if [ -z "$version" ]; then
-            echo "::error::could not read the loopwerk-cli version"
+            echo "::error::could not read the suhina-cli version"
             exit 1
           fi
           # MAJOR.MINOR.PATCH, optionally with a release-candidate suffix: 0.1.0 or 0.1.0-rc.1.
@@ -79,7 +79,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      PACKAGE: loopwerk-${{ needs.version.outputs.version }}-${{ matrix.name }}
+      PACKAGE: suhina-${{ needs.version.outputs.version }}-${{ matrix.name }}
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
@@ -102,7 +102,7 @@ jobs:
           TARGETS: ${{ matrix.targets }}
         run: |
           for target in ${TARGETS//,/ }; do
-            cargo build --release --locked -p loopwerk-cli -p loopwerk-plugin-host --target "$target"
+            cargo build --release --locked -p suhina-cli -p suhina-plugin-host --target "$target"
           done
       - name: Collect the package
         shell: bash
@@ -215,5 +215,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --draft \
             "${flags[@]}" \
-            --title "Loopwerk $VERSION" \
+            --title "Suhina $VERSION" \
             --notes "Pre-alpha build of the headless command-line tool (\`$BIN\`). The binaries are not signed."

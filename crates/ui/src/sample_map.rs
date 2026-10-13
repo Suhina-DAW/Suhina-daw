@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use egui::{
     Align2, Color32, CornerRadius, Key, PointerButton, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
 };
-use loopwerk_soundmap::grid::Grid;
-use loopwerk_soundmap::kinds::Kind;
+use suhina_soundmap::grid::Grid;
+use suhina_soundmap::kinds::Kind;
 
 use crate::theme;
 
@@ -257,7 +257,7 @@ fn label_spots(points: &[MapPoint], positions: &[[f32; 2]]) -> Vec<(Kind, [f32; 
     out
 }
 
-/// A kind's colour: Loopwerk's muted palette, extended, with neighbouring kinds told apart.
+/// A kind's colour: Suhina's muted palette, extended, with neighbouring kinds told apart.
 pub fn kind_colour(kind: Kind) -> Color32 {
     let hex: u32 = match kind {
         Kind::Kick => 0xD0_6E_5E,
@@ -885,7 +885,7 @@ mod look {
             }
         }
         let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
-        let grid = loopwerk_soundmap::grid::snap(&positions, 1.0);
+        let grid = suhina_soundmap::grid::snap(&positions, 1.0);
         for layout in [Layout::Cloud, Layout::Grid] {
             let view = MapView { layout, ..MapView::default() };
             let mut harness = Harness::builder().with_size(egui::vec2(900.0, 640.0)).build_ui_state(

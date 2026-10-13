@@ -1,5 +1,5 @@
 ---
-description: The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts
+description: The layout of Suhina's own project file (.locr), field by field, with what a reader accepts
 read_when: .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state
 type: spec
 status: current
@@ -10,7 +10,7 @@ covers:
 
 # The .locr project file
 
-Loopwerk's own project file ([ADR 0010](../decisions/0010-project-files.md)), version 1. It is
+Suhina's own project file ([ADR 0010](../decisions/0010-project-files.md)), version 1. It is
 UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 ([ADR 0001](../decisions/0001-daw-neutral-model.md)); this lists them and what a reader accepts.
 
