@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use suhina_engine::{
+use loopwerk_engine::{
     DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, model::DeviceKind, plugin_devices,
 };
-use suhina_model::{Device, Project};
-use suhina_plugins::library::{Hosting, group_for};
-use suhina_plugins::scan::{Catalog, PluginInfo};
-use suhina_plugins::{
+use loopwerk_model::{Device, Project};
+use loopwerk_plugins::library::{Hosting, group_for};
+use loopwerk_plugins::scan::{Catalog, PluginInfo};
+use loopwerk_plugins::{
     Event, EventKind, Health, Launch, MAX_EVENTS, Placement, Plugin, PluginAudio, PluginError, SavedState,
 };
 
@@ -63,7 +63,7 @@ impl PluginEnv {
 
     /// What `library` gives: its catalog, its host, and how each plug-in is hosted (its
     /// `plugins.setHosting` choice, else one process per plug-in file).
-    pub fn from_library(library: &mut suhina_plugins::library::Library) -> Self {
+    pub fn from_library(library: &mut loopwerk_plugins::library::Library) -> Self {
         let host = library.host().to_path_buf();
         let catalog = library.catalog().clone();
         let chosen: HashMap<String, Hosting> = catalog
@@ -282,21 +282,21 @@ impl Hosted {
     }
 
     /// Takes in what a block's round trip gave: the output into `buffer` when it was answered.
-    fn outcome(&mut self, outcome: suhina_plugins::Outcome, buffer: &mut [f32]) -> bool {
+    fn outcome(&mut self, outcome: loopwerk_plugins::Outcome, buffer: &mut [f32]) -> bool {
         match outcome {
-            suhina_plugins::Outcome::Done => {
+            loopwerk_plugins::Outcome::Done => {
                 if let Some(output) = self.output.get(..buffer.len()) {
                     buffer.copy_from_slice(output);
                 }
                 true
             }
             // Sent, but late: the host still gets its events.
-            suhina_plugins::Outcome::Missed => {
+            loopwerk_plugins::Outcome::Missed => {
                 self.counts.late.fetch_add(1, Ordering::Relaxed);
                 false
             }
             // Not sent: its releases wait for the next block; new notes are dropped.
-            suhina_plugins::Outcome::Busy => {
+            loopwerk_plugins::Outcome::Busy => {
                 self.counts.late.fetch_add(1, Ordering::Relaxed);
                 carry_releases(&self.events, &mut self.carried);
                 false
@@ -312,7 +312,7 @@ impl Hosted {
         let started = std::time::Instant::now();
         let outcome = match self.output.get_mut(..buffer.len()) {
             Some(output) => self.audio.finish(output, timeout),
-            None => suhina_plugins::Outcome::Busy,
+            None => loopwerk_plugins::Outcome::Busy,
         };
         let took = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
         self.counts.longest_us.fetch_max(took, Ordering::Relaxed);
@@ -349,7 +349,7 @@ impl PluginProcessor for Hosted {
 
 /// The installed plug-in for `device` and whether it is an instrument; `None` when nothing
 /// installed stands for it (or it is not a plug-in).
-fn find<'a>(catalog: &'a Catalog, device: &Device) -> Option<(suhina_plugins::matching::Match<'a>, bool)> {
+fn find<'a>(catalog: &'a Catalog, device: &Device) -> Option<(loopwerk_plugins::matching::Match<'a>, bool)> {
     let (found, _) = crate::plugins::device_plugin(catalog, device)?;
     let instrument = is_instrument(found.plugin);
     Some((found, instrument))
@@ -556,7 +556,7 @@ impl Rack {
     /// back to be kept for when the device's plug-in starts again.
     fn stop(&self, key: u64, mut control: Plugin) {
         let sender = self.returned_sender.clone();
-        let _detached = std::thread::Builder::new().name("suhina-plugin-stop".into()).spawn(move || {
+        let _detached = std::thread::Builder::new().name("loopwerk-plugin-stop".into()).spawn(move || {
             let state = (control.health() == Health::Running).then(|| control.save_state().ok()).flatten();
             drop(control);
             let _gone = sender.send(Returned { key, generation: 0, control: None, done: Done::Stopped(state) });
@@ -571,7 +571,7 @@ impl Rack {
         let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
         let mut control = instance.control.take().ok_or("the plug-in is busy; try again in a moment")?;
         let (sender, generation) = (self.returned_sender.clone(), instance.generation);
-        let spawned = std::thread::Builder::new().name("suhina-plugin-control".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("loopwerk-plugin-control".into()).spawn(move || {
             let done = work(&mut control);
             let _gone = sender.send(Returned { key, generation, control: Some(control), done });
         });
@@ -871,7 +871,7 @@ impl Rack {
         instance.generation = self.next_generation;
         instance.status = PluginStatus::Loading;
         let (sender, generation) = (self.sender.clone(), self.next_generation);
-        let spawned = std::thread::Builder::new().name("suhina-plugin-restart".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("loopwerk-plugin-restart".into()).spawn(move || {
             let mut control = control;
             let result = control.restart().map(|audio| (control, audio, None)).map_err(|e| e.to_string());
             let _gone = sender.send(Started { key, generation, result });
@@ -1022,7 +1022,7 @@ fn missing_notice(env: &PluginEnv, missing: &[String]) -> String {
 /// Starts a plug-in on a thread of its own and sends the result.
 fn spawn_start(sender: Sender<Started>, key: u64, generation: u64, launch: Launch, state: Option<SavedState>) {
     let fallback = sender.clone();
-    let spawned = std::thread::Builder::new().name("suhina-plugin-start".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("loopwerk-plugin-start".into()).spawn(move || {
         let result = start(launch, state).map_err(|e| e.to_string());
         let _gone = sender.send(Started { key, generation, result });
     });

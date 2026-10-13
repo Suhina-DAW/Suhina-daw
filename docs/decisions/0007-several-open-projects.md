@@ -26,7 +26,7 @@ the layer that owns sessions.
 
 ## Decision
 
-1. **`Projects` in `suhina-session`** holds the open sessions in tab order and which one is
+1. **`Projects` in `loopwerk-session`** holds the open sessions in tab order and which one is
    active. Each keeps its own project, source and undo history. A `ProjectId` names an open
    project and is never reused while the `Projects` lives, so a stale id cannot reach a
    project opened later. At most 32 are open at once.
@@ -59,7 +59,7 @@ the layer that owns sessions.
 - Only the active project's plug-ins run: `Projects::poll_plugins` starts them while it plays,
   and a project that stops playing (another tab made active) stops them, each keeping its last
   state for when the project plays again ([ADR 0006](0006-plug-in-hosting.md)).
-- `Projects` is where Suhina-wide state lives too: it also holds the plug-in library that the
+- `Projects` is where Loopwerk-wide state lives too: it also holds the plug-in library that the
   `plugins.*` commands run on ([ADR 0006](0006-plug-in-hosting.md)) and the browser's library that
   the `library.*` commands run on ([ADR 0012](0012-file-library.md)), shared by every open
   project. Each session keeps its own decoded audio ([ADR 0011](0011-preview-and-added-audio.md)),

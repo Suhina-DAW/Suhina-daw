@@ -1,5 +1,5 @@
 //! Theme files: one JSON file per theme in the `themes` folder beside the settings file, named
-//! by the theme's id (`night-blue.json`). A file saved while Suhina runs is read again within a
+//! by the theme's id (`night-blue.json`). A file saved while Loopwerk runs is read again within a
 //! second, so a theme can be edited in any text editor and seen right away. Backups and the theme
 //! template are zips written to the `exports` folder beside it; theme files and zips dropped on
 //! the window are brought in.
@@ -9,9 +9,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use suhina_ui::settings::is_theme_id;
-use suhina_ui::theme::{self, Theme};
-use suhina_ui::themes::{ThemeEntry, slug};
+use loopwerk_ui::settings::is_theme_id;
+use loopwerk_ui::theme::{self, Theme};
+use loopwerk_ui::themes::{ThemeEntry, slug};
 
 /// Larger files are not themes; they are skipped instead of read.
 const MAX_FILE: u64 = 256 * 1024;
@@ -123,7 +123,7 @@ impl ThemeFiles {
         Ok(())
     }
 
-    /// Writes every theme file into `exports/suhina-themes-<date>.zip`. Returns its path.
+    /// Writes every theme file into `exports/loopwerk-themes-<date>.zip`. Returns its path.
     pub fn backup(&self) -> Result<PathBuf, String> {
         let files = self.list();
         if files.is_empty() {
@@ -134,11 +134,11 @@ impl ThemeFiles {
             let text = std::fs::read(&path).map_err(|e| format!("could not read {id}.json: {e}"))?;
             contents.push((format!("{id}.json"), text));
         }
-        let name = format!("suhina-themes-{}.zip", date(SystemTime::now()));
+        let name = format!("loopwerk-themes-{}.zip", date(SystemTime::now()));
         write_zip(&self.exports()?.join(name), &contents)
     }
 
-    /// Writes `exports/suhina-theme-template.zip`: `template.json` (Suhina Dark with every
+    /// Writes `exports/loopwerk-theme-template.zip`: `template.json` (Loopwerk Dark with every
     /// colour written out), `README.md` on the format, and the built-in themes in `examples/`.
     /// Returns its path.
     pub fn export_template(&self) -> Result<PathBuf, String> {
@@ -150,7 +150,7 @@ impl ThemeFiles {
         for (id, theme) in theme::built_in_themes() {
             contents.push((format!("{EXAMPLES}{id}.json"), theme.to_json().into_bytes()));
         }
-        write_zip(&self.exports()?.join("suhina-theme-template.zip"), &contents)
+        write_zip(&self.exports()?.join("loopwerk-theme-template.zip"), &contents)
     }
 
     /// Brings in a theme file or every theme in a zip (a backup, say; the template's own files
@@ -359,14 +359,14 @@ mod tests {
     use super::*;
 
     fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("suhina-theme-files-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-theme-files-{name}-{}", std::process::id()));
         let _fresh = std::fs::remove_dir_all(&dir);
         dir
     }
 
     fn night() -> Theme {
         let mut theme = Theme { name: "Night".into(), ..Theme::default() };
-        theme.colors.accent = suhina_ui::theme::parse_hex("#123456").unwrap_or_default();
+        theme.colors.accent = loopwerk_ui::theme::parse_hex("#123456").unwrap_or_default();
         theme
     }
 

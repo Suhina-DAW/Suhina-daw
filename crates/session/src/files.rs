@@ -4,15 +4,15 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
-use suhina_device_api::Role;
-use suhina_engine::AudioData;
-use suhina_media::info::{FileKind, Tempo, TempoSource, kind_of};
-use suhina_model::{
+use loopwerk_device_api::Role;
+use loopwerk_engine::AudioData;
+use loopwerk_media::info::{FileKind, Tempo, TempoSource, kind_of};
+use loopwerk_model::{
     ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds,
     ContentLane, LaneData, LauncherColumn, LoopRange, Note, Project, Scene, Slot, StretchMode, Track, TrackId,
     WarpMarker,
 };
+use serde_json::{Value, json};
 
 use crate::commands::{make_room, number, track_at};
 use crate::{CommandError, Session};
@@ -187,7 +187,7 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
     // What the device is decides the kind when none is given.
     let device_role = match (device, preset) {
         (_, Some(_)) => Some(Role::Instrument),
-        (Some(id), None) => match suhina_device_registry::info(id) {
+        (Some(id), None) => match loopwerk_device_registry::info(id) {
             Some(info) => Some(info.role),
             None => {
                 let env = session.plugins.env().ok_or_else(|| format!("no built-in device or plug-in {id:?}"))?;
@@ -219,7 +219,7 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
         Some(n) => n.to_string(),
         None => match (device, preset) {
             (_, Some(path)) => file_stem(Path::new(path)),
-            (Some(id), None) => suhina_device_registry::info(id).map_or_else(
+            (Some(id), None) => loopwerk_device_registry::info(id).map_or_else(
                 || session.plugins.env().and_then(|e| e.catalog.find(id).map(|p| p.name.clone())).unwrap_or_default(),
                 |i| i.name.to_string(),
             ),
@@ -238,7 +238,7 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
             }
         }
         added = match device {
-            Some(id) if suhina_device_registry::info(id).is_some() => {
+            Some(id) if loopwerk_device_registry::info(id).is_some() => {
                 device_params["id"] = json!(id);
                 crate::devices::add(session, &device_params)?
             }
@@ -299,8 +299,8 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
         (Some(_), Some(_)) | (None, None) => {
             return Err("give either start (a beat in the arrangement) or scene (a row of clip slots)".into());
         }
-        (Some(s), None) if !(0.0..=suhina_engine::MAX_START_BEAT).contains(&s) => {
-            return Err(format!("start must be from 0 to {}", suhina_engine::MAX_START_BEAT).into());
+        (Some(s), None) if !(0.0..=loopwerk_engine::MAX_START_BEAT).contains(&s) => {
+            return Err(format!("start must be from 0 to {}", loopwerk_engine::MAX_START_BEAT).into());
         }
         (None, Some(s)) if s >= MAX_SCENES => return Err(format!("scene must be at most {MAX_SCENES}").into()),
         _ => {}
@@ -598,7 +598,7 @@ fn read_sources(
             }])
         }
         Some(FileKind::Midi) => {
-            let midi = suhina_media::midi::read_file(&absolute)?;
+            let midi = loopwerk_media::midi::read_file(&absolute)?;
             if midi.tracks.is_empty() {
                 return Err("no notes".into());
             }
@@ -626,8 +626,8 @@ fn read_sources(
 
 /// A sample's tempo: its metadata or name, else detected (`docs/spec/browser.md` › Tempo).
 pub fn file_tempo(path: &Path, data: &AudioData) -> Option<Tempo> {
-    let from_file = suhina_media::info::sample_info(path).ok().and_then(|i| i.tempo);
-    from_file.or_else(|| suhina_media::tempo::detect(data).map(|bpm| Tempo { bpm, source: TempoSource::Detected }))
+    let from_file = loopwerk_media::info::sample_info(path).ok().and_then(|i| i.tempo);
+    from_file.or_else(|| loopwerk_media::tempo::detect(data).map(|bpm| Tempo { bpm, source: TempoSource::Detected }))
 }
 
 /// `path` made absolute against the working folder, without touching the disk.
@@ -672,7 +672,7 @@ fn place_stems(
     if !absolute.is_file() {
         return Err("not found".into());
     }
-    let info = suhina_media::stems::read_info(&absolute)?;
+    let info = loopwerk_media::stems::read_info(&absolute)?;
     let streams = session.decoded_streams(&absolute, info.tracks)?;
     let master = streams.first().ok_or("no master track")?;
     let name = file_stem(&absolute);
@@ -717,7 +717,7 @@ fn place_stems(
             None => format!("{name} – Master"),
         };
         let track_name = stem.map_or_else(|| "Master".to_string(), |s| s.name.clone());
-        let color = stem.and_then(|s| s.color).map(|[r, g, b]| suhina_model::Rgb(r, g, b));
+        let color = stem.and_then(|s| s.color).map(|[r, g, b]| loopwerk_model::Rgb(r, g, b));
         sources.push((
             track_name,
             color,
@@ -771,14 +771,14 @@ fn place_stems(
     let p = &mut session.project;
     let group_channel = p.tracks.iter().find(|t| t.id == group).and_then(|t| t.channel);
     if let Some(c) = p.channels.iter_mut().find(|c| Some(c.id) == group_channel) {
-        for setting in suhina_media::stems::mastering_devices(&info) {
-            let Some(device) = suhina_device_registry::info(setting.id) else { continue };
-            c.devices.push(suhina_model::Device {
+        for setting in loopwerk_media::stems::mastering_devices(&info) {
+            let Some(device) = loopwerk_device_registry::info(setting.id) else { continue };
+            c.devices.push(loopwerk_model::Device {
                 name: device.name.to_string(),
-                kind: suhina_model::DeviceKind::Builtin(setting.id.to_string()),
+                kind: loopwerk_model::DeviceKind::Builtin(setting.id.to_string()),
                 enabled: setting.enabled,
                 state: None,
-                params: setting.params.iter().map(|(id, v)| suhina_model::DeviceParam::new(*id, *v)).collect(),
+                params: setting.params.iter().map(|(id, v)| loopwerk_model::DeviceParam::new(*id, *v)).collect(),
                 extensions: Default::default(),
             });
         }

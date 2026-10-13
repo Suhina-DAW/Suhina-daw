@@ -2,8 +2,8 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
-use suhina_engine::{LauncherMonitor, Queued};
+use loopwerk_engine::model::{ChannelRole, Project, Rgb, TrackId};
+use loopwerk_engine::{LauncherMonitor, Queued};
 
 /// Colours for tracks that have none, in track order (design brief › Tokens).
 pub const TRACK_PALETTE: [Rgb; 4] =

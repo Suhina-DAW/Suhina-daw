@@ -137,15 +137,15 @@ pub fn set_palette(ctx: &egui::Context, palette: Palette) {
     ctx.request_repaint();
 }
 
-/// The id of the default theme, Suhina Dark, in the settings file.
-pub const BUILT_IN: &str = "suhina-dark";
+/// The id of the default theme, Loopwerk Dark, in the settings file.
+pub const BUILT_IN: &str = "loopwerk-dark";
 
-/// The themes that come with Suhina besides Suhina Dark, as theme files: id and text.
+/// The themes that come with Loopwerk besides Loopwerk Dark, as theme files: id and text.
 /// Dracula, Nord, Catppuccin and Solarized are popular open palettes (MIT, their licences in
-/// `themes/licenses/`), mapped onto Suhina's tokens.
+/// `themes/licenses/`), mapped onto Loopwerk's tokens.
 const BUILT_IN_FILES: [(&str, &str); 8] = [
     ("editor-dark", include_str!("../themes/editor-dark.json")),
-    ("suhina-light", include_str!("../themes/suhina-light.json")),
+    ("loopwerk-light", include_str!("../themes/loopwerk-light.json")),
     ("high-contrast", include_str!("../themes/high-contrast.json")),
     ("dracula", include_str!("../themes/dracula.json")),
     ("nord", include_str!("../themes/nord.json")),
@@ -154,7 +154,7 @@ const BUILT_IN_FILES: [(&str, &str); 8] = [
     ("solarized-dark", include_str!("../themes/solarized-dark.json")),
 ];
 
-/// The themes that come with Suhina, Suhina Dark first, with their ids. They do not change;
+/// The themes that come with Loopwerk, Loopwerk Dark first, with their ids. They do not change;
 /// editing one makes a copy.
 pub fn built_in_themes() -> Vec<(&'static str, Theme)> {
     let mut themes = vec![(BUILT_IN, Theme::default())];
@@ -162,7 +162,7 @@ pub fn built_in_themes() -> Vec<(&'static str, Theme)> {
     themes
 }
 
-/// Whether `id` names a theme that comes with Suhina.
+/// Whether `id` names a theme that comes with Loopwerk.
 pub fn is_built_in(id: &str) -> bool {
     id.eq_ignore_ascii_case(BUILT_IN) || BUILT_IN_FILES.iter().any(|(b, _)| id.eq_ignore_ascii_case(b))
 }
@@ -180,12 +180,12 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self { name: "Suhina Dark".into(), colors: Palette::DARK }
+        Self { name: "Loopwerk Dark".into(), colors: Palette::DARK }
     }
 }
 
 impl Theme {
-    /// Reads a theme file. Tokens it leaves out keep Suhina Dark's colour, so a file only needs
+    /// Reads a theme file. Tokens it leaves out keep Loopwerk Dark's colour, so a file only needs
     /// the colours it changes; unknown tokens and values that are not `#RRGGBB` are skipped with
     /// a warning. A `"$schema"` or `"description"` is allowed and ignored.
     pub fn from_json(text: &str) -> (Self, Vec<String>) {
@@ -241,9 +241,9 @@ impl Theme {
 /// person or an AI agent can make a theme from it alone.
 pub fn template_readme() -> String {
     let mut text = String::from(
-        "# Suhina theme template\n\
+        "# Loopwerk theme template\n\
 \n\
-A Suhina theme is one JSON file. `template.json` beside this README is Suhina Dark with every\n\
+A Loopwerk theme is one JSON file. `template.json` beside this README is Loopwerk Dark with every\n\
 colour written out; copy it, give it a name and change the colours.\n\
 \n\
 ## The file\n\
@@ -254,14 +254,14 @@ colour written out; copy it, give it a name and change the colours.\n\
 \n\
 - `name`: what Settings shows. Any text.\n\
 - `colors`: token name to colour. Every colour is `#RRGGBB` (six hex digits, no alpha).\n\
-- A token left out keeps Suhina Dark's colour, so a theme may list only what it changes.\n\
-- An unknown token or a colour that is not `#RRGGBB` is skipped, and Suhina shows a warning.\n\
+- A token left out keeps Loopwerk Dark's colour, so a theme may list only what it changes.\n\
+- An unknown token or a colour that is not `#RRGGBB` is skipped, and Loopwerk shows a warning.\n\
 - Nothing else belongs in the file (`description` and `$schema` are allowed and ignored).\n\
 \n\
 ## Installing it\n\
 \n\
-Save it as `<id>.json` in Suhina's `themes` folder (Settings › Interface › Theme › Open folder\n\
-shows it), or drop the file on Suhina's window. The file name without `.json` is the theme's\n\
+Save it as `<id>.json` in Loopwerk's `themes` folder (Settings › Interface › Theme › Open folder\n\
+shows it), or drop the file on Loopwerk's window. The file name without `.json` is the theme's\n\
 id: letters, digits and `-`, for example `night-blue.json`. Pick it in Settings › Interface ›\n\
 Theme. While it is in use, every save of the file shows within a second.\n\
 \n\
@@ -282,7 +282,7 @@ Theme. While it is in use, every save of the file shows within a second.\n\
 \n\
 ## Tokens\n\
 \n\
-| Token | Suhina Dark | Used for |\n\
+| Token | Loopwerk Dark | Used for |\n\
 |---|---|---|\n",
     );
     for (key, purpose, color) in Palette::DARK.tokens() {
@@ -477,13 +477,13 @@ mod tests {
     }
 
     #[test]
-    fn the_themes_that_come_with_suhina_read_whole() {
+    fn the_themes_that_come_with_loopwerk_read_whole() {
         let themes = built_in_themes();
         assert_eq!(themes.first().map(|(id, _)| *id), Some(BUILT_IN));
         for (id, text) in BUILT_IN_FILES {
             let (theme, warnings) = Theme::from_json(text);
             assert!(warnings.is_empty(), "{id}: {warnings:?}");
-            // Every colour is written out, so none falls back to Suhina Dark by mistake.
+            // Every colour is written out, so none falls back to Loopwerk Dark by mistake.
             let listed = serde_json::from_str::<Value>(text).ok().and_then(|v| v.get("colors").cloned());
             assert_eq!(listed.and_then(|c| c.as_object().map(Map::len)), Some(Palette::DARK.tokens().len()), "{id}");
             assert!(is_built_in(id));

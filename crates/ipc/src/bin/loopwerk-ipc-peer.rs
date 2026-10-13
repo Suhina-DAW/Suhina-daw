@@ -1,24 +1,24 @@
 //! A stand-in for the plug-in host, used by the `ipc` tests: it opens the link named on its
 //! command line and serves blocks, halving every sample.
 //!
-//! `suhina-ipc-peer <address> <mode>`, where mode is `serve` (until no block comes for two
+//! `loopwerk-ipc-peer <address> <mode>`, where mode is `serve` (until no block comes for two
 //! seconds), `crash` (exits in the middle of block 4, without answering) or `hang` (stops
 //! answering in the middle of block 4).
 
 use std::time::Duration;
 
-use suhina_ipc::Served;
+use loopwerk_ipc::Served;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (Some(address), Some(mode)) = (args.get(1), args.get(2)) else {
-        eprintln!("usage: suhina-ipc-peer <address> <serve|crash|hang>");
+        eprintln!("usage: loopwerk-ipc-peer <address> <serve|crash|hang>");
         std::process::exit(2);
     };
     let mut served = match Served::open(address) {
         Ok(served) => served,
         Err(e) => {
-            eprintln!("suhina-ipc-peer: {e}");
+            eprintln!("loopwerk-ipc-peer: {e}");
             std::process::exit(1);
         }
     };

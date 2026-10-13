@@ -1,5 +1,5 @@
 ---
-description: Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter
+description: Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Loopwerk reads and how it maps the mastering to its compressor and limiter
 read_when: stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix
 type: spec
 status: draft
@@ -15,7 +15,7 @@ covers:
 # Stems files
 
 A Stems file holds a finished track and its parts in one file, so a DJ or a remixer can play
-the parts separately: typically drums, bass, other and vocals. Suhina reads them into a group
+the parts separately: typically drums, bass, other and vocals. Loopwerk reads them into a group
 of audio tracks, one per stem, whose group plays the stems through the file's mastering
 settings.
 
@@ -27,17 +27,17 @@ settings.
 
 ## Container
 
-- An ISO MP4 file. Names end in `.stem.mp4` (the original spelling) or `.stem.m4a`; Suhina
+- An ISO MP4 file. Names end in `.stem.mp4` (the original spelling) or `.stem.m4a`; Loopwerk
   recognises both, in any case. A file named only `.mp4` is not taken as a Stems file.
 - **Audio tracks, in the order of their `trak` boxes:** the first is the **master**, the finished
   mix that plays in ordinary players; each further one is a **stem**. Files have four stems;
-  Suhina accepts from one to fifteen (at most 16 audio tracks) and refuses a file with only
+  Loopwerk accepts from one to fifteen (at most 16 audio tracks) and refuses a file with only
   one audio track. Other tracks (cover art, video) are ignored.
 - **Codecs:** AAC (the usual case) or ALAC (lossless). All tracks share one sample rate.
 - **Edit lists.** An AAC encoder starts with priming frames (1024 at 44.1 kHz) and pads the end;
   the track's `edts/elst` box says where the sound starts (`media_time`, in the track's time
   scale from `mdhd`) and how long it plays (`segment_duration`, in the movie's time scale from
-  `mvhd`). Suhina trims every track by its first edit that plays media (an empty edit, a
+  `mvhd`). Loopwerk trims every track by its first edit that plays media (an empty edit, a
   delay, is skipped), so the stems line up exactly with each other and with the beat grid.
   Symphonia, which decodes the audio, does not read edit lists; `crates/media/src/stems.rs`
   reads these boxes itself.
@@ -73,7 +73,7 @@ stems are then called "Stem 1", "Stem 2" and so on, without colours or mastering
 ## Mastering
 
 A player is meant to run the sum of the stems through the compressor and then the limiter, so
-the stems together sound like the master. Suhina puts both on the stems' group track
+the stems together sound like the master. Loopwerk puts both on the stems' group track
 (`mastering_devices`): the group sums its tracks and runs its devices over the sum
 ([ADR 0004](../decisions/0004-built-in-devices.md) › 10). A setting with `enabled` false is added
 as a disabled device, so it can be switched on.

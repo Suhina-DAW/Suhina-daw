@@ -5,6 +5,10 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use loopwerk_engine::model::{LaneData, Project};
+use loopwerk_session::{
+    AudioSystem, CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands,
+};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
@@ -14,13 +18,11 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt, tool, t
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use suhina_engine::model::{LaneData, Project};
-use suhina_session::{AudioSystem, CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands};
 
 use crate::render::{LaunchStep, render_launch_script, render_wav, scene_as_arrangement};
 use crate::workspace::{Workspace, display_path};
 
-const INSTRUCTIONS: &str = "Suhina, an open-source clip-launching DAW. Open a Live Set with project_open \
+const INSTRUCTIONS: &str = "Loopwerk, an open-source clip-launching DAW. Open a Live Set with project_open \
 (paths are relative to the read root granted at launch), look at it with project_inspect, discover command ids \
 and parameters with command_list, and change it with command_run or command_batch (each editing command is one \
 undo step; edit.undo reverts it). Several projects can be open, like tabs: each project_open adds one and makes it \
@@ -33,7 +35,7 @@ transport.stop, transport.setPosition, launcher.state) play on a real audio devi
 const MAX_BATCH_STEPS: usize = 256;
 
 #[derive(Clone)]
-pub struct SuhinaMcp {
+pub struct LoopwerkMcp {
     projects: Arc<Mutex<Projects>>,
     workspace: Arc<Workspace>,
     /// Opened projects play out loud (`--audio`): the projects have an audio system.
@@ -147,7 +149,7 @@ fn fail(message: impl std::fmt::Display) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(message.to_string())])
 }
 
-impl SuhinaMcp {
+impl LoopwerkMcp {
     /// A server with no project open.
     pub fn new(workspace: Workspace) -> Self {
         Self {
@@ -160,7 +162,7 @@ impl SuhinaMcp {
 
     /// Gives agents the user's browser library (`library.*`, ADR 0012), kept up to date on a
     /// thread of its own. Agents may search it and read what it lists inside the read root.
-    pub fn with_file_library(self, mut library: suhina_library::Library) -> Self {
+    pub fn with_file_library(self, mut library: loopwerk_library::Library) -> Self {
         let _ = library.start();
         if let Ok(mut projects) = self.projects.lock() {
             projects.set_file_library(library);
@@ -210,7 +212,7 @@ impl SuhinaMcp {
 }
 
 #[tool_router]
-impl SuhinaMcp {
+impl LoopwerkMcp {
     #[tool(
         description = "Open a Live Set (.als) below the read root and make it the session's project. Returns a summary and the importer's warnings (unsupported content is skipped, not fatal)."
     )]
@@ -317,7 +319,7 @@ impl SuhinaMcp {
                     let params = confine(&workspace, &step.id, step.params.unwrap_or_else(|| json!({})));
                     let outcome = match (refused(&step.id), params) {
                         (Some(why), _) => Err(why.into()),
-                        (None, Err(e)) => Err(suhina_session::CommandError(e)),
+                        (None, Err(e)) => Err(loopwerk_session::CommandError(e)),
                         (None, Ok(params)) => projects.execute_in(target, &step.id, &params),
                     };
                     if outcome.is_ok() {
@@ -436,7 +438,7 @@ fn start_audio(projects: &mut Projects, id: ProjectId, warnings: &mut Vec<String
 /// The audio `project` (the session's, or a scene of it) plays: its files decoded from where
 /// the session's project file is, with what the session has decoded already (files added since
 /// it opened, ADR 0011) for the rest.
-fn project_audio(session: &Session, project: &Project) -> (suhina_media::AudioPool, Vec<String>) {
+fn project_audio(session: &Session, project: &Project) -> (loopwerk_media::AudioPool, Vec<String>) {
     let folder = session
         .audio_folder()
         .map(Path::to_path_buf)
@@ -449,7 +451,7 @@ fn project_audio(session: &Session, project: &Project) -> (suhina_media::AudioPo
         .any(|lane| matches!(&lane.data, LaneData::Audio(region) if !have.files.contains_key(&region.file)));
     let mut warnings = Vec::new();
     if missing {
-        let (loaded, found) = suhina_media::load_project_audio(project, folder.as_deref().unwrap_or(Path::new(".")));
+        let (loaded, found) = loopwerk_media::load_project_audio(project, folder.as_deref().unwrap_or(Path::new(".")));
         for (key, data) in loaded.files {
             have.files.entry(key).or_insert(data);
         }
@@ -513,7 +515,7 @@ fn confine_file(workspace: &Workspace, params: &mut Value, name: &str) -> Result
 
 /// Commands agents may not run. They choose the folders whose plug-ins a scan loads and runs,
 /// so an agent could otherwise add its write root and run code it wrote there. The user chooses
-/// plug-in folders (`suhina-cli plugins add-folder`, later the UI); agents may still scan them.
+/// plug-in folders (`loopwerk-cli plugins add-folder`, later the UI); agents may still scan them.
 const NOT_FOR_AGENTS: [&str; 4] =
     ["plugins.addFolder", "plugins.removeFolder", "library.addFolder", "library.removeFolder"];
 
@@ -523,7 +525,9 @@ fn refused(id: &str) -> Option<String> {
         if id.starts_with("library.") {
             format!("{id} is not available to agents: the user chooses the browser's folders")
         } else {
-            format!("{id} is not available to agents: the user chooses plug-in folders (suhina-cli plugins add-folder)")
+            format!(
+                "{id} is not available to agents: the user chooses plug-in folders (loopwerk-cli plugins add-folder)"
+            )
         }
     })
 }
@@ -561,10 +565,10 @@ fn annotated(mut tool: Tool) -> Tool {
     tool
 }
 
-impl ServerHandler for SuhinaMcp {
+impl ServerHandler for LoopwerkMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("suhina", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("loopwerk", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 
@@ -613,7 +617,7 @@ mod confine_tests {
     use super::*;
 
     fn roots(name: &str) -> (std::path::PathBuf, Workspace) {
-        let dir = std::env::temp_dir().join(format!("suhina-confine-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-confine-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("inside/pack")).unwrap();
         std::fs::create_dir_all(dir.join("outside")).unwrap();

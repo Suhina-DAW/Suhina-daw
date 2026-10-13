@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Measures how plug-ins keep up on each audio output: drives `suhina-cli mcp --audio`, opens a
+"""Measures how plug-ins keep up on each audio output: drives `loopwerk-cli mcp --audio`, opens a
 project, and for each output plays it from a beat for a while, then reads `audio.info` and every
 plug-in device's `device.plugin` counts.
 
 Usage:
-  python scripts/measure-audio.py <suhina-cli> <read-root> <project> <outputs.json> <results.json>
+  python scripts/measure-audio.py <loopwerk-cli> <read-root> <project> <outputs.json> <results.json>
 
   <project>       the project, relative to the read root
   <outputs.json>  a list of {"name": "...", "output": {audio.setOutput parameters}}; each step
@@ -14,7 +14,7 @@ Usage:
                    {"name": "ASIO 512", "output": {"buffer_frames": 512}}]
 
 Environment: MEASURE_SECONDS (default 20) how long each output plays, MEASURE_BEAT (default
-144) where it plays from. Build the CLI with `--features suhina-cli/asio` to measure ASIO.
+144) where it plays from. Build the CLI with `--features loopwerk-cli/asio` to measure ASIO.
 
 Each output's result has the underruns while it played, the blocks every plug-in ran and how
 many of them were late (`late_blocks`) or got no time (`no_time`), and the longest round trip

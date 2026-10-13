@@ -14,7 +14,7 @@
 //!
 //! Sixteen voices; a new note takes the voice already on its pitch, then a silent one, then the
 //! oldest released one, then the oldest. The engine files carry their own notices (Apache-2.0);
-//! the rest of this crate is Suhina's own.
+//! the rest of this crate is Loopwerk's own.
 
 mod core;
 mod env;
@@ -27,7 +27,7 @@ mod voice;
 #[cfg(test)]
 mod tests;
 
-use suhina_device_api::{
+use loopwerk_device_api::{
     Device, DeviceError, DeviceInfo, NoteEvent, ProcessContext, Role, check_sample_rate, controller,
 };
 

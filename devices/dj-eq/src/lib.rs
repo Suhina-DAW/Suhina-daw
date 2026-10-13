@@ -7,11 +7,11 @@
 //! does the same. Gains, kills and crossover frequencies are all smoothed, so they can be
 //! turned and automated while playing. The high frequency never goes below the low one.
 
-use suhina_device_api::{
+use loopwerk_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use suhina_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
-use suhina_dsp::{LinkwitzRiley, Slope, Smoother};
+use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
+use loopwerk_dsp::{LinkwitzRiley, Slope, Smoother};
 
 /// How long a gain or kill change takes to arrive.
 pub const RAMP_SECONDS: f64 = 0.02;

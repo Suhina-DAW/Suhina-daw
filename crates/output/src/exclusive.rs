@@ -1,4 +1,4 @@
-//! WASAPI in exclusive mode (Windows): the device is Suhina's alone, with the buffer size
+//! WASAPI in exclusive mode (Windows): the device is Loopwerk's alone, with the buffer size
 //! asked for and no system mixer in between. cpal opens WASAPI only shared, so this goes
 //! through the `wasapi` crate. Everything COM happens on the stream's own thread, which sets
 //! the device up, says whether that worked, then runs the event loop: wait for the device,
@@ -125,7 +125,7 @@ struct Ready {
     channels: u16,
 }
 
-/// Opens `device` (by its name; the default output when `None`) for Suhina alone at
+/// Opens `device` (by its name; the default output when `None`) for Loopwerk alone at
 /// `sample_rate`, with a buffer near `buffer_frames` (the device's default period when `None`),
 /// reading from `ring`.
 pub(crate) fn open(
@@ -140,7 +140,7 @@ pub(crate) fn open(
     let (ready_tx, ready_rx) = mpsc::channel();
     let (stopping, going, progress) = (Arc::clone(&stop), Arc::clone(&go), Arc::clone(progress));
     let thread = std::thread::Builder::new()
-        .name("suhina-wasapi".into())
+        .name("loopwerk-wasapi".into())
         .spawn(move || run(device, sample_rate, buffer_frames, ring, &progress, &stopping, &going, &ready_tx))
         .map_err(|e| format!("could not start the exclusive-mode thread: {e}"))?;
     let mut stream = ExclusiveStream { stop, go, thread: Some(thread), buffer_frames: 0, channels: 0 };
@@ -159,7 +159,7 @@ pub(crate) fn open(
 
 /// The device names that can be opened in exclusive mode at their own sample rate.
 pub(crate) fn capable_devices() -> Vec<String> {
-    let probe = std::thread::Builder::new().name("suhina-wasapi-probe".into()).spawn(|| {
+    let probe = std::thread::Builder::new().name("loopwerk-wasapi-probe".into()).spawn(|| {
         if wasapi::initialize_mta().is_err() {
             return Vec::new();
         }
@@ -311,7 +311,7 @@ fn set_up(name: Option<&str>, sample_rate: u32, buffer_frames: Option<u32>) -> R
     let (encoding, format) = Encoding::ALL
         .iter()
         .find_map(|e| client.is_supported_exclusive_with_quirks(&e.format(sample_rate, channels)).ok().map(|f| (*e, f)))
-        .ok_or_else(|| format!("the device takes no format Suhina writes at {sample_rate} Hz in exclusive mode"))?;
+        .ok_or_else(|| format!("the device takes no format Loopwerk writes at {sample_rate} Hz in exclusive mode"))?;
     let (default_period, _) = client.get_device_period().map_err(|e| error("no device period", e))?;
     let wanted = match buffer_frames {
         Some(frames) => wasapi::calculate_period_100ns(i64::from(frames), i64::from(sample_rate)),

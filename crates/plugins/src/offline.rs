@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use suhina_ipc::Outcome;
+use loopwerk_ipc::Outcome;
 
 use crate::{Event, Launch, Plugin, PluginError, SavedState};
 

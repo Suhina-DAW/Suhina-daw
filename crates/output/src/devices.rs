@@ -3,7 +3,7 @@
 //! fails to answer is listed with the error or left out, never a panic (AGENTS.md rule 2).
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use suhina_session::audio::{DeviceInfo, HostInfo, MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
+use loopwerk_session::audio::{DeviceInfo, HostInfo, MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
 
 /// The buffer sizes offered when the driver gives no range: powers of two the engine renders
 /// well in.

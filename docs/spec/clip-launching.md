@@ -22,8 +22,8 @@ covers:
   Follow actions, per-clip launch quantisation and launch modes (trigger, gate, toggle, repeat)
   are not specified yet; they need a corpus series of their own.
 
-This document describes the behaviour Suhina implements, in Suhina's terms. Where Suhina
-decides something the sources do not settle, the text says so (**Suhina:**).
+This document describes the behaviour Loopwerk implements, in Loopwerk's terms. Where Loopwerk
+decides something the sources do not settle, the text says so (**Loopwerk:**).
 
 ## Terms
 
@@ -60,12 +60,12 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    transport stops everything at once, and clears queued launches. A jump of the playhead
    (`transport.setPosition` while playing) keeps queued launches, queued again for the next
    boundary from the new beat.
-7. **Deactivated clips** do not play. **Suhina:** launching one is ignored.
+7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored.
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
 
-## Suhina decisions
+## Loopwerk decisions
 
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
   marker of a clip without a loop) is shortened to end there.
@@ -87,7 +87,7 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `launcher.state`), sent to the
   audio thread through a
-  lock-free queue and applied at the start of the next audio block. **Suhina:**
+  lock-free queue and applied at the start of the next audio block. **Loopwerk:**
   `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
   beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)).
 

@@ -102,7 +102,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("suhina-workspace-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-workspace-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("inside")).unwrap();
         std::fs::write(dir.join("inside").join("a.als"), b"x").unwrap();

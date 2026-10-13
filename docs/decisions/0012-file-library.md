@@ -29,7 +29,7 @@ or full of odd names.
 
 ## Decision
 
-1. **A crate of its own, `suhina-library` (layer 2, under `session`)**, owns the folders, the
+1. **A crate of its own, `loopwerk-library` (layer 2, under `session`)**, owns the folders, the
    index, the pins, the recent items and the tags. `Projects` holds it, as it holds the plug-in
    library, and the `library.*` commands run on it. It depends on `media` only for what a file
    is (kinds by extension) and does no decoding of its own: durations, tempo and key are read
@@ -82,6 +82,6 @@ or full of odd names.
   walking it on every search.
 - **Only polling:** works everywhere, but new files show up minutes late on local disks.
 - **fanotify on Linux:** watches a whole file system without per-folder watches, but needs
-  privileges (or a recent kernel with limits) Suhina should not ask for.
+  privileges (or a recent kernel with limits) Loopwerk should not ask for.
 - **A database (SQLite):** faster to query with many folders, but a C dependency and more than
   this needs; the index is small enough to keep in memory.

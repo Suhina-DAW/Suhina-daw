@@ -2,7 +2,7 @@
 
 The host side of the Steinberg ASIO SDK 2.3.4 (2025-10-15), from
 <https://www.steinberg.net/asiosdk>, used under the **GNU General Public License version 3**,
-one of the two licences Steinberg offers it under (see `LICENSE.txt`). Suhina builds it into
+one of the two licences Steinberg offers it under (see `LICENSE.txt`). Loopwerk builds it into
 cpal's ASIO host when built with the `asio` feature (README › Building); the build finds it
 through `CPAL_ASIO_DIR`, set in `.cargo/config.toml`.
 
@@ -17,4 +17,4 @@ Only what a host needs is kept: `common/` (the interface, without the driver-sid
   Using the ASIO name and logo is governed by Steinberg's usage guidelines, not by the GPL.
 
 The files are unchanged. To update: download the SDK, copy the same files over, and run
-`cargo build -p suhina-output --features asio`.
+`cargo build -p loopwerk-output --features asio`.

@@ -13,7 +13,7 @@ const PULSE_PERIOD: f64 = 0.8;
 const EGUI_ANIMATION_TIME: f32 = 0.083;
 
 fn key() -> Id {
-    Id::new("suhina-animations")
+    Id::new("loopwerk-animations")
 }
 
 /// Turns animations on or off, ours and egui's own.

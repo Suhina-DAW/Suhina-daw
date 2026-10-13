@@ -25,19 +25,19 @@ cp dx7note.cc dx7note.h env.cc env.h exp2.cc exp2.h fm_core.cc fm_core.h fm_op_k
    fm_op_kernel.h freqlut.cc freqlut.h lfo.cc lfo.h pitchenv.cc pitchenv.h porta.cpp porta.h \
    sin.cc sin.h synth.h aligned_buf.h controllers.h module.h ../../../ref/msfa/
 cd ../../../ref
-cp -r <suhina>/devices/fm-synth/tests/reference/stubs/* .
-cp <suhina>/devices/fm-synth/tests/reference/harness.cpp .
+cp -r <loopwerk>/devices/fm-synth/tests/reference/stubs/* .
+cp <loopwerk>/devices/fm-synth/tests/reference/harness.cpp .
 g++ -O1 -fwrapv -std=c++17 -I. -Imsfa harness.cpp msfa/dx7note.cc msfa/env.cc msfa/exp2.cc \
    msfa/fm_core.cc msfa/fm_op_kernel.cc msfa/freqlut.cc msfa/lfo.cc msfa/pitchenv.cc \
    msfa/porta.cpp msfa/sin.cc -o harness
-./harness <suhina>/devices/fm-synth/tests/golden/scenarios.txt <suhina>/devices/fm-synth/tests/golden
+./harness <loopwerk>/devices/fm-synth/tests/golden/scenarios.txt <loopwerk>/devices/fm-synth/tests/golden
 ```
 
 `-fwrapv` makes signed overflow wrap, as the engine assumes. To try scenarios of your own
 without changing these files, render them into another folder and run
 
 ```sh
-SUHINA_FM_SCENARIOS=<folder>/scenarios.txt cargo test -p suhina-device-fm-synth -- --ignored
+LOOPWERK_FM_SCENARIOS=<folder>/scenarios.txt cargo test -p loopwerk-device-fm-synth -- --ignored
 ```
 
 ## Where the port differs on purpose

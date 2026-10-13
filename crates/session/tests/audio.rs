@@ -5,13 +5,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::{Value, json};
-use suhina_engine::{AudioPool, LaunchCommand, Renderer};
-use suhina_model::Project;
-use suhina_session::audio::{DeviceInfo, HostInfo, Opened};
-use suhina_session::{
+use loopwerk_engine::{AudioPool, LaunchCommand, Renderer};
+use loopwerk_model::Project;
+use loopwerk_session::audio::{DeviceInfo, HostInfo, Opened};
+use loopwerk_session::{
     AudioSystem, CommandKind, LiveOutput, OutputChoice, OutputInfo, Player, Projects, Session, audio_commands,
 };
+use serde_json::{Value, json};
 
 const SR: u32 = 48_000;
 
@@ -100,7 +100,7 @@ impl Stand {
 }
 
 fn project() -> Project {
-    suhina_session::blank_project()
+    loopwerk_session::blank_project()
 }
 
 fn run(projects: &mut Projects, id: &str, params: Value) -> Result<Value, String> {
@@ -119,7 +119,7 @@ fn audio_commands_are_listed_with_their_kind() {
     let ids: Vec<&str> = audio_commands().iter().map(|c| c.id).collect();
     assert_eq!(ids, ["audio.devices", "audio.setOutput", "audio.info"]);
     assert!(audio_commands().iter().all(|c| c.kind == CommandKind::Audio));
-    let listed = suhina_session::all_commands();
+    let listed = loopwerk_session::all_commands();
     assert!(listed.as_array().unwrap().iter().any(|c| c["id"] == "audio.setOutput"));
 }
 

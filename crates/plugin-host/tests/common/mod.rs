@@ -70,7 +70,7 @@ mod imp {
 
         /// How many editor windows (the host's class) are children of this window.
         pub fn editor_children(&self) -> usize {
-            let class: Vec<u16> = "SuhinaPluginEditor".encode_utf16().chain([0]).collect();
+            let class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
             let mut count = 0;
             let mut after = std::ptr::null_mut();
             loop {
@@ -153,7 +153,7 @@ mod imp {
                         class
                             .ok()
                             .and_then(|c| c.reply().ok())
-                            .is_some_and(|c| c.value.starts_with(b"suhina-plugin-editor"))
+                            .is_some_and(|c| c.value.starts_with(b"loopwerk-plugin-editor"))
                     })
                 })
                 .count()

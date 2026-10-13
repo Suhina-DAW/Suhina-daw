@@ -1,16 +1,16 @@
 [package]
-name = "suhina-automation"
-description = "MCP server over a Suhina session, plus offline rendering to WAV"
+name = "loopwerk-automation"
+description = "MCP server over a Loopwerk session, plus offline rendering to WAV"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-engine.workspace = true
-suhina-session.workspace = true
-suhina-media.workspace = true
-suhina-library.workspace = true
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+loopwerk-media.workspace = true
+loopwerk-library.workspace = true
 hound.workspace = true
 serde_json.workspace = true
 serde = { version = "1", features = ["derive"] }  # MIT OR Apache-2.0

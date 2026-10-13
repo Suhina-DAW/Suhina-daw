@@ -1,5 +1,5 @@
 //! The user's plug-in library: the folders they added, the catalog of what the last scan
-//! found, and how each plug-in is hosted. All are kept as JSON in Suhina's settings folder,
+//! found, and how each plug-in is hosted. All are kept as JSON in Loopwerk's settings folder,
 //! so a scan survives a restart and the next one reads only what changed.
 
 use std::collections::BTreeMap;
@@ -20,7 +20,7 @@ const CATALOG_FILE: &str = "plugin-catalog.json";
 const HOSTING_FILE: &str = "plugin-hosting.json";
 /// Plug-ins whose hosting may be set apart from the default.
 const MAX_HOSTING: usize = 4096;
-/// Longest hosting file read; a longer one is not Suhina's and is ignored.
+/// Longest hosting file read; a longer one is not Loopwerk's and is ignored.
 const MAX_HOSTING_BYTES: u64 = 1 << 20;
 /// Longest plug-in name (its spec) a hosting choice is kept for.
 const MAX_SPEC: usize = 4096;
@@ -72,23 +72,23 @@ pub fn group_for(hosting: Hosting, plugin: &PluginInfo) -> Option<String> {
     }
 }
 
-/// Suhina's settings folder: `%APPDATA%\Suhina` on Windows,
-/// `~/Library/Application Support/Suhina` on macOS, `$XDG_CONFIG_HOME/suhina` (or
-/// `~/.config/suhina`) elsewhere. `None` when the system says nothing about where.
+/// Loopwerk's settings folder: `%APPDATA%\Loopwerk` on Windows,
+/// `~/Library/Application Support/Loopwerk` on macOS, `$XDG_CONFIG_HOME/loopwerk` (or
+/// `~/.config/loopwerk`) elsewhere. `None` when the system says nothing about where.
 pub fn settings_folder() -> Option<PathBuf> {
     let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     if cfg!(windows) {
-        env("APPDATA").map(|p| p.join("Suhina"))
+        env("APPDATA").map(|p| p.join("Loopwerk"))
     } else if cfg!(target_os = "macos") {
-        env("HOME").map(|p| p.join("Library/Application Support/Suhina"))
+        env("HOME").map(|p| p.join("Library/Application Support/Loopwerk"))
     } else {
-        env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|p| p.join(".config"))).map(|p| p.join("suhina"))
+        env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|p| p.join(".config"))).map(|p| p.join("loopwerk"))
     }
 }
 
-/// The `suhina-plugin-host` executable next to the running one.
+/// The `loopwerk-plugin-host` executable next to the running one.
 pub fn host_next_to_this_program() -> PathBuf {
-    let name = format!("suhina-plugin-host{}", std::env::consts::EXE_SUFFIX);
+    let name = format!("loopwerk-plugin-host{}", std::env::consts::EXE_SUFFIX);
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
@@ -119,7 +119,7 @@ pub struct Library {
 }
 
 impl Default for Library {
-    /// The library in Suhina's settings folder, scanned with the host next to this program.
+    /// The library in Loopwerk's settings folder, scanned with the host next to this program.
     fn default() -> Self {
         Self::new(settings_folder(), host_next_to_this_program())
     }
@@ -234,7 +234,7 @@ impl Library {
     pub fn scan(&mut self, all: bool) -> Result<Report, String> {
         self.load();
         if !self.host.exists() {
-            return Err(format!("the plug-in host {} is missing; it ships next to Suhina", self.host.display()));
+            return Err(format!("the plug-in host {} is missing; it ships next to Loopwerk", self.host.display()));
         }
         if all {
             self.catalog = Catalog::new();
@@ -306,7 +306,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("suhina-library-{name}-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("loopwerk-library-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         folder
     }

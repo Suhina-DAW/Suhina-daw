@@ -1,4 +1,4 @@
-//! A Suhina session: an open project, where it came from, and its undo history. Every change
+//! A Loopwerk session: an open project, where it came from, and its undo history. Every change
 //! goes through a command (see `docs/decisions/0002-commands.md`), so the CLI, the MCP server and
 //! later the UI all drive the project the same way.
 
@@ -16,21 +16,21 @@ mod rack;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use loopwerk_engine::{Controller, LauncherMonitor};
+use loopwerk_model::Project;
 use serde_json::Value;
-use suhina_engine::{Controller, LauncherMonitor};
-use suhina_model::Project;
 
 pub use audio::{AudioSystem, LiveOutput, OutputChoice, OutputInfo, audio_commands};
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
 pub use library::{Category, Found, file_info, library_commands, search_items};
+pub use loopwerk_plugins::Placement;
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, project_commands};
 pub use rack::{
     Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, is_instrument, start_offline,
 };
-pub use suhina_plugins::Placement;
 
 /// Undo steps kept per session; the oldest are dropped first.
 const MAX_UNDO: usize = 256;
@@ -93,7 +93,7 @@ impl Player {
         (self.controller, self.keep_alive)
     }
 
-    pub fn send(&mut self, command: suhina_engine::LaunchCommand) -> Result<(), CommandError> {
+    pub fn send(&mut self, command: loopwerk_engine::LaunchCommand) -> Result<(), CommandError> {
         self.controller.send(command).map_err(CommandError)
     }
 
@@ -118,17 +118,17 @@ impl Player {
     }
 
     /// What graphs built from now on know about the project's plug-in devices (ADR 0006).
-    pub fn set_plugin_info(&mut self, info: std::collections::HashMap<u64, suhina_engine::PluginSlotInfo>) {
+    pub fn set_plugin_info(&mut self, info: std::collections::HashMap<u64, loopwerk_engine::PluginSlotInfo>) {
         self.controller.set_plugin_info(info);
     }
 
     /// Builds the engine's graphs from now on with `audio` (ADR 0011).
-    pub fn set_audio(&mut self, audio: std::sync::Arc<suhina_engine::AudioPool>) {
+    pub fn set_audio(&mut self, audio: std::sync::Arc<loopwerk_engine::AudioPool>) {
         self.controller.set_audio(audio);
     }
 
     /// Whether a preview plays, and where (ADR 0011).
-    pub fn preview_monitor(&self) -> &suhina_engine::PreviewMonitor {
+    pub fn preview_monitor(&self) -> &loopwerk_engine::PreviewMonitor {
         self.controller.preview_monitor()
     }
 
@@ -140,7 +140,7 @@ impl Player {
     pub fn send_plugin(
         &mut self,
         key: u64,
-        processor: Box<dyn suhina_engine::PluginProcessor>,
+        processor: Box<dyn loopwerk_engine::PluginProcessor>,
     ) -> Result<(), CommandError> {
         self.controller.send_plugin(key, processor).map_err(CommandError)
     }
@@ -150,7 +150,7 @@ impl Player {
 /// without a new graph.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamEdit {
-    pub track: suhina_model::TrackId,
+    pub track: loopwerk_model::TrackId,
     /// The device's index among the track channel's devices.
     pub device: usize,
     /// The parameter's index in the device's info.
@@ -173,17 +173,17 @@ pub struct Session {
     redo: Vec<Project>,
     player: Option<Player>,
     /// A copied arrangement clip and the content it plays, for `clip.paste`.
-    clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
+    clipboard: Option<(loopwerk_model::Clip, loopwerk_model::ClipContent)>,
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
     /// The project's plug-ins, running while it plays (ADR 0006).
     pub(crate) plugins: rack::Rack,
     /// The project's decoded audio, by the key its regions name (ADR 0011).
-    audio: suhina_engine::AudioPool,
+    audio: loopwerk_engine::AudioPool,
     /// Files added to `audio` since the player last got it.
     audio_changed: bool,
     /// Files decoded ahead of a command that uses them (`provide_audio`), newest last.
-    decoded: Vec<(String, std::sync::Arc<suhina_engine::AudioData>)>,
+    decoded: Vec<(String, std::sync::Arc<loopwerk_engine::AudioData>)>,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -203,37 +203,37 @@ impl Session {
             clipboard: None,
             param_edit: None,
             plugins: rack::Rack::default(),
-            audio: suhina_engine::AudioPool::new(),
+            audio: loopwerk_engine::AudioPool::new(),
             audio_changed: false,
             decoded: Vec::new(),
         }
     }
 
     /// The project's decoded audio, which players are started with (ADR 0011).
-    pub fn audio(&self) -> &suhina_engine::AudioPool {
+    pub fn audio(&self) -> &loopwerk_engine::AudioPool {
         &self.audio
     }
 
     /// Gives the session its project's decoded audio (`media::load_project_audio`), before a
     /// player is started with [`Session::audio`].
-    pub fn set_audio(&mut self, audio: suhina_engine::AudioPool) {
+    pub fn set_audio(&mut self, audio: loopwerk_engine::AudioPool) {
         self.audio = audio;
         self.audio_changed = true;
     }
 
     /// Hands over a file decoded ahead (on another thread), so a command that uses `path` next
     /// (`clip.addFiles`, `preview.play`) need not decode it. Only the latest few are kept.
-    pub fn provide_audio(&mut self, path: &Path, data: std::sync::Arc<suhina_engine::AudioData>) {
+    pub fn provide_audio(&mut self, path: &Path, data: std::sync::Arc<loopwerk_engine::AudioData>) {
         self.provide_key(files::absolute(path).display().to_string(), data);
     }
 
     /// Hands over one audio track of a Stems file decoded ahead (track 0 is the master), as
     /// [`Session::provide_audio`] does for a sample.
-    pub fn provide_stream(&mut self, path: &Path, stream: u16, data: std::sync::Arc<suhina_engine::AudioData>) {
-        self.provide_key(suhina_model::stream_key(&files::absolute(path).display().to_string(), stream), data);
+    pub fn provide_stream(&mut self, path: &Path, stream: u16, data: std::sync::Arc<loopwerk_engine::AudioData>) {
+        self.provide_key(loopwerk_model::stream_key(&files::absolute(path).display().to_string(), stream), data);
     }
 
-    fn provide_key(&mut self, key: String, data: std::sync::Arc<suhina_engine::AudioData>) {
+    fn provide_key(&mut self, key: String, data: std::sync::Arc<loopwerk_engine::AudioData>) {
         self.decoded.retain(|(k, _)| *k != key);
         if self.decoded.len() >= MAX_DECODED {
             self.decoded.remove(0);
@@ -243,14 +243,14 @@ impl Session {
 
     /// The decoded audio of the file at `path` (absolute): from the pool, from what was
     /// provided, or decoded now.
-    pub(crate) fn decoded_audio(&mut self, path: &Path) -> Result<std::sync::Arc<suhina_engine::AudioData>, String> {
+    pub(crate) fn decoded_audio(&mut self, path: &Path) -> Result<std::sync::Arc<loopwerk_engine::AudioData>, String> {
         let key = path.display().to_string();
         let data = if let Some(data) = self.audio.files.get(&key) {
             return Ok(std::sync::Arc::clone(data));
         } else if let Some((_, data)) = self.decoded.iter().find(|(k, _)| *k == key) {
             std::sync::Arc::clone(data)
         } else {
-            std::sync::Arc::new(suhina_media::decode_file(path)?)
+            std::sync::Arc::new(loopwerk_media::decode_file(path)?)
         };
         self.audio.files.insert(key, std::sync::Arc::clone(&data));
         self.audio_changed = true;
@@ -259,16 +259,16 @@ impl Session {
 
     /// Every audio track of the Stems file at `path` (absolute), the master first: from the
     /// pool, from what was provided, or decoded now. Each joins the pool under its
-    /// [`suhina_model::stream_key`].
+    /// [`loopwerk_model::stream_key`].
     pub(crate) fn decoded_streams(
         &mut self,
         path: &Path,
         tracks: usize,
-    ) -> Result<Vec<std::sync::Arc<suhina_engine::AudioData>>, String> {
+    ) -> Result<Vec<std::sync::Arc<loopwerk_engine::AudioData>>, String> {
         let file = path.display().to_string();
         let keys: Vec<String> =
-            (0..tracks).map(|n| suhina_model::stream_key(&file, u16::try_from(n).unwrap_or(u16::MAX))).collect();
-        let known: Vec<Option<std::sync::Arc<suhina_engine::AudioData>>> = keys
+            (0..tracks).map(|n| loopwerk_model::stream_key(&file, u16::try_from(n).unwrap_or(u16::MAX))).collect();
+        let known: Vec<Option<std::sync::Arc<loopwerk_engine::AudioData>>> = keys
             .iter()
             .map(|key| {
                 self.audio
@@ -278,10 +278,10 @@ impl Session {
                     .map(std::sync::Arc::clone)
             })
             .collect();
-        let all: Vec<std::sync::Arc<suhina_engine::AudioData>> = if known.iter().all(Option::is_some) {
+        let all: Vec<std::sync::Arc<loopwerk_engine::AudioData>> = if known.iter().all(Option::is_some) {
             known.into_iter().flatten().collect()
         } else {
-            suhina_media::stems::decode_streams(path)?.into_iter().map(std::sync::Arc::new).collect()
+            loopwerk_media::stems::decode_streams(path)?.into_iter().map(std::sync::Arc::new).collect()
         };
         if all.len() != tracks {
             return Err(format!("{} audio tracks where {tracks} were expected", all.len()));
@@ -296,7 +296,7 @@ impl Session {
     }
 
     /// Decoded audio for a preview, which does not join the project's pool.
-    pub(crate) fn preview_audio(&mut self, path: &Path) -> Result<std::sync::Arc<suhina_engine::AudioData>, String> {
+    pub(crate) fn preview_audio(&mut self, path: &Path) -> Result<std::sync::Arc<loopwerk_engine::AudioData>, String> {
         let key = path.display().to_string();
         if let Some(data) = self.audio.files.get(&key) {
             return Ok(std::sync::Arc::clone(data));
@@ -304,7 +304,7 @@ impl Session {
         if let Some((_, data)) = self.decoded.iter().find(|(k, _)| *k == key) {
             return Ok(std::sync::Arc::clone(data));
         }
-        let data = std::sync::Arc::new(suhina_media::decode_file(path)?);
+        let data = std::sync::Arc::new(loopwerk_media::decode_file(path)?);
         self.provide_audio(path, std::sync::Arc::clone(&data));
         Ok(data)
     }
@@ -323,7 +323,7 @@ impl Session {
     /// error the session has no player.
     pub fn replace_player<E>(
         &mut self,
-        open: impl FnOnce(&Project, &suhina_engine::AudioPool, Option<Player>) -> Result<Player, E>,
+        open: impl FnOnce(&Project, &loopwerk_engine::AudioPool, Option<Player>) -> Result<Player, E>,
     ) -> Result<(), E> {
         let old = self.player.take();
         match open(&self.project, &self.audio, old) {
@@ -381,8 +381,8 @@ impl Session {
     /// (`track`, index among the track's channel's devices) and in the owner window's own
     /// pixels; every other embedded editor is hidden. Never waits for a host; the window says
     /// it every frame.
-    pub fn place_editors(&mut self, shown: &[(suhina_model::TrackId, usize, suhina_plugins::Placement)]) {
-        let keyed: Vec<(u64, suhina_plugins::Placement)> = shown
+    pub fn place_editors(&mut self, shown: &[(loopwerk_model::TrackId, usize, loopwerk_plugins::Placement)]) {
+        let keyed: Vec<(u64, loopwerk_plugins::Placement)> = shown
             .iter()
             .filter_map(|(track, device, placement)| Some((plugin_key_at(&self.project, *track, *device)?, *placement)))
             .collect();
@@ -404,7 +404,7 @@ impl Session {
 
     /// What is known about the plug-in device at `device` among `track`'s channel's devices;
     /// `None` for devices that are not plug-ins or while the project does not play.
-    pub fn plugin_report(&mut self, track: suhina_model::TrackId, device: usize) -> Option<PluginReport> {
+    pub fn plugin_report(&mut self, track: loopwerk_model::TrackId, device: usize) -> Option<PluginReport> {
         let key = plugin_key_at(&self.project, track, device)?;
         self.plugins.report(key)
     }
@@ -416,21 +416,21 @@ impl Session {
     pub(crate) fn player_mut(&mut self) -> Result<&mut Player, CommandError> {
         self.player.as_mut().ok_or_else(|| {
             CommandError(
-                "no audio engine is playing this project: start one with `suhina-cli play --launcher`, or the MCP                  server with --audio"
+                "no audio engine is playing this project: start one with `loopwerk-cli play --launcher`, or the MCP                  server with --audio"
                     .into(),
             )
         })
     }
 
-    /// Opens a project: a Suhina project (`.locr`) or a Live Set to import (`.als`). Returns
+    /// Opens a project: a Loopwerk project (`.locr`) or a Live Set to import (`.als`). Returns
     /// the session and the importer's warnings.
     pub fn open(path: &Path) -> Result<(Self, Vec<String>), CommandError> {
-        let is_locr = path.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION));
+        let is_locr = path.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION));
         let (project, warnings) = if is_locr {
-            let project = suhina_locr::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let project = loopwerk_locr::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
             (project, Vec::new())
         } else {
-            let import = suhina_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
             (import.project, import.warnings)
         };
         let mut session = Self::new(project);
@@ -439,7 +439,7 @@ impl Session {
         Ok((session, warnings))
     }
 
-    /// A new, untitled project made from the template file `path` (any project Suhina opens).
+    /// A new, untitled project made from the template file `path` (any project Loopwerk opens).
     /// Its audio is still found where the template's is.
     pub fn from_template(path: &Path) -> Result<(Self, Vec<String>), CommandError> {
         let (mut session, warnings) = Self::open(path)?;
@@ -457,24 +457,24 @@ impl Session {
         self.changes != self.saved_at
     }
 
-    /// Saves the project as a Suhina project at `path` (`.locr` is added when it is missing),
+    /// Saves the project as a Loopwerk project at `path` (`.locr` is added when it is missing),
     /// with the running plug-ins' state as it is now and audio paths written relative to the new
     /// file. The session then belongs to that file, unless `copy` (a template, a backup), which
     /// leaves the session as it was. Returns the path written.
     pub fn save(&mut self, path: &Path, copy: bool) -> Result<PathBuf, CommandError> {
         let mut path = path.to_path_buf();
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(suhina_locr::EXTENSION)) {
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION)) {
             let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             if name.is_empty() {
                 return Err("give the project a file name".into());
             }
             name.push(".");
-            name.push(suhina_locr::EXTENSION);
+            name.push(loopwerk_locr::EXTENSION);
             path.set_file_name(name);
         }
         let mut project = self.project.clone();
         let states = self.plugins.current_states();
-        for device in suhina_engine::plugin_devices(&project) {
+        for device in loopwerk_engine::plugin_devices(&project) {
             let Some(state) = states.get(&device.key) else { continue };
             let slot = project
                 .channels
@@ -485,7 +485,7 @@ impl Session {
                 slot.state = Some(state.data.clone());
                 slot.extensions.0.retain(|e| e.key != "Vst3ControllerState");
                 if let Some(controller) = &state.controller {
-                    slot.extensions.0.push(suhina_model::Extension {
+                    slot.extensions.0.push(loopwerk_model::Extension {
                         format: "vst3".into(),
                         key: "Vst3ControllerState".into(),
                         data: controller.clone(),
@@ -498,8 +498,8 @@ impl Session {
             None => std::env::current_dir().unwrap_or_default(),
         };
         let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-        suhina_locr::rebase_audio(&mut project, &from, &to);
-        suhina_locr::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
+        loopwerk_locr::rebase_audio(&mut project, &from, &to);
+        loopwerk_locr::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
         if !copy {
             self.source = Some(path.clone());
             self.saved_at = self.changes;
@@ -620,9 +620,9 @@ impl Session {
 }
 
 /// The key of the plug-in device at `device` among `track`'s channel's devices.
-pub(crate) fn plugin_key_at(project: &Project, track: suhina_model::TrackId, device: usize) -> Option<u64> {
+pub(crate) fn plugin_key_at(project: &Project, track: loopwerk_model::TrackId, device: usize) -> Option<u64> {
     let channel = project.tracks.iter().find(|t| t.id == track)?.channel?;
-    suhina_engine::plugin_devices(project)
+    loopwerk_engine::plugin_devices(project)
         .into_iter()
         .find(|d| d.channel == channel && d.position == device)
         .map(|d| d.key)

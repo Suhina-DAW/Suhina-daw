@@ -2,9 +2,9 @@
 //! switching them, and setting their parameters. Each edit is one undo step, and a playing
 //! engine hears it at once: a chain that keeps its devices keeps playing (held notes, tails).
 
+use loopwerk_device_api::{DeviceInfo, ParamKind, Role, Unit};
+use loopwerk_model::{Device, DeviceKind, DeviceParam, Extensions};
 use serde_json::{Value, json};
-use suhina_device_api::{DeviceInfo, ParamKind, Role, Unit};
-use suhina_model::{Device, DeviceKind, DeviceParam, Extensions};
 
 use crate::commands::{channel_param, number, track_id};
 use crate::{CommandError, ParamEdit, Session};
@@ -14,7 +14,7 @@ const MAX_DEVICES: usize = 64;
 
 /// The built-in devices and their parameters.
 pub(crate) fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
-    Ok(Value::Array(suhina_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
+    Ok(Value::Array(loopwerk_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
 }
 
 fn info_json(info: &DeviceInfo) -> Value {
@@ -85,7 +85,7 @@ fn device_json(index: usize, device: &Device) -> Value {
         DeviceKind::Vst2 { id } => ("vst2", Some(id.to_string())),
         _ => ("other", None),
     };
-    let info = id.as_deref().filter(|_| kind == "builtin").and_then(suhina_device_registry::info);
+    let info = id.as_deref().filter(|_| kind == "builtin").and_then(loopwerk_device_registry::info);
     let params = info.map(|info| {
         info.params
             .iter()
@@ -143,7 +143,7 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         (None, Some(p)) => p.device,
         (None, None) => return Err("id must be a built-in device id, from devices.list".into()),
     };
-    let info = suhina_device_registry::info(id)
+    let info = loopwerk_device_registry::info(id)
         .ok_or_else(|| format!("no built-in device {id:?}; devices.list lists them"))?;
     if info.role == Role::Instrument {
         let track = track_id(&session.project, params)?;
@@ -160,7 +160,7 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         .devices
         .first()
         .and_then(|d| match &d.kind {
-            DeviceKind::Builtin(id) => suhina_device_registry::info(id),
+            DeviceKind::Builtin(id) => loopwerk_device_registry::info(id),
             _ => None,
         })
         .is_some_and(|i| i.role == Role::Instrument);
@@ -202,13 +202,13 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
 }
 
 /// Reads voice `voice` of the preset file at `path`.
-fn read_preset(path: &std::path::Path, voice: usize) -> Result<suhina_device_registry::Preset, CommandError> {
+fn read_preset(path: &std::path::Path, voice: usize) -> Result<loopwerk_device_registry::Preset, CommandError> {
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
-    if size > suhina_device_registry::MAX_PRESET_BYTES as u64 {
+    if size > loopwerk_device_registry::MAX_PRESET_BYTES as u64 {
         return Err(format!("{}: a preset file is at most 64 KiB", path.display()).into());
     }
     let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    suhina_device_registry::preset(&data, voice).map_err(|e| format!("{}: {e}", path.display()).into())
+    loopwerk_device_registry::preset(&data, voice).map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
 pub(crate) fn remove(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -237,7 +237,8 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     let DeviceKind::Builtin(id) = &device.kind else {
         return Err("only built-in devices have parameters here; plug-in parameters come later".into());
     };
-    let info = suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
+    let info =
+        loopwerk_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
     let param_index = info
         .param_index(param)
         .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;

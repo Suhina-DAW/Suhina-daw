@@ -1,6 +1,6 @@
 [package]
-name = "suhina-output"
-description = "Plays a Suhina engine on an audio output device: lists the hosts and devices, opens the one chosen"
+name = "loopwerk-output"
+description = "Plays a Loopwerk engine on an audio output device: lists the hosts and devices, opens the one chosen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,8 +13,8 @@ rust-version.workspace = true
 asio = ["cpal/asio"]
 
 [dependencies]
-suhina-engine.workspace = true
-suhina-session.workspace = true
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
 cpal.workspace = true
 # The ring the engine renders ahead into, read by the device's callback.
 rtrb.workspace = true
@@ -28,7 +28,7 @@ wasapi = "0.19"  # MIT
 audio_thread_priority = { version = "0.38", default-features = false }  # MPL-2.0
 
 [dev-dependencies]
-suhina-model.workspace = true
+loopwerk-model.workspace = true
 
 [lints]
 workspace = true

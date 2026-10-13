@@ -17,5 +17,5 @@ frame against the envelope written out in the test (linear fades times the 2 ms 
 Only when a change to the envelope is intended, and the spec says so:
 
 ```sh
-SUHINA_BLESS=1 cargo test -p suhina-engine fade_tests
+LOOPWERK_BLESS=1 cargo test -p loopwerk-engine fade_tests
 ```

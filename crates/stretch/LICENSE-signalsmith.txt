@@ -1,6 +1,6 @@
 This crate is a Rust port of Signalsmith Stretch (https://github.com/Signalsmith-Audio/signalsmith-stretch,
 commit a670068) and the STFT of Signalsmith Linear (https://github.com/Signalsmith-Audio/linear).
-The port is distributed with Suhina under GPL-3.0-or-later; the original code is under this license:
+The port is distributed with Loopwerk under GPL-3.0-or-later; the original code is under this license:
 
 MIT License
 

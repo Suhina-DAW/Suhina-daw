@@ -10,11 +10,11 @@
 //! inversion). The gain goes through a 2 ms one-pole filter, so square and random shapes and
 //! jumps in phase do not click.
 
-use suhina_device_api::{
+use loopwerk_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use suhina_dsp::lfo::{Shape, wave};
-use suhina_dsp::{OnePole, Smoother};
+use loopwerk_dsp::lfo::{Shape, wave};
+use loopwerk_dsp::{OnePole, Smoother};
 
 /// Ramp for changes of the amount.
 pub const RAMP_SECONDS: f64 = 0.02;

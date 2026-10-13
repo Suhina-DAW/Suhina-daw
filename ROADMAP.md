@@ -1,22 +1,22 @@
 # Roadmap
 
-Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
+Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 
 | | Milestone | Status |
 |---|---|---|
 | M0 | **Foundation:** workspace, GPL-3.0-or-later, clean-room rules, DAW-neutral model | done |
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
-| M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
-| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.locr`) work; more commands to come |
+| M2 | **Real-time playback:** audio output, `loopwerk-cli play` | done (verified on Windows) |
+| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Loopwerk's own format (`.locr`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `suhina-cli plugin run` puts a file through one; `suhina-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `suhina-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `suhina-cli plugin params` lists a plug-in's parameters, and `suhina-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
+| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
 | M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
 ## Built-in devices
 
-Instruments and effects that ship with Suhina. They run inside the engine (rule 5 covers
+Instruments and effects that ship with Loopwerk. They run inside the engine (rule 5 covers
 third-party plug-ins only), so they follow the real-time and never-crash rules like the engine
 itself. Written in Rust; DSP from GPL-compatible open-source projects may be ported (rule 9) with
 its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md). An ADR comes before
@@ -36,7 +36,7 @@ the first device.
   remove, switch and set them.
   Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
-  then an approximate mapping to an open-source plug-in over CLAP; then a Suhina device for the
+  then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
   most used ones. After import, the user sees which devices came in exactly, approximately or as
   placeholders. No content from Live's library (presets, wavetables, samples, impulse responses).
 - **Order:** utility (gain, width, mono, phase) and auto-pan first, to prove the device system;
@@ -47,7 +47,7 @@ the first device.
 
 ### How each device is built
 
-Every Suhina device follows the same path:
+Every Loopwerk device follows the same path:
 
 1. **Learn what the device does, not how it is coded.** From the vendor's published manual, from
    listening, and from Live Sets we author ourselves, where we change one parameter at a time and
@@ -83,7 +83,7 @@ work starts). **DSP done** means the device exists in `devices/` and passes its 
 engine does not run it yet; **import** is whether a Live Set's device comes in as it (otherwise a
 placeholder):
 
-| Imports from Live | Suhina device | DSP from | Status |
+| Imports from Live | Loopwerk device | DSP from | Status |
 |---|---|---|---|
 | Utility, Auto Pan | utility, auto-pan | own | DSP done; import done for Utility, planned for Auto Pan |
 | EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | DSP done; import planned |
@@ -189,13 +189,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - anything not understood yet is skipped with a warning; the project still opens
 
 ### M2 Playing
-- `suhina-cli play` plays a set, or one launcher scene, on the default audio device; `render`
+- `loopwerk-cli play` plays a set, or one launcher scene, on the default audio device; `render`
   writes a 32-bit float WAV. Both run the same engine code.
 - Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
   instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
   master volume and mute apply. A group with devices is a bus: its devices run over the sum of
   its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
-  track, with a voice from a DX7 file; `suhina-cli fm-synth voices` lists a file's voices.
+  track, with a voice from a DX7 file; `loopwerk-cli fm-synth voices` lists a file's voices.
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
@@ -207,8 +207,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `transport.setPosition`, `transport.setMetronome`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
-  `plugins.check`, `plugins.setHosting` (also as `suhina-cli plugins …`); for the audio
-  output `audio.devices` (also `suhina-cli audio devices`), `audio.setOutput`, `audio.info`;
+  `plugins.check`, `plugins.setHosting` (also as `loopwerk-cli plugins …`); for the audio
+  output `audio.devices` (also `loopwerk-cli audio devices`), `audio.setOutput`, `audio.info`;
   for devices
   `devices.list`, `track.devices`, `device.add`, `device.remove`, `device.setEnabled`,
   `device.setParam`, `device.addPlugin`, `device.plugin`, `device.openEditor`,
@@ -220,15 +220,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `library.removeTag`, `library.tag`.
 - Several projects open at once, like tabs, one of them active and playing; commands go to the
   active one or to a named one ([ADR 0007](docs/decisions/0007-several-open-projects.md)).
-- `suhina-cli mcp` serves them to agents over the Model Context Protocol, with file access
+- `loopwerk-cli mcp` serves them to agents over the Model Context Protocol, with file access
   only below granted roots ([`docs/mcp.md`](docs/mcp.md)).
 - Edits and undo/redo are heard by a playing engine from its next audio block, without a gap:
   a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
   as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
-- Projects are saved in Suhina's own format, `.locr` (versioned JSON, plug-in state included,
+- Projects are saved in Loopwerk's own format, `.locr` (versioned JSON, plug-in state included,
   audio referred to by path): `project.save { path?, copy? }`; `.locr` files open in the app,
-  `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
+  `loopwerk-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/locr-format.md)).
 - Still to do: more commands (notes, clips, sends), MCP resources, asking before closing
   a project with unsaved changes.
@@ -248,7 +248,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   change.
 - Transport commands (`clip.launch`, `scene.launch`, `track.stop`, `launcher.*`,
   `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
-  `suhina-cli play --launcher` takes them as typed lines, `suhina-cli mcp --audio` from
+  `loopwerk-cli play --launcher` takes them as typed lines, `loopwerk-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
 - Still to do: follow actions, launch modes, per-clip quantisation, reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
@@ -269,7 +269,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
 
 ### M6 Plug-ins (in progress)
-- CLAP and VST3 plug-ins run in `suhina-plugin-host` processes, never in Suhina's: by
+- CLAP and VST3 plug-ins run in `loopwerk-plugin-host` processes, never in Loopwerk's: by
   default one process per plug-in file, or per vendor, or one per instance
   (`plugins.setHosting`); a crash or hang costs that plug-in's sound, not the project
   ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)).
@@ -283,11 +283,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks are lined up for the latency of their devices and plug-ins.
 - The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
   editor, Close editor or Restart; the same commands work from the CLI and MCP. Editors float
-  above Suhina's window, owned by it (Windows, X11), and respond at once; a setting
+  above Loopwerk's window, owned by it (Windows, X11), and respond at once; a setting
   (Plug-ins › Editors › Device view) shows them inside the device panel instead, as part of
   the chain. On Linux the window is an X11 one whenever an X server (or XWayland) is there,
   so this works on Wayland desktops too.
-- Renders (`suhina-cli render`, MCP `project_render`) run the same plug-ins.
+- Renders (`loopwerk-cli render`, MCP `project_render`) run the same plug-ins.
 - The plug-ins of different tracks run at the same time (one block out to every host, then
   every answer collected), the engine renders ahead of the audio device in blocks of its own,
   and host audio threads run at real-time priority: a project with 25 plug-ins plays without a
@@ -296,7 +296,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Wayland and macOS editors, VST2 hosting (not decided).
 
 ### M8 UI (started)
-- `suhina` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
+- `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
   stopped on the default output and shows the **Session view**: tracks as columns, return tracks
   beside the scene column, clip slots with their state (stopped, queued, playing with progress),
   scene launch, stop buttons, and a mixer strip with pan, volume and track on/off
@@ -336,7 +336,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
-  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Suhina (Suhina
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Loopwerk (Loopwerk
   Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
   Dark). Settings › Interface › Theme picks one, changes its colours, renames, duplicates, reads
   the files again, backs every theme up into a zip and exports a template zip with a README an AI
@@ -371,7 +371,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   mode (off by default), and what plays now with its measured latency and underruns. A change
   reopens the output with the transport where it was and the plug-ins running; the engine
   renders in blocks of the buffer size, so the plug-ins' deadline follows it. A device that is
-  gone at start plays the default output, with a notice. `suhina-cli play` takes the same
+  gone at start plays the default output, with a notice. `loopwerk-cli play` takes the same
   choice (`--host`, `--device`, `--buffer`, `--exclusive`).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.

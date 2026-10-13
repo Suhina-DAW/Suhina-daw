@@ -1,5 +1,5 @@
 [package]
-name = "suhina-stretch"
+name = "loopwerk-stretch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

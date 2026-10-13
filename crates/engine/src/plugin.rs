@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use suhina_device_api::NoteEvent;
-use suhina_model::{ChannelId, DeviceKind, Project, TrackId};
+use loopwerk_device_api::NoteEvent;
+use loopwerk_model::{ChannelId, DeviceKind, Project, TrackId};
 
 /// How long a slot waits for a block when rendering offline, where there is no deadline: long
 /// enough for any plug-in that still works.
@@ -25,7 +25,7 @@ pub const OFFLINE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const DEADLINE_SHARE: f64 = 0.6;
 
 /// The audio half of a running plug-in, as the engine sees it. Implemented outside the engine
-/// (the session, over `suhina-plugins`); test doubles implement it too.
+/// (the session, over `loopwerk-plugins`); test doubles implement it too.
 pub trait PluginProcessor: Send {
     /// Runs `buffer`, interleaved stereo (the chain's sound so far), through the plug-in in
     /// place, with `events` at frames counted from the start of `buffer`, waiting at most
@@ -255,7 +255,7 @@ impl Delay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suhina_model::{Device, Extensions};
+    use loopwerk_model::{Device, Extensions};
 
     fn plug(kind: DeviceKind) -> Device {
         Device {

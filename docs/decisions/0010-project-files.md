@@ -1,5 +1,5 @@
 ---
-description: Suhina's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects
+description: Loopwerk's own project file (.locr): versioned JSON of the model, written by its own crate; saving, templates and new projects
 read_when: project file, save, open, .locr, native format, project.save, templates, new project, blank project, unsaved changes, recent projects
 type: decision
 status: current
@@ -7,10 +7,10 @@ last_verified: 2026-10-12
 covers:
   - crates/locr
   - crates/session/src/blank.rs
-  - apps/suhina/src/recent.rs
+  - apps/loopwerk/src/recent.rs
 ---
 
-# 0010: Suhina's own project files (.locr)
+# 0010: Loopwerk's own project files (.locr)
 
 - **Status:** accepted
 - **Date:** 2026-10-12
@@ -18,7 +18,7 @@ covers:
 ## Context
 
 Until now a project could only be imported (a Live Set) and never saved: every edit was lost
-when the window closed. Templates, new projects and "save" all need a file that Suhina writes
+when the window closed. Templates, new projects and "save" all need a file that Loopwerk writes
 itself and reads back with nothing lost. `docs/architecture.md` had it planned as a native
 format written and read by its own crate.
 
@@ -31,7 +31,7 @@ projects saved today keep working after the rename.
    JSON over XML or a binary format because people and agents can read and diff it, the
    workspace already uses `serde_json` (keymap, themes, MCP), and the model is plain data.
    The layout is in [the spec](../spec/locr-format.md).
-2. **Its own crate, `suhina-locr`** (layer 1, beside `als`), maps the model to JSON and back
+2. **Its own crate, `loopwerk-locr`** (layer 1, beside `als`), maps the model to JSON and back
    by hand, as the importers do; the model keeps no serialisation code or dependency
    ([ADR 0001](0001-daw-neutral-model.md)). Everything in the model is written, extensions
    included, so a project saved and opened again is equal to the one saved (round-trip tests).
@@ -54,20 +54,20 @@ projects saved today keep working after the rename.
    the project with its own file. The session counts its changes, and `project.info` reports
    `unsaved_changes`.
 8. **New projects.** A blank project is two note tracks, two audio tracks, two returns, the main
-   channel and eight scenes (`suhina_session::blank_project`); `track.add` adds more. A
+   channel and eight scenes (`loopwerk_session::blank_project`); `track.add` adds more. A
    project from a template is any project file opened untitled; its audio is still
    found next to the template.
 9. **The window** offers New or open (Ctrl+T): a new blank project, one from a template in the
    templates folder, or a project to open from a typed path or the recent list (kept in
    `recent.txt`); Save (Ctrl+S), Save as (Ctrl+Shift+S) and Save as template ask for a name and
    folder. The projects and templates folders are settings. There is no system file dialog: the
-   dialog lists what Suhina knows, and a path can be typed or a file dropped.
+   dialog lists what Loopwerk knows, and a path can be typed or a file dropped.
 
 ## Consequences
 
 - Edits can be kept; templates and new projects work.
-- `.locr` files can be read and written by agents and scripts without Suhina.
-- Every new field in the model needs its line in `suhina-locr` and in the round-trip test; a
+- `.locr` files can be read and written by agents and scripts without Loopwerk.
+- Every new field in the model needs its line in `loopwerk-locr` and in the round-trip test; a
   field that changes meaning needs a new version.
 - Large note-heavy projects are bigger than a binary format would make them.
 

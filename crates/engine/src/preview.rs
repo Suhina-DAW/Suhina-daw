@@ -9,9 +9,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use loopwerk_device_api::{Device, NoteEvent, ProcessContext};
+use loopwerk_model::TrackId;
 use rtrb::{Consumer, Producer, RingBuffer};
-use suhina_device_api::{Device, NoteEvent, ProcessContext};
-use suhina_model::TrackId;
 
 use crate::AudioData;
 use crate::audio::CLICK_GUARD_SECONDS;

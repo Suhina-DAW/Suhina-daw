@@ -1,13 +1,13 @@
 [package]
-name = "suhina-device-auto-pan"
+name = "loopwerk-device-auto-pan"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-dsp.workspace = true
-suhina-device-api.workspace = true
+loopwerk-dsp.workspace = true
+loopwerk-device-api.workspace = true
 
 [lints]
 workspace = true

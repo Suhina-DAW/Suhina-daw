@@ -1,7 +1,7 @@
 //! Device chains in the renderer: effects on a track, instruments playing its notes, launched
 //! clips, the transport, graph swaps.
 
-use suhina_model::*;
+use loopwerk_model::*;
 
 use crate::{LaunchCommand, Renderer, render_launches, render_offline};
 

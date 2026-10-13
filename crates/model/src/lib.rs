@@ -1,4 +1,4 @@
-//! Suhina project model: the project as pure data, with no audio or UI dependencies.
+//! Loopwerk project model: the project as pure data, with no audio or UI dependencies.
 //!
 //! The model is DAW-neutral (see `docs/decisions/0001-daw-neutral-model.md`): tracks and mixer
 //! channels are separate, clip contents live in a pool and are placed by clips, and data a format
@@ -19,7 +19,7 @@ pub struct ChannelId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ContentId(pub u32);
 
-/// A Suhina project.
+/// A Loopwerk project.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Project {
     pub transport: Transport,
@@ -113,7 +113,7 @@ pub struct Send {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceKind {
-    /// A Suhina device, by its stable id.
+    /// A Loopwerk device, by its stable id.
     Builtin(String),
     Clap {
         id: String,
@@ -126,7 +126,7 @@ pub enum DeviceKind {
     Vst2 {
         id: u32,
     },
-    /// A device native to another DAW that Suhina cannot run, kept as a placeholder so the
+    /// A device native to another DAW that Loopwerk cannot run, kept as a placeholder so the
     /// chain keeps its shape. `format` names the source format (`"als"`), `id` the device type.
     Foreign {
         format: String,

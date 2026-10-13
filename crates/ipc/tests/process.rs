@@ -1,11 +1,11 @@
-//! The engine side against a real second process (`suhina-ipc-peer`): blocks round-trip, and
+//! The engine side against a real second process (`loopwerk-ipc-peer`): blocks round-trip, and
 //! a peer that crashes or hangs in the middle of a block costs missed blocks, never a stall.
 #![allow(clippy::panic)] // test helpers outside #[test] functions
 
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use suhina_ipc::{Link, Outcome};
+use loopwerk_ipc::{Link, Outcome};
 
 const FRAMES: usize = 128;
 /// A block's budget at 128 frames and 48 kHz is 2.7 ms; the deadline for the peer is less.
@@ -14,7 +14,7 @@ const DEADLINE: Duration = Duration::from_millis(2);
 const PATIENT: Duration = Duration::from_secs(5);
 
 fn peer(link: &Link, mode: &str) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_suhina-ipc-peer"))
+    Command::new(env!("CARGO_BIN_EXE_loopwerk-ipc-peer"))
         .args([link.address().as_str(), mode])
         .spawn()
         .unwrap_or_else(|e| panic!("starting the peer: {e}"))

@@ -1,19 +1,19 @@
 ---
-description: Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Suhina's own look
+description: Why the UI is built with egui, and how close it may get to Live: same structure and behaviour, Loopwerk's own look
 read_when: UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton
 type: decision
 status: current
 last_verified: 2026-10-12
 ---
 
-# 0009: egui for the UI; familiar workflow, Suhina's own look
+# 0009: egui for the UI; familiar workflow, Loopwerk's own look
 
 - **Status:** accepted
 - **Date:** 2026-10-11
 
 ## Context
 
-Suhina's UI has two hard parts. Most of it is custom drawing: the clip grid, the timeline,
+Loopwerk's UI has two hard parts. Most of it is custom drawing: the clip grid, the timeline,
 waveforms, the piano roll, meters and device panels. And it must feel immediately familiar to
 people coming from Ableton Live, while not looking like Live.
 
@@ -40,7 +40,7 @@ What the law protects decides how close the UI may get (summary, not legal advic
 1. **The UI is built with egui** on eframe and wgpu.
 2. **Same map, different paint.** The structure and behaviour of each view follow Live as closely
    as useful: where things are, what they do, how they react, which keys do what. The appearance
-   is Suhina's own: colours, typography, control shapes, icons, spacing and the visual language
+   is Loopwerk's own: colours, typography, control shapes, icons, spacing and the visual language
    of states. [`docs/design/brief.md`](../design/brief.md) lists what stays familiar and what
    must differ.
 3. **Behaviour is specified in words.** Each view has a functional spec under `docs/spec/ui-*.md`
@@ -67,7 +67,7 @@ What the law protects decides how close the UI may get (summary, not legal advic
 
 - Ableton users can work without relearning: the views are where they expect and react the way
   they expect.
-- Nobody should mistake a Suhina screenshot for Live, even at thumbnail size. Every view is
+- Nobody should mistake a Loopwerk screenshot for Live, even at thumbnail size. Every view is
   checked side by side before release (the brief's "squint test").
 - Heavy views (clip grid with many clips, arrangement, waveforms) need geometry caches keyed on
   project revision; this is part of the UI architecture from the start.

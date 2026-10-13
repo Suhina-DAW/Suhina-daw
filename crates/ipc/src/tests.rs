@@ -129,17 +129,17 @@ fn opening_something_else_fails_cleanly() {
     assert!(matches!(Served::open(&stranger.display().to_string()), Err(IpcError::BadLink(_))));
     let _ = std::fs::remove_file(&stranger);
 
-    let short = dir.join(format!("suhina-ipc-short-{}", std::process::id()));
+    let short = dir.join(format!("loopwerk-ipc-short-{}", std::process::id()));
     let _ = std::fs::write(&short, [0u8; 16]);
     assert!(matches!(Served::open(&short.display().to_string()), Err(IpcError::BadLink(_))));
     let _ = std::fs::remove_file(&short);
 
-    let garbage = dir.join(format!("suhina-ipc-garbage-{}", std::process::id()));
+    let garbage = dir.join(format!("loopwerk-ipc-garbage-{}", std::process::id()));
     let _ = std::fs::write(&garbage, [0xAAu8; 4096]);
     assert!(matches!(Served::open(&garbage.display().to_string()), Err(IpcError::BadLink(_))));
     let _ = std::fs::remove_file(&garbage);
 
-    assert!(Served::open("suhina-ipc-does-not-exist").is_err());
+    assert!(Served::open("loopwerk-ipc-does-not-exist").is_err());
 }
 
 #[test]

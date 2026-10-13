@@ -2,18 +2,18 @@
 //! `DeviceKind::Builtin(id)` turns into a running device here. The engine builds device chains
 //! through this crate; front ends list what can be added.
 
-use suhina_device_api::{Device, DeviceInfo};
+use loopwerk_device_api::{Device, DeviceInfo};
 
 /// The built-in devices, in the order a device browser lists them.
 pub const DEVICES: [&DeviceInfo; 8] = [
-    &suhina_device_fm_synth::INFO,
-    &suhina_device_utility::INFO,
-    &suhina_device_auto_pan::INFO,
-    &suhina_device_dj_eq::INFO,
-    &suhina_device_vinyl_distortion::INFO,
-    &suhina_device_overdrive::INFO,
-    &suhina_device_compressor::INFO,
-    &suhina_device_limiter::INFO,
+    &loopwerk_device_fm_synth::INFO,
+    &loopwerk_device_utility::INFO,
+    &loopwerk_device_auto_pan::INFO,
+    &loopwerk_device_dj_eq::INFO,
+    &loopwerk_device_vinyl_distortion::INFO,
+    &loopwerk_device_overdrive::INFO,
+    &loopwerk_device_compressor::INFO,
+    &loopwerk_device_limiter::INFO,
 ];
 
 /// What the device with this id is, or `None` for an unknown id.
@@ -25,14 +25,14 @@ pub fn info(id: &str) -> Option<&'static DeviceInfo> {
 /// id. Allocates: call it off the audio thread.
 pub fn create(id: &str) -> Option<Box<dyn Device>> {
     Some(match id {
-        "fm-synth" => Box::new(suhina_device_fm_synth::FmSynth::new()),
-        "utility" => Box::new(suhina_device_utility::Utility::new()),
-        "auto-pan" => Box::new(suhina_device_auto_pan::AutoPan::new()),
-        "dj-eq" => Box::new(suhina_device_dj_eq::DjEq::new()),
-        "vinyl-distortion" => Box::new(suhina_device_vinyl_distortion::VinylDistortion::new()),
-        "overdrive" => Box::new(suhina_device_overdrive::Overdrive::new()),
-        "compressor" => Box::new(suhina_device_compressor::Compressor::new()),
-        "limiter" => Box::new(suhina_device_limiter::Limiter::new()),
+        "fm-synth" => Box::new(loopwerk_device_fm_synth::FmSynth::new()),
+        "utility" => Box::new(loopwerk_device_utility::Utility::new()),
+        "auto-pan" => Box::new(loopwerk_device_auto_pan::AutoPan::new()),
+        "dj-eq" => Box::new(loopwerk_device_dj_eq::DjEq::new()),
+        "vinyl-distortion" => Box::new(loopwerk_device_vinyl_distortion::VinylDistortion::new()),
+        "overdrive" => Box::new(loopwerk_device_overdrive::Overdrive::new()),
+        "compressor" => Box::new(loopwerk_device_compressor::Compressor::new()),
+        "limiter" => Box::new(loopwerk_device_limiter::Limiter::new()),
         _ => return None,
     })
 }
@@ -67,19 +67,19 @@ pub fn preset(data: &[u8], voice: usize) -> Result<Preset, String> {
         .checked_sub(1)
         .and_then(|i| voices.patches.get(i))
         .ok_or_else(|| format!("voice {voice} is not in the file; it holds {count}"))?;
-    let mut synth = suhina_device_fm_synth::FmSynth::new();
+    let mut synth = loopwerk_device_fm_synth::FmSynth::new();
     synth.load_patch(patch);
-    let info = &suhina_device_fm_synth::INFO;
+    let info = &loopwerk_device_fm_synth::INFO;
     let params =
         info.params.iter().enumerate().filter_map(|(i, p)| synth.param(i).map(|value| (p.id, value))).collect();
     Ok(Preset { device: info.id, name: patch.name().trim().to_string(), params })
 }
 
-fn read_voices(data: &[u8]) -> Result<suhina_device_fm_synth::patch::Voices, String> {
+fn read_voices(data: &[u8]) -> Result<loopwerk_device_fm_synth::patch::Voices, String> {
     if data.len() > MAX_PRESET_BYTES {
         return Err(format!("a preset file is at most {} KiB", MAX_PRESET_BYTES / 1024));
     }
-    suhina_device_fm_synth::patch::read(data).map_err(|e| e.to_string())
+    loopwerk_device_fm_synth::patch::read(data).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -88,15 +88,15 @@ mod tests {
 
     #[test]
     fn a_dx7_voice_is_a_preset_for_the_fm_synth() {
-        use suhina_device_fm_synth::patch::{Patch, write_bank, write_voice};
+        use loopwerk_device_fm_synth::patch::{Patch, write_bank, write_voice};
         let mut patch = Patch::default();
         patch.set_name("GLASS BELL");
         patch.set(134, 21); // algorithm 22
         let single = write_voice(&patch);
         let preset = preset(&single, 1).unwrap();
         assert_eq!((preset.device, preset.name.as_str()), ("fm-synth", "GLASS BELL"));
-        assert_eq!(preset.params.len(), suhina_device_fm_synth::INFO.params.len());
-        let mut synth = suhina_device_fm_synth::FmSynth::new();
+        assert_eq!(preset.params.len(), loopwerk_device_fm_synth::INFO.params.len());
+        let mut synth = loopwerk_device_fm_synth::FmSynth::new();
         synth.load_patch(&patch);
         for (i, (id, value)) in preset.params.iter().enumerate() {
             assert_eq!(Some(*value), synth.param(i), "{id}");

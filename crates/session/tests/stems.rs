@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
+use loopwerk_model::*;
+use loopwerk_session::{Session, blank_project};
 use serde_json::{Value, json};
-use suhina_model::*;
-use suhina_session::{Session, blank_project};
 
 const SR: u32 = 48_000;
 
@@ -16,7 +16,7 @@ fn run(session: &mut Session, id: &str, params: Value) -> Result<Value, String> 
 
 /// A copy of a test Stems file in a folder of its own.
 fn stems_file(test: &str, name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("suhina-stems-{test}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("loopwerk-stems-{test}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../media/tests/data").join(name);
@@ -34,7 +34,7 @@ fn channel<'a>(p: &'a Project, t: &Track) -> &'a Channel {
 }
 
 fn render(session: &Session) -> Vec<f32> {
-    suhina_engine::render_offline_with_audio(session.project(), session.audio(), SR, 512).unwrap()
+    loopwerk_engine::render_offline_with_audio(session.project(), session.audio(), SR, 512).unwrap()
 }
 
 fn peak(out: &[f32]) -> f32 {

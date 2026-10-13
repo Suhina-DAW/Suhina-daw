@@ -1,4 +1,4 @@
-//! Signal-processing building blocks for Suhina's built-in devices (ADR 0004): gain
+//! Signal-processing building blocks for Loopwerk's built-in devices (ADR 0004): gain
 //! conversions, parameter smoothing, filters, crossovers, LFO waveforms, waveshapers and oversampling.
 //!
 //! Nothing here depends on the engine, the model or a device: every block is plain state plus a

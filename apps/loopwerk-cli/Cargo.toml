@@ -1,0 +1,33 @@
+[package]
+name = "loopwerk-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "loopwerk-cli"
+path = "src/main.rs"
+
+[features]
+# ASIO on Windows (README › Building): needs libclang and a C++ compiler at build time.
+asio = ["loopwerk-output/asio"]
+
+[dependencies]
+loopwerk-engine.workspace = true
+loopwerk-als.workspace = true
+loopwerk-session.workspace = true
+loopwerk-automation.workspace = true
+loopwerk-media.workspace = true
+loopwerk-library.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
+loopwerk-output.workspace = true
+serde_json.workspace = true
+loopwerk-device-api.workspace = true
+loopwerk-device-registry.workspace = true
+loopwerk-device-fm-synth.workspace = true
+loopwerk-plugins.workspace = true
+hound.workspace = true
+
+[lints]
+workspace = true

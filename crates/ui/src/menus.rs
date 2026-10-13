@@ -1,8 +1,8 @@
 //! Context menus the views share. Every entry is a command, the same the CLI and MCP run.
 
 use egui::{Id, Key, Sense, Ui, Vec2};
+use loopwerk_engine::model::{Rgb, TrackId};
 use serde_json::json;
-use suhina_engine::model::{Rgb, TrackId};
 
 use crate::grid::TRACK_PALETTE;
 use crate::theme;

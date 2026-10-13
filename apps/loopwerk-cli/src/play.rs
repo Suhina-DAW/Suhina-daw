@@ -1,15 +1,15 @@
 //! Real-time playback on the default audio output: the arrangement once, or the clip launcher
-//! driven by typed commands. The device itself is `suhina-output`.
+//! driven by typed commands. The device itself is `loopwerk-output`.
 
 use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use loopwerk_engine::model::{LaneData, Project};
+use loopwerk_engine::{AudioPool, Renderer};
+use loopwerk_output::{Output, Progress};
+use loopwerk_session::{OutputChoice, Player, Session};
 use serde_json::{Value, json};
-use suhina_engine::model::{LaneData, Project};
-use suhina_engine::{AudioPool, Renderer};
-use suhina_output::{Output, Progress};
-use suhina_session::{OutputChoice, Player, Session};
 
 /// Extra time to wait after the last frame, so the device can drain its buffer.
 const TAIL: Duration = Duration::from_millis(300);

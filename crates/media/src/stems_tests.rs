@@ -87,7 +87,7 @@ fn a_file_without_metadata_gets_numbered_stems() {
 
 #[test]
 fn an_ordinary_audio_file_is_not_a_stems_file() {
-    let dir = std::env::temp_dir().join(format!("suhina-stems-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("loopwerk-stems-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // One audio track only.
     let one = dir.join("one.stem.mp4");
@@ -203,8 +203,8 @@ fn mastering_settings_become_compressor_and_limiter_values() {
     // Every id and value is one the devices accept.
     for device in &devices {
         let info = match device.id {
-            "compressor" => &suhina_device_compressor::INFO,
-            _ => &suhina_device_limiter::INFO,
+            "compressor" => &loopwerk_device_compressor::INFO,
+            _ => &loopwerk_device_limiter::INFO,
         };
         for (id, value) in &device.params {
             let index = info.param_index(id).unwrap_or_else(|| panic!("{} has no {id}", device.id));
