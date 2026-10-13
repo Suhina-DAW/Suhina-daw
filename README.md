@@ -2,7 +2,7 @@
 <img width="12525" height="3663" alt="suhina-logo" src="https://github.com/user-attachments/assets/7efa72b4-fba5-42f3-9503-0ea9f4e864f6" />
 
 <p align="center">
-  <a href="https://discord.gg/xeHvKnjfQN"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://discord.gg/xeHvKnjfQN"><img alt="Discord" src="https://img.shields.io/discord/1558859596783689758?label=Discord&logo=discord&logoColor=white&color=5865F2"></a>
 </p>
 
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
