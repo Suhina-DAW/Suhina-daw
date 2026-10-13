@@ -60,7 +60,8 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
    transport stops everything at once, and clears queued launches. A jump of the playhead
    (`transport.setPosition` while playing) keeps queued launches, queued again for the next
    boundary from the new beat.
-7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored.
+7. **Deactivated clips** do not play. **Loopwerk:** launching one is ignored, alone or in a
+   scene: its column keeps what it plays (an empty slot's stop button would stop it).
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**

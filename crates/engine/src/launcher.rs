@@ -277,6 +277,9 @@ impl ClipPlan {
 
 struct SlotPlan {
     clip: Option<ClipPlan>,
+    /// The slot holds a clip, even one that cannot play (deactivated or unplannable): launching
+    /// it does nothing, rather than what an empty slot's stop button does.
+    has_clip: bool,
     has_stop: bool,
 }
 
@@ -342,6 +345,7 @@ impl Launcher {
                         clip: slot.clip.as_ref().filter(|c| c.enabled).and_then(|c| {
                             plan_clip(project, audio, chains, c, column.track, frames_per_beat, sample_rate)
                         }),
+                        has_clip: slot.clip.is_some(),
                         has_stop: slot.has_stop,
                     })
                     .collect(),
@@ -634,10 +638,10 @@ impl Renderer {
                 let Some(target) = self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else {
                     return;
                 };
-                let action = match (&target.clip, target.has_stop) {
-                    (Some(_), _) => Queued::Launch(slot),
-                    (None, true) => Queued::Stop,
-                    (None, false) => return,
+                let action = match (&target.clip, target.has_clip, target.has_stop) {
+                    (Some(_), _, _) => Queued::Launch(slot),
+                    (None, false, true) => Queued::Stop,
+                    (None, _, _) => return,
                 };
                 if matches!(action, Queued::Stop) && !self.running {
                     return;
@@ -653,7 +657,7 @@ impl Renderer {
                 for column in 0..self.graph.launcher.columns.len() {
                     let action = match self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
                         Some(SlotPlan { clip: Some(_), .. }) => Queued::Launch(scene),
-                        Some(SlotPlan { clip: None, has_stop: true }) => Queued::Stop,
+                        Some(SlotPlan { clip: None, has_clip: false, has_stop: true }) => Queued::Stop,
                         _ => continue,
                     };
                     self.graph.launcher.queue(column, action);
@@ -1245,6 +1249,29 @@ mod tests {
         assert_eq!(monitor.column(0).unwrap().playing, None);
         assert_eq!(monitor.column(1).unwrap().playing, Some(0));
         assert!(monitor.column(0).unwrap().overrides_arrangement);
+    }
+
+    /// A slot whose clip is deactivated does nothing when launched, alone or in a scene: the
+    /// column playing keeps playing, where an empty slot's stop button would stop it (#154).
+    #[test]
+    fn a_deactivated_clip_neither_plays_nor_stops_its_column() {
+        let off = Clip { enabled: false, ..clip(2, 1.0, true) };
+        let p = project(
+            vec![notes(1, vec![note(0.0, 60)]), notes(2, vec![note(0.5, 72)])],
+            vec![vec![with(clip(1, 1.0, true)), with(off)]],
+        );
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::LaunchScene { scene: 0 });
+        let mut out = vec![0.0f32; 2 * BAR];
+        renderer.process(&mut out);
+        renderer.handle(LaunchCommand::LaunchScene { scene: 1 });
+        renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 1 });
+        let monitor = renderer.monitor();
+        assert_eq!(monitor.column(0).unwrap().queued, None);
+        let mut out = vec![0.0f32; 2 * 2 * BAR];
+        renderer.process(&mut out);
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+        assert_onsets(&out, &(0..8).map(|b| b * BEAT).collect::<Vec<_>>());
     }
 
     #[test]
