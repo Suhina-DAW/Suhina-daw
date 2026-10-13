@@ -16,7 +16,7 @@ use std::sync::Arc;
 use loopwerk_model::{AudioRegion, Clip, StretchMode};
 use loopwerk_stretch::Stretch;
 
-use crate::audio::{AudioData, STRETCH_SAMPLE_RATES};
+use crate::audio::{AudioData, STRETCH_SAMPLE_RATES, seconds_at, warp_markers};
 
 /// Stretcher frames made per call.
 const CHUNK_FRAMES: usize = 1024;
@@ -43,14 +43,7 @@ struct Piece {
 /// region's warp markers at `tempo_bpm`. `None` when the clip cannot be stretched (fewer than two
 /// usable warp markers, or a speed that is not a finite positive number).
 fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64) -> Option<(Vec<Piece>, f64)> {
-    let mut markers: Vec<(f64, f64)> = region
-        .warp_markers
-        .iter()
-        .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
-        .map(|m| (m.time, m.audio_time))
-        .collect();
-    markers.sort_by(|a, b| a.0.total_cmp(&b.0));
-    markers.dedup_by(|a, b| a.0 == b.0);
+    let markers = warp_markers(region);
     if markers.len() < 2 || markers.windows(2).any(|w| matches!(w, [a, b] if b.1 <= a.1)) {
         return None;
     }
@@ -67,7 +60,7 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
     let mut stream = 0.0;
     let mut max_rate: f64 = 0.0;
     while played < clip.length - 1e-9 && pieces.len() < MAX_PIECES {
-        let next_marker = markers.iter().map(|m| m.0).find(|b| *b > beat + 1e-9);
+        let next_marker = markers.get(markers.partition_point(|m| m.0 <= beat + 1e-9)).map(|m| m.0);
         let loop_end = loop_range.map(|r| r.end).filter(|e| *e > beat + 1e-9);
         let clip_end = beat + (clip.length - played);
         let next = [next_marker, loop_end, Some(clip_end)].into_iter().flatten().fold(f64::INFINITY, f64::min);
@@ -90,16 +83,6 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
         }
     }
     Some((pieces, max_rate))
-}
-
-/// File seconds at a clip beat, extending the first and last marker segments.
-fn seconds_at(markers: &[(f64, f64)], beat: f64) -> f64 {
-    let i = markers.iter().position(|m| m.0 > beat).unwrap_or(markers.len()).clamp(1, markers.len().max(2) - 1);
-    let (Some(a), Some(b)) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
-    if b.0 <= a.0 {
-        return a.1;
-    }
-    a.1 + (beat - a.0) * (b.1 - a.1) / (b.0 - a.0)
 }
 
 /// One warped clip placement being stretched in real time.
@@ -233,7 +216,8 @@ impl StretchVoice {
     /// The piece playing at voice frame `at` (the last one past the end).
     fn piece_at(&self, at: u64) -> usize {
         let file_rate = self.file_rate;
-        self.pieces.iter().rposition(|p| (p.out_start * file_rate).round() as u64 <= at).unwrap_or(0)
+        // The pieces are sorted by `out_start`: a binary search, as this runs per chunk.
+        self.pieces.partition_point(|p| (p.out_start * file_rate).round() as u64 <= at).saturating_sub(1)
     }
 
     /// Fills `out` (interleaved) with the input stream from frame `from` on. Past the playlist
@@ -403,6 +387,33 @@ mod tests {
                 (3.5, 1000.0, 1500.0, 1.0, 5500.0), // beat 2–3, clip ends
             ]
         );
+    }
+
+    /// A clip with tens of thousands of warp markers builds its playlist and plays: lookups are
+    /// binary searches, so the playlist is no longer quadratic in the markers (#162).
+    #[test]
+    fn a_clip_with_many_warp_markers_builds_and_plays() {
+        let data = sine(440.0, 30.0, 8000);
+        // 40 000 segments over 60 beats (30 s at 120 bpm), alternating 1.1x and 0.9x.
+        let markers: Vec<(f64, f64)> = (0..=40_000)
+            .scan(0.0, |seconds, i| {
+                let beat = f64::from(i) * 60.0 / 40_000.0;
+                let here = (beat, *seconds);
+                *seconds += 60.0 / 40_000.0 * 0.5 * if i % 2 == 0 { 1.1 } else { 0.9 };
+                Some(here)
+            })
+            .collect();
+        let r = region(&markers, StretchMode::Smooth);
+        let c = clip(60.0, 0.0, None);
+        let (pieces, _) = playlist(&c, &r, &data, 120.0).unwrap();
+        assert_eq!(pieces.len(), 40_000);
+        let mut voice = StretchVoice::new(&c, &r, data, 120.0, 48_000).unwrap();
+        voice.seek(48_000 * 15);
+        let mut out = vec![0.0f32; 2 * 4096];
+        for _ in 0..4 {
+            voice.render(&mut out);
+        }
+        assert!(out.iter().all(|s| s.is_finite()) && out.iter().any(|s| s.abs() > 0.1));
     }
 
     /// An offset past the loop end starts at the loop start, like the direct reader and the

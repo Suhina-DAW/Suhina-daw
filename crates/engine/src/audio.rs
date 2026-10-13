@@ -76,6 +76,37 @@ impl AudioPool {
     }
 }
 
+/// Most warp markers the engine reads from one region, so a malformed project cannot make every
+/// clip placement copy an unbounded list; markers past it are ignored (the last segment extends).
+pub(crate) const MAX_WARP_MARKERS: usize = 100_000;
+
+/// A region's usable warp markers as (beat, seconds): finite, sorted by beat, one per beat, at
+/// most [`MAX_WARP_MARKERS`].
+pub(crate) fn warp_markers(region: &AudioRegion) -> Vec<(f64, f64)> {
+    let mut markers: Vec<(f64, f64)> = region
+        .warp_markers
+        .iter()
+        .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
+        .map(|m| (m.time, m.audio_time))
+        .collect();
+    markers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    markers.dedup_by(|a, b| a.0 == b.0);
+    markers.truncate(MAX_WARP_MARKERS);
+    markers
+}
+
+/// File seconds at clip beat `beat` through sorted `markers`, extending the first and last
+/// segments. A binary search: this runs per frame on the audio thread.
+pub(crate) fn seconds_at(markers: &[(f64, f64)], beat: f64) -> f64 {
+    // The segment that contains `beat`, or the first or last one to extend.
+    let i = markers.partition_point(|(b, _)| *b <= beat).clamp(1, markers.len().max(2) - 1);
+    let (Some(&(b0, s0)), Some(&(b1, s1))) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
+    if b1 <= b0 {
+        return s0;
+    }
+    s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
+}
+
 /// How a beat in the clip maps to seconds in the file.
 #[derive(Debug, Clone, PartialEq)]
 enum TimeMap {
@@ -89,16 +120,7 @@ impl TimeMap {
     fn seconds(&self, beat: f64) -> f64 {
         match self {
             Self::Linear { seconds_per_beat } => beat * seconds_per_beat,
-            Self::Warp(markers) => {
-                // The segment that contains `beat`, or the first or last one to extend.
-                let i =
-                    markers.iter().position(|(b, _)| *b > beat).unwrap_or(markers.len()).clamp(1, markers.len() - 1);
-                let (Some(&(b0, s0)), Some(&(b1, s1))) = (markers.get(i - 1), markers.get(i)) else { return 0.0 };
-                if b1 <= b0 {
-                    return s0;
-                }
-                s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
-            }
+            Self::Warp(markers) => seconds_at(markers, beat),
         }
     }
 }
@@ -205,14 +227,7 @@ impl AudioEvent {
             return None;
         }
         let linear = TimeMap::Linear { seconds_per_beat: 60.0 / tempo_bpm };
-        let mut markers: Vec<(f64, f64)> = region
-            .warp_markers
-            .iter()
-            .filter(|m| m.time.is_finite() && m.audio_time.is_finite())
-            .map(|m| (m.time, m.audio_time))
-            .collect();
-        markers.sort_by(|a, b| a.0.total_cmp(&b.0));
-        markers.dedup_by(|a, b| a.0 == b.0);
+        let markers = warp_markers(region);
         let (map, rate) = if region.warped {
             (if markers.len() >= 2 { TimeMap::Warp(markers) } else { linear }, 1.0)
         } else {
@@ -406,6 +421,32 @@ mod tests {
         for beat in [0.0, 0.3, 1.0, 1.7] {
             assert_eq!(file_seconds_at(&plain, beat), file_seconds_at(&transposed, beat), "beat {beat}");
         }
+    }
+
+    /// The binary search finds the same segment as a scan from the start (#162), at, between,
+    /// before and after markers.
+    #[test]
+    fn warp_lookup_matches_a_linear_scan() {
+        let linear = |markers: &[(f64, f64)], beat: f64| {
+            let i = markers.iter().position(|(b, _)| *b > beat).unwrap_or(markers.len()).clamp(1, markers.len() - 1);
+            let ((b0, s0), (b1, s1)) = (markers[i - 1], markers[i]);
+            s0 + (beat - b0) * (s1 - s0) / (b1 - b0)
+        };
+        let markers: Vec<(f64, f64)> = (0..500).map(|i| (f64::from(i) * 0.37, f64::from(i * i) * 0.001)).collect();
+        for k in -40..2000 {
+            let beat = f64::from(k) * 0.0925;
+            assert_eq!(seconds_at(&markers, beat), linear(&markers, beat), "beat {beat}");
+        }
+        for &(beat, _) in &markers {
+            assert_eq!(seconds_at(&markers, beat), linear(&markers, beat), "on the marker at {beat}");
+        }
+    }
+
+    /// Markers past the cap are ignored, so no clip placement copies an unbounded list.
+    #[test]
+    fn warp_markers_are_capped() {
+        let many: Vec<(f64, f64)> = (0..MAX_WARP_MARKERS + 10).map(|i| (i as f64, i as f64 * 0.01)).collect();
+        assert_eq!(warp_markers(&region(true, &many, 0.0)).len(), MAX_WARP_MARKERS);
     }
 
     #[test]
