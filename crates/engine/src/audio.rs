@@ -10,6 +10,13 @@ use std::sync::Arc;
 
 use loopwerk_model::{AudioRegion, Clip};
 
+/// File sample rates the direct reader plays; a file outside them is not read (a rate of 0 would
+/// freeze on one frame). Wider than [`STRETCH_SAMPLE_RATES`], since the direct reader is where a
+/// clip the stretcher refuses goes.
+pub(crate) const FILE_SAMPLE_RATES: std::ops::RangeInclusive<u32> = 1_000..=384_000;
+/// File sample rates the stretcher takes.
+pub(crate) const STRETCH_SAMPLE_RATES: std::ops::RangeInclusive<u32> = 8_000..=192_000;
+
 /// Decoded audio, interleaved f32.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioData {
@@ -171,7 +178,13 @@ impl AudioEvent {
     ) -> Option<Self> {
         let Timing { frames_per_beat, tempo_bpm, sample_rate } = timing;
         let finite = [clip.start, clip.length, clip.offset, frames_per_beat, tempo_bpm].iter().all(|v| v.is_finite());
-        if !finite || clip.length <= 0.0 || frames_per_beat <= 0.0 || data.frames() == 0 {
+        if !finite
+            || clip.length <= 0.0
+            || frames_per_beat <= 0.0
+            || tempo_bpm <= 0.0
+            || data.frames() == 0
+            || !FILE_SAMPLE_RATES.contains(&data.sample_rate)
+        {
             return None;
         }
         let linear = TimeMap::Linear { seconds_per_beat: 60.0 / tempo_bpm };
@@ -277,14 +290,14 @@ mod tests {
 
     /// One second of a ramp, so the sample value tells the file position: value = seconds.
     fn ramp() -> Arc<AudioData> {
-        Arc::new(AudioData { sample_rate: 1000, channels: 1, samples: (0..1000).map(|i| i as f32 / 1000.0).collect() })
+        Arc::new(AudioData { sample_rate: 8000, channels: 1, samples: (0..8000).map(|i| i as f32 / 8000.0).collect() })
     }
 
     fn region(warped: bool, markers: &[(f64, f64)], transpose: f64) -> AudioRegion {
         AudioRegion {
             file: "ramp.wav".into(),
             absolute_file: None,
-            sample_rate: Some(1000),
+            sample_rate: Some(8000),
             channels: Some(1),
             duration_seconds: Some(1.0),
             warped,
@@ -341,6 +354,21 @@ mod tests {
         assert_eq!(fades.gain(0.0, 200.0), 0.0);
         let c = Clip { fade_in: f64::NAN, fade_out: -1.0, ..clip(2.0, 0.0, None) };
         assert_eq!(Fades::new(&c, 100.0, 1000).gain(100.0, 100.0), 1.0, "bad fades are no fades");
+    }
+
+    /// The direct reader refuses a tempo of 0 and a file sample rate outside 1 to 384 kHz, as the
+    /// stretcher refuses them (#164).
+    #[test]
+    fn a_zero_tempo_or_an_unplayable_sample_rate_is_no_event() {
+        let timing = |tempo_bpm: f64| Timing { frames_per_beat: 24_000.0, tempo_bpm, sample_rate: SR };
+        let c = clip(2.0, 0.0, None);
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(0.0), (1.0, 1.0)).is_none());
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(-120.0), (1.0, 1.0)).is_none());
+        for rate in [0, 999, 384_001, 1_000_000] {
+            let data = Arc::new(AudioData { sample_rate: rate, ..(*ramp()).clone() });
+            assert!(AudioEvent::new(&c, &region(false, &[], 0.0), data, timing(120.0), (1.0, 1.0)).is_none(), "{rate}");
+        }
+        assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(120.0), (1.0, 1.0)).is_some());
     }
 
     #[test]

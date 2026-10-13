@@ -16,7 +16,7 @@ use std::sync::Arc;
 use loopwerk_model::{AudioRegion, Clip, StretchMode};
 use loopwerk_stretch::Stretch;
 
-use crate::audio::AudioData;
+use crate::audio::{AudioData, STRETCH_SAMPLE_RATES};
 
 /// Stretcher frames made per call.
 const CHUNK_FRAMES: usize = 1024;
@@ -137,7 +137,7 @@ impl StretchVoice {
         sample_rate: u32,
     ) -> Option<Self> {
         let channels = usize::from(data.channels);
-        if !(1..=8).contains(&channels) || data.frames() == 0 || !(8_000..=192_000).contains(&data.sample_rate) {
+        if !(1..=8).contains(&channels) || data.frames() == 0 || !STRETCH_SAMPLE_RATES.contains(&data.sample_rate) {
             return None;
         }
         if region.stretch == StretchMode::Repitch {
