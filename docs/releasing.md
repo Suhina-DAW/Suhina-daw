@@ -61,6 +61,6 @@ the VST3 test plug-in built into the host through the packaged CLI. Each archive
 
 ## Not yet
 
-The binaries are not signed: macOS Gatekeeper and Windows SmartScreen warn about them. Installers
-(AppImage, deb, rpm, Flatpak, MSI), code signing and notarisation, and Linux aarch64 and Windows
-arm64 builds come with the UI (ROADMAP, M8).
+The binaries are not signed: macOS Gatekeeper and Windows SmartScreen warn about them. The
+desktop app (`apps/suhina`) is not packaged yet; it, installers (AppImage, deb, rpm, Flatpak, MSI),
+code signing and notarisation, and Linux aarch64 and Windows arm64 builds come with M8 (ROADMAP).
