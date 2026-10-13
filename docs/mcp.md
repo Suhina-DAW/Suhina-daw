@@ -78,10 +78,10 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([arrangement editing](spec/arrangement-editing.md) › Play position).
 
 - **Saving.** `project.save { path?, copy? }` (through `command_run`) writes the project as a
-  Suhina project (`.locr`, [spec](spec/locr-format.md)) with its plug-ins' state as it is now;
-  without a path, to the `.locr` it came from; `copy: true` writes a copy (a template) and the
+  Suhina project (`.suhina`, [spec](spec/suhina-format.md)) with its plug-ins' state as it is now;
+  without a path, to the project file it came from (a `.locr` from before October 2026 stays `.locr`); `copy: true` writes a copy (a template) and the
   project keeps its own file. `project.info` reports `unsaved_changes`. `project_open` opens
-  `.locr` files as well as Live Sets.
+  `.suhina` (and older `.locr`) files as well as Live Sets.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades;
   `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`, `clip.cut`, `clip.paste`,
@@ -163,7 +163,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 | Tool | What it does |
 |---|---|
-| `project_open` | Open a Suhina project (`.locr`) or a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
+| `project_open` | Open a Suhina project (`.suhina`, or `.locr` from before) or a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
 | `project_inspect` | Summary, tracks (volume, pan, mute, devices) and arrangement clips as JSON; optional `project`. |
 | `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`, `plugin`, `library`, `audio`) and parameter schema; optional `filter`. |
 | `command_run` | Run one command: `{"id": "track.setPan", "params": {"track": "Bass", "pan": -1}}`; optional `project`. |
