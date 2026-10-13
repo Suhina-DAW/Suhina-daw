@@ -1,14 +1,14 @@
 [package]
-name = "suhina-output"
-description = "Plays a Suhina engine on the default audio output device"
+name = "loopwerk-output"
+description = "Plays a Loopwerk engine on the default audio output device"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-engine.workspace = true
-suhina-session.workspace = true
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
 cpal.workspace = true
 
 [lints]

@@ -1,20 +1,20 @@
 [package]
-name = "suhina-ui"
-description = "Suhina's user interface: views and widgets on top of the session's commands (egui)"
+name = "loopwerk-ui"
+description = "Loopwerk's user interface: views and widgets on top of the session's commands (egui)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-engine.workspace = true
-suhina-session.workspace = true
-suhina-plugins.workspace = true
-suhina-library.workspace = true
-suhina-media.workspace = true
-suhina-device-api.workspace = true
-suhina-device-registry.workspace = true
-suhina-soundmap.workspace = true
+loopwerk-engine.workspace = true
+loopwerk-session.workspace = true
+loopwerk-plugins.workspace = true
+loopwerk-library.workspace = true
+loopwerk-media.workspace = true
+loopwerk-device-api.workspace = true
+loopwerk-device-registry.workspace = true
+loopwerk-soundmap.workspace = true
 serde_json.workspace = true
 egui = "0.36"  # MIT OR Apache-2.0
 

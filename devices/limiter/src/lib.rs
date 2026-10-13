@@ -16,11 +16,11 @@
 //! frames at the sample rate. Under the threshold the output is the input delayed exactly,
 //! times the drive.
 
-use suhina_device_api::{
+use loopwerk_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use suhina_dsp::Smoother;
-use suhina_dsp::gain::db_to_gain;
+use loopwerk_dsp::Smoother;
+use loopwerk_dsp::gain::db_to_gain;
 
 /// How far ahead the limiter looks, in seconds.
 pub const LOOKAHEAD_SECONDS: f64 = 0.0015;

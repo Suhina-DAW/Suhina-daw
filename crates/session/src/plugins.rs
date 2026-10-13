@@ -1,14 +1,14 @@
 //! Commands for the plug-in library: scanning for installed plug-ins, listing them, and the
-//! folders a scan looks in (ADR 0006). They belong to Suhina, not to one project, so they run
+//! folders a scan looks in (ADR 0006). They belong to Loopwerk, not to one project, so they run
 //! on [`Projects`] like the `projects.*` commands.
 
 use std::path::Path;
 
+use loopwerk_model::{Device, DeviceKind};
+use loopwerk_plugins::SavedState;
+use loopwerk_plugins::matching::Match;
+use loopwerk_plugins::scan::{Catalog, Report, Scanned};
 use serde_json::{Value, json};
-use suhina_model::{Device, DeviceKind};
-use suhina_plugins::SavedState;
-use suhina_plugins::matching::Match;
-use suhina_plugins::scan::{Catalog, Report, Scanned};
 
 use crate::commands::{CommandKind, CommandSpec, Param, ParamType, optional, param};
 use crate::projects::project_param;
@@ -92,7 +92,7 @@ fn paths(list: &[std::path::PathBuf]) -> Vec<String> {
 fn list(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
     let library = projects.library_mut();
     let specs: Vec<String> = library.catalog().plugins().map(|p| p.spec()).collect();
-    let hosting: std::collections::HashMap<String, suhina_plugins::library::Hosting> =
+    let hosting: std::collections::HashMap<String, loopwerk_plugins::library::Hosting> =
         specs.into_iter().map(|spec| (spec.clone(), library.hosting(&spec))).collect();
     let catalog = projects.library_mut().catalog();
     let plugins: Vec<Value> = catalog
@@ -142,7 +142,7 @@ fn scan(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
 fn folders(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
     let library = projects.library_mut();
     let custom = paths(library.custom_folders());
-    Ok(json!({ "standard": paths(&suhina_plugins::scan::standard_folders()), "added": custom }))
+    Ok(json!({ "standard": paths(&loopwerk_plugins::scan::standard_folders()), "added": custom }))
 }
 
 fn add_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
@@ -151,7 +151,7 @@ fn add_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandE
 }
 
 fn set_hosting(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
-    use suhina_plugins::library::Hosting;
+    use loopwerk_plugins::library::Hosting;
     let name = params.get("plugin").and_then(Value::as_str).ok_or("plugin must be a plug-in name, id or file")?;
     let hosting = params
         .get("hosting")
@@ -206,7 +206,7 @@ fn device_format(kind: &DeviceKind) -> (&'static str, String) {
 
 fn check(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let id = params.get("project").map(|_| project_param(params)).transpose()?;
-    let devices: Vec<(String, suhina_model::Device)> = projects
+    let devices: Vec<(String, loopwerk_model::Device)> = projects
         .session_mut(id)?
         .project()
         .channels

@@ -1,4 +1,4 @@
-use suhina_device_api::conformance;
+use loopwerk_device_api::conformance;
 
 use super::*;
 use crate::patch::{Patch, SysexError, read, write_bank, write_voice};
@@ -329,12 +329,12 @@ fn renders_like_the_original_engine() {
     compare(all, &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"));
 }
 
-/// The same comparison for scenarios of your own: set `SUHINA_FM_SCENARIOS` to a scenarios
+/// The same comparison for scenarios of your own: set `LOOPWERK_FM_SCENARIOS` to a scenarios
 /// file whose folder holds the reference renders (see tests/golden/README.md).
 #[test]
 #[ignore = "needs renders from the reference renderer"]
 fn renders_like_the_original_engine_for_other_scenarios() {
-    let path = std::path::PathBuf::from(std::env::var("SUHINA_FM_SCENARIOS").unwrap_or_default());
+    let path = std::path::PathBuf::from(std::env::var("LOOPWERK_FM_SCENARIOS").unwrap_or_default());
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     compare(scenarios(&text), path.parent().unwrap_or(std::path::Path::new(".")));
 }

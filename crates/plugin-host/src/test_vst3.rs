@@ -508,7 +508,7 @@ impl IPluginFactoryTrait for Factory {
     unsafe fn getFactoryInfo(&self, info: *mut PFactoryInfo) -> tresult {
         // SAFETY: the host passes a struct to fill.
         let Some(info) = (unsafe { info.as_mut() }) else { return kInvalidArgument };
-        copy_text("Suhina", &mut info.vendor);
+        copy_text("Loopwerk", &mut info.vendor);
         kResultOk
     }
 
@@ -528,7 +528,7 @@ impl IPluginFactoryTrait for Factory {
         info.cid = cid;
         info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances as int32;
         copy_text(category, &mut info.category);
-        copy_text("Suhina Test Gain", &mut info.name);
+        copy_text("Loopwerk Test Gain", &mut info.name);
         kResultOk
     }
 
@@ -563,9 +563,9 @@ impl IPluginFactory2Trait for Factory {
         }
         info.cid = PROCESSOR_CID;
         copy_text("Audio Module Class", &mut info.category);
-        copy_text("Suhina Test Gain", &mut info.name);
+        copy_text("Loopwerk Test Gain", &mut info.name);
         copy_text("Fx|Tools", &mut info.subCategories);
-        copy_text("Suhina", &mut info.vendor);
+        copy_text("Loopwerk", &mut info.vendor);
         copy_text("1.0", &mut info.version);
         kResultOk
     }

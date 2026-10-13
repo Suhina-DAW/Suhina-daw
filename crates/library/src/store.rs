@@ -401,7 +401,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("suhina-store-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

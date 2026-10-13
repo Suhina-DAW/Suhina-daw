@@ -1,13 +1,13 @@
 [package]
-name = "suhina-locr"
-description = "Reads and writes Suhina's own project files (.locr, versioned JSON)"
+name = "loopwerk-locr"
+description = "Reads and writes Loopwerk's own project files (.locr, versioned JSON)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-model.workspace = true
+loopwerk-model.workspace = true
 serde_json.workspace = true
 base64.workspace = true
 

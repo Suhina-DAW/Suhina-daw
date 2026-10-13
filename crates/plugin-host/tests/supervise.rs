@@ -1,12 +1,12 @@
-//! The engine's side (`suhina-plugins`) against the real `suhina-plugin-host` process:
+//! The engine's side (`loopwerk-plugins`) against the real `loopwerk-plugin-host` process:
 //! loading, state, and surviving a host that crashes or hangs, then restarting it.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use suhina_ipc::Outcome;
-use suhina_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio, PluginError, SavedState};
+use loopwerk_ipc::Outcome;
+use loopwerk_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio, PluginError, SavedState};
 
 const FRAMES: usize = 64;
 const DEADLINE: Duration = Duration::from_millis(2);
@@ -14,7 +14,7 @@ const PATIENT: Duration = Duration::from_secs(5);
 
 fn launch(plugin: &str) -> Launch {
     Launch {
-        host: PathBuf::from(env!("CARGO_BIN_EXE_suhina-plugin-host")),
+        host: PathBuf::from(env!("CARGO_BIN_EXE_loopwerk-plugin-host")),
         plugin: plugin.into(),
         channels: 2,
         max_frames: FRAMES as u32,
@@ -129,7 +129,7 @@ fn a_clap_plugin_processes_reports_latency_and_keeps_state() {
 
 #[test]
 fn clap_files_that_are_missing_or_not_plugins_are_errors() {
-    let missing = std::env::temp_dir().join("suhina-no-such-plugin.clap");
+    let missing = std::env::temp_dir().join("loopwerk-no-such-plugin.clap");
     let error = Plugin::start(launch(&format!("clap:{}", missing.display()))).err();
     assert!(matches!(&error, Some(PluginError::Host(m)) if m.contains("could not load")), "{error:?}");
 
@@ -139,12 +139,12 @@ fn clap_files_that_are_missing_or_not_plugins_are_errors() {
     assert!(matches!(&error, Some(PluginError::Host(_))), "{error:?}");
 }
 
-/// Runs a real CLAP file through the host when `SUHINA_TEST_CLAP` names one
+/// Runs a real CLAP file through the host when `LOOPWERK_TEST_CLAP` names one
 /// (`path/to/plugin.clap`, optionally `#plugin.id`); skipped otherwise.
 #[test]
 fn a_real_clap_file_when_one_is_given() {
-    let Ok(spec) = std::env::var("SUHINA_TEST_CLAP") else {
-        eprintln!("SUHINA_TEST_CLAP not set; skipped");
+    let Ok(spec) = std::env::var("LOOPWERK_TEST_CLAP") else {
+        eprintln!("LOOPWERK_TEST_CLAP not set; skipped");
         return;
     };
     let (mut plugin, mut audio) = start(&format!("clap:{spec}"));
@@ -165,7 +165,7 @@ fn a_real_clap_file_when_one_is_given() {
 
 #[test]
 fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
-    use suhina_plugins::offline::render;
+    use loopwerk_plugins::offline::render;
     // 1500 frames of a ramp, through the test CLAP gain (0.5, reports 16 frames of latency).
     let input: Vec<f32> = (0..1_500).flat_map(|n| [n as f32, -(n as f32)]).collect();
     let rendered = render(launch("test:clap"), &input, 100).unwrap();
@@ -179,7 +179,7 @@ fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     assert!(rendered.samples[2 * 1_484..].iter().all(|&s| s == 0.0));
 
     // With a state first: one the plug-in takes, and one it refuses (it runs with its default).
-    use suhina_plugins::offline::render_with_state;
+    use loopwerk_plugins::offline::render_with_state;
     let quieter =
         render_with_state(launch("test:vst3"), Some(0.25f32.to_le_bytes().to_vec().into()), &input, 0).unwrap();
     assert_eq!(quieter.state_refused, None);
@@ -268,7 +268,7 @@ fn a_bank_of_programs_is_set_as_parameters() {
 
 #[test]
 fn vst3_files_that_are_missing_or_not_plugins_are_errors() {
-    let missing = std::env::temp_dir().join("suhina-no-such-plugin.vst3");
+    let missing = std::env::temp_dir().join("loopwerk-no-such-plugin.vst3");
     let error = Plugin::start(launch(&format!("vst3:{}", missing.display()))).err();
     assert!(matches!(&error, Some(PluginError::Host(_))), "{error:?}");
     let error = Plugin::start(launch("vst3:x.vst3#nothex")).err();
@@ -277,7 +277,7 @@ fn vst3_files_that_are_missing_or_not_plugins_are_errors() {
 
 #[test]
 fn notes_and_controllers_reach_clap_and_vst3_plugins() {
-    use suhina_plugins::{Event, EventKind};
+    use loopwerk_plugins::{Event, EventKind};
     for spec in ["test:clap", "test:vst3"] {
         let (_plugin, mut audio) = start(spec);
         // A note at frame 10 adds its velocity there, on the left channel only.
@@ -296,8 +296,8 @@ fn notes_and_controllers_reach_clap_and_vst3_plugins() {
 
 #[test]
 fn an_offline_run_plays_notes_at_their_frames() {
-    use suhina_plugins::Event;
-    use suhina_plugins::offline::render_with_events;
+    use loopwerk_plugins::Event;
+    use loopwerk_plugins::offline::render_with_events;
     // 2000 frames of silence through the VST3 test plug-in, with notes in the first and the
     // fourth block (blocks are 512 frames offline).
     let input = vec![0.0f32; 2_000 * 2];
@@ -315,7 +315,7 @@ fn an_offline_run_plays_notes_at_their_frames() {
 #[cfg(windows)]
 fn close_editor_window() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_CLOSE};
-    let class: Vec<u16> = "SuhinaPluginEditor".encode_utf16().chain([0]).collect();
+    let class: Vec<u16> = "LoopwerkPluginEditor".encode_utf16().chain([0]).collect();
     // SAFETY: a class name that outlives the call; any title.
     let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
     assert!(!window.is_null(), "no editor window");
@@ -338,7 +338,7 @@ fn close_editor_window() {
         .into_iter()
         .find(|w| {
             let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
-            class.ok().and_then(|c| c.reply().ok()).is_some_and(|c| c.value.starts_with(b"suhina-plugin-editor"))
+            class.ok().and_then(|c| c.reply().ok()).is_some_and(|c| c.value.starts_with(b"loopwerk-plugin-editor"))
         })
         .unwrap_or_else(|| panic!("no editor window"));
     let message = ClientMessageEvent::new(32, window, protocols, [delete, 0, 0, 0, 0]);
@@ -395,7 +395,7 @@ fn an_editor_opens_in_a_window_and_closes() {
 
 #[test]
 fn parameter_events_automate_a_parameter_from_their_frame() {
-    use suhina_plugins::Event;
+    use loopwerk_plugins::Event;
     for spec in ["test:clap", "test:vst3"] {
         let (_plugin, mut audio) = start(spec);
         let mut output = [9.0f32; FRAMES * 2];

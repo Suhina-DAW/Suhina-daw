@@ -21,7 +21,7 @@ Settings › Display & Input), read on 2026-10-13. No binaries or files were loo
 - The same zoom is a setting (a Zoom control in the display settings), so it stays from one run
   to the next.
 
-## Suhina's behaviour
+## Loopwerk's behaviour
 
 - **Zoom in, Zoom out:** Ctrl and + (or Ctrl and =) and Ctrl and -; Cmd on macOS. Ctrl and = is
   needed on macOS: there + is Shift and =, and with Cmd held the window reports that key as =,

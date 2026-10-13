@@ -1,5 +1,5 @@
 //! The control messages between the engine and a plug-in host process (ADR 0006): one JSON
-//! object per line over a local socket. Audio does not go here; it goes through `suhina-ipc`.
+//! object per line over a local socket. Audio does not go here; it goes through `loopwerk-ipc`.
 //!
 //! Every message has an `op`. Engine to host: `hello`, `load`, `unload`, `ping`, `get_state`,
 //! `set_state`, `get_params`, `set_param`, `open_editor`, `close_editor`, `quit`. Host to

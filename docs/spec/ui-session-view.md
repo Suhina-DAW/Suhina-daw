@@ -21,14 +21,14 @@ Items marked **(to observe)** still need checking in Live.
 
 From top to bottom:
 
-1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help. (Suhina has File,
+1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help. (Loopwerk has File,
    Edit, View, Projects and Options so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
    - groove amount, metronome, global launch quantisation
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
-     start, punch, loop, loop length. **Suhina:** play starts from the play start marker and
+     start, punch, loop, loop length. **Loopwerk:** play starts from the play start marker and
      stop returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
    - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
@@ -36,12 +36,12 @@ From top to bottom:
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
      collections (user colour tags), library categories and places (user folders); a results
-     tree; tags and an item count below it. **Suhina's structure** (see the design brief):
+     tree; tags and an item count below it. **Loopwerk's structure** (see the design brief):
      search with a shortcut; category filters as buttons (all, samples, MIDI, instruments,
      effects, presets, plug-ins); a sidebar of places only (Pinned, Recent, Folders, add folder);
      a file tree with expandable folders, type icons and length or duration; colour tags as dots
      on rows; a preview strip with play, waveform, playhead, duration, BPM and key; tags and the
-     selection count at the bottom. **Suhina:** how it behaves (places, search, preview,
+     selection count at the bottom. **Loopwerk:** how it behaves (places, search, preview,
      dragging into the project) is in [`browser.md`](browser.md).
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
@@ -50,8 +50,8 @@ From top to bottom:
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
 6. **Status bar:** messages, the selected track's name and a mini overview.
 
-Suhina keeps one 20 px status bar for messages and counts and has no separate info view; where
-this list and `docs/design/components.md` differ, components.md describes Suhina.
+Loopwerk keeps one 20 px status bar for messages and counts and has no separate info view; where
+this list and `docs/design/components.md` differ, components.md describes Loopwerk.
 
 ## Session view
 
@@ -123,7 +123,7 @@ volume, pan or sends, only the MIDI meter. The height of this section is a saved
 Devices left to right in chain order. Each device has a header (on/off switch, name, fold,
 options) and its controls. Instruments come first on MIDI tracks; effects follow. An empty
 area at the end accepts dropped devices. Plug-ins show their name and an option to open their
-own window. Suhina shows where the plug-in stands (loading, running, missing, crashed) and a
+own window. Loopwerk shows where the plug-in stands (loading, running, missing, crashed) and a
 button that opens or closes its editor, or restarts it after a crash
 ([components](../design/components.md) › Device panel).
 

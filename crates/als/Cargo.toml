@@ -1,6 +1,6 @@
 [package]
-name = "suhina-als"
-description = "Reads Live Sets (.als) into the Suhina project model"
+name = "loopwerk-als"
+description = "Reads Live Sets (.als) into the Loopwerk project model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ rust-version.workspace = true
 corpus = []
 
 [dependencies]
-suhina-model.workspace = true
+loopwerk-model.workspace = true
 flate2.workspace = true
 roxmltree.workspace = true
 

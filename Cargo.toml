@@ -10,31 +10,31 @@ rust-version = "1.95"
 
 [workspace.dependencies]
 # internal
-suhina-model = { path = "crates/model" }
-suhina-engine = { path = "crates/engine" }
-suhina-als = { path = "crates/als" }
-suhina-locr = { path = "crates/locr" }
-suhina-session = { path = "crates/session" }
-suhina-automation = { path = "crates/automation" }
-suhina-media = { path = "crates/media" }
-suhina-library = { path = "crates/library" }
-suhina-dsp = { path = "crates/dsp" }
-suhina-device-api = { path = "crates/device-api" }
-suhina-ipc = { path = "crates/ipc" }
-suhina-plugins = { path = "crates/plugins" }
-suhina-device-utility = { path = "devices/utility" }
-suhina-device-auto-pan = { path = "devices/auto-pan" }
-suhina-device-dj-eq = { path = "devices/dj-eq" }
-suhina-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
-suhina-device-overdrive = { path = "devices/overdrive" }
-suhina-device-fm-synth = { path = "devices/fm-synth" }
-suhina-device-compressor = { path = "devices/compressor" }
-suhina-device-limiter = { path = "devices/limiter" }
-suhina-device-registry = { path = "crates/device-registry" }
-suhina-stretch = { path = "crates/stretch" }
-suhina-output = { path = "crates/output" }
-suhina-ui = { path = "crates/ui" }
-suhina-soundmap = { path = "crates/soundmap" }
+loopwerk-model = { path = "crates/model" }
+loopwerk-engine = { path = "crates/engine" }
+loopwerk-als = { path = "crates/als" }
+loopwerk-locr = { path = "crates/locr" }
+loopwerk-session = { path = "crates/session" }
+loopwerk-automation = { path = "crates/automation" }
+loopwerk-media = { path = "crates/media" }
+loopwerk-library = { path = "crates/library" }
+loopwerk-dsp = { path = "crates/dsp" }
+loopwerk-device-api = { path = "crates/device-api" }
+loopwerk-ipc = { path = "crates/ipc" }
+loopwerk-plugins = { path = "crates/plugins" }
+loopwerk-device-utility = { path = "devices/utility" }
+loopwerk-device-auto-pan = { path = "devices/auto-pan" }
+loopwerk-device-dj-eq = { path = "devices/dj-eq" }
+loopwerk-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
+loopwerk-device-overdrive = { path = "devices/overdrive" }
+loopwerk-device-fm-synth = { path = "devices/fm-synth" }
+loopwerk-device-compressor = { path = "devices/compressor" }
+loopwerk-device-limiter = { path = "devices/limiter" }
+loopwerk-device-registry = { path = "crates/device-registry" }
+loopwerk-stretch = { path = "crates/stretch" }
+loopwerk-output = { path = "crates/output" }
+loopwerk-ui = { path = "crates/ui" }
+loopwerk-soundmap = { path = "crates/soundmap" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0

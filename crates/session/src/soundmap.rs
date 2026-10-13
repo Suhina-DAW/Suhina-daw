@@ -1,14 +1,14 @@
 //! The sample map's commands (`docs/spec/sample-map.md` › Commands, ADR 0013): analysis of the
 //! library's samples, layouts of a scope, similar items. Like the library they belong to
-//! Suhina, not to one project, so they run on [`Projects`] and never change a project.
+//! Loopwerk, not to one project, so they run on [`Projects`] and never change a project.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use loopwerk_library::{FileKind, Group, Item};
+use loopwerk_soundmap::cache::Analysis;
+use loopwerk_soundmap::{DEFAULT_MAX_SECONDS, MAX_SECONDS_RANGE, MAX_SIMILAR, Map, SoundMap, SourceFile};
 use serde_json::{Value, json};
-use suhina_library::{FileKind, Group, Item};
-use suhina_soundmap::cache::Analysis;
-use suhina_soundmap::{DEFAULT_MAX_SECONDS, MAX_SECONDS_RANGE, MAX_SIMILAR, Map, SoundMap, SourceFile};
 
 use crate::commands::{CommandKind, CommandSpec, ParamType, optional, param};
 use crate::{CommandError, Projects};
@@ -249,13 +249,13 @@ fn map_of(projects: &mut Projects, place: Option<&str>, max_seconds: f32) -> Res
 pub fn matches(projects: &mut Projects, path: &Path, words: &[String], tags: &[String]) -> bool {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let key = path.display().to_string();
-    (words.is_empty() || suhina_library::rank(words, &name, &key).is_some())
+    (words.is_empty() || loopwerk_library::rank(words, &name, &key).is_some())
         && (tags.is_empty() || projects.file_library_mut().item_tags(&key).iter().any(|t| tags.contains(t)))
 }
 
 fn layout(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let place = optional_text(params, "place")?;
-    let words = suhina_library::words(optional_text(params, "text")?.unwrap_or(""));
+    let words = loopwerk_library::words(optional_text(params, "text")?.unwrap_or(""));
     let tags = tags(params)?;
     let grid = match params.get("grid") {
         None | Some(Value::Null) => false,
@@ -323,7 +323,7 @@ fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
         .into_iter()
         .find(|f| f.path == path)
         .ok_or_else(|| format!("{} is not a sample in the browser's folders", path.display()))?;
-    let named = suhina_soundmap::kinds::kind_of_path(&file.path, &file.folder);
+    let named = loopwerk_soundmap::kinds::kind_of_path(&file.path, &file.folder);
     let analysis = projects.sound_map_mut().analysis(&file);
     let mut out = json!({ "item": path.display().to_string() });
     match analysis {
@@ -336,7 +336,7 @@ fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
             out["state"] = json!("analysed");
             out["seconds"] = json!(seconds);
             out["features"] = json!(features.to_vec());
-            out["featureVersion"] = json!(suhina_soundmap::features::FEATURE_VERSION);
+            out["featureVersion"] = json!(loopwerk_soundmap::features::FEATURE_VERSION);
         }
     }
     match named {

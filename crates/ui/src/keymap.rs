@@ -113,9 +113,9 @@ pub fn actions() -> Vec<Action> {
         .iter()
         .map(|(id, label, group)| Action { id: (*id).into(), label: (*label).into(), group })
         .collect();
-    let session = suhina_session::commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
+    let session = loopwerk_session::commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
     let projects =
-        suhina_session::project_commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
+        loopwerk_session::project_commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
     for (id, label, no_params) in session.chain(projects) {
         // Saving goes through the window's own actions, which ask for a name the first time.
         if no_params && id != "project.save" && !all.iter().any(|a| a.id == id) {

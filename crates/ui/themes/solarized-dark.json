@@ -1,6 +1,6 @@
 {
   "name": "Solarized Dark",
-  "description": "The Solarized palette (MIT, ethanschoonover.com/solarized), dark, mapped onto Suhina's tokens.",
+  "description": "The Solarized palette (MIT, ethanschoonover.com/solarized), dark, mapped onto Loopwerk's tokens.",
   "colors": {
     "window.background": "#002B36",
     "panel.background": "#073642",

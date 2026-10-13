@@ -1,20 +1,20 @@
-//! The plug-in scanner (`suhina_plugins::scan`) against the real `suhina-plugin-host --scan`.
+//! The plug-in scanner (`loopwerk_plugins::scan`) against the real `loopwerk-plugin-host --scan`.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use suhina_plugins::scan::{Catalog, Scanned, find_files, scan_file, standard_folders};
+use loopwerk_plugins::scan::{Catalog, Scanned, find_files, scan_file, standard_folders};
 
 const PATIENT: Duration = Duration::from_secs(10);
 
 fn host() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_suhina-plugin-host"))
+    PathBuf::from(env!("CARGO_BIN_EXE_loopwerk-plugin-host"))
 }
 
 /// A fresh, empty folder for one test.
 fn folder(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("suhina-scan-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("loopwerk-scan-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -31,7 +31,7 @@ fn write(path: &Path, text: &str) {
 fn reads_what_a_plugin_file_holds() {
     let Scanned::Plugins(plugins) = scan_file(&host(), "test:clap", PATIENT) else { panic!("no plug-ins") };
     let [gain] = plugins.as_slice() else { panic!("{plugins:?}") };
-    assert_eq!((gain.id.as_str(), gain.name.as_str()), ("org.suhina.test.gain", "Suhina Test Gain"));
+    assert_eq!((gain.id.as_str(), gain.name.as_str()), ("org.loopwerk.test.gain", "Loopwerk Test Gain"));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn a_saved_catalog_finds_plugins_by_id_or_name() {
 
 #[test]
 fn the_library_scans_its_folders_and_remembers_across_starts() {
-    use suhina_plugins::library::Library;
+    use loopwerk_plugins::library::Library;
     let dir = folder("library");
     write(&dir.join("plugins/fake.clap"), "not a plug-in");
     let mut library = Library::new(Some(dir.join("settings")), host()).without_standard_folders();
@@ -152,7 +152,7 @@ fn the_library_scans_its_folders_and_remembers_across_starts() {
 
 #[test]
 fn worker_processes_read_many_files_and_survive_crashes_and_hangs() {
-    use suhina_plugins::scan_pool::scan_files;
+    use loopwerk_plugins::scan_pool::scan_files;
     let files: Vec<String> =
         ["test:clap", "test:crash", "test:vst3", "test:hang", "test:clap", "test:vst3"].map(String::from).to_vec();
     let started = Instant::now();
@@ -165,17 +165,17 @@ fn worker_processes_read_many_files_and_survive_crashes_and_hangs() {
             Scanned::Failed(why) => format!("failed: {}", why.split(':').next().unwrap_or_default()),
         })
         .collect();
-    assert_eq!(names[0], "Suhina Test Gain");
+    assert_eq!(names[0], "Loopwerk Test Gain");
     assert!(names[1].starts_with("failed: crashed"), "{names:?}");
-    assert_eq!(names[2], "Suhina Test Gain");
+    assert_eq!(names[2], "Loopwerk Test Gain");
     assert!(names[3].starts_with("failed: hung"), "{names:?}");
-    assert_eq!(names[4..], ["Suhina Test Gain", "Suhina Test Gain"]);
+    assert_eq!(names[4..], ["Loopwerk Test Gain", "Loopwerk Test Gain"]);
     // The VST3 test plug-in's id is in the canonical text form.
     let Scanned::Plugins(vst3) = &results[2] else { panic!() };
     assert_eq!(vst3[0].id.len(), 32);
     // What its compatibility class says it replaces: a VST2 plug-in, by its derived class id.
     assert_eq!(vst3[0].replaces, ["5653544761696E6761696E0000000000"]);
-    assert_eq!(vst3[0].replaces[0], suhina_plugins::matching::vst2_class_id(0x4761_696E, "Gain"));
+    assert_eq!(vst3[0].replaces[0], loopwerk_plugins::matching::vst2_class_id(0x4761_696E, "Gain"));
     // One hang costs its timeout once, not per file. The room is for slow process starts: on
     // a loaded Windows machine each start can take seconds while the antivirus checks it.
     assert!(started.elapsed() < Duration::from_secs(60), "{:?}", started.elapsed());

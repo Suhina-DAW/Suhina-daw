@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use suhina_model::*;
+use loopwerk_model::*;
 
 use crate::chain_tests::{BEAT, SR, blocks, device, empty_project, note, peak, project};
 use crate::{AudioData, AudioPool, LaunchCommand, Renderer, preview_notes};

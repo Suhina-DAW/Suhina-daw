@@ -1,8 +1,8 @@
-//! Reads Live Sets (`.als`) into the Suhina project model.
+//! Reads Live Sets (`.als`) into the Loopwerk project model.
 //!
 //! The format is described in `docs/spec/als-format.md`, which was written from Live Sets we
 //! authored ourselves. This reader covers what that spec covers: tempo, tracks, mixer, sends,
-//! scenes, MIDI and audio clips, plug-ins, and Live's devices that have a Suhina counterpart
+//! scenes, MIDI and audio clips, plug-ins, and Live's devices that have a Loopwerk counterpart
 //! (see `devices.rs`). Anything else is skipped or kept as a placeholder and reported in
 //! [`Import::warnings`], so a project still opens with everything else intact.
 
@@ -13,13 +13,13 @@ use std::fmt;
 use std::io::Read;
 use std::path::Path;
 
-use roxmltree::Node;
-use suhina_model::{
+use loopwerk_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
     LoopRange, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
     ValidationError, WarpMarker,
 };
+use roxmltree::Node;
 
 /// Upper bound for the decompressed XML, so a malicious file cannot exhaust memory.
 const MAX_XML_BYTES: u64 = 512 * 1024 * 1024;

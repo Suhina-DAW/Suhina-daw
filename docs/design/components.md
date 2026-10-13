@@ -243,7 +243,7 @@ read-only setting (Output) shows its value as the note.
 | Page | Setting | Values |
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
-| General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
+| General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Loopwerk/Projects` and `…/Templates`, shown as the hint |
 | General › Dropping files | Several files | One track (default), One each; Ctrl while dropping does the other ([browser spec](../spec/browser.md) › Files) |
 | General › Dropping files | Warp mode | Beats (default), Tonal, Texture, Smooth, Pro, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
@@ -263,7 +263,7 @@ read-only setting (Output) shows its value as the note.
 | Audio | Output | The device in use (read only) |
 
 **Interface › Theme**: the themes as 20 px rows in a list that scrolls after eight, the user's
-own first and then those that come with Suhina, the name on the left and the file name or
+own first and then those that come with Loopwerk, the name on the left and the file name or
 `built-in` on the right (10 px `text.hint`); a click uses one, the one in use filled like the page
 list and scrolled into view when the page opens. Under them a 34 px row: the name of the theme in
 use in a field, kept on Enter or leaving it (a built-in theme shows its name and "changing a
@@ -299,7 +299,7 @@ shortcuts wait while it shows.
 
 | Part | Spec |
 |---|---|
-| New (left half) | "New" heading (10 px `text.hint` over a `border` hairline); a 20 px row "New blank project" with "4 tracks, 2 returns, 8 scenes" on the right; "From a template" and the templates folder's `.locr` and `.als` files by name, 20 px rows that scroll, "Suhina project" or "Live Set" on the right; "No templates yet: File › Save as template" when there are none; the folder at the bottom in 10 px `text.hint` |
+| New (left half) | "New" heading (10 px `text.hint` over a `border` hairline); a 20 px row "New blank project" with "4 tracks, 2 returns, 8 scenes" on the right; "From a template" and the templates folder's `.locr` and `.als` files by name, 20 px rows that scroll, "Loopwerk project" or "Live Set" on the right; "No templates yet: File › Save as template" when there are none; the folder at the bottom in 10 px `text.hint` |
 | Open (right half) | A path field (hint "Path to a .locr or .als file"; Enter opens; quotes around a pasted path are dropped) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
 | Rows | Hover `panel.hoverBackground`; name 11 px `text.primary`, note 10 px `text.hint` |
 
@@ -314,7 +314,7 @@ and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
 | Part | Spec |
 |---|---|
 | Panel | `panel.background`, panels 1 px apart, end of chain is empty `window.background` |
-| Header | 20 px, `control.background`, 6 px padding: on switch, name, and what it is on the right in 9 px `text.hint` (Suhina, CLAP, VST3, VST2, or "Not supported" for a device of another DAW) |
+| Header | 20 px, `control.background`, 6 px padding: on switch, name, and what it is on the right in 9 px `text.hint` (Loopwerk, CLAP, VST3, VST2, or "Not supported" for a device of another DAW) |
 | On switch | 9 × 9 square, 1 px border; on: filled `text.primary`; off: outline `text.hint`, name `text.hint` |
 | Parameter | A 16 px row: its id in 10 px `text.secondary` on the left, its value in 10 px mono `#C9C4BB` on the right. (planned, with the device commands and parameter ranges) a 44 px column: 26 px knob (r 11, pointer to r 10), value 10 px mono, label 10 px `text.secondary`; 14 px between columns; pointer `accent` when the device is on |
 | Plug-in | A 16 px row with where it stands, 10 px: the plug-in's name and vendor (and its latency in frames) in `text.secondary` while it runs; "Loading …", "Not running" (the project is not playing) or "Not installed; kept with its settings" in `text.hint`; "Crashed: …" or "Could not start: …" in `recording`. Under it a 96 × 18 px button, `control.background` (hover `control.hoverBackground`), 1 px `border.strong` border, 10 px `text.primary`: "Open editor" or "Close editor" while it runs, "Restart" after a crash; none otherwise. It runs `device.openEditor`, `device.closeEditor` or `device.restart` |

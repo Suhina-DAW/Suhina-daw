@@ -79,7 +79,7 @@ Both play a sample as soon as the pointer is over it.
 The map holds the samples of the browser's place, whichever category filter is chosen (the
 filters choose what the list shows).
 
-**Suhina:** analysis starts with the desktop app and the MCP server, as indexing does; tests
+**Loopwerk:** analysis starts with the desktop app and the MCP server, as indexing does; tests
 and the command line never analyse a user's folders unasked.
 
 ## Analysis
@@ -147,7 +147,7 @@ Every item has a kind. The kinds and the words in names that give them:
 - **Guessed kinds.** An item whose name gives no kind is given the kind most of its 7 nearest
   neighbours (by features) have, when at least 4 of them agree; otherwise Other. A guessed
   kind is drawn a little paler, and the item's tooltip says "guessed".
-- Each kind has a colour from Suhina's own palette (the design brief's track colours, extended),
+- Each kind has a colour from Loopwerk's own palette (the design brief's track colours, extended),
   chosen so that neighbouring kinds (kick and bass, snare and clap, the hats) are told apart.
 - **Labels.** The name of each kind with at least 8 items in view is written over its region, at
   the item of that kind closest to the kind's centre, in the map's label style. Labels fade out
@@ -206,7 +206,7 @@ sound types), and often have a short audio **preview** recorded from the preset:
   for user and third-party content is `Documents\Native Instruments\User Content`). Databases
   and registry entries of other programs are not read.
 - **Naming:** the browser and the docs say "Native Instruments preset files (.nksf)" where a
-  name is needed; Suhina does not use the NKS logo or call itself NKS-compatible.
+  name is needed; Loopwerk does not use the NKS logo or call itself NKS-compatible.
 - **In the map:** a preset with a preview is an item of the map; its features come from the
   preview. Its kind comes from its sound type metadata when there is one, then from its name as
   above. Presets are drawn as rings rather than dots, so they are told from samples.
@@ -214,7 +214,7 @@ sound types), and often have a short audio **preview** recorded from the preset:
   not in the map.
 - **Dragging** a preset into the project adds the plug-in it names with the preset's state, as a
   plug-in from the browser: on a track's chain, or a new track in the empty area. When the plug-in
-  is not installed, or is not a format Suhina hosts, the drop is refused with a message naming
+  is not installed, or is not a format Loopwerk hosts, the drop is refused with a message naming
   the plug-in.
 
 How much of this works with a given library is open until the format is checked on real files;

@@ -20,7 +20,7 @@ made by you, in your own copy of Live, from scratch.
 - **Change one thing per file.** Each file is the previous one plus exactly one edit, saved under
   a new name. Then a diff between neighbours shows only what that edit changed.
 - **Only your own content.** No samples, presets, clips or devices from Live's Core Library or
-  Packs. Audio comes from your own recording or from Suhina itself (see step 08).
+  Packs. Audio comes from your own recording or from Loopwerk itself (see step 08).
 - **Don't click around.** Live also saves view state (selected track, scroll position, open
   panels). Every extra click adds noise to the diff. Make the edit, save, move on.
 - **Record what you did.** Fill in the log table at the end (copy it to `corpus/als/README.md`).
@@ -28,7 +28,7 @@ made by you, in your own copy of Live, from scratch.
 ## Setup
 
 1. Note your Live version and edition (Help › About Live, e.g. "Live 12.2.5 Suite") and your OS.
-2. Create the folder `corpus/als/` in your Suhina checkout. It is gitignored; nothing here is
+2. Create the folder `corpus/als/` in your Loopwerk checkout. It is gitignored; nothing here is
    committed.
 3. Start from a new Live Set (File › New Live Set).
 
@@ -62,10 +62,10 @@ share one `Samples/` folder.
 
 ## Series 2: audio
 
-Make the audio file with Suhina so its origin is clean:
+Make the audio file with Loopwerk so its origin is clean:
 
 ```sh
-cargo run -p suhina-cli -- render --demo -o corpus/als/loopwerk-demo.wav
+cargo run -p loopwerk-cli -- render --demo -o corpus/als/loopwerk-demo.wav
 ```
 
 Continue from the last file of series 1 and use an audio track that has no clips yet.
@@ -116,8 +116,8 @@ sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 ## Series 6: built-in devices
 
 Teaches the importer how Live stores the parameters of its own devices, so they can be mapped
-onto Suhina's devices (ROADMAP › Built-in devices, step 1), and gives a bounce of each
-setting to compare Suhina's sound with. It works differently from series 1–4 in three ways:
+onto Loopwerk's devices (ROADMAP › Built-in devices, step 1), and gives a bounce of each
+setting to compare Loopwerk's sound with. It works differently from series 1–4 in three ways:
 
 - **Its own project:** `corpus/devices/`, so device files do not mix with the format series.
 - **Every file starts from the device's default file,** not from the previous file. Then a
@@ -339,8 +339,8 @@ Date:
 
 ### Test
 
-`cargo test -p suhina-als --features corpus` also reads the device series and checks that
-each Utility file imports as the Suhina utility with the values the file holds. It finds the
+`cargo test -p loopwerk-als --features corpus` also reads the device series and checks that
+each Utility file imports as the Loopwerk utility with the values the file holds. It finds the
 files in whichever project folder under `corpus/devices/` holds them.
 
 ### Extract and diff a device file
@@ -356,7 +356,7 @@ git diff --no-index "$P/110-utility-default.als.xml" "$P/111-utility-gain-minus1
 Teaches the importer how Live stores automation: arrangement envelopes on the mixer, on device
 parameters and on the tempo, their breakpoints and curves, the state when a control has been
 moved by hand over its automation, and envelopes inside session clips. The arrangement files
-also get a bounce, so Suhina's render of the same automation can be compared with Live's.
+also get a bounce, so Loopwerk's render of the same automation can be compared with Live's.
 
 Like series 1–4, **each file is the previous one plus one edit**: automation is built up step
 by step, and a diff between neighbours shows one change.
@@ -418,7 +418,7 @@ point.
 ## Series 8: Max devices
 
 Teaches the importer how a Live Set refers to a Max for Live device: the file reference, the
-stored parameter values, and what Collect All and Save does with the device file. Suhina will
+stored parameter values, and what Collect All and Save does with the device file. Loopwerk will
 never run these devices; it keeps them so a project loses nothing
 ([ADR 0008](../decisions/0008-patch-devices.md)). Needs Live Suite (or Max for Live).
 
@@ -438,12 +438,12 @@ empty templates.
 |---|---|---|
 | 400 | `400-base.als` | No edit. |
 | 401 | `401-max-audio-effect.als` | Browser › Max for Live › Max Audio Effect (the empty template) onto the audio track. Do not open the editor. |
-| 402 | `402-edited-device.als` | Click the device's Edit button. In Max, put a `*~ 0.5` between `plugin~` and `plugout~` (both channels), save the device as `corpus/max/devices/suhina-half.amxd`, close Max. Log what Live asked. |
+| 402 | `402-edited-device.als` | Click the device's Edit button. In Max, put a `*~ 0.5` between `plugin~` and `plugout~` (both channels), save the device as `corpus/max/devices/loopwerk-half.amxd`, close Max. Log what Live asked. |
 | 403 | `403-device-parameter.als` | Edit again: add a `live.dial` named `Amount` (range 0–1) feeding the `*~` right inlets, save the device, close Max. On the device in Live, type `0.25` into Amount. |
 | 404 | `404-collect-all.als` | File › Collect All and Save (include everything Live offers), then Save As this name. Log which files Live copied, and where. |
 | 405 | `405-moved-original.als` | Close Live. Rename `corpus/max/devices/` to `devices-moved/`. Open `404-collect-all.als`, check the device still loads (log it), Save As this name. Rename the folder back. |
 | 406 | `406-max-midi-effect.als` | Add a MIDI track, put Browser › Max for Live › Max MIDI Effect (empty template) on it. |
-| 407 | `407-device-off.als` | Turn the `suhina-half` device off with its activator. |
+| 407 | `407-device-off.als` | Turn the `loopwerk-half` device off with its activator. |
 
 ### Log
 
@@ -479,7 +479,7 @@ leaves fades at 0 and `als-format.md` lists them as an open question.
 
 Bounce `501` and `502` (File › Export Audio/Video, the arrangement from bar 1 for the clip's
 length, 48 kHz, 32-bit float, no normalising, no dither) as `501-bounce.wav` and
-`502-bounce.wav`: comparing them with Suhina's render shows the curve's shape.
+`502-bounce.wav`: comparing them with Loopwerk's render shows the curve's shape.
 
 ### Log
 

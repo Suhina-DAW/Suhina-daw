@@ -16,7 +16,7 @@ const HEIGHT: f32 = 380.0;
 const SAVE_WIDTH: f32 = 420.0;
 const LINE: f32 = 20.0;
 const BUTTON: Vec2 = Vec2::new(96.0, 18.0);
-/// The extension Suhina's own projects are saved with.
+/// The extension Loopwerk's own projects are saved with.
 const LOCR: &str = "locr";
 
 /// What the project dialog keeps between frames.
@@ -322,7 +322,7 @@ fn stem(path: &Path) -> String {
 fn kind(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("als") => "Live Set".into(),
-        _ => "Suhina project".into(),
+        _ => "Loopwerk project".into(),
     }
 }
 

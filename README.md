@@ -1,14 +1,14 @@
-# Suhina
+# Loopwerk
 
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
-> **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (MIDI as sine tones for
+> **Status:** pre-alpha. Loopwerk opens Live Sets, plays and renders them (MIDI as sine tones for
 > now, audio clips with real-time time-stretching), and lets agents edit them over MCP. The
 > desktop app shows the Session view so far. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
 
-Suhina is an independent clean-room project. It is not affiliated with, sponsored by or
+Loopwerk is an independent clean-room project. It is not affiliated with, sponsored by or
 endorsed by Ableton AG. Ableton and Live are trademarks of Ableton AG, named here only to describe
-comparable workflows and file compatibility. Suhina contains no code or content from Ableton
+comparable workflows and file compatibility. Loopwerk contains no code or content from Ableton
 products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Goals
@@ -17,12 +17,12 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 - Session-style clip launching with quantisation, plus a linear arrangement.
 - Reading `.als` projects you made yourself; later other formats such as DAWproject and `.flp`,
   so projects are not locked to one program.
-- CLAP and VST3 plug-in hosting, sandboxed outside Suhina's process: a crashing plug-in never takes the project down.
+- CLAP and VST3 plug-in hosting, sandboxed outside Loopwerk's process: a crashing plug-in never takes the project down.
 - Every action available headlessly: CLI and MCP for automation and agents.
 
 ## Downloads
 
-Tagged versions build the headless command-line tool `suhina-cli` for Linux (x86_64), Windows
+Tagged versions build the headless command-line tool `loopwerk-cli` for Linux (x86_64), Windows
 (x64) and macOS (universal) and attach them to a GitHub Release. The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
@@ -32,35 +32,35 @@ How a release is made: [`docs/releasing.md`](docs/releasing.md).
 ```sh
 # Open a Live Set in the desktop app and launch its clips and scenes with the mouse; the
 # plug-in host is built first, since the app runs plug-ins in it (scan in Settings › Plug-ins)
-cargo build --release -p suhina-plugin-host
-cargo run --release -p suhina -- path/to/set.als
+cargo build --release -p loopwerk-plugin-host
+cargo run --release -p loopwerk -- path/to/set.als
 
 # Play a Live Set on the default audio device (release builds play heavy sets smoothly)
-cargo run --release -p suhina-cli -- play path/to/set.als
+cargo run --release -p loopwerk-cli -- play path/to/set.als
 
 # Play one launcher scene instead of the arrangement
-cargo run --release -p suhina-cli -- play path/to/set.als --scene 2
+cargo run --release -p loopwerk-cli -- play path/to/set.als --scene 2
 
 # Launch clips and scenes by typing commands (see below)
-cargo run --release -p suhina-cli -- play path/to/set.als --launcher
+cargo run --release -p loopwerk-cli -- play path/to/set.als --launcher
 
 # Render to a 32-bit float WAV
-cargo run --release -p suhina-cli -- render path/to/set.als -o out.wav
+cargo run --release -p loopwerk-cli -- render path/to/set.als -o out.wav
 
 # Play every MIDI track on the built-in FM synth, with voice 3 of a DX7 bank (.syx)
-cargo run --release -p suhina-cli -- play --demo --fm --voices path/to/bank.syx --voice 3
+cargo run --release -p loopwerk-cli -- play --demo --fm --voices path/to/bank.syx --voice 3
 
 # List the voices in a DX7 voice or bank file
-cargo run --release -p suhina-cli -- fm-synth voices path/to/bank.syx
+cargo run --release -p loopwerk-cli -- fm-synth voices path/to/bank.syx
 
 # Serve the Model Context Protocol for agents (see docs/mcp.md)
-cargo run --release -p suhina-cli -- mcp --read-root path/to/projects --write-root path/to/renders
+cargo run --release -p loopwerk-cli -- mcp --read-root path/to/projects --write-root path/to/renders
 ```
 
 `--demo` instead of a file uses a small built-in project. `--fm` works with `play` and `render`,
 for the demo or any set; without `--voices` the synth plays its initial voice, a plain sine.
 
-With `--launcher` the set starts stopped and Suhina reads one command per line:
+With `--launcher` the set starts stopped and Loopwerk reads one command per line:
 
 | Type | Does |
 |---|---|
@@ -88,8 +88,8 @@ must be installed before building:
 | Fedora, RHEL | `alsa-lib-devel pkgconf-pkg-config` |
 | Arch, Manjaro, EndeavourOS | `alsa-lib pkgconf` |
 
-Building the whole workspace also builds `suhina-plugin-host`, the program the desktop app
-runs plug-ins in; it has to sit next to `suhina`:
+Building the whole workspace also builds `loopwerk-plugin-host`, the program the desktop app
+runs plug-ins in; it has to sit next to `loopwerk`:
 
 ```sh
 cargo build --release
@@ -116,5 +116,5 @@ cargo test --workspace
 
 ## License
 
-Suhina is free software, licensed under the [GNU General Public License v3.0 or later](LICENSE).
+Loopwerk is free software, licensed under the [GNU General Public License v3.0 or later](LICENSE).
 Contributions are licensed the same way.

@@ -1,6 +1,6 @@
 //! Group buses: a group with devices processes the sum of the tracks routed into it.
 
-use suhina_model::*;
+use loopwerk_model::*;
 
 use crate::chain_tests::{SR, blocks, device, left, max_diff, note, peak};
 use crate::{Renderer, render_offline};

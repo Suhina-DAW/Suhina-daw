@@ -1,5 +1,5 @@
 //! The fast paths of a scan: VST3 bundles that describe themselves in `moduleinfo.json` are read
-//! without loading anything, and the rest go to a few long-lived `suhina-plugin-host
+//! without loading anything, and the rest go to a few long-lived `loopwerk-plugin-host
 //! --scan-worker` processes that each read file after file. A worker that crashes or hangs on a
 //! file is ended, the file is marked failed with the reason, and a fresh worker takes the rest.
 //!
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn module_info_is_read_from_a_bundle() {
-        let dir = std::env::temp_dir().join(format!("suhina-moduleinfo-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-moduleinfo-{}", std::process::id()));
         let bundle = dir.join("Thing.vst3");
         let resources = bundle.join("Contents").join("Resources");
         let _ = std::fs::create_dir_all(&resources);

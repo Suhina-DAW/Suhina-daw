@@ -1,7 +1,7 @@
 # Contributing
 
 - **Language:** Rust only.
-- **Licence:** Suhina is GPL-3.0-or-later (`LICENSE`, `NOTICE`), and contributions are
+- **Licence:** Loopwerk is GPL-3.0-or-later (`LICENSE`, `NOTICE`), and contributions are
   licensed the same way. Dependencies and bundled libraries must be GPLv3-compatible (MIT,
   Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0); GPL-2.0-only and proprietary or
   non-commercial licences are not.
@@ -23,7 +23,7 @@
 
 ## Clean-room
 
-Suhina reimplements the *behaviour* of commercial DAWs, Ableton Live in particular, without
+Loopwerk reimplements the *behaviour* of commercial DAWs, Ableton Live in particular, without
 using any of their code or content. This rule outranks feature work: one contaminated change can
 force a rewrite of everything built on it, so it is not something we clean up later.
 
@@ -54,15 +54,15 @@ force a rewrite of everything built on it, so it is not something we clean up la
   typefaces or the look of its controls. Familiar workflow and the structure of the window (which
   region is where, what a view shows, how it reacts, its shortcuts and menu structure) are
   allowed; [`docs/design/brief.md`](docs/design/brief.md) lists what stays familiar and what
-  must be Suhina's own. Screenshots of a proprietary product may be used as a reference for
+  must be Loopwerk's own. Screenshots of a proprietary product may be used as a reference for
   structure and behaviour, by people and by design tools, but the look drawn from them must follow
   the brief, not the screenshot; they are never traced or committed, and nothing in them (icons,
   artwork, text) is reused ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md)).
-- Using the Ableton or Live names, logos or trade dress for Suhina itself.
+- Using the Ableton or Live names, logos or trade dress for Loopwerk itself.
 
 **How we work:** findings go into prose specs under `docs/spec/` (your own words, no code from
 the product). Implementation is written from those specs. AI agents follow the same rules: an
-agent that writes Suhina code must never be given decompiled or leaked material.
+agent that writes Loopwerk code must never be given decompiled or leaked material.
 
 If you are unsure whether a source is allowed, ask in an issue before using it.
 
@@ -76,14 +76,14 @@ Signed-off-by: Your Name <you@example.com>
 
 `git commit -s` adds it. By signing off you certify the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/): that you wrote the
-change or have the right to submit it under the project's licence. For Suhina this includes
+change or have the right to submit it under the project's licence. For Loopwerk this includes
 the clean-room rules above: the change does not come from disassembled, decompiled or leaked
 material, from notes based on such material, or from content of a proprietary product, and no
 agent that wrote it was given such material. CI checks the sign-off on pull requests from forks.
 
 ## Reporting a rights problem
 
-If you believe Suhina contains code, content or design that infringes your rights, or that a
+If you believe Loopwerk contains code, content or design that infringes your rights, or that a
 contribution broke the clean-room rules, see [`IP.md`](IP.md). Such reports are handled before
 any other work.
 
@@ -97,4 +97,4 @@ AI coding agents are welcome, under these rules:
   pull request; you answer review questions, not the agent.
 - **The clean-room rules apply to agents too.** Never give an agent decompiled, disassembled or
   leaked material, and never point it at proprietary binaries. An agent that has seen such
-  material must not write Suhina code.
+  material must not write Loopwerk code.

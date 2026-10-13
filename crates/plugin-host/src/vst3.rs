@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use suhina_ipc::Served;
-use suhina_plugins::ParamInfo;
-use suhina_plugins::scan::PluginInfo;
+use loopwerk_ipc::Served;
+use loopwerk_plugins::ParamInfo;
+use loopwerk_plugins::scan::PluginInfo;
 
 use crate::vst3_events::{BlockEvents, MidiMapping};
 use crate::vst3_params::{BlockChanges, Pending};
@@ -326,7 +326,7 @@ pub(crate) fn describe(spec: &str) -> Result<Vec<PluginInfo>, String> {
     let (module, _) = open(spec)?;
     let mut plugins: Vec<PluginInfo> = module.audio_classes()?.into_iter().map(|(_, info)| info).collect();
     if let Some(list) = module.compatibility() {
-        suhina_plugins::scan::apply_compatibility_text(&mut plugins, &list);
+        loopwerk_plugins::scan::apply_compatibility_text(&mut plugins, &list);
     }
     Ok(plugins)
 }
@@ -344,7 +344,7 @@ impl IHostApplicationTrait for HostApplication {
         // SAFETY: the plug-in passes a pointer to a String128 of its own to fill.
         let Some(name) = (unsafe { name.as_mut() }) else { return kInvalidArgument };
         name.fill(0);
-        for (slot, unit) in name.iter_mut().zip("Suhina".encode_utf16()) {
+        for (slot, unit) in name.iter_mut().zip("Loopwerk".encode_utf16()) {
             *slot = unit as TChar;
         }
         kResultOk
@@ -733,7 +733,7 @@ impl Vst3Plugin {
         let raw = stream.to_com_ptr::<IBStream>().ok_or("stream")?;
         // SAFETY: a live component reading from a live stream.
         let taken = ok(unsafe { self.component.setState(raw.as_ptr()) });
-        let parameters = suhina_plugins::vst2::program_values(data).map_or(0, |values| self.set_parameters(&values));
+        let parameters = loopwerk_plugins::vst2::program_values(data).map_or(0, |values| self.set_parameters(&values));
         if !taken && parameters == 0 {
             return Err("the plug-in did not take the state".into());
         }

@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-use suhina_model::{LaneData, Project, TimeSignature};
+use loopwerk_model::{LaneData, Project, TimeSignature};
 
 use crate::audio::{AudioEvent, AudioPool, Timing};
 use crate::chain::Chain;
@@ -220,7 +220,7 @@ struct PlanNote {
     frequency: f64,
     key: u8,
     velocity: f32,
-    track: suhina_model::TrackId,
+    track: loopwerk_model::TrackId,
     gain_left: f32,
     gain_right: f32,
     /// 0 for the output, or 1 + the index of the track's chain.
@@ -511,8 +511,8 @@ fn plan_clip(
     project: &Project,
     audio: &AudioPool,
     chains: &[Chain],
-    clip: &suhina_model::Clip,
-    track: suhina_model::TrackId,
+    clip: &loopwerk_model::Clip,
+    track: loopwerk_model::TrackId,
     frames_per_beat: f64,
     sample_rate: u32,
 ) -> Option<ClipPlan> {
@@ -552,7 +552,7 @@ fn plan_clip(
                 let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
                 // Placed at frame 0; a looping clip is given an endless length. Fades belong to
                 // arrangement clips; a launched clip has only the click guard.
-                let placed = suhina_model::Clip {
+                let placed = loopwerk_model::Clip {
                     start: 0.0,
                     length: if loop_range.is_some() { ENDLESS_BEATS } else { clip.length },
                     fade_in: 0.0,
@@ -566,9 +566,9 @@ fn plan_clip(
                 // Warped clips are time-stretched like arrangement clips; the stretch voice gets
                 // the region gain, the direct reader has it already.
                 let stretch_beats = if loop_range.is_some() { STRETCH_LOOP_BEATS } else { clip.length };
-                let stretch = (region.warped && region.stretch != suhina_model::StretchMode::Repitch)
+                let stretch = (region.warped && region.stretch != loopwerk_model::StretchMode::Repitch)
                     .then(|| {
-                        let stretched = suhina_model::Clip { length: stretch_beats, ..placed.clone() };
+                        let stretched = loopwerk_model::Clip { length: stretch_beats, ..placed.clone() };
                         StretchVoice::new(&stretched, region, data.clone(), tempo, sample_rate)
                     })
                     .flatten();
@@ -1009,7 +1009,7 @@ impl Renderer {
 mod tests {
     use std::sync::Arc;
 
-    use suhina_model::*;
+    use loopwerk_model::*;
 
     use super::*;
     use crate::{AudioData, render_launches};
@@ -1080,7 +1080,7 @@ mod tests {
                 })
                 .collect(),
             contents,
-            launcher: suhina_model::Launcher {
+            launcher: loopwerk_model::Launcher {
                 scenes: vec![Scene::default(); scenes],
                 columns: slots
                     .into_iter()

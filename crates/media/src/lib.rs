@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use suhina_engine::model::{LaneData, Project};
-pub use suhina_engine::{AudioData, AudioPool};
+use loopwerk_engine::model::{LaneData, Project};
+pub use loopwerk_engine::{AudioData, AudioPool};
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
@@ -73,7 +73,7 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
                             Ok(all) => done.extend(
                                 all.into_iter()
                                     .zip(0u16..)
-                                    .map(|(data, n)| (suhina_engine::model::stream_key(file, n), Ok(data))),
+                                    .map(|(data, n)| (loopwerk_engine::model::stream_key(file, n), Ok(data))),
                             ),
                             Err(e) => done.push((file.clone(), Err(failed(e)))),
                         }
@@ -155,10 +155,10 @@ pub fn decode_file(path: &Path) -> Result<AudioData, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suhina_engine::model::*;
+    use loopwerk_engine::model::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("suhina-media-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-media-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("set")).unwrap();
         dir

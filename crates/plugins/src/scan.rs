@@ -2,7 +2,7 @@
 //!
 //! [`standard_folders`] lists where each system keeps plug-ins; users can add folders of their
 //! own. [`Catalog::scan`] looks through the folders for plug-in files and reads each new or
-//! changed one in a `suhina-plugin-host --scan` process of its own, with a timeout, so a
+//! changed one in a `loopwerk-plugin-host --scan` process of its own, with a timeout, so a
 //! plug-in that crashes or hangs while loading costs its own entry, nothing else. The catalog
 //! keeps what it learned, keyed by path, modification time and size, so the next scan reads only
 //! what changed; files that failed stay listed with the reason and are not tried again until
@@ -18,7 +18,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 /// The line the host prints its scan result on; anything else a plug-in prints is ignored.
-pub const SCAN_MARKER: &str = "SUHINA-SCAN ";
+pub const SCAN_MARKER: &str = "LOOPWERK-SCAN ";
 /// Folder levels a scan goes down.
 const MAX_DEPTH: usize = 8;
 /// Plug-in files one scan looks at, at most.

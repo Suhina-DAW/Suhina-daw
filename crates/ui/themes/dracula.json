@@ -1,6 +1,6 @@
 {
   "name": "Dracula",
-  "description": "The Dracula palette (MIT, draculatheme.com), mapped onto Suhina's tokens.",
+  "description": "The Dracula palette (MIT, draculatheme.com), mapped onto Loopwerk's tokens.",
   "colors": {
     "window.background": "#191A21",
     "panel.background": "#21222C",

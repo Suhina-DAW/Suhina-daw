@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use suhina_device_api::NoteEvent;
-use suhina_model::*;
+use loopwerk_device_api::NoteEvent;
+use loopwerk_model::*;
 
 use crate::chain_tests::{BEAT, SR, blocks, device, left, max_diff, note, peak, project};
 use crate::{

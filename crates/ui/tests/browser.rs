@@ -9,16 +9,16 @@ use std::time::{Duration, Instant};
 use egui::{Key, Modifiers, Pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use suhina_engine::model::{ChannelId, LaneData};
-use suhina_library::Library;
-use suhina_session::Session;
-use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use loopwerk_engine::model::{ChannelId, LaneData};
+use loopwerk_library::Library;
+use loopwerk_session::Session;
+use loopwerk_ui::demo::demo_project;
+use loopwerk_ui::{App, theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("suhina-browser-ui-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("loopwerk-browser-ui-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -338,7 +338,7 @@ fn a_folder_is_added_from_the_sidebar_and_the_panel_moves_to_the_right() {
     let left = harness.get_by_label("Place Pinned").rect().center().x;
     assert!(left < SIZE.0 / 2.0);
     let mut settings_now = harness.state().settings().clone();
-    settings_now.browser_side = suhina_ui::settings::Side::Right;
+    settings_now.browser_side = loopwerk_ui::settings::Side::Right;
     let ctx = harness.ctx.clone();
     harness.state_mut().set_settings(&ctx, settings_now);
     harness.run();
@@ -349,7 +349,7 @@ fn a_folder_is_added_from_the_sidebar_and_the_panel_moves_to_the_right() {
 }
 
 /// Renders the window with the browser open to `target/ui-snapshots/browser.png`, for looking
-/// at: `cargo test -p suhina-ui --test browser -- --ignored`.
+/// at: `cargo test -p loopwerk-ui --test browser -- --ignored`.
 #[test]
 #[ignore = "needs a GPU adapter; run with --ignored"]
 fn render_the_browser() {

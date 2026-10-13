@@ -9,8 +9,8 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+use loopwerk_engine::AudioData;
 use serde_json::Value;
-use suhina_engine::AudioData;
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
@@ -219,7 +219,7 @@ pub struct DeviceSetting {
     pub params: Vec<(&'static str, f64)>,
 }
 
-/// The file's mastering settings as Suhina's compressor and limiter, in that order; settings
+/// The file's mastering settings as Loopwerk's compressor and limiter, in that order; settings
 /// the file does not have are left out. Missing values take the devices' defaults.
 /// `docs/spec/stems-format.md` › Mastering gives the mapping.
 pub fn mastering_devices(info: &StemsInfo) -> Vec<DeviceSetting> {

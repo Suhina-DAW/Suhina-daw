@@ -13,12 +13,12 @@
 //! output is the input exactly, delayed by the oversampler's [`LATENCY`] frames (reported to the
 //! host for compensation, whatever the settings).
 
-use suhina_device_api::{
+use loopwerk_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use suhina_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
-use suhina_dsp::shape::Curve;
-use suhina_dsp::{Biquad, Coefficients, DcBlocker, Oversampler2x, Smoother};
+use loopwerk_dsp::gain::{SILENCE_DB, db_to_gain_or_silence};
+use loopwerk_dsp::shape::Curve;
+use loopwerk_dsp::{Biquad, Coefficients, DcBlocker, Oversampler2x, Smoother};
 
 /// Delay the device adds, in frames.
 pub const LATENCY: u32 = Oversampler2x::LATENCY;

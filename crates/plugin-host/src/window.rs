@@ -7,7 +7,7 @@
 //! (ADR 0006).
 //!
 //! An editor's window is owned by the engine's window when the engine names it
-//! ([`set_owner`]): it floats above Suhina, has no taskbar entry of its own and is minimised
+//! ([`set_owner`]): it floats above Loopwerk, has no taskbar entry of its own and is minimised
 //! with it (Win32 owner window; X11 `WM_TRANSIENT_FOR`).
 
 use std::cell::Cell;
@@ -116,7 +116,7 @@ mod imp {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    const CLASS: &str = "SuhinaPluginEditor";
+    const CLASS: &str = "LoopwerkPluginEditor";
 
     unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         let id = WindowId(hwnd as usize);
@@ -191,7 +191,7 @@ mod imp {
             // SAFETY: as in `register`.
             let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
             // The engine's window, if it still is one: the editor's is owned by it (not a child
-            // of it), so it floats above Suhina and goes with it.
+            // of it), so it floats above Loopwerk and goes with it.
             let owner = super::owner()
                 .and_then(|o| usize::try_from(o).ok())
                 .map(|o| o as HWND)
@@ -414,7 +414,7 @@ mod imp {
                         window,
                         AtomEnum::WM_CLASS,
                         AtomEnum::STRING,
-                        b"suhina-plugin-editor\0Suhina\0",
+                        b"loopwerk-plugin-editor\0Loopwerk\0",
                     )
                     .map_err(error)?;
                 if let Some(owner) = super::owner().and_then(|o| u32::try_from(o).ok()) {

@@ -43,7 +43,7 @@ pub(crate) fn unique_dir(name: &str) -> PathBuf {
     static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    std::env::temp_dir().join(format!("suhina-soundmap-{name}-{}-{nanos}-{n}", std::process::id()))
+    std::env::temp_dir().join(format!("loopwerk-soundmap-{name}-{}-{nanos}-{n}", std::process::id()))
 }
 
 impl Drop for Library {

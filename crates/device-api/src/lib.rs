@@ -1,4 +1,4 @@
-//! The interface between Suhina's built-in devices and whatever runs them (ADR 0004).
+//! The interface between Loopwerk's built-in devices and whatever runs them (ADR 0004).
 //!
 //! A device describes itself with a static [`DeviceInfo`]: a stable id, a name and its
 //! parameters ([`ParamInfo`]). The host prepares it off the audio thread, then calls
@@ -10,7 +10,7 @@
 //! Instruments also take notes: the host hands them [`NoteEvent`]s through [`Device::event`]
 //! between blocks, splitting a block where an event falls, as it does for automation.
 //!
-//! This crate depends on nothing in Suhina, so devices can be built, tested and later shipped
+//! This crate depends on nothing in Loopwerk, so devices can be built, tested and later shipped
 //! as plug-ins without the engine.
 
 pub mod conformance;

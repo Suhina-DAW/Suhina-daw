@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn a_wav_files_acid_chunk_gives_tempo_and_root() {
-        let dir = std::env::temp_dir().join(format!("suhina-info-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-info-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = wav_with_chunks(&dir, "loop.wav", &acid(2, 57, 97.0));
         let info = sample_info(&path).unwrap();
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn a_file_that_is_not_audio_is_an_error() {
-        let dir = std::env::temp_dir().join(format!("suhina-info-bad-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-info-bad-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("noise.wav");
         std::fs::write(&path, b"RIFF\x04\x00\x00\x00WAVE").unwrap();

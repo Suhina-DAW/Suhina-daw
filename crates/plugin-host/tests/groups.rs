@@ -1,4 +1,4 @@
-//! Several plug-in instances in one `suhina-plugin-host` process (ADR 0006, decision 2):
+//! Several plug-in instances in one `loopwerk-plugin-host` process (ADR 0006, decision 2):
 //! instances in one group share a process, each with its own audio and state; a crash or hang
 //! takes the group's process, and restarts bring every instance back into one new process.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use suhina_ipc::Outcome;
-use suhina_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio};
+use loopwerk_ipc::Outcome;
+use loopwerk_plugins::{HUNG_AFTER, Health, Launch, Plugin, PluginAudio};
 
 const FRAMES: usize = 64;
 const DEADLINE: Duration = Duration::from_millis(2);
@@ -15,7 +15,7 @@ const PATIENT: Duration = Duration::from_secs(5);
 
 fn launch(plugin: &str, group: Option<&str>) -> Launch {
     Launch {
-        host: PathBuf::from(env!("CARGO_BIN_EXE_suhina-plugin-host")),
+        host: PathBuf::from(env!("CARGO_BIN_EXE_loopwerk-plugin-host")),
         plugin: plugin.into(),
         channels: 2,
         max_frames: FRAMES as u32,

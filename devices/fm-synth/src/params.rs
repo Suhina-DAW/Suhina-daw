@@ -2,7 +2,7 @@
 //! the order a voice stores them, then performance settings (bend, portamento, what the
 //! wheels and pedals do, volume).
 
-use suhina_device_api::{ParamInfo, Scale, Unit};
+use loopwerk_device_api::{ParamInfo, Scale, Unit};
 
 pub const OP_PARAMS: usize = 22;
 /// Index of the first global voice parameter.

@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 
 use egui::{Rect, Ui};
+use loopwerk_session::Projects;
+use loopwerk_soundmap::Map;
+use loopwerk_soundmap::grid::Grid;
 use serde_json::json;
-use suhina_session::Projects;
-use suhina_soundmap::Map;
-use suhina_soundmap::grid::Grid;
 
 use crate::browser::{BrowserState, Place, ResultsMode};
 use crate::drop::{BrowserItem, ItemKind};
@@ -76,7 +76,7 @@ fn files_in_use(projects: &Projects) -> HashSet<PathBuf> {
     let mut out = HashSet::new();
     for content in &session.project().contents {
         for lane in &content.lanes {
-            let suhina_engine::model::LaneData::Audio(region) = &lane.data else { continue };
+            let loopwerk_engine::model::LaneData::Audio(region) = &lane.data else { continue };
             if let Some(absolute) = &region.absolute_file {
                 out.insert(PathBuf::from(absolute));
             }
@@ -131,7 +131,7 @@ impl Panel {
             }
             return;
         }
-        let Ok(files) = suhina_session::scope_files(projects, place.as_deref()) else { return };
+        let Ok(files) = loopwerk_session::scope_files(projects, place.as_deref()) else { return };
         let prepared = projects.sound_map_mut().prepare(&files, settings.map_max_seconds as f32);
         let key = ScopeKey { place, max_seconds: settings.map_max_seconds, layout_key: prepared.key() };
         self.last_layout = now;
@@ -180,7 +180,7 @@ impl Panel {
         if self.flags_key.as_deref() == Some(key.as_str()) && self.points.len() == map.points.len() {
             return;
         }
-        let words = suhina_library::words(&state.search);
+        let words = loopwerk_library::words(&state.search);
         let in_use = files_in_use(projects);
         let library = projects.file_library_mut();
         self.points = map
@@ -190,7 +190,7 @@ impl Panel {
                 let path_key = p.path.display().to_string();
                 let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let tags = library.item_tags(&path_key);
-                let text_matches = words.is_empty() || suhina_library::rank(&words, &name, &path_key).is_some();
+                let text_matches = words.is_empty() || loopwerk_library::rank(&words, &name, &path_key).is_some();
                 let tag_matches = state.tag_filter.is_empty() || tags.iter().any(|t| state.tag_filter.contains(t));
                 let folder = p.path.parent().map(|f| f.display().to_string()).unwrap_or_default();
                 MapPoint {
@@ -375,11 +375,11 @@ fn preview(state: &mut BrowserState, projects: &mut Projects, path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suhina_session::{Session, blank_project};
+    use loopwerk_session::{Session, blank_project};
 
     fn temp(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        let dir = std::env::temp_dir().join(format!("suhina-map-panel-{name}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("loopwerk-map-panel-{name}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -411,7 +411,7 @@ mod tests {
         }
         wav(&samples.join("long kick.wav"), 55.0, 3.0);
         let mut projects = Projects::new();
-        projects.set_file_library(suhina_library::Library::new(Some(settings.clone())));
+        projects.set_file_library(loopwerk_library::Library::new(Some(settings.clone())));
         projects.add(Session::new(blank_project()), None).unwrap();
         projects.execute("library.addFolder", &json!({ "folder": samples.display().to_string() })).unwrap();
         projects.start_sound_map();
@@ -449,7 +449,7 @@ mod tests {
         assert!(panel.status().starts_with("16 samples"), "{}", panel.status());
         assert_eq!(panel.points.len(), 16);
         let kick = panel.points.iter().position(|p| p.name == "kick 0.wav").unwrap();
-        assert_eq!(panel.points[kick].kind, suhina_soundmap::kinds::Kind::Kick);
+        assert_eq!(panel.points[kick].kind, loopwerk_soundmap::kinds::Kind::Kick);
 
         // Selecting on the map selects in the browser; the search dims what does not match.
         panel.handle(MapEvent::Select { items: vec![kick], add: false }, &mut state, &mut projects, &mut settings);

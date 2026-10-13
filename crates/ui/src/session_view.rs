@@ -3,8 +3,8 @@
 //! It draws a [`Grid`] and turns clicks into [`Action`]s; it never changes the project itself.
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
+use loopwerk_engine::model::TrackId;
 use serde_json::json;
-use suhina_engine::model::TrackId;
 
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
@@ -53,7 +53,7 @@ fn lane(color: Color32, muted: bool) -> Color32 {
     if muted { color.gamma_multiply(MUTED_ALPHA) } else { color }
 }
 
-fn rgb(color: suhina_engine::model::Rgb) -> Color32 {
+fn rgb(color: loopwerk_engine::model::Rgb) -> Color32 {
     Color32::from_rgb(color.0, color.1, color.2)
 }
 

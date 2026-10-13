@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use suhina_engine::{AudioData, AudioPool};
+use loopwerk_engine::{AudioData, AudioPool};
 
 /// Frames summarised by one bucket.
 pub const FRAMES_PER_BUCKET: usize = 256;

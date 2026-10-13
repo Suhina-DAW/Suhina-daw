@@ -1,5 +1,5 @@
 [package]
-name = "suhina-library"
+name = "loopwerk-library"
 description = "The browser's library: added folders, an index of their files kept up to date, pins, recent items and colour tags"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-suhina-media.workspace = true
+loopwerk-media.workspace = true
 serde_json.workspace = true
 notify-debouncer-full.workspace = true
 

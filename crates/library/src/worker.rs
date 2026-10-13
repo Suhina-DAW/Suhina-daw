@@ -117,7 +117,7 @@ pub(crate) fn spawn(
     inbox: Receiver<ToWorker>,
     own: Sender<ToWorker>,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new().name("suhina-library".into()).spawn(move || run(&to_library, &inbox, &own))?;
+    std::thread::Builder::new().name("loopwerk-library".into()).spawn(move || run(&to_library, &inbox, &own))?;
     Ok(())
 }
 

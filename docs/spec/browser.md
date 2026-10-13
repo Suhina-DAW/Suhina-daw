@@ -24,7 +24,7 @@ The panel at the side of the main window where samples, MIDI files, presets, bui
 instruments and effects and installed plug-ins are found, previewed and dragged into the
 project.
 
-- **Sources:** Suhina's own design. The structure is in [`ui-session-view.md`](ui-session-view.md)
+- **Sources:** Loopwerk's own design. The structure is in [`ui-session-view.md`](ui-session-view.md)
   › Window regions and the look in [`docs/design/brief.md`](../design/brief.md) (Browser row) and
   [`components.md`](../design/components.md) › Browser. The decisions below were made with the
   project owner on 2026-10-12; nothing here was observed in another program.
@@ -41,7 +41,7 @@ project.
   none at first.
 - **Place:** what the sidebar offers: Pinned, the Recent groups and the folders.
 - **Library:** the folders, the index of the files in them, the pins, the recent items and the
-  colour tags. It belongs to Suhina, not to a project (like the plug-in library).
+  colour tags. It belongs to Loopwerk, not to a project (like the plug-in library).
 
 ## Kinds of files
 
@@ -273,7 +273,7 @@ only items with that tag (several: items with any of them); clicking it again st
 
 ## Where it is kept
 
-`browser.json` in Suhina's settings folder (beside `settings.txt`): the folders, the pins,
+`browser.json` in Loopwerk's settings folder (beside `settings.txt`): the folders, the pins,
 the recent items by group, the tags and which items carry them, and the tag limit. A missing
 file is an empty library. A file that cannot be read, or parts of it (an unknown group, a tag
 without a name, a colour that is not `#RRGGBB`), are skipped with a warning; lists longer
@@ -341,7 +341,7 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
 
 ## Not decided yet
 
-- Presets of the other built-in devices and of plug-ins (a preset format of Suhina's own,
+- Presets of the other built-in devices and of plug-ins (a preset format of Loopwerk's own,
   CLAP preset discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.

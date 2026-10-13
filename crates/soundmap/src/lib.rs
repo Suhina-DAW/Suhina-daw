@@ -544,7 +544,7 @@ pub fn analyse_file(path: &Path, size: u64) -> Analysis {
     if size > MAX_FILE_BYTES {
         return Analysis::Failed(format!("larger than {} MiB", MAX_FILE_BYTES / 1024 / 1024));
     }
-    match suhina_media::decode_file(path) {
+    match loopwerk_media::decode_file(path) {
         Ok(audio) => {
             let seconds = audio.frames() as f32 / audio.sample_rate.max(1) as f32;
             match features::analyse(&audio.samples, audio.channels, audio.sample_rate) {
