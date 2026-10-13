@@ -83,7 +83,8 @@ jobs:
       - name: Links between repository files resolve
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --no-progress "**/*.md"
+          # Vendored third-party files keep their own docs, links included.
+          args: --offline --no-progress --exclude-path third_party "**/*.md"
           fail: true
 
   fmt:
