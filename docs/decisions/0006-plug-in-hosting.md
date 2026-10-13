@@ -98,7 +98,7 @@ workspace forbids.
      version 2); the host reads them into a list made beforehand, so neither side allocates.
      A VST3 host hands notes to `process` as an `IEventList` on event bus 0, and controllers
      and pitch bend as parameter changes at their frame through the plug-in's `IMidiMapping`
-     (asked for the first MIDI channel only: Serum 2 crashes when asked about the second); a
+     (asked for the first MIDI channel only: some plug-ins crash when asked about the second); a
      CLAP host sends note events to note port 0 and controllers and bend as MIDI messages, and
      gives a plug-in without audio inputs (an instrument) no input port. A parameter event
      (automation) reaches a VST3 processor as a parameter change at its frame and a CLAP plug-in
@@ -143,7 +143,7 @@ workspace forbids.
    the period Windows gives it, and the ring holds a device buffer and a block when the device
    takes more than a block at once. The session counts each plug-in's blocks and late blocks
    (`device.plugin`: `blocks`, `late_blocks`, `longest_us`, `no_time`), and the device panel
-   shows the share. Even so the sum of 25 plug-ins' times (Serum 2 up to 9 ms a block)
+   shows the share. Even so the sum of 25 plug-ins' times (a heavy synth up to 9 ms a block)
    passed the budget on half the blocks, so the chains no chain plays into now run their
    plug-ins *at the same time*, a stage at a time: every chain hands its block to its next
    plug-in (`Link::send_with_events`, `PluginProcessor::send`), then every chain waits for
@@ -173,7 +173,7 @@ workspace forbids.
    thread (connected through their connection points, the controller given the component's
    state; the host makes the messages and attribute lists they send each other,
    `IHostApplication::createInstance` in `crates/plugin-host/src/vst3_message.rs`, without which
-   iZotope's plug-ins crash as soon as they are connected and others when given a state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
+   some plug-ins crash as soon as they are connected and others when given a state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
    silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
@@ -194,13 +194,13 @@ workspace forbids.
    first nine bytes of the name in lower case; the name part is not compared, as a project keeps
    the name its host showed); the same name once build words (`x64`, `64bit`, `.64`) and a
    leading vendor name are set aside, or the name without its number when the installed
-   plug-in's version starts with that number (`Nexus 5` finds a VST3 named `Nexus` whose
+   plug-in's version starts with that number (`Synth 5` finds a VST3 named `Synth` whose
    version is 5.x and whose class id follows no convention); and last the nearest newer version
-   of the same name (`Serum` → `Serum 2`, `Pro-Q 2` → `Pro-Q 3`, and with the number inside
-   the name, `Ozone 8 Imager` → `Ozone 11 Imager`). Only the first three promise that the state carries over;
+   of the same name (`Synth` → `Synth 2`, `EQ 2` → `EQ 3`, and with the number inside
+   the name, `Suite 8 Imager` → `Suite 11 Imager`). Only the first three promise that the state carries over;
    for the last two the state is handed over and the plug-in decides, and the result says
    which (`keeps_state`). Vendors declare their own older builds rather than older products:
-   the Pro-Q 3 module declares the VST2 builds of Pro-Q 3, not Pro-Q 2, which is why the name
+   an `EQ 3` module declares the VST2 builds of `EQ 3`, not `EQ 2`, which is why the name
    steps exist.
 
    *Handing over the state.* The importer keeps a VST2 plug-in's state as the standard VST2
@@ -209,18 +209,18 @@ workspace forbids.
    state goes with the component's (`set_state` carries both, protocol version 2) and is
    restored after a restart. A plug-in that refuses the state runs with its defaults and the
    caller is told (`offline::render_with_state`, `suhina-cli plugin run-device`). Measured on
-   a real project: Valhalla VintageVerb and PSP VintageWarmer read their VST2 chunk banks
-   (the output changes with the saved settings); OTT takes a parameter bank (`FxBk`) in
-   `setState` without applying it. So the host also sets a parameter bank's current program as
+   a real project: two effects read their VST2 chunk banks (the output changes with the saved
+   settings); a third takes a parameter bank (`FxBk`) in `setState` without applying it. So the host also sets a parameter bank's current program as
    parameters, value `i` to parameter id `i`, the numbering a VST3 version keeps from its VST2
    one, but only when the plug-in has every id from 0 to the last value's: on the controller
    (`setParamNormalized`) and on the processor through the next block's parameter changes
-   (`crates/plugin-host/src/vst3_params.rs`). With that OTT plays with the project's settings.
-   Pro-Q 3 refuses Pro-Q 2's state and runs with its defaults. Sylenth1 (an instrument, VST2
-   to its VST3 by the id convention) plays a project's notes with its saved settings. Serum 2
-   refuses Serum 1's state in every form tried: the bank, a single program (`FPCh`, an `.fxp`
-   file's contents) and the bare chunk; it opens Serum 1 presets only from its own browser, so
-   a project's Serum plays with Serum 2's defaults until a way is found.
+   (`crates/plugin-host/src/vst3_params.rs`). With that the third plays with the project's settings.
+   A newer version of an EQ refuses its predecessor's state and runs with its defaults. An
+   instrument found by the id convention plays a project's notes with its saved settings. A
+   synth's second version refuses the first version's state in every form tried: the bank, a
+   single program (`FPCh`, an `.fxp` file's contents) and the bare chunk; it opens the first
+   version's presets only from its own browser, so such a project plays with the defaults
+   until a way is found.
 
    In a real project with 14 different VST2 plug-ins, 4 were found by the id
    convention, 1 by name and 3 as newer versions; the other 5 exist on that machine only as
@@ -235,7 +235,7 @@ workspace forbids.
    - Everything else goes to a few long-lived `suhina-plugin-host --scan-worker` processes
      (half the processor's threads, at most 4), each reading file after file. A worker that
      crashes or hangs on a file is ended, the file is marked failed with the reason, and a new
-     worker takes the rest. Shells (files with many plug-ins, such as Waves' WaveShell) go first
+     worker takes the rest. Shells (files with many plug-ins, such as a vendor's shell plug-in) go first
      and get 180 s, other files 30 s.
    - Measured on a Windows machine with 443 plug-in files: a process per file took 11.5 min and
      timed the shells out; this takes 86 s and finds every plug-in (733). Starting a process
@@ -279,7 +279,7 @@ workspace forbids.
     stopping it, run on threads of their own. A host whose window thread hangs can be ended
     like any other (decision 4). The host's main loop waits for its windows' messages
     (`MsgWaitForMultipleObjectsEx`, woken by the control messages' thread) rather than looking
-    every 10 ms, which made editors such as Pro-Q 4 lag; on X11 it looks every millisecond while
+    every 10 ms, which made some editors lag; on X11 it looks every millisecond while
     an editor is open.
     *Linux:* the desktop app opens its window as an X11 one whenever an X server is there
     (`DISPLAY` is set: the desktop's own X11, or XWayland, which every distribution's Wayland
@@ -288,16 +288,15 @@ workspace forbids.
     window is a Wayland one and editors open in windows of their own, unowned.
     *Built on Windows:* the host's main thread initialises OLE first (`OleInitialize`, and
     so COM, apartment threaded), as a host's window thread is expected to: editors use it for
-    drag and drop, the clipboard and text services, and Serum 2 and Z3TA+ 2 crashed inside
-    `attached` without it (a null object from a COM call), found with the host under `cdb`
-    (`crates/plugin-host/tests/manual.rs` opens one installed plug-in's editor by hand, with
-    any program standing in for the host). The host opens a top-level window of its own on
+    drag and drop, the clipboard and text services, and some failed to open in `attached`
+    without it (`crates/plugin-host/tests/manual.rs` opens one installed plug-in's editor by
+    hand). The host opens a top-level window of its own on
     its main thread (`crates/plugin-host/src/window.rs`, Win32), or for an embedded editor a
     clip and a view window as children of Suhina's, and attaches the plug-in's view to it (VST3 `IPlugView`
     with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps its
     messages in the main loop between control messages, and tells the engine unasked when the
     user closes it (`editor_closed`, protocol version 4) or the plug-in resizes it
-    (`editor_resized`, version 7). Checked with Valhalla VintageVerb and Pro-Q 3 (VST3); no
+    (`editor_resized`, version 7). Checked with two VST3 effects; no
     CLAP plug-in with an editor was at hand.
     *Built on Linux (X11):* the host's window comes from `x11rb` (an embedded editor's clip and
     view are children of Suhina's window id), the plug-in's view is embedded by window id

@@ -158,7 +158,7 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
 ## Commands
 
 Every user-visible action is a command in `session` with an id, typed parameters and a kind
-([ADR 0002](decisions/0002-commands.md)). The CLI, the MCP server and later the UI all call
+([ADR 0002](decisions/0002-commands.md)). The CLI, the MCP server and the UI all call
 `Session::execute(id, params)`, or `Projects::execute` when several projects are open (it runs
 `projects.*` itself and passes everything else to the active project); none of them changes a
 project directly.

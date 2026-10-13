@@ -4,13 +4,16 @@ An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ablet
 
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
 
-> **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (MIDI as sine tones for
-> now, audio clips with real-time time-stretching), and lets agents edit them over MCP. The
-> desktop app shows the Session view so far. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
+> **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (audio clips with
+> real-time time-stretching, MIDI through the built-in FM synth, sandboxed CLAP and VST3 plug-ins,
+> or sine tones), and lets agents edit them over MCP. The desktop app has the Session and
+> Arrangement views, a browser with a sample map, and settings. See [`ROADMAP.md`](ROADMAP.md) for what works and what comes next.
 
 Suhina is an independent clean-room project. It is not affiliated with, sponsored by or
-endorsed by Ableton AG. Ableton and Live are trademarks of Ableton AG, named here only to describe
-comparable workflows and file compatibility. Suhina contains no code or content from Ableton
+endorsed by Ableton AG or any other company named here. Ableton and Live are trademarks of Ableton AG. VST is a registered trademark and ASIO a
+trademark of Steinberg Media Technologies GmbH. DX7 is a trademark of Yamaha Corporation. Stems
+and NKS are trademarks of Native Instruments. Other product names are trademarks of their
+owners. They are named only to describe file compatibility and comparable workflows. Suhina contains no code or content from Ableton
 products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Goals
@@ -131,8 +134,8 @@ trademark of Steinberg Media Technologies GmbH.
 | [`docs/architecture.md`](docs/architecture.md) | How the parts fit: layers, data flow, threads, commands, where new code goes |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Clean-room rules, licences, sign-off (DCO), AI-assisted contributions |
 | [`IP.md`](IP.md) | Reporting a rights or clean-room problem, and how material is removed |
-| [`docs/decisions/`](docs/decisions/) | Architecture decisions: the DAW-neutral model, commands, time-stretching |
-| [`docs/spec/`](docs/spec/) | The Live Set format as observed, and how to author test sets |
+| [`docs/decisions/`](docs/decisions/) | Architecture decisions: the model, commands, time-stretching, devices, plug-in hosting, project files and more |
+| [`docs/spec/`](docs/spec/) | Clean-room specs: file formats (Live Sets, stems, NKS, DX7 voices, `.locr`) and behaviour (clip launching, editing, the browser, the views) |
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 
 ## Community

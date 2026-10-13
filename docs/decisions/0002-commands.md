@@ -20,7 +20,7 @@ Suhina will be driven from several places: the CLI, an MCP server for agents, la
 MIDI controllers. If each of them changed the project in its own way, they would drift apart,
 undo would only work in some of them, and an agent could not do everything a person can.
 
-PhotoCraft (MIT/Apache-2.0) solves the same problem with a command registry: every menu item,
+[PhotoCraft](https://github.com/storytold/photocraft) (MIT/Apache-2.0) solves the same problem with a command registry: every menu item,
 tool and dialog is a command with an id, a parameter description and a `run` function, and the
 UI, CLI, control channel and MCP server all dispatch commands by id. We take the idea, not code.
 

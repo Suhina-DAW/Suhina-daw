@@ -14,7 +14,7 @@ covers:
 
 `suhina-cli mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) on
 stdin/stdout (the official `rmcp` SDK), so an agent can open, inspect, edit and render projects.
-It follows the same conventions as PhotoCraft's MCP server.
+It follows the same conventions as [PhotoCraft](https://github.com/storytold/photocraft)'s MCP server.
 
 ```sh
 suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]

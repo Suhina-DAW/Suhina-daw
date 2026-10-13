@@ -97,7 +97,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    2026-10-11: timestretch first, Rubber Band later). Its keylock profile, used within 20 % of
    the file's speed, sounded harsh on larger tempo changes. In a listening test of the same stems
    at 100 bpm (from 120), its phase-vocoder profile and the Signalsmith port sounded about the
-   same and both far better. The owner chose the Signalsmith port (2026-10-11): it is pure Rust
+   same and both far better. The maintainer chose the Signalsmith port (2026-10-11): it is pure Rust
    without `unsafe`, has transpose built in, keeps transients on the grid by itself and opens a
    set without an analysis pass. Rubber Band stays possible for `HighQuality` as an isolated FFI
    crate (`crates/rubberband`, `unsafe` allowed only there, recorded in AGENTS.md when made), if

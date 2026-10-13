@@ -16,7 +16,7 @@ A project names the audio files its clips play. When a file has moved or been re
 project was saved, it cannot be decoded and its clips are silent. Suhina says so when the
 project opens and helps find the files again.
 
-- **Sources:** the owner's request (2026-10-13); other DAWs have such a view (a list of missing
+- **Sources:** the maintainer's request (2026-10-13); other DAWs have such a view (a list of missing
   files with an automatic search by name and a folder to search), known from their public
   manuals. The design below is Suhina's own.
 - **Builds on:** the browser's file index ([ADR 0012](../decisions/0012-file-library.md)) and

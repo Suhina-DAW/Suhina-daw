@@ -1,6 +1,7 @@
 # Contributing
 
-- **Language:** Rust only.
+- **Language:** the product is Rust only. Scripts in `scripts/` are Python, and the FM synth's
+  reference renderer is C++; neither is built into the program.
 - **Licence:** Suhina is GPL-3.0-or-later (`LICENSE`, `NOTICE`), and contributions are
   licensed the same way. Dependencies and bundled libraries must be GPLv3-compatible (MIT,
   Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0); GPL-2.0-only and proprietary or
@@ -37,20 +38,24 @@ force a rewrite of everything built on it, so it is not something we clean up la
 - Project, clip and preset files **you authored yourself** (`.als`, `.alc`, `.adg`, `.adv`).
   These are gzip-compressed XML; study them by saving variants that differ in one setting and
   diffing them.
-- Public documentation: user manuals, the Live Object Model and Remote Script documentation,
+- Public documentation: user manuals, the officially published Live Object Model documentation,
   published specs (DAWproject, MIDI, CLAP, VST3), papers and textbooks.
+- Open-source code under a licence compatible with GPL-3.0-or-later, ported with its notices
+  kept. Code without a licence may not be copied, ported or translated; only its published
+  description (a paper, a README) may be learnt from.
 
 **Not allowed:**
 
 - Disassembling, decompiling or debugging the binaries of Ableton Live or any other proprietary
   DAW or plug-in, by hand or with tools (Ghidra, IDA, Hopper, REA, ida-pro-mcp, …). If you have
   done this for a product, do not contribute code for that product's features.
-- Reading or using leaked source code.
+- Reading or using leaked source code, or decompiled scripts of a proprietary program (for
+  example the control-surface scripts that circulate decompiled).
 - Notes, patches, write-ups or tools that come from someone else's debugging, disassembly or
   decompilation of a proprietary program, for example the notes and binary patches of projects
-  that make a commercial DAW run on another operating system. Such a project may still be used
-  as a test platform to run the program and observe it; its findings about the program's
-  internals may not be read or used.
+  that make a commercial DAW run on another operating system. An unmodified, licensed copy of
+  the program may still be run on such a platform to observe it; the project's findings about
+  the program's internals, and its patched copies, may not be read or used.
 - Copying samples, presets, Packs, Core Library content, impulse responses, wavetables or demo
   projects from proprietary products, or committing them as test data.
 - Copying the visual design of a proprietary product: icons, artwork, interface text, colours,
