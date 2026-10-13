@@ -53,7 +53,8 @@ jobs:
               const at = body.indexOf(heading);
               if (at < 0) continue;
               const answer = body.slice(at + heading.length).trim().split("\n")[0].trim();
-              for (const label of answers[answer] || []) labels.add(label);
+              if (!Object.hasOwn(answers, answer)) continue;
+              for (const label of answers[answer]) labels.add(label);
             }
             if (labels.size === 0) return;
             await github.rest.issues.addLabels({
