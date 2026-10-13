@@ -134,7 +134,9 @@ Work is tracked in the GitHub project **Suhina**
 (<https://github.com/users/juhamikael/projects/12>), and nowhere else. New work, bugs found while
 testing and follow-ups a change leaves open go there as items, written in English, with a
 Status, a Priority (P0 to P2) and a Phase (the ROADMAP milestone). Work that a pull request will
-close gets an issue, so the pull request can say `Closes #N`. Items imported from the earlier
+close gets an issue, so the pull request can say `Closes #N`. An issue gets a type label and
+area labels (`CONTRIBUTING.md` › Issues lists them); a larger piece split into issues is an
+`epic`, and repository, build and release work is a `chore`. Items imported from the earlier
 board keep their old key in the title (`(LOOP-27)`); a pull request for one names that key.
 
 ## 4. Before you finish a task
