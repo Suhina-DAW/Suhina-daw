@@ -320,6 +320,8 @@ workspace forbids.
     from its main loop (`crates/plugin-host/src/run_loop.rs`): VST3's `IRunLoop` on the
     editor's frame and CLAP's `posix-fd-support` give it the descriptors it waits on (polled
     without waiting each turn) and timers; CLAP's `timer-support` serves timers on every system.
+    Closing an editor's window waits for the X server to answer, so once the host says it is
+    closed no other client finds it (the server serves clients in no set order; #237).
     Tested in CI under Xvfb with the VST3 test plug-in, floating and embedded in a window the
     test makes; no real Linux plug-in has been tried yet. Wayland and macOS (floating) come
     later.
