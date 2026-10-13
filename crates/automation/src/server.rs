@@ -544,8 +544,9 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&P
 
 /// `project.save` writes below the write root only. Its `path` (with `.suhina` added as the
 /// session adds it) must be there; without a path it saves over the project's own file (`.suhina`,
-/// or the `.locr` it was opened from), which must be there too. Either way an existing file is replaced only with `overwrite: true`,
-/// an MCP parameter that is taken out before the command runs.
+/// or the `.locr` it was opened from), which must be there too. Either way an existing file is
+/// replaced only with `overwrite: true`, an MCP parameter that is taken out before the command
+/// runs.
 fn confine_save(workspace: &Workspace, params: &mut Value, source: Option<&Path>) -> Result<(), String> {
     let overwrite = match params.get("overwrite") {
         None | Some(Value::Null) => false,
