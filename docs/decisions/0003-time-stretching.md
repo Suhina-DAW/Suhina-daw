@@ -73,9 +73,13 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      transpose. Scaling the read speed by the transpose instead would take the clip off the
      beat.
    - **Timing.** The input runs ahead of what is heard by `input_latency + speed *
-     output_latency`. The voice feeds each call up to exactly that point for the speed playing,
-     so a speed change (a new warp segment) is evened out over one call instead of shifting the
-     clip. Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
+     output_latency`. What is fed now is heard `output_latency` frames later, so the voice feeds
+     each call up to the input position heard then, plus `input_latency`: a speed change (a new
+     warp segment) reaches the input that much before it is heard, and nothing has to be evened
+     out afterwards. A call never gets less than half its speed's input, so the stretcher never
+     runs dry. (Feeding for the speed playing now left the input ahead after a speed drop, and
+     the stretcher got nothing for a few calls: 2x to 1x froze the sound for about 80 ms, 2x to
+     0.5x for about 200 ms.) Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
      with no drift; the timestretch backend needed restarts before every onset and measured
      corrections to get there (see the measurements).
 3. **Loading a project only decodes.** `loopwerk-media` decodes every file on all cores. The

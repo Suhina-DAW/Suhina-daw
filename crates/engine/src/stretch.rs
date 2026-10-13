@@ -250,12 +250,6 @@ impl StretchVoice {
         piece.stream_start + (at as f64 - piece.out_start * self.file_rate).max(0.0) * piece.rate
     }
 
-    /// How far the input must run ahead of what is heard, at `rate`: the stretcher analyses a block
-    /// `input_latency` frames behind its input and is heard `output_latency` frames after that.
-    fn lead(&self, rate: f64) -> f64 {
-        self.stretch.input_latency() as f64 + rate * self.stretch.output_latency() as f64
-    }
-
     /// The piece at `place`, moved to its repeat.
     fn piece(&self, place: Place) -> Option<Piece> {
         let mut piece = *self.pieces.get(place.index)?;
@@ -370,18 +364,24 @@ impl StretchVoice {
         if frames == 0 {
             return;
         }
-        // One speed per call: stop at the next piece.
-        let place = self.piece_at(self.produced);
+        // What is fed now is heard `output_latency` frames after these frames are made, so the
+        // input follows the piece heard then: a speed change reaches the input that much before
+        // it is heard, and the input never runs ahead or behind the timing. One speed per call:
+        // stop where that piece ends.
+        let latency = self.stretch.output_latency() as u64;
+        let heard = self.produced + latency;
+        let place = self.piece_at(heard);
         if let Some(boundary) = self.next(place).and_then(|n| self.out_frame(n))
-            && boundary > self.produced
+            && boundary > heard
         {
-            frames = frames.min(boundary - self.produced);
+            frames = frames.min(boundary - heard);
         }
         let rate = self.piece(place).map_or(1.0, |p| p.rate);
-        // Feed up to where the input should be once these frames are out. The lead depends on the
-        // speed, so a speed change is evened out over the next call instead of shifting the
-        // timing for good.
-        let fed = (self.stream_at(self.produced + frames) + self.lead(rate)).max(self.fed);
+        // Never less than half the speed's input: a call without input makes the stretcher freeze
+        // its sound (after a seek, or a playlist that jumps). At half the input the stretch stays
+        // clean at 1x and above, and any lead left over drains within a few calls.
+        let want = self.stream_at(heard + frames) + self.stretch.input_latency() as f64;
+        let fed = want.max(self.fed + frames as f64 * rate * 0.5);
         let input_frames = ((fed.floor() - self.fed.floor()).max(0.0) as usize).min(self.input.len() / channels);
         let frames = frames as usize;
         let mut input = std::mem::take(&mut self.input);
@@ -522,6 +522,64 @@ mod tests {
         assert!(out.iter().all(|s| s.is_finite()) && out.iter().any(|s| s.abs() > 0.1));
     }
 
+    /// The level of a 440 Hz sine stretched at 2x for four beats and then at `slower`, in 10 ms
+    /// windows, with how far each window is from a clean sine (the residual of the best-fitting
+    /// 440 Hz sine, relative to the window's level).
+    fn seam(slower: f64) -> Vec<(f64, f32, f32)> {
+        let rate = 48_000;
+        let data = sine(440.0, 8.0, rate);
+        let r = region(&[(0.0, 0.0), (4.0, 4.0), (8.0, 4.0 + 2.0 * slower)], StretchMode::Smooth);
+        let c = clip(8.0, 0.0, None);
+        let mut voice = StretchVoice::new(&c, &r, data, 120.0, rate).unwrap();
+        let mut out = vec![0.0f32; 2 * 4 * rate as usize];
+        for block in out.chunks_mut(2 * 512) {
+            voice.render(block);
+        }
+        let left: Vec<f64> = out.chunks_exact(2).map(|f| f64::from(f[0])).collect();
+        let window = rate as usize / 100;
+        left.chunks_exact(window)
+            .enumerate()
+            .map(|(i, w)| {
+                let t0 = (i * window) as f64;
+                let w_hz = std::f64::consts::TAU * 440.0 / f64::from(rate);
+                let (mut ss, mut sc, mut cc, mut ys, mut yc, mut yy) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+                for (k, y) in w.iter().enumerate() {
+                    let (sn, cs) = ((t0 + k as f64) * w_hz).sin_cos();
+                    ss += sn * sn;
+                    sc += sn * cs;
+                    cc += cs * cs;
+                    ys += y * sn;
+                    yc += y * cs;
+                    yy += y * y;
+                }
+                let det = ss * cc - sc * sc;
+                let (a, b) = ((ys * cc - yc * sc) / det, (yc * ss - ys * sc) / det);
+                let fitted = a * ys + b * yc;
+                let rms = (yy / w.len() as f64).sqrt();
+                let residual = ((yy - fitted).max(0.0) / yy.max(1e-12)).sqrt();
+                (i as f64 * 0.01, rms as f32, residual as f32)
+            })
+            .collect()
+    }
+
+    /// A speed drop at a warp marker keeps the sound: before, the stretcher got no input for a
+    /// few calls after the drop and froze its sound, a 60-200 ms dip (#165).
+    #[test]
+    fn a_speed_drop_keeps_the_level() {
+        for slower in [1.0, 0.5] {
+            let windows = seam(slower);
+            let level = |from: f64, to: f64| {
+                let w: Vec<f32> = windows.iter().filter(|(t, _, _)| (from..to).contains(t)).map(|w| w.1).collect();
+                w.iter().sum::<f32>() / w.len() as f32
+            };
+            let (before, after) = (level(1.0, 1.9), level(2.5, 3.9));
+            for &(t, rms, residual) in windows.iter().filter(|(t, _, _)| (1.0..3.9).contains(t)) {
+                assert!(rms > 0.85 * before.min(after) && rms < 1.15 * before.max(after), "{slower}x at {t:.2} s: {rms}");
+                assert!(residual < 0.05, "{slower}x at {t:.2} s: {residual} off a clean sine");
+            }
+        }
+    }
+
     /// A looping clip that needs more than `MAX_PIECES` pieces keeps looping where its playlist
     /// was cut, instead of running on through the file and going silent (#167).
     #[test]
@@ -656,6 +714,21 @@ mod tests {
             let errors = click_errors(&markers, 46.0, 0.0, 0.0);
             assert!(errors.len() >= 30, "{markers:?}: {} clicks found", errors.len());
             assert!(worst(&errors) < limit, "{markers:?}: {errors:?}");
+        }
+    }
+
+    /// Clicks stay on the grid after a speed drop: feeding the stretcher at least some input
+    /// after the drop must not leave the input ahead for good (#165).
+    #[test]
+    fn transients_stay_on_the_grid_after_a_speed_drop() {
+        // 16 beats at 2x (16 s of file in 8 s), then 24 beats at 1x or 0.5x.
+        for markers in [vec![(0.0, 0.0), (16.0, 16.0), (40.0, 28.0)], vec![(0.0, 0.0), (16.0, 16.0), (40.0, 22.0)]] {
+            let errors = click_errors(&markers, 40.0, 0.0, 0.0);
+            // At 0.5x a stretched click can show a second onset 120 ms in (as before #165): only
+            // the clicks themselves are timed here.
+            let clicks: Vec<f64> = errors.iter().copied().filter(|e| e.abs() < 50.0).collect();
+            assert!(clicks.len() >= 45, "{markers:?}: {} clicks found", clicks.len());
+            assert!(worst(&clicks) < 4.0, "{markers:?}: {errors:?}");
         }
     }
 
