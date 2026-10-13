@@ -16,6 +16,7 @@ covers:
   - crates/ui/src/browser.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/drop.rs
+  - crates/ui/src/session_view.rs
 ---
 
 # Browser
@@ -85,10 +86,10 @@ Three sections, each title in small hint text:
   Presets. Each lists the last 50 of its kind, newest first. A project counts when it is
   opened or saved; anything else when it is added to a project (dropped, or added with Enter or
   a double-click). Previewing does not count.
-- **Folders:** the added folders by name, each with its state when it is not plain (*scanning*,
-  *polling*, *missing*), then **+ Add folder**: a field where a path is typed (Enter adds it).
+- **Folders:** the added folders by name, each with a mark when it is not plain (`…` while
+  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it).
   A folder dragged from the system onto the window is added too (and the browser shows). A folder's right-click menu
-  has Refresh, Pin and Remove.
+  has Refresh, Pin and Remove from the browser.
 
 At most one place is selected. Clicking the selected place again clears it.
 
@@ -177,9 +178,11 @@ order:
    `Bb minor` between separators (space, `_`, `-`, `.`, brackets) for the key. A single letter
    with no sharp, flat or mode is not taken as a key.
 3. **Tempo detection** (tempo only, when 1 and 2 give none): the file's onsets are analysed
-   (at most its first 30 seconds). A tempo is taken only when the analysis is confident and the
-   file's length is within 2 % of a whole number of bars (1, 2, 4, 8 or 16 bars of 4/4) at that
-   tempo, so one-shots and long recordings are not given one. Detected tempos are shown with a
+   (at most its first 30 seconds; files of 0.5 s to 2 minutes, and in the preview strip and
+   `library.info` only samples up to 60 s). Only tempos from 60 to 200 BPM at which the file is
+   exactly 1, 2, 4, 8 or 16 bars of 4/4 are tried, and one is taken only when its beat stands out
+   clearly in the onsets (the nearest to 120 BPM among equals), so one-shots and long recordings
+   are not given one. Detected tempos are shown with a
    `~` ("~124 BPM").
 
 ## Dragging into the project
@@ -200,7 +203,7 @@ in the Arrangement each starts where the one before ends; in the Session they go
 track's slots from the slot they were dropped on. With **Ctrl** held when releasing, they go
 onto **one track each**, side by side: in the Arrangement all at the dropped beat, in the
 Session all in the dropped scene, the first on the track it was dropped on and the others on
-new tracks after it. Settings › General › Dropping several files flips this (one track each
+new tracks after it. Settings › General › Dropping files › Several files flips this (one track each
 without Ctrl).
 
 | Dropped on | Result |
@@ -225,7 +228,7 @@ Session, at its left in the Arrangement), which add an empty track of that kind.
 either works like a drop on the empty area.
 
 **Warping.** A sample whose tempo is known (see *Tempo and key*) is warped: it plays at the
-project's tempo, stretched with the stretch mode in Settings › General › Warp mode (Beats by
+project's tempo, stretched with the stretch mode in Settings › General › Warp mode (Rhythmic by
 default, the `rhythmic` stretch mode), and its length in beats comes from its own tempo. A
 sample without a known tempo is not warped: it plays at its own speed, and its length in beats
 is its duration at the project's tempo when it is dropped.
@@ -295,13 +298,13 @@ the CLI can do the same.
 
 | Command | Params | Does |
 |---|---|---|
-| `library.folders` | | the folders with their state (`watching`, `polling`, `scanning`, `missing`) and file counts |
+| `library.folders` | | the folders with their state (`watching`, `polling`, `scanning`, `missing`, `idle`) and file counts |
 | `library.addFolder` | `folder` | adds a folder and indexes it |
 | `library.removeFolder` | `folder` | removes it and its part of the index |
 | `library.refresh` | `folder?` | reads a folder (or every folder) again |
 | `library.list` | `folder` | what is directly in a folder: sub-folders and files of the kinds above, with kind and size |
 | `library.search` | `text?`, `category?`, `place?`, `tags?`, `limit?` | matching items as in *Results* (`limit` at most 500) |
-| `library.info` | `item` | a file's kind, duration, sample rate, channels, tempo (and whether detected) and key; a MIDI file's tracks and notes |
+| `library.info` | `item` | a file's kind, size, duration, sample rate, channels, tempo (and where it came from) and key; a Stems file's stems and mastering; a MIDI file's tracks with their notes; a preset's voices; a built-in device's or plug-in's role (and a plug-in's vendor, format and version); the item's tags |
 | `library.pinned` | | the pinned items |
 | `library.pin`, `library.unpin` | `item` | pins or unpins an item |
 | `library.recent` | `group?` | the recent items of one group or all |
@@ -309,18 +312,19 @@ the CLI can do the same.
 | `library.setTag` | `name?`, `color?`, `rename?`, `limit?` | adds a tag, or changes one's colour or name; `limit` sets the most tags there may be |
 | `library.removeTag` | `name` | removes a tag from the list and every item |
 | `library.tag` | `item`, `tag`, `on` | sets or clears a tag on an item |
+| `library.findFiles` | `names`, `folder?` | finds files by name for missing files: in the folders' index and the active project's folder, or by walking `folder` ([missing files](missing-files.md)) |
 
 **Project** (on the active project, one undo step each):
 
 | Command | Params | Does |
 |---|---|---|
 | `track.add` | `kind?` (`audio`, `midi`), `name?`, `after?`, `device?`, `preset?`, `voice?` | adds a track with its mixer channel, clip slots for every scene and an Arrangement lane, after track `after` or at the end of the regular tracks; with `device` (a built-in id or a plug-in from `plugins.list`) or `preset`, the device too, and `kind` follows from it |
-| `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?` | places samples, MIDI files and Stems files as in *Files*: on `track` (or new tracks when it is missing; a Stems file's group goes into `track` when it is a group), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track; returns the clips, the new tracks, the Stems groups (`groups`) and what was `skipped` |
+| `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?`, `warp?` | places samples, MIDI files and Stems files as in *Files*: on `track` (or new tracks when it is missing; a Stems file's group goes into `track` when it is a group), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track; `warp` is the stretch mode for samples with a known tempo (`rhythmic` by default); returns the clips, the new tracks, the Stems groups (`groups`) and what was `skipped` |
 | `device.add` | adds `preset?` and `voice?` (1–32) | the built-in effect or instrument with a preset's values |
 
-**Preview** (Transport kind, on the active project's player): `preview.play {path, from?, track?}`
-previews a sample from `from` seconds, or a MIDI file through `track`'s instrument (the FM synth
-when it has none); `preview.stop`. `launcher.state` reports `preview` (playing, position).
+**Preview** (Transport kind, on the active project's player): `preview.play {path, from?, track?, gain?}`
+previews a sample from `from` seconds at `gain` dB (−6 by default), or a MIDI file through `track`'s instrument (the FM synth
+when it has none); `preview.stop`. `launcher.state` reports `preview` (`playing`, `seconds`).
 
 Over MCP, every path a command reads (`paths`, `path`, `preset`, `folder`, a file `item`) must
 be inside the server's read root, and `library.addFolder` and `library.removeFolder` are refused:
@@ -332,6 +336,8 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
 |---|---|---|
 | Folders | 256 | refused |
 | Files indexed per folder | 200 000 | the rest are left out; the folder says so |
+| Entries listed in one folder (`library.list`) | 10 000 | the rest are not listed |
+| Words in a search | 16 | the rest are ignored |
 | Folder depth | 32 | deeper folders are left out |
 | Symbolic links | not followed | |
 | A file name | 1024 bytes | left out |
@@ -351,4 +357,4 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
   discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
-- A system file dialog for adding a folder (ADR 0010 › Not decided yet).
+- A system file dialog for adding a folder (today a path is typed or a folder dropped).
