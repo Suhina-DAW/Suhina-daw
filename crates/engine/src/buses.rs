@@ -25,10 +25,13 @@ pub(crate) fn build(
     plugins: &mut Plugins,
     column_of: impl Fn(TrackId) -> u32,
 ) -> (Vec<Chain>, u32) {
+    // Every track with devices has a chain, a silent one too (muted, or not soloed): its
+    // devices keep running at a gain of zero, so a plug-in keeps its state and its process,
+    // and sounds again as soon as the track does. A chain that was left out of a graph would
+    // give its plug-in's processor back, and the plug-in would fall silent for good.
     let mut chains: Vec<Chain> = project
         .tracks
         .iter()
-        .filter(|track| track_gains(project, track.id).is_some())
         .filter_map(|track| Chain::build(project, track.id, column_of(track.id), (0.0, 0.0), sample_rate, plugins))
         .collect();
 
@@ -82,6 +85,12 @@ pub(crate) fn build(
         let post = gains_until(project, chain.track, target.map(|(_, ch)| ch), !is_bus).unwrap_or((0.0, 0.0));
         chain.set_post(post);
         chain.target = target.map(|(index, _)| index);
+    }
+    for index in 0..chains.len() {
+        let fed = targets.iter().any(|t| t.is_some_and(|(target, _)| target == index));
+        if let Some(chain) = chains.get_mut(index) {
+            chain.is_bus = fed;
+        }
     }
 
     // Latency compensation. A chain's sources start without delay; a bus's input is the latest

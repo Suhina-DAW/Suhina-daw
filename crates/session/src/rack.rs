@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -19,12 +21,16 @@ use suhina_engine::{
 use suhina_model::{Device, Project};
 use suhina_plugins::library::{Hosting, group_for};
 use suhina_plugins::scan::{Catalog, PluginInfo};
-use suhina_plugins::{Event, EventKind, Health, Launch, MAX_EVENTS, Plugin, PluginAudio, PluginError, SavedState};
+use suhina_plugins::{
+    Event, EventKind, Health, Launch, MAX_EVENTS, Placement, Plugin, PluginAudio, PluginError, SavedState,
+};
 
 use crate::{CommandError, Player};
 
-/// How long starting a plug-in (the host process, loading it, its state) may take.
-pub const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long starting a plug-in (the host process, loading it, its state) may take. Generous:
+/// a plug-in that reads a library as it loads (Nexus 5 took 33 s on a fast machine) is not a
+/// hung one, and the loading dialog shows which plug-ins are still at it.
+pub const START_TIMEOUT: Duration = Duration::from_secs(120);
 /// How often the session looks whether its plug-ins still run.
 const HEALTH_EVERY: Duration = Duration::from_millis(250);
 /// How often the state of each running plug-in is read, so a restart after a crash gets back
@@ -122,6 +128,17 @@ pub struct PluginReport {
     /// Frames of delay it reported.
     pub latency: u32,
     pub editor_open: bool,
+    /// The open editor is embedded in the device panel of the session's window (rather than
+    /// in a window of its own), and the size of its inside in pixels, as the host last said.
+    pub editor_embedded: Option<(u32, u32)>,
+    /// Blocks the engine gave it since it started, and how many it did not answer in time
+    /// (the chain went on without it for that block).
+    pub blocks: u32,
+    pub late_blocks: u32,
+    /// The longest a block's round trip took, in microseconds.
+    pub longest_us: u32,
+    /// Blocks that came with no time left before the deadline (an earlier plug-in used it).
+    pub no_time: u32,
     /// Why it runs with its own defaults, when it did not take the saved state.
     pub state_refused: Option<String>,
 }
@@ -140,6 +157,36 @@ pub struct PluginProgress {
     pub failed: Vec<String>,
 }
 
+/// How a hosted plug-in keeps up with the engine: the blocks it was given and the ones it did
+/// not answer in time (sent late, or not sent because the host was still busy), counted on
+/// the audio thread and read by the session for the device panel.
+#[derive(Debug, Default)]
+pub struct BlockCounts {
+    blocks: AtomicU32,
+    late: AtomicU32,
+    /// The longest a block's round trip took, in microseconds.
+    longest_us: AtomicU32,
+    /// Blocks that came with no time left before the deadline (an earlier plug-in used it).
+    no_time: AtomicU32,
+}
+
+impl BlockCounts {
+    /// Blocks given and blocks not answered in time, so far.
+    pub fn read(&self) -> (u32, u32) {
+        (self.blocks.load(Ordering::Relaxed), self.late.load(Ordering::Relaxed))
+    }
+
+    /// The longest a block's round trip took, in microseconds.
+    pub fn longest_us(&self) -> u32 {
+        self.longest_us.load(Ordering::Relaxed)
+    }
+
+    /// Blocks that came with no time left before the deadline.
+    pub fn no_time(&self) -> u32 {
+        self.no_time.load(Ordering::Relaxed)
+    }
+}
+
 /// The audio half of a hosted plug-in, as the engine runs it: real-time safe.
 pub struct Hosted {
     audio: PluginAudio,
@@ -149,6 +196,7 @@ pub struct Hosted {
     /// Releases from blocks that were not sent (the host still busy with an earlier one),
     /// sent at the start of the next block that is, so no note is left hanging.
     carried: Vec<Event>,
+    counts: Arc<BlockCounts>,
 }
 
 impl Hosted {
@@ -159,7 +207,13 @@ impl Hosted {
             output: vec![0.0; MAX_BLOCK_FRAMES * 2],
             events: Vec::with_capacity(MAX_EVENTS),
             carried: Vec::with_capacity(MAX_EVENTS),
+            counts: Arc::new(BlockCounts::default()),
         }
+    }
+
+    /// The counts this keeps while the engine runs it.
+    pub fn counts(&self) -> Arc<BlockCounts> {
+        Arc::clone(&self.counts)
     }
 }
 
@@ -212,12 +266,10 @@ fn push_event(out: &mut Vec<Event>, frame: u32, event: DeviceEvent) {
     }
 }
 
-impl PluginProcessor for Hosted {
-    fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
-        let samples = buffer.len();
-        let (Some(input), Some(output)) = (self.input.get_mut(..samples), self.output.get_mut(..samples)) else {
-            return false;
-        };
+impl Hosted {
+    /// Copies the block and its events in, ready to send; `false` for a block too big.
+    fn take(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
+        let Some(input) = self.input.get_mut(..buffer.len()) else { return false };
         input.copy_from_slice(buffer);
         self.events.clear();
         // What earlier blocks could not send goes first.
@@ -225,19 +277,73 @@ impl PluginProcessor for Hosted {
         for &(frame, event) in events {
             push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
         }
-        match self.audio.process_with_events(input, &self.events, output, timeout) {
+        self.counts.blocks.fetch_add(1, Ordering::Relaxed);
+        true
+    }
+
+    /// Takes in what a block's round trip gave: the output into `buffer` when it was answered.
+    fn outcome(&mut self, outcome: suhina_plugins::Outcome, buffer: &mut [f32]) -> bool {
+        match outcome {
             suhina_plugins::Outcome::Done => {
-                buffer.copy_from_slice(output);
+                if let Some(output) = self.output.get(..buffer.len()) {
+                    buffer.copy_from_slice(output);
+                }
                 true
             }
             // Sent, but late: the host still gets its events.
-            suhina_plugins::Outcome::Missed => false,
+            suhina_plugins::Outcome::Missed => {
+                self.counts.late.fetch_add(1, Ordering::Relaxed);
+                false
+            }
             // Not sent: its releases wait for the next block; new notes are dropped.
             suhina_plugins::Outcome::Busy => {
+                self.counts.late.fetch_add(1, Ordering::Relaxed);
                 carry_releases(&self.events, &mut self.carried);
                 false
             }
         }
+    }
+
+    /// Waits for the block out, noting how long it took and whether any time was left.
+    fn wait_for(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        if timeout.is_zero() {
+            self.counts.no_time.fetch_add(1, Ordering::Relaxed);
+        }
+        let started = std::time::Instant::now();
+        let outcome = match self.output.get_mut(..buffer.len()) {
+            Some(output) => self.audio.finish(output, timeout),
+            None => suhina_plugins::Outcome::Busy,
+        };
+        let took = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
+        self.counts.longest_us.fetch_max(took, Ordering::Relaxed);
+        self.outcome(outcome, buffer)
+    }
+}
+
+impl PluginProcessor for Hosted {
+    fn process(&mut self, buffer: &mut [f32], events: &[(usize, DeviceEvent)], timeout: Duration) -> bool {
+        if !self.send(buffer, events) {
+            return false;
+        }
+        self.wait_for(buffer, timeout)
+    }
+
+    fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
+        if !self.take(buffer, events) {
+            return false;
+        }
+        let Some(input) = self.input.get(..buffer.len()) else { return false };
+        if self.audio.send(input, &self.events, buffer.len()) {
+            return true;
+        }
+        // The host is still busy with an earlier block: this one is lost, as a miss.
+        self.counts.late.fetch_add(1, Ordering::Relaxed);
+        carry_releases(&self.events, &mut self.carried);
+        false
+    }
+
+    fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        self.wait_for(buffer, timeout)
     }
 }
 
@@ -297,6 +403,46 @@ struct Instance {
     state_refused: Option<String>,
     /// Whether its editor is open, as last known.
     editor_open: bool,
+    /// How the editor was opened: embedded in the session's window, or in a window of its
+    /// own. Set when it is asked to open, so a placement that comes while it opens is kept.
+    editor_embedded: bool,
+    /// The size of the open editor's inside in pixels, as last known.
+    editor_size: Option<(u32, u32)>,
+    /// Where the window wants the embedded editor, and what the host was last told.
+    placement_wanted: Option<Placement>,
+    placement_sent: Option<Placement>,
+    /// The editor is being closed to open again the other way (the embedding setting changed).
+    reopen_editor: bool,
+    /// How it keeps up with the engine, while its audio half runs there.
+    counts: Option<Arc<BlockCounts>>,
+}
+
+impl Instance {
+    fn new(status: PluginStatus, plugin: Option<(String, String, &'static str)>, generation: u64) -> Self {
+        Self {
+            status,
+            plugin,
+            info: PluginSlotInfo::default(),
+            control: None,
+            generation,
+            state_refused: None,
+            editor_open: false,
+            editor_embedded: false,
+            editor_size: None,
+            placement_wanted: None,
+            placement_sent: None,
+            reopen_editor: false,
+            counts: None,
+        }
+    }
+
+    /// The editor is closed (or gone with its process).
+    fn editor_gone(&mut self) {
+        self.editor_open = false;
+        self.editor_size = None;
+        self.placement_wanted = None;
+        self.placement_sent = None;
+    }
 }
 
 /// The plug-ins one project runs, while it plays.
@@ -314,6 +460,8 @@ pub struct Rack {
     saved: Instant,
     /// The window editors open over (owned by it), when the session runs in one.
     owner: Option<u64>,
+    /// Editors open embedded in that window's device panel rather than in windows of their own.
+    embed: bool,
     returned_sender: Sender<Returned>,
     returned: Receiver<Returned>,
     /// What happened while the project was saved, for the next [`Rack::sync`] to tell.
@@ -338,6 +486,7 @@ impl Default for Rack {
             checked: Instant::now(),
             saved: Instant::now(),
             owner: None,
+            embed: false,
         }
     }
 }
@@ -440,14 +589,19 @@ impl Rack {
                 continue;
             }
             let Some(control) = control else { continue };
+            let mut reopen = false;
             match self.instances.get_mut(&key).filter(|i| i.generation == generation && i.control.is_none()) {
                 Some(instance) => {
                     let name = instance.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
                     match done {
-                        Done::Opened(Ok(_)) => instance.editor_open = true,
+                        Done::Opened(Ok(size)) => {
+                            instance.editor_open = true;
+                            instance.editor_size = Some(size);
+                        }
                         Done::Opened(Err(why)) => notices.push(format!("{name}: its editor did not open ({why})")),
                         Done::Closed(result) => {
-                            instance.editor_open = false;
+                            instance.editor_gone();
+                            reopen = std::mem::take(&mut instance.reopen_editor);
                             if let Err(why) = result {
                                 notices.push(format!("{name}: its editor did not close ({why})"));
                             }
@@ -459,6 +613,25 @@ impl Rack {
                 // The device went while its plug-in was out: stop it like the others.
                 None => self.stop(key, control),
             }
+            if reopen && let Err(e) = self.open_editor(key) {
+                notices.push(format!("the editor did not open again: {}", e.0));
+            }
+        }
+    }
+
+    /// Tells the hosts where the window wants their embedded editors, where that has not been
+    /// told yet (the control half was out when the window said).
+    fn send_placements(&mut self) {
+        for instance in self.instances.values_mut() {
+            let (Some(wanted), Some(control)) = (instance.placement_wanted, instance.control.as_mut()) else {
+                continue;
+            };
+            if instance.placement_sent == Some(wanted) {
+                continue;
+            }
+            if control.place_editor(wanted).unwrap_or(false) {
+                instance.placement_sent = Some(wanted);
+            }
         }
     }
 
@@ -466,15 +639,24 @@ impl Rack {
     pub fn report(&mut self, key: u64) -> Option<PluginReport> {
         let instance = self.instances.get_mut(&key)?;
         if let Some(control) = instance.control.as_mut() {
-            instance.editor_open = control.editor_open();
+            if control.editor_open() {
+                instance.editor_open = true;
+                instance.editor_size = control.editor_size();
+            } else {
+                instance.editor_gone();
+            }
         }
-        let editor_open = instance.editor_open;
         Some(PluginReport {
             status: instance.status.clone(),
             plugin: instance.plugin.clone(),
             instrument: instance.info.instrument,
             latency: instance.info.latency,
-            editor_open,
+            editor_open: instance.editor_open,
+            editor_embedded: instance.editor_size.filter(|_| instance.editor_embedded && instance.editor_open),
+            blocks: instance.counts.as_ref().map_or(0, |c| c.read().0),
+            late_blocks: instance.counts.as_ref().map_or(0, |c| c.read().1),
+            longest_us: instance.counts.as_ref().map_or(0, |c| c.longest_us()),
+            no_time: instance.counts.as_ref().map_or(0, |c| c.no_time()),
             state_refused: instance.state_refused.clone(),
         })
     }
@@ -547,18 +729,7 @@ impl Rack {
             changed = true;
             let Some((matched, instrument)) = find(&env.catalog, device) else {
                 missing.push(device.name.clone());
-                self.instances.insert(
-                    found.key,
-                    Instance {
-                        status: PluginStatus::Missing,
-                        plugin: None,
-                        info: PluginSlotInfo::default(),
-                        control: None,
-                        generation: 0,
-                        state_refused: None,
-                        editor_open: false,
-                    },
-                );
+                self.instances.insert(found.key, Instance::new(PluginStatus::Missing, None, 0));
                 continue;
             };
             let state = self.kept.remove(&found.key).or_else(|| saved_state(device));
@@ -573,18 +744,10 @@ impl Rack {
             };
             self.next_generation += 1;
             let generation = self.next_generation;
-            self.instances.insert(
-                found.key,
-                Instance {
-                    status: PluginStatus::Loading,
-                    plugin: Some((matched.plugin.name.clone(), matched.plugin.vendor.clone(), matched.how.name())),
-                    info: PluginSlotInfo { instrument, latency: 0 },
-                    control: None,
-                    generation,
-                    state_refused: None,
-                    editor_open: false,
-                },
-            );
+            let plugin = Some((matched.plugin.name.clone(), matched.plugin.vendor.clone(), matched.how.name()));
+            let mut instance = Instance::new(PluginStatus::Loading, plugin, generation);
+            instance.info = PluginSlotInfo { instrument, latency: 0 };
+            self.instances.insert(found.key, instance);
             spawn_start(self.sender.clone(), found.key, generation, launch, state);
         }
         if !missing.is_empty() {
@@ -592,6 +755,7 @@ impl Rack {
         }
         changed |= self.receive(player, &mut notices);
         self.take_returned(&mut notices);
+        self.send_placements();
         self.watch(&mut notices);
         if changed {
             player.set_plugin_info(self.slot_info());
@@ -623,7 +787,9 @@ impl Rack {
                         changed = true;
                     }
                     instance.state_refused = refused;
-                    match player.send_plugin(started.key, Box::new(Hosted::new(audio))) {
+                    let hosted = Hosted::new(audio);
+                    instance.counts = Some(hosted.counts());
+                    match player.send_plugin(started.key, Box::new(hosted)) {
                         Ok(()) => instance.status = PluginStatus::Running,
                         Err(e) => instance.status = PluginStatus::Failed(e.0),
                     }
@@ -718,20 +884,77 @@ impl Rack {
         self.owner = owner;
     }
 
+    /// Whether editors open embedded in the owner window's device panel from now on, rather
+    /// than in windows of their own (nothing without an owner window). An editor open the
+    /// other way is closed and opened again the new way.
+    pub fn set_embedding(&mut self, embed: bool) {
+        let embed = embed && self.owner.is_some();
+        if self.embed == embed {
+            return;
+        }
+        self.embed = embed;
+        let to_move: Vec<u64> = self
+            .instances
+            .iter()
+            .filter(|(_, i)| i.editor_open && i.editor_embedded != embed)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in to_move {
+            if self.close_editor(key).is_ok()
+                && let Some(instance) = self.instances.get_mut(&key)
+            {
+                instance.reopen_editor = true;
+            }
+        }
+    }
+
     /// Opens the editor of the plug-in device `key`; returns the size of its inside. Over an
     /// owner window (the desktop app's) it opens on a thread of its own and `None` comes back
     /// at once: the host making a window that the app's window owns waits for the app's window
-    /// thread, which must not be waiting for the host meanwhile.
+    /// thread, which must not be waiting for the host meanwhile. Embedded (the setting), it
+    /// opens hidden inside that window until [`Rack::place_editor`] puts it somewhere.
     pub fn open_editor(&mut self, key: u64) -> Result<Option<(u32, u32)>, CommandError> {
         self.running(key)?;
         match self.owner {
             Some(owner) => {
+                let embed = self.embed;
                 self.lend(key, move |control| {
-                    Done::Opened(control.open_editor_owned(Some(owner)).map_err(|e| e.to_string()))
+                    let opened = if embed {
+                        control.open_editor_embedded(owner)
+                    } else {
+                        control.open_editor_owned(Some(owner))
+                    };
+                    Done::Opened(opened.map_err(|e| e.to_string()))
                 })?;
+                if let Some(instance) = self.instances.get_mut(&key) {
+                    instance.editor_embedded = embed;
+                    instance.placement_sent = None;
+                }
                 Ok(None)
             }
             None => self.running(key)?.open_editor().map(Some).map_err(|e| CommandError(e.to_string())),
+        }
+    }
+
+    /// Where the window shows the embedded editors this frame, by plug-in device key; every
+    /// other embedded editor is hidden (its device is not in the panel). Told to the hosts now
+    /// where it can be (and the place changed), otherwise at the next [`Rack::sync`]. Never
+    /// waits for a host. Nothing for editors in windows of their own.
+    pub fn place_editors(&mut self, shown: &[(u64, Placement)]) {
+        for (key, instance) in &mut self.instances {
+            if !instance.editor_embedded || !instance.editor_open {
+                continue;
+            }
+            let placement = shown.iter().find(|(k, _)| k == key).map_or(Placement::HIDDEN, |(_, p)| *p);
+            instance.placement_wanted = Some(placement);
+            if instance.placement_sent == Some(placement) {
+                continue;
+            }
+            if let Some(control) = instance.control.as_mut()
+                && control.place_editor(placement).unwrap_or(false)
+            {
+                instance.placement_sent = Some(placement);
+            }
         }
     }
 
@@ -904,15 +1127,8 @@ mod tests {
     #[test]
     fn progress_counts_each_state() {
         let mut rack = Rack::default();
-        let instance = |status: PluginStatus, name: &str| Instance {
-            status,
-            plugin: Some((name.to_string(), "V".into(), "same")),
-            info: PluginSlotInfo::default(),
-            control: None,
-            generation: 0,
-            state_refused: None,
-            editor_open: false,
-        };
+        let instance =
+            |status: PluginStatus, name: &str| Instance::new(status, Some((name.to_string(), "V".into(), "same")), 0);
         rack.instances.insert(1, instance(PluginStatus::Running, "A"));
         rack.instances.insert(2, instance(PluginStatus::Loading, "C"));
         rack.instances.insert(3, instance(PluginStatus::Loading, "B"));

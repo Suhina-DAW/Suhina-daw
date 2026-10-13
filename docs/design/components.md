@@ -280,7 +280,9 @@ label (300 px, 10 px), its keys (130 px, 10 px mono `#C9C4BB`, "Press keys" in `
 waiting), Change and Clear; Reset all at the top; a key bound twice in red above the list
 ([shortcuts](../shortcuts.md)).
 
-**Plug-ins**: "Folders" (11 px), the standard folders in 10 px `text.hint` with "(standard)",
+**Plug-ins**: an "Editors" row first (Window · Device view: where a plug-in's editor opens; the
+note says when the device view is not available on this system); then "Folders" (11 px), the
+standard folders in 10 px `text.hint` with "(standard)",
 the added ones in `text.secondary` with a 64 px Remove button, a 20 px field to add one with a
 64 px Add button; a 34 px Scan row (the count found and failed as its note, Scan and Rescan all
 on the right, run in the background); then the plug-ins found (name, vendor · format version) and

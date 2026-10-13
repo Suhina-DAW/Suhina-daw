@@ -32,6 +32,24 @@ pub trait PluginProcessor: Send {
     /// `timeout`. Returns false when the plug-in did not answer in time or is gone; `buffer` is
     /// then left as it was. Never allocates, locks or does I/O beyond the block's round trip.
     fn process(&mut self, buffer: &mut [f32], events: &[(usize, NoteEvent)], timeout: Duration) -> bool;
+
+    /// The first half of [`PluginProcessor::process`]: hands `buffer` and `events` to the
+    /// plug-in without waiting, so the plug-ins of several chains run at the same time and a
+    /// block's deadline is shared by the slowest rather than by all of them in turn. Returns
+    /// false when the plug-in cannot take the block now; the chain then runs it with
+    /// `process` instead. A processor that cannot split a block leaves this returning false.
+    fn send(&mut self, buffer: &[f32], events: &[(usize, NoteEvent)]) -> bool {
+        let _ = (buffer, events);
+        false
+    }
+
+    /// The second half: waits at most `timeout` for the block handed over with
+    /// [`PluginProcessor::send`] and puts the result in `buffer`. Returns false when the plug-in
+    /// did not answer in time; `buffer` is then left as it was.
+    fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        let _ = (buffer, timeout);
+        false
+    }
 }
 
 /// What the engine needs to know about a plug-in device to place it in a chain: whether it
@@ -160,6 +178,31 @@ impl PluginSlot {
             Some(processor) => processor.process(span, events, timeout),
             None => false,
         };
+        if !answered {
+            if self.processor.is_some() {
+                self.missed += 1;
+            }
+            if self.instrument {
+                span.fill(0.0);
+            }
+        }
+    }
+
+    /// Hands `span` with `events` to the plug-in without waiting ([`PluginProcessor::send`]);
+    /// whether it took it, so [`PluginSlot::finish`] must follow. A disabled or empty slot
+    /// does not.
+    pub(crate) fn send(&mut self, span: &[f32], events: &[(usize, NoteEvent)]) -> bool {
+        if !self.enabled || span.is_empty() {
+            return false;
+        }
+        self.processor.as_mut().is_some_and(|processor| processor.send(span, events))
+    }
+
+    /// Waits for the block handed over with [`PluginSlot::send`] until `deadline` and puts the
+    /// result in `span`; a miss passes the sound through, or is silent for an instrument.
+    pub(crate) fn finish(&mut self, span: &mut [f32], deadline: Option<Instant>) {
+        let timeout = deadline.map_or(OFFLINE_TIMEOUT, |d| d.saturating_duration_since(Instant::now()));
+        let answered = self.processor.as_mut().is_some_and(|processor| processor.wait(span, timeout));
         if !answered {
             if self.processor.is_some() {
                 self.missed += 1;

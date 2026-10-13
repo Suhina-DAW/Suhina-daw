@@ -51,6 +51,17 @@ pub enum DeviceLayout {
     Stack,
 }
 
+/// Where a plug-in's editor opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EditorPlacement {
+    /// In a window of its own, owned by Suhina's: above it, and minimised with it.
+    #[default]
+    Window,
+    /// Inside the device panel, as part of the device chain (Windows and X11; elsewhere the
+    /// editor opens in a window).
+    DeviceView,
+}
+
 /// How the window is drawn. Takes effect the next time the app starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Graphics {
@@ -135,6 +146,8 @@ pub struct Settings {
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
     pub device_layout: DeviceLayout,
+    /// Where plug-in editors open.
+    pub plugin_editors: EditorPlacement,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
     /// without `.json`.
     pub theme: String,
@@ -174,6 +187,7 @@ impl Default for Settings {
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
+            plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
             templates_folder: String::new(),
@@ -236,8 +250,12 @@ impl Settings {
             OnOpen::NewTab => "tab",
             OnOpen::Replace => "replace",
         };
+        let editors = match self.plugin_editors {
+            EditorPlacement::Window => "window",
+            EditorPlacement::DeviceView => "device",
+        };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nzoom = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nzoom = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -285,6 +303,8 @@ impl Settings {
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
                 ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
+                ("plugin_editors", "window") => settings.plugin_editors = EditorPlacement::Window,
+                ("plugin_editors", "device") => settings.plugin_editors = EditorPlacement::DeviceView,
                 ("projects_folder", folder) => settings.projects_folder = folder.to_string(),
                 ("templates_folder", folder) => settings.templates_folder = folder.to_string(),
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
@@ -352,6 +372,7 @@ mod tests {
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
+            plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),
             templates_folder: "/home/me/templates".into(),

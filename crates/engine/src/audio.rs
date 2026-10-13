@@ -32,7 +32,9 @@ impl AudioData {
     /// linearly); silence outside it. Mono plays on both sides.
     pub(crate) fn frame_at(&self, position: f64) -> (f32, f32) {
         let channels = usize::from(self.channels.max(1));
-        if position.is_nan() || position < 0.0 {
+        // Past the end (a huge or infinite position from hostile warp markers or offsets
+        // included) is silence, before the cast could saturate; NaN fails this too.
+        if !(position >= 0.0 && position < self.frames() as f64) {
             return (0.0, 0.0);
         }
         let index = position.floor() as usize;
@@ -40,7 +42,8 @@ impl AudioData {
         let frame = |i: usize| -> (f32, f32) {
             let base = i.saturating_mul(channels);
             let left = self.samples.get(base).copied().unwrap_or(0.0);
-            let right = if channels > 1 { self.samples.get(base + 1).copied().unwrap_or(0.0) } else { left };
+            let right =
+                if channels > 1 { self.samples.get(base.saturating_add(1)).copied().unwrap_or(0.0) } else { left };
             (left, right)
         };
         let (l0, r0) = frame(index);
@@ -338,6 +341,31 @@ mod tests {
         assert_eq!(fades.gain(0.0, 200.0), 0.0);
         let c = Clip { fade_in: f64::NAN, fade_out: -1.0, ..clip(2.0, 0.0, None) };
         assert_eq!(Fades::new(&c, 100.0, 1000).gain(100.0, 100.0), 1.0, "bad fades are no fades");
+    }
+
+    /// Hostile warp markers and offsets put the read position far past the file (or at
+    /// infinity): silence, never a panic or a NaN (issue #152). Stereo, where the right
+    /// channel's index used to overflow.
+    #[test]
+    fn a_huge_position_in_a_stereo_file_is_silence() {
+        let stereo = Arc::new(AudioData { sample_rate: 1000, channels: 2, samples: vec![0.5; 2000] });
+        for position in [1e300, f64::INFINITY, usize::MAX as f64, 1000.0, f64::NAN, -1.0] {
+            assert_eq!(stereo.frame_at(position), (0.0, 0.0), "{position}");
+        }
+        assert_eq!(stereo.frame_at(999.0), (0.5, 0.5));
+        let warped = AudioRegion { channels: Some(2), ..region(true, &[(0.0, 0.0), (1.0, 1e300)], 0.0) };
+        let e = AudioEvent::new(
+            &clip(2.0, 0.0, None),
+            &warped,
+            stereo,
+            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR },
+            (1.0, 1.0),
+        )
+        .unwrap();
+        for frame in [0u64, 1, 24_000, 47_999] {
+            let (l, r) = e.sample(frame);
+            assert!(l.is_finite() && r.is_finite(), "frame {frame}: {l} {r}");
+        }
     }
 
     #[test]

@@ -51,6 +51,18 @@ const UNLOAD_WAIT: Duration = Duration::from_secs(1);
 /// Most instances one process runs.
 const MAX_INSTANCES: usize = 1024;
 
+/// Gives the calling thread, an instance's audio thread, the highest priority the system
+/// allows it (time-critical on Windows), so it answers the engine's blocks as soon as they
+/// come: the engine waits only until each block's deadline (ADR 0006). Where that is not
+/// allowed (Linux without the right), the thread runs at its normal priority.
+pub(crate) fn real_time_thread() {
+    // `SUHINA_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
+    if std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
+        return;
+    }
+    let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
+}
+
 /// Asks an audio thread to stop and waits up to `wait` for it to end; whether it did (or there
 /// was none).
 pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHandle<T>>, wait: Duration) -> bool {
@@ -67,7 +79,21 @@ pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHan
     }
 }
 
+/// Sets the main thread up as a plug-in's editor expects a host's window thread to be: on
+/// Windows with OLE (and so COM, apartment threaded) initialised, which editors use for drag
+/// and drop, the clipboard and text services, and which some crash without (Serum 2, Z3TA+ 2:
+/// a null object from a COM call made before `OleInitialize`).
+fn prepare_main_thread() {
+    #[cfg(windows)]
+    {
+        // SAFETY: called once, on the main thread, before any window or plug-in; a null
+        // reserved argument as the function requires.
+        let _ = unsafe { windows_sys::Win32::System::Ole::OleInitialize(std::ptr::null_mut()) };
+    }
+}
+
 fn main() {
+    prepare_main_thread();
     let args: Vec<String> = std::env::args().collect();
     let address = match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("--control"), Some(address)) => address,
@@ -153,11 +179,29 @@ impl Loaded {
         }
     }
 
-    fn open_editor(&mut self) -> Result<window::Size, String> {
+    fn open_editor(&mut self, mode: window::Mode) -> Result<window::Size, String> {
         match self {
-            Self::Clap(plugin) => plugin.open_editor(),
-            Self::Vst3(plugin) => plugin.open_editor(),
+            Self::Clap(plugin) => plugin.open_editor(mode),
+            Self::Vst3(plugin) => plugin.open_editor(mode),
             Self::Test { .. } => Err("the plug-in has no editor".into()),
+        }
+    }
+
+    /// Puts an embedded editor where the engine says.
+    fn place_editor(&self, placement: window::Placement) {
+        match self {
+            Self::Clap(plugin) => plugin.place_editor(placement),
+            Self::Vst3(plugin) => plugin.place_editor(placement),
+            Self::Test { .. } => {}
+        }
+    }
+
+    /// A size the open editor got since this was last asked, to tell the engine.
+    fn editor_resized(&mut self) -> Option<window::Size> {
+        match self {
+            Self::Clap(plugin) => plugin.editor_resized(),
+            Self::Vst3(plugin) => plugin.editor_resized(),
+            Self::Test { .. } => None,
         }
     }
 
@@ -261,6 +305,7 @@ fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let audio = thread::Builder::new()
         .name("plug-in audio".into())
         .spawn(move || {
+            real_time_thread();
             while !audio_stop.load(Ordering::Acquire) {
                 served.serve(POLL, |input, output| audio_processor.process(input, output));
             }
@@ -339,6 +384,11 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
             loaded.tick();
             if loaded.editor_tick() {
                 send(&mut writer, &Message::EditorClosed { instance: *instance })?;
+            } else if let Some(size) = loaded.editor_resized() {
+                send(
+                    &mut writer,
+                    &Message::EditorResized { instance: *instance, width: size.width, height: size.height },
+                )?;
             }
         }
         let message = match next_message(&messages) {
@@ -349,7 +399,9 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
         if message == Message::Quit {
             break;
         }
-        send(&mut writer, &answer(&mut instances, message))?;
+        if let Some(reply) = answer(&mut instances, message) {
+            send(&mut writer, &reply)?;
+        }
     }
     for (_, loaded) in std::mem::take(&mut instances) {
         loaded.unload();
@@ -357,11 +409,12 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The reply to one message from the engine (anything but `quit`).
-fn answer(instances: &mut Instances, message: Message) -> Message {
+/// The reply to one message from the engine (anything but `quit`); `None` for a message that
+/// takes no reply (`place_editor`).
+fn answer(instances: &mut Instances, message: Message) -> Option<Message> {
     let failed = |instance: u32, message: String| Message::Error { instance: Some(instance), message };
     let missing = |instance: u32| Message::Error { instance: Some(instance), message: "no such instance".into() };
-    match message {
+    Some(match message {
         Message::Hello { .. } => Message::Hello { version: VERSION },
         Message::Ping { id } => Message::Pong { id },
         Message::Load { instance, .. } if instances.contains_key(&instance) => {
@@ -384,14 +437,27 @@ fn answer(instances: &mut Instances, message: Message) -> Message {
             }
             Message::Unloaded { instance }
         }
-        Message::OpenEditor { instance, owner } => match instances.get_mut(&instance).map(|loaded| {
-            window::set_owner(owner);
-            loaded.open_editor()
-        }) {
-            Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
-            Some(Err(message)) => failed(instance, message),
-            None => missing(instance),
-        },
+        Message::OpenEditor { instance, owner, embedded } => {
+            let mode = match (embedded, owner) {
+                (true, Some(parent)) => window::Mode::Embedded { parent },
+                (true, None) => return Some(failed(instance, "no window to embed the editor in".into())),
+                (false, owner) => {
+                    window::set_owner(owner);
+                    window::Mode::Floating
+                }
+            };
+            match instances.get_mut(&instance).map(|loaded| loaded.open_editor(mode)) {
+                Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
+                Some(Err(message)) => failed(instance, message),
+                None => missing(instance),
+            }
+        }
+        Message::PlaceEditor { instance, placement } => {
+            if let Some(loaded) = instances.get(&instance) {
+                loaded.place_editor(placement);
+            }
+            return None;
+        }
         Message::CloseEditor { instance } => {
             if let Some(loaded) = instances.get_mut(&instance) {
                 loaded.close_editor();
@@ -423,5 +489,5 @@ fn answer(instances: &mut Instances, message: Message) -> Message {
             None => missing(instance),
         },
         other => Message::Error { instance: other.instance(), message: format!("unexpected message {other:?}") },
-    }
+    })
 }

@@ -127,11 +127,13 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   (`--audio`) the active project's plug-ins run: each is found in the catalog and started with
   its saved settings in the background, between commands; `device.plugin` (and `plugin` in
   `track.devices`) says where one stands (`loading`, `running`, `missing`, `crashed`, `failed`,
-  or `stopped` while the project does not play) with the plug-in found, its latency and whether
-  its editor is open. `device.openEditor` and `device.closeEditor` open its editor in a window
-  on the user's screen (above Suhina's window when the desktop app runs it, where it opens
-  in the background: the answer is `"editor_open": "opening"` and `device.plugin` says when it
-  is open), and `device.restart` starts a crashed one again with its
+  or `stopped` while the project does not play) with the plug-in found, its latency, whether
+  its editor is open, and how it keeps up (`blocks` given and `late_blocks` not answered in
+  time, which the chain went on without; the device panel shows the share). `device.openEditor` and `device.closeEditor` open its editor in a window
+  on the user's screen (above Suhina's window when the desktop app runs it, or inside its
+  device panel when its settings say so; there it opens in the background: the answer is
+  `"editor_open": "opening"` and `device.plugin` says when it is open), and `device.restart`
+  starts a crashed one again with its
   last settings. Renders run the installed plug-ins with their saved settings; their result's
   `plugins` lists those that are missing or did not start.
 

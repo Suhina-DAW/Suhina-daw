@@ -144,7 +144,9 @@ pub fn standard_folders() -> Vec<PathBuf> {
 
 /// The plug-in files under `folders`: files or bundle folders named `*.clap` or `*.vst3` (a
 /// bundle is not looked into), at most [`MAX_DEPTH`] levels down and [`MAX_FILES`] in all,
-/// sorted.
+/// sorted. A folder that is a symbolic link or junction is looked into like any other (an
+/// installer may link a plug-in's folder into the standard one; the depth limit bounds a
+/// loop).
 pub fn find_files(folders: &[PathBuf]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut pending: Vec<(PathBuf, usize)> = folders.iter().map(|f| (f.clone(), 0)).collect();
@@ -158,7 +160,7 @@ pub fn find_files(folders: &[PathBuf]) -> Vec<PathBuf> {
                     found.sort();
                     return found;
                 }
-            } else if depth < MAX_DEPTH && entry.file_type().is_ok_and(|t| t.is_dir()) {
+            } else if depth < MAX_DEPTH && std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
                 pending.push((path, depth + 1));
             }
         }

@@ -3864,6 +3864,7 @@ dependencies = [
  "suhina-plugins",
  "suhina-session",
  "suhina-ui",
+ "winit",
  "zip",
 ]
 
@@ -4058,8 +4059,10 @@ name = "suhina-output"
 version = "0.0.1"
 dependencies = [
  "cpal",
+ "rtrb",
  "suhina-engine",
  "suhina-session",
+ "thread-priority",
 ]
 
 [[package]]
@@ -4078,6 +4081,7 @@ dependencies = [
  "suhina-model",
  "suhina-plugins",
  "suhina-session",
+ "thread-priority",
  "vst3",
  "windows-sys 0.61.2",
  "x11rb",
@@ -4403,6 +4407,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "thread-priority"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2e834949be5111506bb252643498af1514f600d9e1dceedaa42afae155b67f"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows",
 ]
 
 [[package]]

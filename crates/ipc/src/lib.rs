@@ -83,6 +83,8 @@ pub struct Link {
     to_engine: Doorbell,
     /// The last block sent.
     sequence: u32,
+    /// Samples of the block sent and not yet collected, if any.
+    in_flight: Option<usize>,
 }
 
 impl Link {
@@ -94,7 +96,7 @@ impl Link {
         let region = Region::create(channels, max_frames)?;
         let to_host = Doorbell::create(region.name(), "host")?;
         let to_engine = Doorbell::create(region.name(), "engine")?;
-        Ok(Self { region, to_host, to_engine, sequence: 0 })
+        Ok(Self { region, to_host, to_engine, sequence: 0, in_flight: None })
     }
 
     /// What the host process needs to open this link; pass it on its command line.
@@ -127,11 +129,22 @@ impl Link {
         timeout: Duration,
     ) -> Outcome {
         let deadline = Instant::now() + timeout;
-        if self.region.response() != self.sequence {
+        if !self.send_with_events(input, events, output.len()) {
             return Outcome::Busy;
         }
+        self.wait(output, deadline)
+    }
+
+    /// The first half of [`Link::process_with_events`]: sends the block (at most `room`
+    /// samples of it, the output's size) and returns at once, so the blocks of several
+    /// plug-ins can be out at the same time. `false` when the host has not answered an earlier
+    /// block yet (the block is not sent). Real-time safe.
+    pub fn send_with_events(&mut self, input: &[f32], events: &[Event], room: usize) -> bool {
+        if self.region.response() != self.sequence || self.in_flight.is_some() {
+            return false;
+        }
         let channels = self.region.channels() as usize;
-        let samples = input.len().min(output.len()).min(self.region.samples());
+        let samples = input.len().min(room).min(self.region.samples());
         let samples = samples - samples % channels;
         self.region.write_input(input.get(..samples).unwrap_or_default());
         self.region.set_frames((samples / channels) as u32);
@@ -139,6 +152,15 @@ impl Link {
         self.sequence = self.sequence.wrapping_add(1);
         self.region.set_request(self.sequence);
         self.to_host.ring(self.region.request_word());
+        self.in_flight = Some(samples);
+        true
+    }
+
+    /// The second half: waits until `deadline` for the block sent with
+    /// [`Link::send_with_events`] and reads its result into `output`. `Busy` when no block is
+    /// out. Real-time safe.
+    pub fn wait(&mut self, output: &mut [f32], deadline: Instant) -> Outcome {
+        let Some(samples) = self.in_flight.take() else { return Outcome::Busy };
         let sequence = self.sequence;
         if self.to_engine.wait(self.region.response_word(), |v| v == sequence, deadline) {
             self.region.read_output(output.get_mut(..samples).unwrap_or_default());

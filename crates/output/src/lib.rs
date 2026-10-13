@@ -1,13 +1,18 @@
 //! The audio device: plays an engine [`Renderer`] on the default output (cpal).
 //!
-//! The renderer is built on the main thread and then moved into the audio callback. The callback
-//! only calls `Renderer::process`, converts samples and sets atomics: no allocation, locks or I/O
-//! on the audio thread (AGENTS.md rule 3). Launcher commands reach it through the renderer's
-//! lock-free command queue, and stretched clips are rendered ahead on a worker thread of their
-//! own (ADR 0003).
+//! The renderer is built on the main thread and then moved to a render thread of its own,
+//! which runs it ahead of the device in blocks of [`ENGINE_BLOCK`] frames into a lock-free
+//! ring ([`rtrb`]); the device's callback only copies from the ring, converts samples and sets
+//! atomics: no allocation, locks or I/O on either thread (AGENTS.md rule 3). Rendering in
+//! blocks of its own, rather than in the device's buffers, gives the plug-ins of a block the
+//! same time whatever the device's buffer size (some drivers give a few milliseconds), at the
+//! cost of the ring's latency. Launcher commands reach the renderer through its lock-free
+//! command queue, and stretched clips are rendered ahead on a worker thread of their own (ADR
+//! 0003).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
@@ -15,13 +20,20 @@ use suhina_engine::model::Project;
 use suhina_engine::{AudioPool, Controller, Renderer};
 use suhina_session::Player;
 
-/// Frames rendered per engine call; output buffers larger than this are filled in several calls.
-const SCRATCH_FRAMES: usize = 4096;
+/// Frames the engine renders per block, ahead of the device. The plug-ins of a block get a
+/// share of this block's playing time (ADR 0006), whatever the device's buffer size.
+pub const ENGINE_BLOCK: usize = 1024;
+/// Blocks the ring holds: the render thread keeps this much ahead of the device, so the
+/// latency from the engine to the device is up to this many blocks.
+const RING_BLOCKS: usize = 2;
+/// How long the render thread waits when the ring is full before looking again.
+const RENDER_WAIT: Duration = Duration::from_millis(1);
 
 /// State the audio callback shares with the main thread.
 #[derive(Default)]
 pub struct Progress {
     frames: AtomicU64,
+    underruns: AtomicU64,
     stream_error: AtomicBool,
 }
 
@@ -31,9 +43,32 @@ impl Progress {
         self.frames.load(Ordering::Relaxed)
     }
 
+    /// Device buffers the render thread had not filled in time, so far: those played silence
+    /// for what was missing.
+    pub fn underruns(&self) -> u64 {
+        self.underruns.load(Ordering::Relaxed)
+    }
+
     /// Whether the device reported an error.
     pub fn failed(&self) -> bool {
         self.stream_error.load(Ordering::Relaxed)
+    }
+}
+
+/// A playing stream: the device's, and the render thread that feeds it. Dropping it stops
+/// both.
+pub struct Stream {
+    _device: cpal::Stream,
+    stop: Arc<AtomicBool>,
+    render: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(render) = self.render.take() {
+            let _ = render.join();
+        }
     }
 }
 
@@ -66,28 +101,67 @@ impl Output {
         format!("{} ({} Hz, {} channels, {})", self.device, self.config.sample_rate, self.config.channels, self.format)
     }
 
-    /// Starts playing `renderer` on the device, with its stretched clips rendered ahead on a
-    /// worker thread that `controller` keeps (and stops when it is dropped). The stream plays
-    /// until it is dropped.
+    /// Starts playing `renderer` on the device, rendered ahead on a thread of its own, with
+    /// its stretched clips rendered ahead on a worker thread that `controller` keeps (and
+    /// stops when it is dropped). The stream plays until it is dropped.
     pub fn start(
         &self,
         mut renderer: Renderer,
         controller: &mut Controller,
         progress: &Arc<Progress>,
-    ) -> Result<cpal::Stream, String> {
+    ) -> Result<Stream, String> {
         controller.run_stretch_worker(&mut renderer).map_err(|e| format!("could not start the stretch worker: {e}"))?;
         let (device, config) = (&self.device, self.config);
+        let block = engine_block();
+        let (producer, consumer) = rtrb::RingBuffer::<f32>::new(block * 2 * RING_BLOCKS);
         let stream = match self.format {
-            cpal::SampleFormat::F32 => build::<f32>(device, config, renderer, progress),
-            cpal::SampleFormat::I16 => build::<i16>(device, config, renderer, progress),
-            cpal::SampleFormat::I32 => build::<i32>(device, config, renderer, progress),
-            cpal::SampleFormat::U16 => build::<u16>(device, config, renderer, progress),
+            cpal::SampleFormat::F32 => build::<f32>(device, config, consumer, progress),
+            cpal::SampleFormat::I16 => build::<i16>(device, config, consumer, progress),
+            cpal::SampleFormat::I32 => build::<i32>(device, config, consumer, progress),
+            cpal::SampleFormat::U16 => build::<u16>(device, config, consumer, progress),
             other => {
                 return Err(format!("audio output {device} uses sample format {other}, which is not supported yet"));
             }
         }?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::clone(&stop);
+        let render = std::thread::Builder::new()
+            .name("suhina-render".into())
+            .spawn(move || render_ahead(renderer, producer, block, &stopping))
+            .map_err(|e| format!("could not start the render thread: {e}"))?;
         stream.play().map_err(|e| format!("could not start audio output {device}: {e}"))?;
-        Ok(stream)
+        Ok(Stream { _device: stream, stop, render: Some(render) })
+    }
+}
+
+/// The render thread: runs the engine a block at a time whenever the ring has room for one,
+/// until told to stop. Real-time: at the highest priority the system allows, and never
+/// allocating after its scratch block.
+/// The frames the engine renders per block: [`ENGINE_BLOCK`], or `SUHINA_ENGINE_BLOCK`
+/// (64 to 4096) to try another size.
+fn engine_block() -> usize {
+    std::env::var("SUHINA_ENGINE_BLOCK")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| (64..=4096).contains(n))
+        .unwrap_or(ENGINE_BLOCK)
+}
+
+fn render_ahead(mut renderer: Renderer, mut ring: rtrb::Producer<f32>, frames: usize, stop: &AtomicBool) {
+    // `SUHINA_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
+    if !std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
+        let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
+    }
+    let mut block = vec![0.0f32; frames * 2];
+    while !stop.load(Ordering::Acquire) {
+        if ring.slots() < block.len() {
+            std::thread::park_timeout(RENDER_WAIT);
+            continue;
+        }
+        renderer.process(&mut block);
+        if let Ok(chunk) = ring.write_chunk_uninit(block.len()) {
+            chunk.fill_from_iter(block.iter().copied());
+        }
     }
 }
 
@@ -96,7 +170,7 @@ pub struct Stopped {
     pub controller: Controller,
     pub output: Output,
     pub progress: Arc<Progress>,
-    pub stream: cpal::Stream,
+    pub stream: Stream,
 }
 
 /// Opens the default output and plays `project` on it with the transport stopped.
@@ -135,17 +209,19 @@ pub fn open_player(project: &Project, audio: &AudioPool) -> Result<(Player, Stri
     Ok((Player::new(controller, Some(Box::new(close))), description))
 }
 
+/// The device's stream: its callback takes what the render thread put in the ring, and
+/// silence (counted as an underrun) for what is not there yet.
 fn build<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    mut renderer: Renderer,
+    mut ring: rtrb::Consumer<f32>,
     progress: &Arc<Progress>,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
     let channels = usize::from(config.channels);
-    let mut scratch = vec![0.0f32; SCRATCH_FRAMES * 2];
+    let mut scratch = vec![0.0f32; 4096 * 2];
     let on_data = Arc::clone(progress);
     let on_error = Arc::clone(progress);
 
@@ -153,10 +229,24 @@ where
         .build_output_stream(
             config,
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                for block in data.chunks_mut(SCRATCH_FRAMES * channels) {
+                for block in data.chunks_mut(4096 * channels) {
                     let frames = block.len() / channels;
                     let Some(stereo) = scratch.get_mut(..frames * 2) else { return };
-                    renderer.process(stereo);
+                    let ready = ring.slots().min(stereo.len()) / 2 * 2;
+                    match ring.read_chunk(ready) {
+                        Ok(chunk) => {
+                            for (sample, out) in chunk.into_iter().zip(stereo.iter_mut()) {
+                                *out = sample;
+                            }
+                        }
+                        Err(_) => stereo.fill(0.0),
+                    }
+                    if ready < stereo.len() {
+                        if let Some(missing) = stereo.get_mut(ready..) {
+                            missing.fill(0.0);
+                        }
+                        on_data.underruns.fetch_add(1, Ordering::Relaxed);
+                    }
                     write_frames(block, channels, stereo);
                     on_data.frames.fetch_add(frames as u64, Ordering::Relaxed);
                 }
