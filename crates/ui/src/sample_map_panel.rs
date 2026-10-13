@@ -307,7 +307,6 @@ impl Panel {
             }
             MapEvent::StartDrag(items) => {
                 let items: Vec<BrowserItem> = items.iter().filter_map(|i| self.path(*i)).map(|p| item_of(&p)).collect();
-                crate::browser_view::stop_preview(state, projects);
                 state.start_drag(items);
             }
             MapEvent::Add(i) => {

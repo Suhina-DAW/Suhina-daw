@@ -687,7 +687,8 @@ fn results_view(
         let items: Vec<BrowserItem> =
             items.into_iter().filter(|i| i.kind != ItemKind::Heading && i.kind != ItemKind::Folder).collect();
         if !items.is_empty() {
-            stop_preview(state, projects);
+            // The preview goes on while dragging (a press held still also starts a drag); it
+            // stops when the items are dropped into the project.
             state.start_drag(items);
         }
     }

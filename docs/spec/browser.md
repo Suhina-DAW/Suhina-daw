@@ -155,8 +155,9 @@ with the part played so far brighter and a playhead.
   not synced to the project's tempo or beat. It plays whether the project is playing or not,
   into the main output after the main channel, at the preview volume (Settings › Interface ›
   Browser › Preview volume, −6 dB by default).
-- Selecting something else, Escape in the search field, the play button again, or a drag from
-  the browser stops it.
+- Selecting something else, Escape in the search field, the play button again, or dropping
+  items from the browser into the project stops it. Dragging does not: a press held still
+  counts as the start of a drag, and the preview it started goes on.
 - **A MIDI file** previews through the selected track's instrument, a built-in one or a
   plug-in, when that track has one; otherwise through the FM synth with its first voice. All
   of the file's MIDI tracks sound together, at 120 BPM or the file's first tempo.

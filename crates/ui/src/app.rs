@@ -1580,6 +1580,8 @@ impl App {
             self.view.drop = None;
             self.arrangement.drop = None;
             if let Some(target) = target {
+                // Dropped into the project: the preview has done its job.
+                browser_view::stop_preview(&mut self.browser, &mut self.projects);
                 self.drop_items(&items, target, separate);
             }
         }
