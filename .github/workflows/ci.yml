@@ -1,9 +1,8 @@
 name: CI
 
-# Pull requests and main run on Linux only, to keep Actions minutes down while the repository is
-# private (Windows minutes count double, macOS ten times). Windows and macOS run when started by
-# hand (Actions > CI > Run workflow, "all platforms"), and the release workflow builds and checks
-# all three for every tag.
+# Pull requests and main run on Linux only, which keeps every change's check fast. Windows and
+# macOS run when started by hand (Actions > CI > Run workflow, "all platforms"), and the release
+# workflow builds and checks all three for every tag and for the nightly.
 on:
   push:
     branches: [main]
