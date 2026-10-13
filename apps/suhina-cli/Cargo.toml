@@ -9,6 +9,10 @@ rust-version.workspace = true
 name = "suhina-cli"
 path = "src/main.rs"
 
+[features]
+# ASIO on Windows (README › Building): needs libclang and a C++ compiler at build time.
+asio = ["suhina-output/asio"]
+
 [dependencies]
 suhina-engine.workspace = true
 suhina-als.workspace = true

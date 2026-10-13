@@ -175,7 +175,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `transport.setPosition`, `transport.setMetronome`; for several open projects `projects.list`, `projects.switch`,
   `projects.next`, `projects.previous`, `projects.close`; for plug-ins `plugins.scan`,
   `plugins.list`, `plugins.folders`, `plugins.addFolder`, `plugins.removeFolder`,
-  `plugins.check`, `plugins.setHosting` (also as `suhina-cli plugins …`); for devices
+  `plugins.check`, `plugins.setHosting` (also as `suhina-cli plugins …`); for the audio
+  output `audio.devices` (also `suhina-cli audio devices`), `audio.setOutput`, `audio.info`;
+  for devices
   `devices.list`, `track.devices`, `device.add`, `device.remove`, `device.setEnabled`,
   `device.setParam`, `device.addPlugin`, `device.plugin`, `device.openEditor`,
   `device.closeEditor`, `device.restart`; for tracks and files `track.add`, `clip.addFiles`
@@ -351,6 +353,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
+- Settings › Audio: the driver (WASAPI, or ASIO in a build with the `asio` feature), the output
+  device, sample rate and buffer size as dropdowns of what the driver allows, WASAPI exclusive
+  mode (off by default), and what plays now with its measured latency and underruns. A change
+  reopens the output with the transport where it was and the plug-ins running; the engine
+  renders in blocks of the buffer size, so the plug-ins' deadline follows it. A device that is
+  gone at start plays the default output, with a notice. `suhina-cli play` takes the same
+  choice (`--host`, `--device`, `--buffer`, `--exclusive`).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command

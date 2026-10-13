@@ -307,6 +307,24 @@ impl Renderer {
         self.offline = offline;
     }
 
+    /// Ends the renderer and gives back its plug-in devices' processors, with what is known
+    /// about each, so another renderer (a new audio output at the same sample rate) can be built
+    /// with them ([`Renderer::stopped_with_plugins`]) and the plug-ins keep running. Call it
+    /// once the renderer no longer runs on the audio thread: it frees what the graph holds.
+    pub fn into_plugins(mut self) -> Plugins {
+        let mut taken = swap::Taken::default();
+        self.swap.take_processors(&mut self.graph, &mut taken);
+        // What the slots knew is newer than what the renderer was built with: the controller
+        // tells the graphs after it, as plug-ins load and say their latency.
+        let mut info = std::mem::take(&mut self.plugin_info);
+        info.extend(taken.info);
+        let processors: HashMap<u64, Box<dyn PluginProcessor>> = taken.processors;
+        for key in processors.keys() {
+            info.entry(*key).or_default();
+        }
+        Plugins { info, processors }
+    }
+
     /// The delay latency compensation adds to everything, in frames: the most any track's
     /// devices add.
     pub fn latency(&self) -> u32 {

@@ -71,7 +71,8 @@ crates/
   session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002), the
            attached player, each project's decoded audio and previews (ADR 0011)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
-  output   L3 the audio device (cpal): plays an engine, opens a Player for a session
+  output   L3 the audio device: lists hosts and devices (cpal; ASIO with the `asio` feature), opens the one
+           chosen (WASAPI exclusive through `wasapi`), plays an engine in blocks of the chosen buffer
   ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in devices: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
@@ -97,6 +98,7 @@ docs/
   spec/       clean-room specs written from observation (formats, behaviour, UI views)
   design/     UI design brief, component measurements and reference mockups (ADR 0009)
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
+third_party/  vendored source built behind a feature: the ASIO SDK's host part (GPL-3.0, `asio`)
 scripts/   research helpers (e.g. extracting and diffing .als files) and docs.py (the docs index)
 ```
 

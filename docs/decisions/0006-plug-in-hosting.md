@@ -3,13 +3,14 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/ipc/**
   - crates/plugins/**
   - crates/plugin-host/**
   - crates/engine/src/plugin.rs
   - crates/session/src/rack.rs
+  - crates/output/src/lib.rs
 ---
 
 # 0006: Plug-in hosting
@@ -127,14 +128,20 @@ workspace forbids.
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
-   *Built:* the host's audio threads and the desktop app's render thread take the highest
-   priority the system gives them (`thread-priority`: time-critical on Windows; on Linux the
-   normal priority until real-time rights are set up). The deadline is 60 % of a block's
+   *Built:* the host's audio threads and the desktop app's render thread join MMCSS "Pro Audio"
+   on Windows (`audio_thread_priority`; `thread-priority`'s highest, `THREAD_PRIORITY_HIGHEST`,
+   only where MMCSS refuses) and take the highest priority the system gives them elsewhere (on
+   Linux the normal priority until real-time rights are set up). The deadline is 60 % of a block's
    playing time for all of a block's plug-ins together, one after another, so it depends on
-   the block: the audio output renders the engine in blocks of its own (`ENGINE_BLOCK`, 1024
-   frames) ahead of the device into a ring, rather than in the device's buffers, after a
-   driver that gave 3 ms buffers left 25 plug-ins 30 to 50 % of their blocks late (notes
-   dropped, "stopped answering"). The session counts each plug-in's blocks and late blocks
+   the block: the audio output renders the engine in blocks of its own ahead of the device into a
+   ring, rather than in the device's buffers, after a driver that gave 3 ms buffers left 25
+   plug-ins 30 to 50 % of their blocks late (notes dropped, "stopped answering"). The block is
+   the buffer size the user chooses (Settings › Audio, `audio.setOutput`: 64 … 4096 frames,
+   rounded to a size the driver allows; 1024 when none is chosen), so the deadline follows that
+   choice: a smaller buffer is quicker to answer a key and leaves the plug-ins less time. With
+   ASIO and WASAPI exclusive mode the device's buffer is that size too; WASAPI shared mode keeps
+   the period Windows gives it, and the ring holds a device buffer and a block when the device
+   takes more than a block at once. The session counts each plug-in's blocks and late blocks
    (`device.plugin`: `blocks`, `late_blocks`, `longest_us`, `no_time`), and the device panel
    shows the share. Even so the sum of 25 plug-ins' times (Serum 2 up to 9 ms a block)
    passed the budget on half the blocks, so the chains no chain plays into now run their

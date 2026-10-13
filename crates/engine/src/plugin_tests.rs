@@ -403,3 +403,62 @@ fn a_plug_in_instrument_is_released_when_the_transport_stops() {
     let all = seen.iter().position(|(_, e)| *e == NoteEvent::AllNotesOff);
     assert!(off.is_some() && all.is_some() && off < all, "{seen:?}");
 }
+
+/// A new audio output (another buffer size, the same sample rate) builds a new renderer: the
+/// old one gives its running processors back, including one still in its queue, and the new
+/// one plays them without a restart.
+#[test]
+fn a_renderer_hands_its_plug_ins_to_the_next_one() {
+    let notes = vec![note(0.0, 8.0, 69)];
+    let p = project(notes, 8.0, vec![plug(vst3())]);
+    let key = plugin_devices(&p)[0].key;
+    let first = Stand::new(Behaviour::Gain(0.0));
+    let dropped = Arc::clone(&first.dropped);
+    let mut renderer = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins(&p, vec![(first, EFFECT)])).unwrap();
+    assert_eq!(peak(&blocks(&mut renderer, 4, 480)), 0.0, "the plug-in silences the track");
+
+    let plugins = renderer.into_plugins();
+    assert_eq!(dropped.load(Ordering::SeqCst), 0, "handed over, not dropped");
+    assert_eq!(plugins.info().get(&key), Some(&EFFECT));
+    let mut next = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    assert_eq!(peak(&blocks(&mut next, 4, 256)), 0.0, "the same plug-in plays in the new renderer");
+
+    // One sent but not placed yet comes back too.
+    let mut controller = next.controller();
+    let queued = Stand::new(Behaviour::Gain(1.0));
+    let queued_dropped = Arc::clone(&queued.dropped);
+    controller.send_plugin(key, Box::new(queued)).unwrap();
+    let back = next.into_plugins();
+    assert_eq!(queued_dropped.load(Ordering::SeqCst), 0);
+    assert_eq!(dropped.load(Ordering::SeqCst), 1, "the queued one, newer, replaced it");
+    let mut third = Renderer::with_plugins(&p, &AudioPool::new(), SR, back).unwrap();
+    assert!(peak(&blocks(&mut third, 4, 256)) > 0.1, "the queued plug-in plays");
+}
+
+/// A plug-in that arrived while playing (its slot told to the controller after the renderer
+/// was built, as the session does) is handed over too, with what its slot knew.
+#[test]
+fn a_plug_in_that_arrived_while_playing_is_handed_over_with_its_slot() {
+    let p = project(vec![note(0.0, 8.0, 69)], 8.0, vec![plug(vst3())]);
+    let key = plugin_devices(&p)[0].key;
+    let mut renderer = Renderer::with_audio(&p, &AudioPool::new(), SR).unwrap();
+    let mut controller = renderer.controller();
+    let mut info = std::collections::HashMap::new();
+    let latency = PluginSlotInfo { instrument: false, latency: 32 };
+    info.insert(key, latency);
+    controller.set_plugin_info(info);
+    let stand = Stand::new(Behaviour::Gain(0.0));
+    let dropped = Arc::clone(&stand.dropped);
+    controller.send_plugin(key, Box::new(stand)).unwrap();
+    blocks(&mut renderer, 2, 480);
+    controller.update(&p).unwrap();
+    blocks(&mut renderer, 4, 480);
+    assert_eq!(peak(&blocks(&mut renderer, 4, 480)), 0.0, "the plug-in plays");
+
+    let plugins = renderer.into_plugins();
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+    assert_eq!(plugins.info().get(&key), Some(&latency));
+    let mut next = Renderer::with_plugins(&p, &AudioPool::new(), SR, plugins).unwrap();
+    assert_eq!(peak(&blocks(&mut next, 40, 256)), 0.0, "and plays on in the next renderer");
+    drop(controller);
+}

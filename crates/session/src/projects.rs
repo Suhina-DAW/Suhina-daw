@@ -47,7 +47,18 @@ pub struct Projects {
     pub(crate) sound_map_started: bool,
     /// The library revision the sound map was last brought in line with.
     pub(crate) sound_map_revision: Option<u64>,
+    /// The system's audio devices, when this program plays out loud (the desktop app, the MCP
+    /// server with `--audio`).
+    audio: Option<std::sync::Arc<dyn crate::AudioSystem>>,
+    /// The output the user chose (`audio.setOutput`, the window's settings).
+    output_choice: crate::OutputChoice,
+    /// When a failed output was last opened again, so a device that keeps failing is tried
+    /// every [`OUTPUT_RETRY`], not every frame.
+    output_retried: Option<std::time::Instant>,
 }
+
+/// How often an output whose device reported an error is opened again.
+const OUTPUT_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
 
@@ -97,6 +108,78 @@ pub fn project_commands() -> &'static [CommandSpec<Projects>] {
 impl Projects {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Lets the projects play out loud through `system`'s devices (`audio.*` commands,
+    /// [`Projects::open_output`]).
+    pub fn set_audio_system(&mut self, system: std::sync::Arc<dyn crate::AudioSystem>) {
+        self.audio = Some(system);
+    }
+
+    pub fn audio_system(&self) -> Option<std::sync::Arc<dyn crate::AudioSystem>> {
+        self.audio.clone()
+    }
+
+    pub fn output_choice(&self) -> &crate::OutputChoice {
+        &self.output_choice
+    }
+
+    /// Chooses the output players open on from now on; [`Projects::reopen_output`] moves the
+    /// playing one there.
+    pub fn set_output_choice(&mut self, choice: crate::OutputChoice) {
+        self.output_choice = choice;
+    }
+
+    /// Opens the chosen output for project `id` (the active one when `None`), with its
+    /// transport stopped. Returns a notice when the chosen device was not there and the default
+    /// plays instead.
+    pub fn open_output(&mut self, id: Option<ProjectId>) -> Result<Option<String>, CommandError> {
+        let system = self.audio.clone().ok_or("no audio output here")?;
+        let choice = self.output_choice.clone();
+        let session = self.session_mut(id)?;
+        let (mut notice, mut kept) = (None, false);
+        session
+            .replace_player(|project, audio, previous| {
+                system.open(project, audio, &choice, previous).map(|opened| {
+                    notice = opened.notice;
+                    kept = opened.plugins_kept;
+                    opened.player
+                })
+            })
+            .map_err(|e| CommandError(format!("no audio output: {e}")))?;
+        if !kept {
+            session.restart_plugins();
+        }
+        Ok(notice)
+    }
+
+    /// Moves the active project's output to the one chosen now, keeping the transport where
+    /// it is (the playhead, playing or stopped, and the metronome) and the plug-ins running.
+    /// Nothing happens while no project plays. Returns a notice as [`Projects::open_output`].
+    pub fn reopen_output(&mut self) -> Result<Option<String>, CommandError> {
+        let Some(system) = self.audio.clone() else { return Ok(None) };
+        let choice = self.output_choice.clone();
+        let Ok(session) = self.session_mut(None) else { return Ok(None) };
+        let Some(transport) = session.player().map(crate::audio::Transport::of) else { return Ok(None) };
+        let (mut notice, mut kept) = (None, false);
+        session
+            .replace_player(|project, audio, previous| {
+                system.open(project, audio, &choice, previous).map(|opened| {
+                    notice = opened.notice;
+                    kept = opened.plugins_kept;
+                    opened.player
+                })
+            })
+            .map_err(|e| CommandError(format!("no audio output: {e}")))?;
+        if !kept {
+            session.restart_plugins();
+        }
+        if let Ok(player) = session.player_mut() {
+            transport.restore(player)?;
+        }
+        // Plug-ins that could not carry over (a new sample rate) start again.
+        session.sync_plugins();
+        Ok(notice)
     }
 
     pub fn len(&self) -> usize {
@@ -245,6 +328,37 @@ impl Projects {
     /// thread that owns the projects (the window calls it every frame); commands call it too.
     /// Returns what the user should hear about.
     pub fn poll_plugins(&mut self) -> Vec<String> {
+        let mut notices = self.check_output();
+        notices.extend(self.sync_active_plugins());
+        notices
+    }
+
+    /// Opens the active project's output again when its device reported an error: a driver
+    /// that asked to be reset (ASIO, after its buffer size or sample rate changed in its own
+    /// panel), or a device unplugged, which then falls back to the default one. Returns what
+    /// the user should hear about.
+    pub fn check_output(&mut self) -> Vec<String> {
+        let failed = self
+            .session_mut(None)
+            .ok()
+            .and_then(|s| s.player())
+            .and_then(crate::Player::output_info)
+            .is_some_and(|info| info.failed);
+        if !failed || self.output_retried.is_some_and(|t| t.elapsed() < OUTPUT_RETRY) {
+            return Vec::new();
+        }
+        self.output_retried = Some(std::time::Instant::now());
+        match self.reopen_output() {
+            Ok(notice) => {
+                let mut said = vec!["the audio device reported an error; its output was opened again".to_string()];
+                said.extend(notice);
+                said
+            }
+            Err(e) => vec![e.0],
+        }
+    }
+
+    fn sync_active_plugins(&mut self) -> Vec<String> {
         let Some(active) = self.active else { return Vec::new() };
         if self.get(active).is_none_or(|s| s.player().is_none()) {
             return Vec::new();
@@ -276,6 +390,7 @@ impl Projects {
             .chain(plugin_commands())
             .chain(crate::library_commands())
             .chain(crate::sound_map_commands())
+            .chain(crate::audio_commands())
             .find(|c| c.id == id)
         {
             if project.is_some() {
@@ -322,6 +437,7 @@ pub fn all_commands() -> Value {
         .chain(plugin_commands())
         .chain(crate::library_commands())
         .chain(crate::sound_map_commands())
+        .chain(crate::audio_commands())
         .map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }

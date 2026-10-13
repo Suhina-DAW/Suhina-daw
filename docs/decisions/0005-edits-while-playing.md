@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -79,6 +79,12 @@ delay lines of latency compensation carry their sound over when their length sta
 What a graph knows about plug-in devices (`Controller::set_plugin_info`: which have a slot,
 which play notes, their latency) is set before the graph is built
 ([ADR 0006](0006-plug-in-hosting.md)).
+
+A renderer that ends because another audio output was chosen (`audio.setOutput`) gives its
+plug-ins back once it no longer runs (`Renderer::into_plugins`): from its graph, the graph not
+yet taken back, the ones parked or still queued, the newest for each device. The next renderer
+is built with them (`Renderer::with_plugins`) when the sample rate stays the same, so the
+plug-ins keep running and their state across the reopen.
 
 ## Amendment: edits in the next block (2026-10-12)
 

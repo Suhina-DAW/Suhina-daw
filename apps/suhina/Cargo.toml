@@ -10,6 +10,10 @@ rust-version.workspace = true
 name = "suhina"
 path = "src/main.rs"
 
+[features]
+# ASIO on Windows (README › Building): needs libclang and a C++ compiler at build time.
+asio = ["suhina-output/asio"]
+
 [dependencies]
 # The main window's native handle, for plug-in editors to float above it.
 raw-window-handle = "0.6"  # MIT OR Apache-2.0 OR Zlib
