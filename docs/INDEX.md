@@ -48,6 +48,7 @@ are changing (*Code and its documents*).
 | [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
+| [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
@@ -114,7 +115,7 @@ Change this code, and check these documents.
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
-| `crates/ui/src/app.rs` | [Architecture](architecture.md), [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/app.rs` | [Architecture](architecture.md), [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/browser.rs` | [Browser](spec/browser.md) |
 | `crates/ui/src/browser_view.rs` | [Browser](spec/browser.md) |
@@ -129,7 +130,7 @@ Change this code, and check these documents.
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/settings_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/theme.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
