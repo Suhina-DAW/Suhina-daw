@@ -93,6 +93,56 @@ palette! {
         "Behind a track header's pan field";
     pan_centre, "pan.centre", 0x55524C,
         "The centre mark of a pan field";
+    track_color_1, "track.1", 0xD08F6E,
+        "The first default track colour: new tracks take them in turn; also effects in the browser";
+    track_color_2, "track.2", 0xC6AC5E,
+        "The second default track colour; also MIDI files in the browser";
+    track_color_3, "track.3", 0x73AAC0,
+        "The third default track colour; also samples in the browser";
+    track_color_4, "track.4", 0xA497CC,
+        "The fourth default track colour; also instruments and presets in the browser";
+    track_color_5, "track.5", 0x8FA87A,
+        "A colour a track's menu offers";
+    track_color_6, "track.6", 0xC27C8E,
+        "A colour a track's menu offers";
+    track_color_7, "track.7", 0x7F8FB0,
+        "A colour a track's menu offers";
+    track_color_8, "track.8", 0xB9B2A6,
+        "A colour a track's menu offers";
+    kind_kick, "kind.kick", 0xD06E5E,
+        "Sample-map points of the kind kick";
+    kind_snare, "kind.snare", 0x73AAC0,
+        "Sample-map points of the kind snare";
+    kind_clap, "kind.clap", 0x5EC0B0,
+        "Sample-map points of the kind clap";
+    kind_closed_hat, "kind.closedHat", 0xC6AC5E,
+        "Sample-map points of the kind closed hat";
+    kind_open_hat, "kind.openHat", 0xD08F6E,
+        "Sample-map points of the kind open hat";
+    kind_hat, "kind.hat", 0xD8C47A,
+        "Sample-map points of the kind hat";
+    kind_rim, "kind.rim", 0x8CA8E0,
+        "Sample-map points of the kind rim";
+    kind_tom, "kind.tom", 0xB074A4,
+        "Sample-map points of the kind tom";
+    kind_crash, "kind.crash", 0xE0A0C8,
+        "Sample-map points of the kind crash";
+    kind_ride, "kind.ride", 0xC8B8E8,
+        "Sample-map points of the kind ride";
+    kind_cymbal, "kind.cymbal", 0xA497CC,
+        "Sample-map points of the kind cymbal";
+    kind_percussion, "kind.percussion", 0x8FC06E,
+        "Sample-map points of the kind percussion";
+    kind_bass, "kind.bass", 0xA84F4F,
+        "Sample-map points of the kind bass";
+    kind_tonal, "kind.tonal", 0x6EB0D0,
+        "Sample-map points of the kind tonal";
+    kind_vocal, "kind.vocal", 0xE8D0A0,
+        "Sample-map points of the kind vocal";
+    kind_effect, "kind.effect", 0x9CC49C,
+        "Sample-map points of the kind effect";
+    kind_other, "kind.other", 0x8A8680,
+        "Sample-map points of the kind other";
 }
 
 /// Tokens renamed since the first theme files, old name first; files with the old names still
@@ -307,6 +357,8 @@ pub fn parse_hex(text: &str) -> Option<Color32> {
 
 /// Grid rows, headers, fields.
 pub const ROW: f32 = 20.0;
+/// A row of the browser's lists and tree.
+pub const BROWSER_ROW: f32 = 17.0;
 pub const MENU_BAR: f32 = 20.0;
 pub const CONTROL_BAR: f32 = 28.0;
 pub const STATUS_BAR: f32 = 20.0;
@@ -422,6 +474,45 @@ fn visuals(visuals: &mut egui::Visuals, p: &Palette) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_theme_that_comes_with_suhina_sets_every_token() {
+        let tokens: Vec<&str> = Palette::DARK.tokens().iter().map(|(key, _, _)| *key).collect();
+        for (id, text) in BUILT_IN_FILES {
+            let (_, warnings) = Theme::from_json(text);
+            assert!(warnings.is_empty(), "{id}: {warnings:?}");
+            let colors = match serde_json::from_str::<Value>(text) {
+                Ok(Value::Object(root)) => root.get("colors").and_then(Value::as_object).cloned().unwrap_or_default(),
+                _ => Map::new(),
+            };
+            for token in &tokens {
+                assert!(colors.contains_key(*token), "{id} leaves out {token}");
+            }
+        }
+    }
+
+    #[test]
+    fn track_and_kind_colours_keep_their_values_in_suhina_dark() {
+        let dark = Palette::DARK;
+        let tracks = [
+            dark.track_color_1,
+            dark.track_color_2,
+            dark.track_color_3,
+            dark.track_color_4,
+            dark.track_color_5,
+            dark.track_color_6,
+            dark.track_color_7,
+            dark.track_color_8,
+        ];
+        let expected = [0xD08F6E, 0xC6AC5E, 0x73AAC0, 0xA497CC, 0x8FA87A, 0xC27C8E, 0x7F8FB0, 0xB9B2A6].map(rgb);
+        assert_eq!(tracks, expected);
+        assert_eq!((dark.kind_kick, dark.kind_other), (rgb(0xD06E5E), rgb(0x8A8680)));
+        // A theme can change them like any other token.
+        let (theme, warnings) =
+            Theme::from_json(r##"{ "colors": { "track.1": "#010203", "kind.snare": "#040506" } }"##);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!((theme.colors.track_color_1, theme.colors.kind_snare), (rgb(0x010203), rgb(0x040506)));
+    }
 
     #[test]
     fn a_theme_survives_a_round_trip() {
