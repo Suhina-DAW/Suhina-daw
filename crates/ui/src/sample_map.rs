@@ -137,6 +137,11 @@ impl Default for MapView {
 }
 
 impl MapView {
+    /// The width over the height of where the points were drawn last frame; 1 before the first.
+    pub fn aspect(&self) -> f32 {
+        aspect_of(self.area)
+    }
+
     /// Shows the answer to [`MapEvent::Similar`]: rings these items and lists them at the side.
     pub fn show_similar(&mut self, of: usize, items: Vec<usize>) {
         self.similar = Some((of, items));
@@ -201,15 +206,26 @@ impl Transform {
     }
 }
 
-/// Where each point is drawn: its cloud position, or the centre of its grid cell.
-fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>) -> Vec<[f32; 2]> {
+/// The width over the height of `rect`; 1 when it has no size.
+fn aspect_of(rect: Rect) -> f32 {
+    let aspect = rect.width() / rect.height();
+    if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
+}
+
+/// Where each point is drawn: its cloud position, or the centre of its grid cell. The grid
+/// fills a box of the view's `aspect` around the map's middle (the view shows 1 across its
+/// shorter side), with square cells.
+fn positions(points: &[MapPoint], layout: Layout, grid: Option<&Grid>, aspect: f32) -> Vec<[f32; 2]> {
     match (layout, grid) {
         (Layout::Grid, Some(grid)) if grid.cells.len() == points.len() => {
-            let side = grid.columns.max(grid.rows).max(1) as f32;
-            let offset = [(side - grid.columns as f32) / 2.0, (side - grid.rows as f32) / 2.0];
+            let (width, height) = if aspect >= 1.0 { (aspect, 1.0) } else { (1.0, 1.0 / aspect) };
+            let (columns, rows) = (grid.columns.max(1) as f32, grid.rows.max(1) as f32);
+            let cell = (width / columns).min(height / rows);
             grid.cells
                 .iter()
-                .map(|(c, r)| [(*c as f32 + 0.5 + offset[0]) / side, (*r as f32 + 0.5 + offset[1]) / side])
+                .map(|(c, r)| {
+                    [0.5 + (*c as f32 + 0.5 - columns / 2.0) * cell, 0.5 + (*r as f32 + 0.5 - rows / 2.0) * cell]
+                })
                 .collect()
         }
         _ => points.iter().map(|p| p.position).collect(),
@@ -315,7 +331,7 @@ pub fn show(
     });
 
     top_bar(ui, top, view, status, events);
-    let positions = positions(points, view.layout, grid);
+    let positions = positions(points, view.layout, grid, aspect_of(area));
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
@@ -810,12 +826,17 @@ mod tests {
     fn grid_positions_are_cell_centres() {
         let points = vec![point(0.0, 0.0, Kind::Kick), point(1.0, 1.0, Kind::Kick)];
         let grid = Grid { columns: 2, rows: 1, cells: vec![(0, 0), (1, 0)] };
-        // A 2 by 1 grid sits in the middle of the square map.
-        assert_eq!(positions(&points, Layout::Grid, Some(&grid)), vec![[0.25, 0.5], [0.75, 0.5]]);
-        assert_eq!(positions(&points, Layout::Cloud, Some(&grid)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // A 2 by 1 grid sits in the middle of a square view.
+        assert_eq!(positions(&points, Layout::Grid, Some(&grid), 1.0), vec![[0.25, 0.5], [0.75, 0.5]]);
+        assert_eq!(positions(&points, Layout::Cloud, Some(&grid), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
+        // In a view twice as wide, a 4 by 2 grid spreads over the whole width.
+        let wide: Vec<MapPoint> = (0..8).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let grid = Grid { columns: 4, rows: 2, cells: (0..8).map(|i| (i % 4, i / 4)).collect() };
+        let placed = positions(&wide, Layout::Grid, Some(&grid), 2.0);
+        assert_eq!((placed[0], placed[7]), ([-0.25, 0.25], [1.25, 0.75]));
         // A grid that does not match the points falls back to the cloud.
         let wrong = Grid { columns: 1, rows: 1, cells: vec![(0, 0)] };
-        assert_eq!(positions(&points, Layout::Grid, Some(&wrong)), vec![[0.0, 0.0], [1.0, 1.0]]);
+        assert_eq!(positions(&points, Layout::Grid, Some(&wrong), 1.0), vec![[0.0, 0.0], [1.0, 1.0]]);
     }
 
     #[test]
