@@ -588,7 +588,6 @@ mod imp {
                 Ok(())
             };
             make()?;
-            eprintln!("TRACE host opened window={window} delete={}", atoms.WM_DELETE_WINDOW);
             let fresh = Open { connection, window, atoms, close_requested: false, size, clip: None };
             Self::keep(fresh)
         }
@@ -678,18 +677,13 @@ mod imp {
     }
 
     impl Open {
-        /// Destroys the window (and an embedded one's clip), and waits until the X server has
-        /// done so: it serves its clients in no set order, so without the round trip another
-        /// client told the editor closed could still find the window (#237).
+        /// Destroys the window (and an embedded one's clip).
         fn close(self) {
-            eprintln!("TRACE host close window={}", self.window);
             let _ = self.connection.destroy_window(self.window);
             if let Some(clip) = self.clip {
                 let _ = self.connection.destroy_window(clip);
             }
-            if let Ok(cookie) = self.connection.get_input_focus() {
-                let _ = cookie.reply();
-            }
+            let _ = self.connection.flush();
         }
     }
 
@@ -745,11 +739,7 @@ mod imp {
 
     /// Whether the user asked window `id` to close since the last call.
     pub(crate) fn take_close_request(id: WindowId) -> bool {
-        let taken = with_open(id, |open| std::mem::take(&mut open.close_requested));
-        if taken != Some(false) {
-            eprintln!("TRACE host take_close_request id={} -> {taken:?}", id.0);
-        }
-        taken.unwrap_or(false)
+        with_open(id, |open| std::mem::take(&mut open.close_requested)).unwrap_or(false)
     }
 
     /// Window `id`'s inside size as the X server last reported it.
@@ -768,17 +758,7 @@ mod imp {
         OPEN.with(|open| {
             let Ok(mut open) = open.try_borrow_mut() else { return };
             for open in open.iter_mut() {
-                loop {
-                    let polled = open.connection.poll_for_event();
-                    static POLLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                    let n = POLLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if n.is_multiple_of(500) {
-                        eprintln!("TRACE host pump heartbeat {n} window={}", open.window);
-                    }
-                    if !matches!(polled, Ok(None)) {
-                        eprintln!("TRACE host pump window={} polled={polled:?}", open.window);
-                    }
-                    let Ok(Some(event)) = polled else { break };
+                while let Ok(Some(event)) = open.connection.poll_for_event() {
                     match event {
                         Event::ClientMessage(message) => {
                             let [first, ..] = message.data.as_data32();

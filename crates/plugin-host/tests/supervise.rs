@@ -326,9 +326,8 @@ fn close_editor_window() {
 }
 
 /// Asks the editor's window to close, as the user does with its close button: the window
-/// manager's WM_DELETE_WINDOW message, sent to the window whose class is the editor's. The
-/// newest one: the root's children come bottom to top, and an editor closed just before may
-/// still be below it (#237).
+/// manager's WM_DELETE_WINDOW message, sent to the newest window whose class is the editor's
+/// (the root's children come bottom to top).
 #[cfg(target_os = "linux")]
 fn close_editor_window() {
     use x11rb::connection::Connection;
@@ -338,15 +337,6 @@ fn close_editor_window() {
     let atom = |name: &[u8]| connection.intern_atom(false, name).unwrap().reply().unwrap().atom;
     let (protocols, delete) = (atom(b"WM_PROTOCOLS"), atom(b"WM_DELETE_WINDOW"));
     let children = connection.query_tree(root).unwrap().reply().unwrap().children;
-    for w in &children {
-        let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
-        let class = class.ok().and_then(|c| c.reply().ok()).map(|c| String::from_utf8_lossy(&c.value).into_owned());
-        let attributes = connection.get_window_attributes(*w).ok().and_then(|c| c.reply().ok());
-        eprintln!(
-            "TRACE test child {w} class={class:?} map_state={:?} delete={delete}",
-            attributes.map(|a| a.map_state)
-        );
-    }
     let window = children
         .into_iter()
         .rfind(|w| {
@@ -356,7 +346,9 @@ fn close_editor_window() {
         .unwrap_or_else(|| panic!("no editor window"));
     let message = ClientMessageEvent::new(32, window, protocols, [delete, 0, 0, 0, 0]);
     connection.send_event(false, window, EventMask::NO_EVENT, message).unwrap();
-    // A round trip before the connection closes, so the server has taken the request.
+    // A round trip before the connection closes: closed straight after the request, the
+    // server could drop the message unsent, and the test waited for a close that never
+    // came (#237). Xlib's XCloseDisplay does the same (XSync).
     connection.get_input_focus().unwrap().reply().unwrap();
 }
 
@@ -383,15 +375,12 @@ fn an_editor_opens_in_a_window_and_closes() {
         assert!(!plugin.editor_open());
         // And it opens again after being closed; when the user closes its window, the host
         // says so unasked.
-        for round in 0..40 {
-            assert_eq!(plugin.open_editor().unwrap(), (300, 200));
-            eprintln!("TRACE test round {round} opened");
-            close_editor_window();
-            let deadline = Instant::now() + PATIENT;
-            while plugin.editor_open() {
-                assert!(Instant::now() < deadline, "the closed window was not reported (round {round})");
-                std::thread::sleep(Duration::from_millis(10));
-            }
+        assert_eq!(plugin.open_editor().unwrap(), (300, 200));
+        close_editor_window();
+        let deadline = Instant::now() + PATIENT;
+        while plugin.editor_open() {
+            assert!(Instant::now() < deadline, "the closed window was not reported");
+            std::thread::sleep(Duration::from_millis(10));
         }
     } else {
         assert!(matches!(opened, Err(PluginError::Host(_))), "{opened:?}");
