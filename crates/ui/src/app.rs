@@ -656,11 +656,7 @@ impl App {
     /// The project's own file (`.suhina`, or the `.locr` it was opened from), once it has been
     /// saved or was opened from one.
     fn own_file(&self, id: ProjectId) -> Option<PathBuf> {
-        self.projects
-            .get(id)?
-            .source()
-            .filter(|s| suhina_session::is_project_file(s))
-            .map(Path::to_path_buf)
+        self.projects.get(id)?.source().filter(|s| suhina_session::is_project_file(s)).map(Path::to_path_buf)
     }
 
     /// Asks for a name to save the active project as a template under.
