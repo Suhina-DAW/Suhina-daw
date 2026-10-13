@@ -3,7 +3,7 @@ description: How the browser's folders are indexed, kept on disk and kept up to 
 read_when: file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/library/**
   - crates/session/src/library.rs
@@ -62,7 +62,8 @@ or full of odd names.
    cannot be made or fails later, when it is over the Linux budget, or when it is on a network
    file system (a `\\server\share` path on Windows; on Linux a mount of type `nfs`, `nfs4`,
    `cifs`, `smb3`, `smbfs`, `sshfs` or `fuse.sshfs` from `/proc/mounts`). `library.folders`
-   reports each folder's state: `watching`, `polling`, `scanning` or `missing`.
+   reports each folder's state: `watching`, `polling`, `scanning`, `missing` or `idle` (not yet
+   checked, before `Library::start`).
 7. **Hostile folders are capped:** 256 folders, 200 000 files per folder, depth 32, names of at
    most 1 024 bytes, symbolic links not followed (so link loops cannot start), files of other
    kinds not listed. Reaching a cap stops that folder's scan with a note, never the program.

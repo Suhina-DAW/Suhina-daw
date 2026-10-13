@@ -90,7 +90,8 @@ workspace forbids.
    `vendor:<name>` (the file's group when the vendor is unknown) or none. Chains do not yet run
    several plug-ins of one process in one round trip.
 3. **The boundary.**
-   - **Shared memory**, one region per host process: a block header (frame count, transport,
+   - **Shared memory**, one region per plug-in instance (instances sharing a host process each
+     have their own): a block header (frame count, transport,
      a sequence number), the audio buffers sized for the largest block, and lock-free rings of
      note and parameter events with sample offsets, so automation stays sample-accurate.
      *Built:* each block carries up to 1024 events (note on and off, MIDI controller, pitch
@@ -266,8 +267,9 @@ workspace forbids.
     editor (`editor_resized`, unasked); the user cannot drag an embedded one. A floating
     editor is never resized by the panel. Changing the setting closes the open editors and
     opens them again the other way; their state is in the plug-in, so nothing is lost. The
-    choice is shown but does nothing where the window is not a Win32 or X11 one (macOS,
-    Wayland without an X server): editors open in windows there.
+    choice is shown but does nothing where the window is not a Win32 or X11 one. There editors
+    do not open yet: on macOS the host has no editor windows, and without an X server (`DISPLAY`
+    unset) it cannot open its X11 windows.
     An owned or child window shares its input queue with the owner's thread on Windows, so
     the host making one waits for Suhina's window thread; the session therefore opens and
     closes an editor on a thread of its own and the command answers at once (`editor_open:
@@ -285,7 +287,7 @@ workspace forbids.
     (`DISPLAY` is set: the desktop's own X11, or XWayland, which every distribution's Wayland
     desktop ships), through winit's `with_x11`, as other DAWs do: the hosts open editors as X11
     windows, and only an X11 window of Suhina's can own or embed them. Without `DISPLAY` the
-    window is a Wayland one and editors open in windows of their own, unowned.
+    window is a Wayland one and plug-in editors cannot open (the host's windows are X11 ones).
     *Built on Windows:* the host's main thread initialises OLE first (`OleInitialize`, and
     so COM, apartment threaded), as a host's window thread is expected to: editors use it for
     drag and drop, the clipboard and text services, and some failed to open in `attached`
@@ -332,8 +334,9 @@ workspace forbids.
 ## Consequences
 
 - Every host process costs a round trip per block, tens of microseconds; at small blocks with
-  many plug-in products this is noticeable. Grouping by product and running chains in one round
-  trip keep it bounded; *in process* is not offered.
+  many plug-in products this is noticeable. Grouping by product, and running different chains'
+  plug-ins at the same time (decision 4), keep it bounded; running several plug-ins of one
+  process in one round trip is not built yet. *In process* is not offered.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
 - Host processes and scan workers start without a window of their own (`host_command`; on
   Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a

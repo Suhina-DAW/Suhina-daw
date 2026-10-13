@@ -111,5 +111,5 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 - Command ids are part of the public interface for agents; renaming one is a breaking change.
 - The registry is the only list of commands: [`docs/commands.md`](../commands.md) is generated
   from it (`suhina-cli commands --markdown`) on `main` after every merge.
-- Saving to `.als` is not possible yet (there is no writer), so sessions opened from Live Sets
-  can be changed, rendered and played, but not saved. A native project format comes later.
+- Suhina does not write `.als` (there is no writer). A session opened from a Live Set is saved
+  as a Suhina project (`.locr`) with `project.save` and a path ([ADR 0010](0010-project-files.md)).

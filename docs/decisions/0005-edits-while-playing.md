@@ -40,7 +40,7 @@ clip; devices (ADR 0004) will add many more parameters.
    the pool given since with `Controller::set_audio`, when files were added; ADR 0011), and
    sends it to the audio thread through a lock-free queue (`rtrb`).
 3. **The swap happens at an exact frame.** The controller picks a frame a little ahead of the
-   playhead it reads from the monitor (`SWAP_AHEAD`), moves the new graph's stretch voices there
+   playhead it reads from the monitor (`SWAP_AHEAD_SECONDS`), moves the new graph's stretch voices there
    and fills their rings before sending it. `process` splits its block at that frame, so the
    block before it is the old graph and the frames from it the new one.
 4. **State carries over at the swap, without allocation.** The playhead stays in beats: if the
@@ -66,7 +66,7 @@ clip; devices (ADR 0004) will add many more parameters.
 7. **The stretch worker thread serves every graph.** It owns a list of workers; a new graph's
    worker joins it before the graph is sent, and a worker leaves when its graph has been dropped.
 8. **The session notifies the player.** After an edit or undo/redo command changes the project,
-   `Session::execute` calls `Player::update`, so the CLI, MCP and a future UI all get the same
+   `Session::execute` calls `Player::update`, so the CLI, MCP and the window all get the same
    behaviour.
 
 ## Amendment: running plug-ins across graphs (2026-10-12)
@@ -96,7 +96,7 @@ klingt and JUCE's graph do), now:
 
 1. **Every graph due in a block is taken in that block,** at its frame, in order; the swap
    queue holds 16 graphs.
-2. **`SWAP_AHEAD` only when it is needed:** a graph with stretched arrangement clips still
+2. **`SWAP_AHEAD_SECONDS` only when it is needed:** a graph with stretched arrangement clips still
    takes over 0.15 s ahead, so their stretch voices are moved and their rings filled first; any
    other graph takes over at the start of the next block.
 3. **Device parameters are messages, not graphs.** `Controller::set_device_param(track,
@@ -112,9 +112,10 @@ klingt and JUCE's graph do), now:
 
 ## Consequences
 
-- An edit is heard from the next audio block after the command returns, plus the time to build
-  the graph; with stretched arrangement clips, 0.15 s after. A device parameter is heard from
-  the next block without building anything.
+- An edit is rendered from the next engine block after the command returns, plus the time to
+  build the graph (with stretched arrangement clips, 0.15 s after), and heard once that block
+  leaves the output's ring, which runs up to two blocks ahead of the device (`crates/output`). A
+  device parameter is rendered from the next block without building anything.
 - Structural edits still rebuild the whole graph; volume, pan and other mix changes could get
   the same message path as device parameters if building becomes too slow for fader drags.
 - Offline rendering stays the oracle (rule 4): tests swap graphs inside an offline render and
