@@ -72,3 +72,8 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 
 Paste places the copy right after the selected clip, or at the playhead on the selected track; it
 replaces what it covers, like a moved clip ([arrangement editing](spec/arrangement-editing.md)).
+
+Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
+while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and
+`Cmd+=`, the usual zoom-in key on a Mac, does. Both work on Windows and Linux, and a keyboard with a
+key of its own for `+` uses `Ctrl+Plus`.

@@ -23,8 +23,10 @@ Settings › Display & Input), read on 2026-10-13. No binaries or files were loo
 
 ## Loopwerk's behaviour
 
-- **Zoom in, Zoom out:** Ctrl and + (or Ctrl and =, so no Shift is needed on keyboards where +
-  is Shift and =) and Ctrl and -; Cmd on macOS. Ctrl and 0 goes back to 100 %. Each step is 10 %,
+- **Zoom in, Zoom out:** Ctrl and + (or Ctrl and =) and Ctrl and -; Cmd on macOS. Ctrl and = is
+  needed on macOS: there + is Shift and =, and with Cmd held the window reports that key as =,
+  never +, so Cmd and = is what zooms in ([shortcuts](../shortcuts.md)). It also spares the Shift
+  on other keyboards where + is Shift and =. Ctrl and 0 goes back to 100 %. Each step is 10 %,
   from 50 % to 200 %. A value between steps (a hand-edited file) moves to the next step in the
   direction asked.
 - Everything in the window scales together: panels, text, controls, the timeline and the

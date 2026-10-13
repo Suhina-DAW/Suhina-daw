@@ -269,9 +269,19 @@ mod tests {
 
     #[test]
     fn shortcuts_read_and_write_the_same() {
-        for text in
-            ["Ctrl+Shift+Z", "Space", "Delete", "Ctrl+Comma", "Alt+F4", "Ctrl+Tab", "Ctrl+Plus", "Ctrl+0", "Minus"]
-        {
+        for text in [
+            "Ctrl+Shift+Z",
+            "Space",
+            "Delete",
+            "Ctrl+Comma",
+            "Alt+F4",
+            "Ctrl+Tab",
+            "Ctrl+Plus",
+            "Ctrl+Minus",
+            "Ctrl+Equals",
+            "Ctrl+0",
+            "Minus",
+        ] {
             let shortcut = Shortcut::parse(text).unwrap_or_else(|| panic!("{text}"));
             assert_eq!(Shortcut::parse(&shortcut.text()), Some(shortcut), "{text}");
         }
