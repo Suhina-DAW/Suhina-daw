@@ -1411,6 +1411,23 @@ mod tests {
         assert_eq!(renderer.stretch_underruns(), 0);
     }
 
+    /// A jump of the playhead while playing is silent until the worker has moved its voices, but
+    /// that silence is intended, not an underrun (#169). Two block sizes, since the engine's
+    /// block follows the device's buffer.
+    #[test]
+    fn a_transport_jump_is_not_counted_as_underruns() {
+        let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
+        for frames in [128, 441] {
+            let mut renderer = Renderer::with_audio(&project, &pool, SR).unwrap();
+            let mut worker = renderer.take_stretch_worker().unwrap();
+            blocks(&mut renderer, 20, frames, |_| worker.fill());
+            renderer.handle(LaunchCommand::SetPosition { beat: 1.0 });
+            let after = blocks(&mut renderer, 40, frames, |_| worker.fill());
+            assert!(after.iter().any(|s| s.abs() > 0.1), "the clip plays on from the new place");
+            assert_eq!(renderer.stretch_underruns(), 0, "blocks of {frames}");
+        }
+    }
+
     #[test]
     fn a_stretch_worker_thread_keeps_up() {
         let (project, pool) = stretched_project(440.0, 2.0, 4.0, 110.0, StretchMode::Smooth);
