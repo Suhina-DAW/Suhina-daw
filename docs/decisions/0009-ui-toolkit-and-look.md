@@ -66,7 +66,7 @@ What the law protects decides how close the UI may get (summary, not legal advic
    serialisable, so agents can read it and take offscreen screenshots (an aim, not built yet).
 6. **Design tokens** (colours, spacing, radii, type sizes) live in one theme module, never
    hard-coded in widgets (today: the default track palette in `grid.rs` and the sample map's
-   kind colours; to move into `theme.rs`). The colours come from the theme in use: the built-in one or a JSON
+   kind colours; to move into `theme.rs`, [#192](https://github.com/juhamikael/Loopwerk/issues/192)). The colours come from the theme in use: the built-in one or a JSON
    theme file the user picks and edits ([brief](../design/brief.md) › Themes).
 
 ## Consequences

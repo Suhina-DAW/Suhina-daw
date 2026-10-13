@@ -95,7 +95,7 @@ Over MCP, `folder` and every `to` path must be inside the server's read root ([`
 | What | Limit | Beyond it |
 |---|---|---|
 | Walking a folder | depth 32, 1 000 000 entries, symbolic links not followed | the walk stops and says so |
-| Candidates per file | 32 (today up to 32 from each source: index and project folder) | the rest are left out |
+| Candidates per file | 32 (today up to 32 from each source: index and project folder; [#191](https://github.com/juhamikael/Loopwerk/issues/191)) | the rest are left out |
 | Names in one `library.findFiles` | 4 096 | refused |
 | Files in one `project.relinkFiles` | 4 096 | refused |
 

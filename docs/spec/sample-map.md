@@ -105,7 +105,7 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   between far-apart regions mean little.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
-  item count allows (today the grid is always square).
+  item count allows (today the grid is always square, [#189](https://github.com/juhamikael/Loopwerk/issues/189)).
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
@@ -188,7 +188,7 @@ Every item has a kind. The kinds and the words in names that give them:
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list (not built yet: today the arrow keys move to the nearest point on the map, as
+step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
 without Show similar).
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the

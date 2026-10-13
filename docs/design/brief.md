@@ -103,7 +103,7 @@ From [research](#sources) and the first design rounds:
 
 All colours, spacing, radii, stroke widths and type sizes are named tokens in one theme module.
 Widgets never contain literal colours (today: the default track palette in `grid.rs` and the
-sample map's kind colours; to move into `theme.rs`). The colours below are the built-in theme, Suhina Dark;
+sample map's kind colours; to move into `theme.rs`, [#192](https://github.com/juhamikael/Loopwerk/issues/192)). The colours below are the built-in theme, Suhina Dark;
 a theme file can change any of them (see Themes). Current values:
 
 | Token | Suhina Dark | Use |
