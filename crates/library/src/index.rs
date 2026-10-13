@@ -19,6 +19,8 @@ pub const MAX_NAME: usize = 1024;
 /// Largest index file read back.
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 const HEADER: &str = "suhina-library-index 2";
+/// The same format, written before the program was renamed.
+const OLD_HEADER: &str = "loopwerk-library-index 2"; // rename_suhina: keep
 
 /// A file in the index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,7 +274,7 @@ impl FolderIndex {
         }
         let text = std::fs::read_to_string(file).ok()?;
         let mut lines = text.lines();
-        if lines.next()? != HEADER {
+        if !matches!(lines.next()?, HEADER | OLD_HEADER) {
             return None;
         }
         let saved_root = lines.next()?.strip_prefix("root\t")?;
@@ -376,6 +378,9 @@ mod tests {
         .unwrap();
         let loaded = FolderIndex::load(&root, &file).unwrap();
         assert_eq!(loaded.files.keys().collect::<Vec<_>>(), ["y.wav"], "bad lines are skipped");
+        let saved = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, saved.replacen(HEADER, OLD_HEADER, 1)).unwrap();
+        assert_eq!(FolderIndex::load(&root, &file), Some(loaded), "an index from before the rename");
         let _ = std::fs::remove_dir_all(&root);
     }
 
