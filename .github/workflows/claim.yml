@@ -20,8 +20,11 @@ permissions:
 jobs:
   claim:
     # A pull request comment is not an issue claim, a closed issue keeps no claim, and the bot's
-    # own comments must never start another round.
+    # own comments must never start another round. Only a comment that starts with `/` can be a
+    # command: other comments start no run, so they never take a command's place in the queue below
+    # (GitHub keeps one pending run per group and cancels the one before it).
     if: >-
+      startsWith(github.event.comment.body, '/') &&
       !github.event.issue.pull_request &&
       github.event.issue.state == 'open' &&
       github.event.comment.user.type != 'Bot'
@@ -54,6 +57,14 @@ jobs:
             const RELEASED = "Ready";
 
             const issue = context.payload.issue;
+            // Assignees and labels are read again rather than taken from the event, which is as old
+            // as the comment: a `/unclaim` queued behind the same person's `/claim` must see the claim.
+            let current = issue;
+            try {
+              current = (await github.rest.issues.get({ ...context.repo, issue_number: issue.number })).data;
+            } catch (error) {
+              core.warning(`Could not read the issue again: ${error.message}`);
+            }
             const comment = context.payload.comment;
             const actor = comment.user.login;
             // GitHub's own word for someone who may move a card: the owner, an organization member
@@ -146,7 +157,7 @@ jobs:
                 ) || null;
               const status =
                 (item && item.fieldValueByName && item.fieldValueByName.name) || null;
-              const assignees = (issue.assignees || []).map((user) => user.login);
+              const assignees = (current.assignees || []).map((user) => user.login);
               const mentions = assignees.map((login) => `@${login}`).join(", ");
 
               const setStatus = (itemId, name) =>
@@ -188,17 +199,26 @@ jobs:
               };
 
               // The reason a maintainer gave with `/hold`, so a refusal can quote the gate instead
-              // of only naming it.
+              // of only naming it. Only a maintainer's `/hold` counts: anyone else's was refused, and
+              // quoting it would let anyone make the bot repeat their words. Every page is read, so the
+              // newest hold wins on a long thread, and `@` is dropped so a quote pings nobody.
               const holdReason = async () => {
                 try {
-                  const comments = await github.rest.issues.listComments({
+                  const comments = await github.paginate(github.rest.issues.listComments, {
                     ...context.repo,
                     issue_number: issue.number,
                     per_page: 100,
                   });
-                  const held = comments.data.filter((entry) => /^\/hold\b/i.test((entry.body || "").trim())).pop();
+                  const held = comments
+                    .filter((entry) => ["OWNER", "MEMBER", "COLLABORATOR"].includes(entry.author_association))
+                    .filter((entry) => /^\/hold\b/i.test((entry.body || "").trim()))
+                    .pop();
                   if (!held) return "";
-                  const why = (held.body || "").replace(/^\/[a-z]+\b/i, "").replace(/\s+/g, " ").trim();
+                  const why = (held.body || "")
+                    .replace(/^\/[a-z]+\b/i, "")
+                    .replace(/@/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
                   if (!why) return "";
                   return `“${why.length > 200 ? `${why.slice(0, 197)}…` : why}”`;
                 } catch (error) {
@@ -236,27 +256,43 @@ jobs:
                       `can release it.`,
                   );
                 }
-                if (!item || status === null || isFree(status)) {
+                // A maintainer releases whoever claimed it; anyone else releases only themselves.
+                const leaving = maintainer ? assignees : [actor];
+                // Only a claim goes back to Ready. A held card stays held and a card in review stays
+                // in review: unclaiming must not open what a maintainer gated or what waits for review.
+                const claimed = item && same(status, CLAIMED);
+                if (!claimed && leaving.length === 0) {
                   return say(`@${actor}, this issue is already free.`);
                 }
-                await setStatus(item.id, RELEASED);
-                try {
-                  await github.rest.issues.removeAssignees({
-                    ...context.repo,
-                    issue_number: issue.number,
-                    assignees: [actor],
-                  });
-                } catch (error) {
-                  // The card is the signal that matters; a failed unassign is worth a warning only.
-                  core.warning(`Could not unassign @${actor}: ${error.message}`);
+                if (claimed) {
+                  if (!(await requireOption(RELEASED))) return;
+                  await setStatus(item.id, RELEASED);
+                }
+                if (leaving.length > 0) {
+                  try {
+                    await github.rest.issues.removeAssignees({
+                      ...context.repo,
+                      issue_number: issue.number,
+                      assignees: leaving,
+                    });
+                  } catch (error) {
+                    // The card is the signal that matters; a failed unassign is worth a warning only.
+                    core.warning(`Could not unassign ${leaving.join(", ")}: ${error.message}`);
+                  }
+                }
+                if (claimed) {
+                  return say(
+                    `Released by @${actor}: back to **${RELEASED}** on the [board](${boardUrl}). ` +
+                      `Thank you for saying so: that is exactly the signal the next person needs.`,
+                  );
                 }
                 return say(
-                  `Released by @${actor}: back to **${RELEASED}** on the [board](${boardUrl}). ` +
-                    `Thank you for saying so — that is exactly the signal the next person needs.`,
+                  `Unassigned by @${actor}. The card stays **${status || "without a status"}** on the ` +
+                    `[board](${boardUrl}); only a claim in **${CLAIMED}** goes back to **${RELEASED}**.`,
                 );
               }
 
-              if ((issue.labels || []).some((label) => label.name === "epic")) {
+              if ((current.labels || []).some((label) => label.name === "epic")) {
                 return say(
                   "An `epic` is a container for other issues, not a task to claim: claim one of its issues instead.",
                 );
@@ -271,7 +307,8 @@ jobs:
                 );
               }
 
-              if (item && !isFree(status)) {
+              // A card without a Status yet is free, as it is for `/unclaim`.
+              if (item && status !== null && !isFree(status)) {
                 if (same(status, CLAIMED) && assignees.length === 1 && assignees[0] === actor) {
                   return say(`@${actor}, this one is already yours.`);
                 }

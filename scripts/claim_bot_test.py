@@ -98,7 +98,8 @@ function scenario(input) {
         number: 42,
         node_id: "I_42",
         labels: (input.issue && input.issue.labels) || [],
-        assignees: (input.assignees || []).map((login) => ({ login })),
+        // The event's copy, which can be older than the issue (`stale`).
+        assignees: (input.stale || input.assignees || []).map((login) => ({ login })),
       },
       comment: {
         body: input.body,
@@ -107,13 +108,27 @@ function scenario(input) {
       },
     },
   };
+  // A comment is its text, written by a maintainer, or { body, by } for anyone else.
+  const listComments = async () => ({
+    data: ((input.issue && input.issue.comments) || []).map((entry) =>
+      typeof entry === "string"
+        ? { body: entry, author_association: "MEMBER" }
+        : { body: entry.body, author_association: entry.by },
+    ),
+  });
   global.github = {
+    paginate: async (method, args) => (await method(args)).data,
     rest: {
       issues: {
         createComment: async (args) => state.comments.push(args.body),
-        listComments: async () => ({
-          data: ((input.issue && input.issue.comments) || []).map((text) => ({ body: text })),
+        get: async () => ({
+          data: {
+            number: 42,
+            labels: (input.issue && input.issue.labels) || [],
+            assignees: (input.assignees || []).map((login) => ({ login })),
+          },
         }),
+        listComments,
         addAssignees: async (args) => state.assigned.push(...args.assignees),
         removeAssignees: async (args) => state.unassigned.push(...args.assignees),
       },
@@ -203,6 +218,51 @@ const cases = [
     name: "unclaim by someone else is refused",
     input: { body: "/unclaim", assignees: ["other"], board: { status: "In progress" } },
     expect: (s) => says(s.state, "Only the person who claimed") && !s.state.moved,
+  },
+  {
+    name: "unclaim on a held card unassigns but keeps the hold",
+    input: { body: "/unclaim", assignees: ["someone"], board: { status: "Do not start yet" } },
+    expect: (s) => !s.state.moved && s.state.unassigned.includes("someone") && says(s.state, "stays **Do not start yet**"),
+  },
+  {
+    name: "unclaim on a card in review unassigns but keeps it in review",
+    input: { body: "/unclaim", assignees: ["someone"], board: { status: "In review" } },
+    expect: (s) => !s.state.moved && says(s.state, "stays **In review**"),
+  },
+  {
+    name: "unclaim by a maintainer releases the person who claimed it",
+    input: { body: "/unclaim", association: "MEMBER", assignees: ["other"], board: { status: "In progress" } },
+    expect: (s) => s.state.moved === "opt-ready" && s.state.unassigned.includes("other") && !s.state.unassigned.includes("someone"),
+  },
+  {
+    name: "unclaim on a free card with nobody assigned says it is free",
+    input: { body: "/unclaim", association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) => says(s.state, "already free") && !s.state.moved,
+  },
+  {
+    name: "unclaim reads the assignees again, not the event's old copy",
+    input: { body: "/unclaim", stale: [], assignees: ["someone"], board: { status: "In progress" } },
+    expect: (s) => s.state.moved === "opt-ready" && s.state.unassigned.includes("someone"),
+  },
+  {
+    name: "a card without a status can be claimed",
+    input: { body: "/claim", board: {} },
+    expect: (s) => s.state.moved === "opt-progress" && !says(s.state, "null"),
+  },
+  {
+    name: "a hold reason is quoted only from a maintainer, without mentions",
+    input: {
+      body: "/claim",
+      board: { status: "Do not start yet" },
+      issue: {
+        comments: [
+          "/hold waiting for @someone and ADR 0003",
+          { body: "/hold @everyone go to evil.example", by: "NONE" },
+        ],
+      },
+    },
+    expect: (s) =>
+      says(s.state, "waiting for someone and ADR 0003") && !says(s.state, "evil.example") && !s.state.moved,
   },
   {
     name: "a comment that only mentions a command is ignored",
