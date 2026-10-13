@@ -676,8 +676,20 @@ impl Renderer {
             }
             LaunchCommand::SetQuantization(q) => self.graph.launcher.quantization = q,
             LaunchCommand::BackToArrangement => {
-                for column in &mut self.graph.launcher.columns {
-                    column.overrides_since = None;
+                // Every track that plays launched clips stops them (fading out, as a stop does)
+                // and plays its arrangement again.
+                for index in 0..self.graph.launcher.columns.len() {
+                    let launcher = &mut self.graph.launcher;
+                    let Some(column) = launcher.columns.get_mut(index) else { continue };
+                    if column.overrides_since.take().is_none() {
+                        continue;
+                    }
+                    column.pending = None;
+                    if let Some(mut playing) = column.playing.take() {
+                        playing.fade_left = launcher.stop_fade_frames;
+                        column.fading = Some(playing);
+                    }
+                    self.release_column(index);
                 }
             }
         }
@@ -1300,6 +1312,33 @@ mod tests {
         let mut out = vec![0.0f32; 2 * BAR];
         renderer.process(&mut out);
         assert_eq!(onsets(&out).len(), 4);
+    }
+
+    /// Back to arrangement while a launched clip plays stops that clip, so the track plays its
+    /// arrangement alone rather than both at once (#153).
+    #[test]
+    fn back_to_arrangement_stops_the_launched_clip() {
+        let mut p = two_loops();
+        let looped = Clip { length: 32.0, ..clip(1, 1.0, true) };
+        p.arrangement.lanes.push(ArrangementLane { name: String::new(), track: Some(TrackId(1)), clips: vec![looped] });
+        let mut renderer = Renderer::with_audio(&p, &AudioPool::new(), SR).unwrap();
+        let mut out = vec![0.0f32; 2 * (BAR + BEAT)];
+        let (first, rest) = out.split_at_mut(2 * (BEAT / 4));
+        renderer.process(first);
+        renderer.handle(LaunchCommand::LaunchClip { column: 0, slot: 1 });
+        renderer.process(rest);
+        renderer.handle(LaunchCommand::BackToArrangement);
+        let status = renderer.monitor().column(0).unwrap();
+        assert_eq!((status.playing, status.queued, status.overrides_arrangement), (None, None, false));
+        // Only the arrangement's on-beat notes sound from here, none of the clip's off-beats.
+        let mut out = vec![0.0f32; 2 * BAR];
+        renderer.process(&mut out);
+        let found = onsets(&out);
+        assert!(found.len() >= 3, "{found:?}");
+        for onset in &found {
+            let from_beat = (onset + BEAT / 2) % BEAT;
+            assert!(from_beat.abs_diff(BEAT / 2) <= 2, "an off-beat onset at {onset}: {found:?}");
+        }
     }
 
     #[test]

@@ -64,6 +64,8 @@ decides something the sources do not settle, the text says so (**Loopwerk:**).
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
+   **Loopwerk:** back to arrangement stops the launched clips of those tracks (with the stop
+   fade) and drops their queued launches, so a track never plays both at once.
 
 ## Loopwerk decisions
 
