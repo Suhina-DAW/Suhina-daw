@@ -6,7 +6,9 @@ status: current
 last_verified: 2026-10-13
 covers:
   - .github/workflows/release.yml
+  - .github/workflows/discord.yml
   - scripts/release_notes.py
+  - scripts/discord_post.py
 ---
 
 # Releasing
@@ -23,8 +25,9 @@ the final release is the last candidate unchanged, under the plain version:
 0.1.0-rc.1  →  testers find a bug, fixed on main  →  0.1.0-rc.2  →  no new bugs  →  0.1.0
 ```
 
-The workflow accepts only these two forms. Release candidates, and every release before 1.0, are
-published as GitHub pre-releases and never become the repository's "latest" release.
+The workflow accepts only these two forms. Release candidates are published as GitHub
+pre-releases and never become the repository's "latest" release; a release, `0.x` ones included,
+becomes the latest.
 
 ## Making a release
 
@@ -49,7 +52,7 @@ workflow artifacts without creating a release, to test the pipeline.
 ## Nightly
 
 The nightly is how people try the current state between releases: a build of `main`, not a
-release. Every night (02:17 UTC) the workflow builds `main` and publishes it as the pre-release
+release. Every night (02:17 UTC) the workflow builds `main` and publishes it as the release
 **`nightly`**, replacing the previous one: its release and tag are deleted and made again on the
 new commit, published at once without a draft. A night with no new commit on `main` builds
 nothing. Running the workflow by hand from `main` with **nightly** checked publishes one now.
@@ -64,15 +67,14 @@ the latest one never changes:
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz
 ```
 
-Each new nightly is posted to Discord: the version, the download link and the changes since the
-previous nightly (at most 15, as described under [Release notes](#release-notes)). The post goes to the channel whose webhook
-URL is the repository secret `DISCORD_WEBHOOK` (Discord: channel settings › Integrations ›
-Webhooks; GitHub: Settings › Secrets and variables › Actions). Without the secret nothing is
-posted, and a failed post leaves the nightly published. Releases from version tags are not
-posted; they are announced by hand when the draft is published.
+Each new nightly is posted to Discord's releases channel (see [Discord](#discord)): the version,
+the download link and the changes since the previous nightly (at most 15, as described under
+[Release notes](#release-notes)). A failed post leaves the nightly published.
 
-The nightly never becomes the repository's "latest" release, and nothing is promoted from it: a
-release is made from a version tag as above.
+Until Suhina has a release of its own (published, not a release candidate), the nightly is the
+repository's **latest** release, so the Releases box on the repository page offers its downloads.
+From the first release on, the nightly is published as a pre-release that never becomes the
+latest. Nothing is promoted from it: a release is made from a version tag as above.
 
 ## Release notes
 
@@ -90,6 +92,24 @@ notes, so they say what changed for a user: "Clip fades: shapes and an adjustabl
   not what changed, and a reworded bullet may be a fix of its text.
 
 Its tests run in CI: `python3 -m unittest discover -s scripts -p 'test_*.py'`.
+
+## Discord
+
+Two channels get posts from GitHub Actions, each through a webhook (Discord: channel settings ›
+Integrations › Webhooks) whose URL is a repository secret (GitHub: Settings › Secrets and
+variables › Actions). A channel without its secret gets nothing, and a failed post fails nothing
+else. No mention in a post pings anyone.
+
+| Channel | Secret | Posts |
+|---|---|---|
+| releases | `DISCORD_WEBHOOK_RELEASES` | each nightly (`release.yml`); each release when a person publishes it, with its *New and changed* section (`discord.yml`) |
+| events | `DISCORD_WEBHOOK_EVENTS` | pull requests opened, merged, closed and reopened; issues opened, closed and reopened (`discord.yml`) |
+
+[`scripts/discord_post.py`](../scripts/discord_post.py) writes the posts of `discord.yml` from
+the event. The nightly never reaches `discord.yml`: it is created with the workflow's own token,
+which starts no other workflow. `discord.yml` runs on `pull_request_target`, so pull requests from
+forks are posted too; it checks out the base branch and never runs the pull request's code. No
+repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice.
 
 ## Packages
 

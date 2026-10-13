@@ -42,12 +42,7 @@ that describe them (*Code and its documents*). Read only the documents that matc
 8. **Other DAWs are named only where a format is handled.** Product names such as Ableton,
    Live or FL Studio may appear in format crates (`crates/als`), their tests, `docs/spec/` and
    `docs/decisions/`, to say which file format the code reads, and in the design brief
-   (`docs/design/brief.md`), to say what Suhina's look must not resemble. They also appear in
-   [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md) and the scripts under
-   `scripts/parity/`, which measure what Suhina has against another DAW's public manual: status
-   analysis of our own project, never content from that manual (its PDF, text, tables, screenshots
-   and parameter lists are never committed; the scripts read a copy the user owns and write to
-   `target/parity/`). ROADMAP and README
+   (`docs/design/brief.md`), to say what Suhina's look must not resemble. ROADMAP and README
    describe Suhina's own devices and features under their own names; which device of another
    product imports into which is a spec ([`docs/spec/device-import.md`](docs/spec/device-import.md)).
    Product terms and set phrases of other DAWs are not used as generic words either: "drum sampler",
@@ -104,15 +99,11 @@ docs/
   decisions/  architecture decision records; read 0001 before changing the model, 0004 before a device
   spec/       clean-room specs written from observation (formats, behaviour, UI views)
   design/     UI design brief, component measurements and reference mockups (ADR 0009)
-  research/   status analysis of our own project: parity against another DAW's public manual
-              (ADR 0016; an ordinary document whose marked parts scripts/parity/ keeps current)
-              and licence audits of third-party models
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
   commands.md generated list of every command (suhina-cli commands --markdown)
 third_party/  vendored source built behind a feature: the ASIO SDK's host part (GPL-3.0, `asio`)
-scripts/   research helpers (e.g. extracting and diffing .als files), the parity measurement
-           (parity/, reading a manual the user owns; its output is never committed), docs.py (the
-           docs index) and release_notes.py (release and nightly notes)
+scripts/   research helpers (e.g. extracting and diffing .als files), docs.py (the docs index) and
+           release_notes.py and discord_post.py (release notes, Discord posts)
 ```
 
 A crate may depend only on crates in its own or a lower layer, never in a cycle. Nothing below
@@ -173,7 +164,6 @@ that no longer exists:
 | What is read from a format, or behaviour described in a spec | the spec in `docs/spec/` |
 | MCP tools, or how agents use commands | [`docs/mcp.md`](docs/mcp.md) (the command list, [`docs/commands.md`](docs/commands.md), is generated) |
 | What works for users | [`ROADMAP.md`](ROADMAP.md) › What works now, and [`README.md`](README.md) if it shows it |
-| What the parity measurement says (a milestone that lands, a feature that appears or is dropped) | the coverage of the chapters it changes in `scripts/parity/score.py`, then `python scripts/parity/update_report.py` for the marked parts of [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md); its prose is edited in that file like any other document |
 | A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
 
 A limit or a planned part that a change resolves is removed from the docs in the same change.
@@ -183,15 +173,7 @@ to (ROADMAP's *What works now*, the crate map), add a bullet or a row of your ow
 extending someone else's sentence. Leave generated files out of the change:
 [`docs/INDEX.md`](docs/INDEX.md) (from the documents' front matter) and
 [`docs/commands.md`](docs/commands.md) (from the command registry) are regenerated on `main` after
-every merge by [`.github/workflows/docs-generated.yml`](.github/workflows/docs-generated.yml), and
-a pull request that edits one of them fails CI rather than losing the edit silently.
-
-The parity report, its figures and the scripts that produce them are the exception, and are
-described in the report itself: the **report** is an ordinary document that a pull request edits
-freely, except for the parts between its `parity:begin` and `parity:end` markers, which
-`scripts/parity/update_report.py` writes from `scripts/parity/score.py` and
-`scripts/parity/devices.json` (CI fails when they are out of date); the **figures** are rendered on
-`main` like the other generated files.
+every merge.
 
 ```sh
 python scripts/docs.py impact   # documents that cover code you changed but you have not updated
