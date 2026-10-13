@@ -86,11 +86,16 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     }
 }
 
-/// The menu of an arrangement clip.
-pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, actions: &mut Vec<Action>) {
+/// The menu of an arrangement clip; `stack` is true when the stacking setting for the clip's
+/// kind is on, so its copy leaves the clips it lands on as they are.
+pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions: &mut Vec<Action>) {
     ui.set_min_width(140.0);
     if ui.add(egui::Button::new("Duplicate").shortcut_text("Ctrl+D")).clicked() {
-        actions.push(Action::new("clip.duplicate", json!({ "track": track.0, "index": index })));
+        let mut params = json!({ "track": track.0, "index": index });
+        if stack {
+            params["stack"] = json!(true);
+        }
+        actions.push(Action::new("clip.duplicate", params));
         ui.close();
     }
     if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() {

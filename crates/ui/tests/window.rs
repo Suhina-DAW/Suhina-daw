@@ -1001,6 +1001,35 @@ fn keys_copy_paste_and_delete_the_selected_clip() {
     assert!(!spans(&harness).contains(&(0.0, 64.0)));
 }
 
+#[test]
+fn paste_and_duplicate_keys_follow_the_midi_stacking_setting() {
+    let spans = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    for key in [Key::V, Key::D] {
+        let mut harness = arrangement_app();
+        let settings = suhina_ui::settings::Settings { midi_stacking: true, ..Default::default() };
+        let ctx = harness.ctx.clone();
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        let before = spans(&harness);
+        harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::C);
+        harness.run();
+        harness.key_press_modifiers(Modifiers::COMMAND, key);
+        harness.run();
+        // The copy of Beat B (bars 17-28) lies over Fill (bars 29-32), which keeps its span.
+        let after = spans(&harness);
+        assert!(after.contains(&(112.0, 48.0)), "{key:?}: {after:?}");
+        assert_eq!(after.len(), before.len() + 1, "{key:?}: {after:?}");
+        assert!(before.iter().all(|s| after.contains(s)), "{key:?}: {before:?} -> {after:?}");
+    }
+}
+
 /// The demo project with a utility device on Drums.
 fn project_with_a_device() -> suhina_engine::model::Project {
     use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
