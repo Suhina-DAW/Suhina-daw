@@ -535,7 +535,7 @@ mod tests {
         for block in out.chunks_mut(2 * 512) {
             voice.render(block);
         }
-        let left: Vec<f64> = out.chunks_exact(2).map(|f| f64::from(f[0])).collect();
+        let left: Vec<f64> = out.as_chunks::<2>().0.iter().map(|[l, _]| f64::from(*l)).collect();
         let window = rate as usize / 100;
         left.chunks_exact(window)
             .enumerate()
@@ -574,7 +574,10 @@ mod tests {
             };
             let (before, after) = (level(1.0, 1.9), level(2.5, 3.9));
             for &(t, rms, residual) in windows.iter().filter(|(t, _, _)| (1.0..3.9).contains(t)) {
-                assert!(rms > 0.85 * before.min(after) && rms < 1.15 * before.max(after), "{slower}x at {t:.2} s: {rms}");
+                assert!(
+                    rms > 0.85 * before.min(after) && rms < 1.15 * before.max(after),
+                    "{slower}x at {t:.2} s: {rms}"
+                );
                 assert!(residual < 0.05, "{slower}x at {t:.2} s: {residual} off a clean sine");
             }
         }
