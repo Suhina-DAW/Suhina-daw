@@ -170,7 +170,8 @@ every merge.
 
 ```sh
 python scripts/docs.py impact   # documents that cover code you changed but you have not updated
-python scripts/docs.py check    # what CI runs: front matter, covered paths
+                                # (a notice only, for files three or more documents cover)
+python scripts/docs.py check    # what CI runs: front matter, covered paths, links and #anchors
 python scripts/docs.py index    # prints the index with your documents in it; writes nothing
 ```
 

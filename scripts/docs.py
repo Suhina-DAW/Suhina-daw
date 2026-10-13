@@ -4,7 +4,7 @@ and checks on the front matter.
 
   python scripts/docs.py index            print the index docs/INDEX.md would have
   python scripts/docs.py index --write    rewrite docs/INDEX.md (the workflow on main does this)
-  python scripts/docs.py check            front matter and covered paths
+  python scripts/docs.py check            front matter, covered paths, and links between documents
   python scripts/docs.py impact [BASE]    documents that describe code changed since BASE
                                           (default origin/main) but were not changed themselves
 
@@ -30,6 +30,7 @@ Standard library only, so CI needs nothing but Python.
 from __future__ import annotations
 
 import fnmatch
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -48,6 +49,9 @@ REQUIRED = ("description", "read_when", "type", "status", "last_verified")
 TYPES = ("system", "decision", "spec", "howto", "plan")
 STATUSES = ("current", "draft", "planned", "superseded")
 STALE_AFTER_DAYS = 90
+# A file covered by this many documents or more is a hub (the session's or the window's main file):
+# a change to it alone does not make `impact` warn about each of them, only list them.
+HUB_DOCS = 3
 # Documents outside docs/ that the index lists by hand; they carry no front matter.
 ROOT_DOCS = (
     ("AGENTS.md", "Rules for agents and contributors, the crate map, what to run before finishing"),
@@ -156,6 +160,88 @@ def annotate(level: str, doc: Doc | None, code: str, message: str) -> None:
     print(f"::{level}{where}::{code}: {message}")
 
 
+LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|!\[[^\]]*\]\(([^)\s]+)\)")
+FENCE = re.compile(r"^\s*(```|~~~)")
+
+
+def slug(heading: str) -> str:
+    """The anchor GitHub gives a heading: its text, lowercase, without punctuation, spaces as -."""
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", heading)  # a link's text only
+    text = text.replace("`", "").replace("*", "").strip().lower()
+    text = re.sub(r"[^\w\- ]", "", text)
+    return text.replace(" ", "-")
+
+
+def anchors(path: Path) -> set[str]:
+    found: set[str] = set()
+    seen: dict[str, int] = {}
+    fenced = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or not line.startswith("#"):
+            continue
+        heading = line.lstrip("#").strip()
+        base = slug(heading)
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        found.add(base if n == 0 else f"{base}-{n}")
+    return found
+
+
+def links(path: Path):
+    """(line number, target) of every relative link in a Markdown file, outside code blocks."""
+    fenced = False
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        line = re.sub(r"`[^`]*`", "", line)  # code spans are not links
+        for match in LINK.finditer(line):
+            target = match.group(1) or match.group(2)
+            if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I):  # https:, mailto: and the like
+                continue
+            yield number, target
+
+
+def check_links(files: list[str]) -> int:
+    """Relative links in the tracked Markdown files point at a tracked file or folder, and an
+    #anchor at a heading in it."""
+    tracked = set(files)
+    folders = {parent.as_posix() for f in files for parent in Path(f).parents}
+    cache: dict[Path, set[str]] = {}
+    errors = 0
+    for rel in files:
+        if not rel.endswith(".md") or rel.startswith("third_party/"):
+            continue
+        source = ROOT / rel
+        if not source.exists():
+            continue
+        for number, target in links(source):
+            file_part, _, anchor = target.partition("#")
+            dest = source if not file_part else (source.parent / file_part).resolve()
+            try:
+                dest_rel = dest.relative_to(ROOT).as_posix()
+            except ValueError:
+                print(f"::error file={rel},line={number}::BROKEN_LINK: {target} leaves the repository")
+                errors += 1
+                continue
+            if file_part and dest_rel not in tracked and dest_rel.rstrip("/") not in folders:
+                print(f"::error file={rel},line={number}::BROKEN_LINK: {target}: no such file in the repository")
+                errors += 1
+                continue
+            if anchor and dest.suffix == ".md":
+                if dest not in cache:
+                    cache[dest] = anchors(dest)
+                if anchor.lower() not in cache[dest]:
+                    print(f"::error file={rel},line={number}::BROKEN_ANCHOR: {target}: no heading with that anchor")
+                    errors += 1
+    return errors
+
+
 def check() -> int:
     docs = documents()
     files = tracked_files()
@@ -191,10 +277,11 @@ def check() -> int:
             if not any(matches(pattern, f) for f in files):
                 annotate("error", d, "BROKEN_COVERS", f"covers {pattern!r}, which matches no file in the repository")
                 errors += 1
+    errors += check_links(files)
     if errors:
         print(f"{errors} problem(s) in the documentation.")
     else:
-        print(f"{len(docs)} documents, front matter and covered paths fine.")
+        print(f"{len(docs)} documents, front matter, covered paths and links fine.")
     return 1 if errors else 0
 
 
@@ -209,13 +296,23 @@ def impact(base: str) -> int:
         rel = path.relative_to(ROOT).as_posix()
         if rel in changed:
             print(f"::warning file={rel}::GENERATED: {rel} is regenerated on main after every merge; leave it out of the change so it does not conflict")
+    docs = documents()
+    # How many documents cover each changed file: a hub alone only gets the documents listed.
+    covering = {f: sum(1 for d in docs if any(matches(p, f) for p in d.covers)) for f in changed}
     behind = []
-    for d in documents():
+    for d in docs:
         if d.rel in changed:
             continue
         hits = sorted({f for f in changed for p in d.covers if matches(p, f)})
-        if hits:
-            behind.append(d)
+        if not hits:
+            continue
+        behind.append(d)
+        if all(covering[f] >= HUB_DOCS for f in hits):
+            annotate(
+                "notice", d, "MAYBE_BEHIND",
+                "covers a shared file this change touches (" + ", ".join(hits) + "); check it if the change is about what it describes",
+            )
+        else:
             annotate("warning", d, "DOCS_BEHIND", "describes changed code that this change does not update it for: " + ", ".join(hits))
     if not behind:
         print("Every document that covers the changed code was updated, or none covers it.")
