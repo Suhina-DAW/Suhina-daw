@@ -924,11 +924,11 @@ fn settings_add_and_remove_plugin_folders_and_scan_in_the_background() {
     harness.get_by_label("Settings page: Plug-ins").click();
     harness.run();
 
-    let field = harness.get_by_role(egui::accesskit::Role::TextInput);
+    let field = harness.get_by_label("Plug-in folder to add");
     field.focus();
     field.type_text(&folder.display().to_string());
     harness.run();
-    harness.get_by_label("Add folder").click();
+    harness.get_by_label("Add plug-in folder").click();
     harness.run();
     harness.run();
     let remove = harness.query_all_by_label_contains("Remove ").count();
@@ -1467,4 +1467,18 @@ fn render_the_clip_waveform() {
         let name = if db { "arrangement-waveform-db.png" } else { "arrangement-waveform.png" };
         image.save(folder.join(name)).unwrap_or_else(|e| panic!("{e}"));
     }
+}
+
+#[test]
+fn settings_open_as_a_dialog_over_the_view_and_escape_closes_them() {
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings_open());
+    assert!(harness.query_by_label("Close settings").is_some());
+    // The view stays behind the dialog.
+    assert!(harness.query_by_label("Turn Bass off").is_some(), "the view is still drawn");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings_open());
 }

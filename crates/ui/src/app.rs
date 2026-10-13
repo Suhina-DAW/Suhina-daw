@@ -107,6 +107,10 @@ pub enum Status {
     Error(String),
 }
 
+/// The Settings dialog at most: the page list, the page and their margins wide, and tall enough
+/// for the longest page on a common screen.
+const SETTINGS_SIZE: Vec2 = Vec2::new(772.0, 720.0);
+
 /// A project with unsaved changes the user is leaving, and what happens once they answered.
 #[derive(Debug, Clone, PartialEq)]
 struct Leaving {
@@ -930,12 +934,6 @@ impl App {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
             let inner = Rect::from_min_max(area.min + Vec2::new(0.0, 1.0), area.max - Vec2::new(0.0, 1.0));
-            if self.settings_open {
-                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.settings_page(ui));
-                // The device panel is not shown: embedded editors hide with it.
-                self.place_editors(&[]);
-                return;
-            }
             self.missing.sync(&mut self.projects, self.revision);
             let missing_bar = self.open_prompt.is_none() && self.missing.bar_shows();
             let prompt_height = if self.open_prompt.is_some() || missing_bar { theme::ROW + 12.0 } else { 0.0 };
@@ -1016,6 +1014,11 @@ impl App {
 
         self.plugin_dialog(ui, window);
         self.project_dialogs(ui, window);
+        if self.settings_open {
+            // Embedded plug-in editors are windows of their own and would cover the dialog.
+            self.place_editors(&[]);
+            self.settings_dialog(ui, window);
+        }
         self.update_title(ui.ctx());
         for action in &actions {
             // Closing a project with unsaved changes asks first (Save, Don't save, Cancel).
@@ -1354,6 +1357,27 @@ impl App {
     /// Whether a plug-in scan is running.
     pub fn scanning(&self) -> bool {
         self.scan.is_some()
+    }
+
+    /// Settings as a dialog over the window: the view stays behind it, dimmed, and its clicks
+    /// are swallowed. Escape, Close and the Settings key close it.
+    fn settings_dialog(&mut self, ui: &Ui, window: Rect) {
+        egui::Area::new(Id::new("settings-dialog")).order(egui::Order::Foreground).fixed_pos(window.min).show(
+            ui.ctx(),
+            |ui| {
+                ui.set_min_size(window.size());
+                let behind = ui.interact(window, Id::new("settings-behind"), Sense::click_and_drag());
+                let _swallowed = behind.clicked();
+                ui.painter().rect_filled(window, 0.0, theme::window_background().gamma_multiply(0.6));
+                let size = Vec2::new(
+                    SETTINGS_SIZE.x.min(window.width() - 2.0 * PAD),
+                    SETTINGS_SIZE.y.min(window.height() - 2.0 * PAD),
+                );
+                let panel = Rect::from_center_size(window.center(), size);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(panel), |ui| self.settings_page(ui));
+                ui.painter().rect_stroke(panel, 0.0, theme::hairline(theme::border_strong()), egui::StrokeKind::Inside);
+            },
+        );
     }
 
     /// The Settings page, applying each change as it is made.
