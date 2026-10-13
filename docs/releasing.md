@@ -116,3 +116,10 @@ The binaries are not signed: macOS Gatekeeper and Windows SmartScreen warn about
 desktop app is a bare executable, not an installer or a macOS app bundle. Installers (AppImage,
 deb, rpm, Flatpak, MSI), a macOS `.app`, code signing and notarisation, and Linux aarch64 and
 Windows arm64 builds come with M8 (ROADMAP).
+
+Releases from version tags are not announced on Discord yet. Before the first one is published,
+add a workflow that runs when a release is published (`on: release: types: [published]`) and posts
+its title, link and *New and changed* section to the releases channel through `DISCORD_WEBHOOK`.
+Only releases published by a person start it: the nightly is created with the workflow's own
+token, which starts no other workflow, so it is never posted twice. Once there are releases, the
+nightly posts can move to a channel of their own with a second secret.
