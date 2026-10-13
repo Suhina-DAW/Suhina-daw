@@ -182,14 +182,14 @@ Every item has a kind. The kinds and the words in names that give them:
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |
 | Double-click empty space, the Fit button | Fits all points in view. |
-| Arrow keys | Moves the selection to the nearest point in that direction and previews it. |
+| Arrow keys | Moves the selection to the nearest point in that direction and previews it; with Show similar on, Up and Down step through the similar list instead. |
 | Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Show in folder (switches to the list with the item selected). |
 
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
 side, each with a play button; Escape or clicking empty space ends it. Arrow keys Up and Down then
-step through the list (not built yet, [#190](https://github.com/juhamikael/Loopwerk/issues/190): today the arrow keys move to the nearest point on the map, as
-without Show similar).
+step through the list, starting from the item it was shown for, and preview each; Left and Right
+still move to the nearest point on the map.
 
 The previews are the browser's own (`preview.play`): same volume, same output, stopped by the
 same things.
