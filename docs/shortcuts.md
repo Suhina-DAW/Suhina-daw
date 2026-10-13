@@ -72,8 +72,9 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
 
-Paste places the copy right after the selected clip, or at the playhead on the selected track; it
-replaces what it covers, like a moved clip ([arrangement editing](spec/arrangement-editing.md)).
+Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
+moved clip, it replaces what it covers unless the stacking setting for its kind is on
+([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.
 
 Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
 while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and
