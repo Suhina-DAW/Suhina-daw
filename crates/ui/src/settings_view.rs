@@ -894,7 +894,8 @@ fn plugin_section(
             .hint_text("A folder to look in as well")
             .font(small.clone()),
     );
-    let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add folder");
+    edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Plug-in folder to add"));
+    let response = widgets::button_area(ui, add, Id::new("add-folder"), "Add plug-in folder");
     let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
     painter.rect_filled(add, 0.0, fill);
     widgets::text_in(painter, add, Align2::CENTER_CENTER, "Add", small.clone(), theme::text_primary());
