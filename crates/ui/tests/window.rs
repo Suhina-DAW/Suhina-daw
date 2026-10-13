@@ -1328,7 +1328,7 @@ fn active_close_label(harness: &Harness<'static, App>) -> String {
 
 /// Whether the window asked to close itself in its last frame.
 fn asked_to_close(harness: &Harness<'static, App>) -> bool {
-    harness.output().viewport_output.values().any(|v| v.commands.iter().any(|c| *c == egui::ViewportCommand::Close))
+    harness.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close))
 }
 
 #[test]
@@ -1348,7 +1348,9 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
     harness.run();
     assert!(unsaved(&harness));
     let label = active_close_label(&harness);
-    harness.get_all_by_label(&label).last().map(|n| n.click());
+    if let Some(close) = harness.get_all_by_label(&label).last() {
+        close.click();
+    }
     harness.run();
     assert!(harness.query_by_label("Don't save the changes").is_some());
     harness.get_by_label("Cancel and keep the project open").click();
@@ -1358,7 +1360,9 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
 
     // Don't save closes it.
     let label = active_close_label(&harness);
-    harness.get_all_by_label(&label).last().map(|n| n.click());
+    if let Some(close) = harness.get_all_by_label(&label).last() {
+        close.click();
+    }
     harness.run();
     harness.get_by_label("Don't save the changes").click();
     harness.run();
