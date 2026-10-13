@@ -21,7 +21,7 @@
   is added; CI rejects the project's old name (`python scripts/rename_suhina.py --check`).
 - **Commits:** small, focused, with a clear subject line, and signed off (see
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
-- **Issues:** small and scoped, with acceptance criteria (the Task and Feature request templates ask for them; a Bug gives the steps to reproduce);
+- **Issues:** small and scoped, with acceptance criteria (the issue forms ask for them: Bug, Plug-in problem, Feature request, Task);
   architecture belongs in an ADR under `docs/decisions/`, not in an issue thread.
 
 ## Clean-room
