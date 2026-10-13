@@ -1470,6 +1470,9 @@ impl App {
             self.settings = map_settings;
             self.settings_changed = true;
         }
+        if let Some(why) = self.sample_map.status.take() {
+            self.status = Status::Hint(why);
+        }
         let added = std::mem::take(&mut self.sample_map.add);
         if !added.is_empty() {
             self.add_to_selected(added);

@@ -247,9 +247,13 @@ pub fn show(ui: &mut Ui, area: Rect, state: &mut BrowserState, cx: Context<'_>) 
             session.provide_audio(&path, data);
         }
         let params = json!({ "path": path.display().to_string(), "from": from, "gain": settings.preview_volume });
-        if projects.execute("preview.play", &params).is_ok() {
-            state.previewing = Some(path.display().to_string());
+        match projects.execute("preview.play", &params) {
+            Ok(_) => state.previewing = Some(path.display().to_string()),
+            Err(e) => out.status = Some(Status::Error(format!("Cannot preview: {}", e.0))),
         }
+    }
+    if let Some(e) = state.take_preview_error() {
+        out.status = Some(Status::Error(format!("Cannot preview: {e}")));
     }
     if state.preview_pending() || state.previewing.is_some() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
@@ -781,16 +785,12 @@ fn start_preview(
     out: &mut BrowserOut,
 ) {
     let Some(path) = item.path() else { return };
-    if active(projects).is_none_or(|s| s.player().is_none()) {
+    if let Err(why) = can_preview(projects) {
+        out.status = Some(Status::Hint(why));
         return;
     }
     match item.kind {
-        ItemKind::Sample => {
-            state.previewing = None;
-            let _ = projects.execute("preview.stop", &json!({}));
-            let _ = state.info(&path, true);
-            state.want_preview(path, from);
-        }
+        ItemKind::Sample => preview_sample(state, projects, path, from),
         ItemKind::Midi => {
             state.cancel_preview();
             let mut params =
@@ -830,6 +830,26 @@ fn mode_switch(ui: &mut Ui, area: Rect, state: &mut BrowserState) {
         widgets::text_in(&painter, rect, Align2::CENTER_CENTER, name, small.clone(), text);
         x = rect.right() + FILTER_GAP;
     }
+}
+
+/// Why nothing can preview now, if so: previews play through the active project's audio output.
+pub fn can_preview(projects: &Projects) -> Result<(), String> {
+    match active(projects) {
+        None => Err("Open or make a project to preview: previews play through its audio output".into()),
+        Some(s) if s.player().is_none() => {
+            Err("Cannot preview: the project has no audio output (see the warnings when it opened)".into())
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// Previews a sample from `from` seconds: it is decoded on the browser's reader thread, then
+/// played (`preview.play`) when it is ready. The caller checks [`can_preview`] first.
+pub fn preview_sample(state: &mut BrowserState, projects: &mut Projects, path: PathBuf, from: f64) {
+    state.previewing = None;
+    let _ = projects.execute("preview.stop", &json!({}));
+    let _ = state.info(&path, true);
+    state.want_preview(path, from);
 }
 
 /// Stops any preview.

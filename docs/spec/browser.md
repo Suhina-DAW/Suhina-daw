@@ -3,7 +3,7 @@ description: How the browser behaves: places, categories, search, the tree, prev
 read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -159,6 +159,8 @@ with the part played so far brighter and a playhead.
   plug-in, when that track has one; otherwise through the FM synth with its first voice. All
   of the file's MIDI tracks sound together, at 120 BPM or the file's first tempo.
 - A file that cannot be read shows "Cannot preview: <reason>" in the strip and nothing plays.
+  The status bar says so too, and says why when nothing can preview at all: no project is open
+  (previews play through the active project's audio output), or the project has no audio output.
 
 ## Tempo and key of a file
 
