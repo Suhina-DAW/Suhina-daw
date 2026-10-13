@@ -69,8 +69,8 @@ def fig_areas(path: Path):
     colours = [COLOURS["green"] if c >= 0.6 else COLOURS["light"] if c >= 0.35
                else COLOURS["amber"] if c >= 0.1 else COLOURS["grey"] for c, _, _ in rows]
     ax.barh(ys, [c * 100 for c, _, _ in rows], color=colours, height=0.62)
-    for y, (cov, pages, _) in zip(ys, rows):
-        ax.text(cov * 100 + 1.2, y, f"{cov*100:.0f}%  ({pages} pages)",
+    for y, (cov, _, _) in zip(ys, rows):
+        ax.text(cov * 100 + 1.2, y, f"{cov*100:.0f}%",
                 va="center", fontsize=9.5, color="#333333")
     ax.set_yticks(ys)
     ax.set_yticklabels(["\n".join(textwrap.wrap(n, 36)) for _, _, n in rows], fontsize=9.5)
