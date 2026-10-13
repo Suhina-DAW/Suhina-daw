@@ -749,6 +749,7 @@ impl App {
         self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
+        self.apply_zoom(ui.ctx());
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
@@ -1329,6 +1330,25 @@ impl App {
                 if ui.add_enabled(has_project, egui::Button::new(label).shortcut_text(keys("view.detail"))).clicked() {
                     self.detail_open = !self.detail_open;
                 }
+                ui.separator();
+                let (zoom, limits) = (self.settings.zoom, crate::settings::ZOOMS);
+                if ui
+                    .add_enabled(zoom < limits.1, egui::Button::new("Zoom in").shortcut_text(keys("view.zoomIn")))
+                    .clicked()
+                {
+                    self.step_zoom(1);
+                }
+                if ui
+                    .add_enabled(zoom > limits.0, egui::Button::new("Zoom out").shortcut_text(keys("view.zoomOut")))
+                    .clicked()
+                {
+                    self.step_zoom(-1);
+                }
+                let reset = egui::Button::new(format!("Actual size ({zoom} %)")).shortcut_text(keys("view.zoomReset"));
+                if ui.add_enabled(zoom != crate::settings::ZOOM, reset).clicked() {
+                    self.settings.zoom = crate::settings::ZOOM;
+                    self.settings_changed = true;
+                }
             });
             ui.menu_button("Projects", |ui| {
                 if ui
@@ -1418,6 +1438,14 @@ impl App {
                 self.settings_open = false;
                 self.toggle_large_map();
             }
+            "view.zoomIn" => self.step_zoom(1),
+            "view.zoomOut" => self.step_zoom(-1),
+            "view.zoomReset" => {
+                if self.settings.zoom != crate::settings::ZOOM {
+                    self.settings.zoom = crate::settings::ZOOM;
+                    self.settings_changed = true;
+                }
+            }
             "browser.search" => {
                 if !self.settings.browser_open {
                     self.toggle_browser();
@@ -1488,6 +1516,25 @@ impl App {
             }
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
+        }
+    }
+
+    /// Makes the whole window `steps` zoom steps larger or smaller and keeps that in the settings.
+    fn step_zoom(&mut self, steps: i32) {
+        if self.settings.step_zoom(steps) {
+            self.settings_changed = true;
+        }
+    }
+
+    /// Draws the window at the zoom the settings keep. The keymap owns the zoom keys, so the
+    /// toolkit's own Ctrl and +, which the settings would not remember, is turned off.
+    fn apply_zoom(&self, ctx: &egui::Context) {
+        if ctx.options(|o| o.zoom_with_keyboard) {
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        }
+        let wanted = self.settings.zoom_factor();
+        if (ctx.zoom_factor() - wanted).abs() > f32::EPSILON {
+            ctx.set_zoom_factor(wanted);
         }
     }
 
