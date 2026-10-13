@@ -1,4 +1,4 @@
-//! Device chains on tracks (ADR 0004 › the engine side, LOOP-35).
+//! Device chains on tracks (ADR 0004 › the engine side).
 //!
 //! A track whose channel holds built-in effects and instruments gets a [`Chain`]: everything the track plays in
 //! a block (its sine voices, audio clips, launched clips) is summed into the chain's buffer
