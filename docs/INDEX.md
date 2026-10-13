@@ -42,6 +42,7 @@ are changing (*Code and its documents*).
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [The .locr project file](spec/locr-format.md) | spec | current | .locr layout, project file fields, writing a project file by hand or from an agent, locr version, base64 state | The layout of Loopwerk's own project file (.locr), field by field, with what a reader accepts |
+| [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
 | [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Loopwerk reads them |
 | [Sample map](spec/sample-map.md) | spec | draft | sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands | How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map |
 | [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Loopwerk reads and how it maps the mastering to its compressor and limiter |
@@ -85,6 +86,7 @@ Change this code, and check these documents.
 | `crates/engine/src/swap.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/library/**` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
+| `crates/library/src/find.rs` | [Missing files](spec/missing-files.md) |
 | `crates/locr` | [0010: Loopwerk's own project files (.locr)](decisions/0010-project-files.md) |
 | `crates/locr/src/lib.rs` | [The .locr project file](spec/locr-format.md) |
 | `crates/media/src/info.rs` | [Browser](spec/browser.md) |
@@ -106,6 +108,7 @@ Change this code, and check these documents.
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/session/src/projects.rs` | [0007: Several open projects](decisions/0007-several-open-projects.md) |
 | `crates/session/src/rack.rs` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
 | `crates/session/src/soundmap.rs` | [Sample map](spec/sample-map.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
@@ -120,6 +123,7 @@ Change this code, and check these documents.
 | `crates/ui/src/grid.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/missing_files.rs` | [Missing files](spec/missing-files.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/project_dialog.rs` | [Components](design/components.md) |
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |

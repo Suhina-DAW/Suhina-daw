@@ -3,7 +3,7 @@ description: How the browser behaves: places, categories, search, the tree, prev
 read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -122,7 +122,9 @@ click on its chevron or a double-click; its contents are read from disk when it 
 folders first then by name (natural order: "Kick 2" before "Kick 10"). A preset bank opens
 into its 32 voices.
 
-**Selection:** a click selects a row; Ctrl+click adds or removes a row; Shift+click selects the
+**Selection:** a click selects a row, as soon as the button goes down (so auto-play starts at
+once; a row that is part of a selection of several is selected alone when the button comes up,
+so pressing it to drag them all keeps the selection); Ctrl+click adds or removes a row; Shift+click selects the
 range from the last clicked row. A sample row shows a play button at its left while it is
 selected or under the pointer; clicking it previews the sample (a second click stops).
 
@@ -153,12 +155,15 @@ with the part played so far brighter and a playhead.
   not synced to the project's tempo or beat. It plays whether the project is playing or not,
   into the main output after the main channel, at the preview volume (Settings › Interface ›
   Browser › Preview volume, −6 dB by default).
-- Selecting something else, Escape in the search field, the play button again, or a drag from
-  the browser stops it.
+- Selecting something else, Escape in the search field, the play button again, or dropping
+  items from the browser into the project stops it. Dragging does not: a press held still
+  counts as the start of a drag, and the preview it started goes on.
 - **A MIDI file** previews through the selected track's instrument, a built-in one or a
   plug-in, when that track has one; otherwise through the FM synth with its first voice. All
   of the file's MIDI tracks sound together, at 120 BPM or the file's first tempo.
 - A file that cannot be read shows "Cannot preview: <reason>" in the strip and nothing plays.
+  The status bar says so too, and says why when nothing can preview at all: no project is open
+  (previews play through the active project's audio output), or the project has no audio output.
 
 ## Tempo and key of a file
 

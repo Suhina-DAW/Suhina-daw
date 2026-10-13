@@ -115,6 +115,8 @@ pub struct App {
     stashes: HashMap<ProjectId, Stash>,
     /// A dropped file waiting for the user to choose a new tab or replace.
     open_prompt: Option<PathBuf>,
+    /// The active project's missing audio files, their bar and panel.
+    missing: crate::missing_files::MissingFiles,
     remember_choice: bool,
     /// A project that became active and needs an audio output.
     player_request: Option<ProjectId>,
@@ -193,6 +195,7 @@ impl App {
             shown_project: None,
             stashes: HashMap::new(),
             open_prompt: None,
+            missing: crate::missing_files::MissingFiles::default(),
             remember_choice: false,
             player_request: None,
             closed: Vec::new(),
@@ -568,6 +571,10 @@ impl App {
 
     /// The project dialog and the save prompt, over the window, and what was chosen in them.
     fn project_dialogs(&mut self, ui: &Ui, window: Rect) {
+        let name = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
+        if let Some(crate::missing_files::Outcome::Apply(files)) = self.missing.panel(ui, window, &name) {
+            self.relink(files);
+        }
         if let Some(mut state) = self.project_dialog.take() {
             match project_dialog::show(ui, window, &mut state, &self.project_lists) {
                 Some(Choice::Open(path)) => self.request_open(path),
@@ -772,13 +779,17 @@ impl App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| self.settings_page(ui));
                 return;
             }
-            let prompt_height = if self.open_prompt.is_some() { theme::ROW + 12.0 } else { 0.0 };
+            self.missing.sync(&mut self.projects, self.revision);
+            let missing_bar = self.open_prompt.is_none() && self.missing.bar_shows();
+            let prompt_height = if self.open_prompt.is_some() || missing_bar { theme::ROW + 12.0 } else { 0.0 };
             let (prompt, inner) = (
                 Rect::from_min_size(inner.min, Vec2::new(inner.width(), prompt_height)),
                 Rect::from_min_max(inner.min + Vec2::new(0.0, prompt_height), inner.max),
             );
             if self.open_prompt.is_some() {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.open_prompt_bar(ui));
+            } else if missing_bar {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
             let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
             let view_area = inner;
@@ -1228,6 +1239,13 @@ impl App {
                     self.settings_open = false;
                     self.toggle_large_map();
                 }
+                let missing = self.missing.rows.len();
+                let label =
+                    if missing == 0 { "Missing files…".to_string() } else { format!("Missing files ({missing})…") };
+                if ui.add_enabled(missing > 0, egui::Button::new(label)).clicked() {
+                    self.missing.open = true;
+                    self.settings_open = false;
+                }
                 let label = if self.settings.browser_open { "Hide browser" } else { "Show browser" };
                 if ui.add(egui::Button::new(label).shortcut_text(keys("view.browser"))).clicked() {
                     self.toggle_browser();
@@ -1287,6 +1305,10 @@ impl App {
     }
 
     fn dropped_files(&mut self, ui: &Ui) {
+        // The missing files panel takes a dropped folder as the folder to search.
+        if self.missing.open {
+            return;
+        }
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect()
         });
@@ -1517,6 +1539,9 @@ impl App {
             self.settings = map_settings;
             self.settings_changed = true;
         }
+        if let Some(why) = self.sample_map.status.take() {
+            self.status = Status::Hint(why);
+        }
         let added = std::mem::take(&mut self.sample_map.add);
         if !added.is_empty() {
             self.add_to_selected(added);
@@ -1624,6 +1649,8 @@ impl App {
             self.view.drop = None;
             self.arrangement.drop = None;
             if let Some(target) = target {
+                // Dropped into the project: the preview has done its job.
+                browser_view::stop_preview(&mut self.browser, &mut self.projects);
                 self.drop_items(&items, target, separate);
             }
         }
@@ -1644,12 +1671,26 @@ impl App {
             self.status = Status::Hint("Nothing to add there".into());
             return;
         };
-        if plan.samples.is_empty() {
-            self.run_drop(plan.commands);
+        self.decode_then_run(plan.samples, plan.commands);
+    }
+
+    /// Relinks missing files (`project.relinkFiles`), their audio decoded on another thread first.
+    fn relink(&mut self, files: Vec<(String, PathBuf)>) {
+        let names: Vec<String> = files.iter().map(|(f, _)| f.clone()).collect();
+        let to: Vec<String> = files.iter().map(|(_, p)| p.display().to_string()).collect();
+        let samples = files.into_iter().map(|(_, p)| p).collect();
+        self.decode_then_run(samples, vec![("project.relinkFiles", json!({ "files": names, "to": to }))]);
+    }
+
+    /// Decodes `samples` on another thread, so the window never waits, then runs `commands`
+    /// with them at hand (ADR 0011).
+    fn decode_then_run(&mut self, samples: Vec<PathBuf>, commands: Vec<(&'static str, serde_json::Value)>) {
+        if samples.is_empty() {
+            self.run_drop(commands);
             return;
         }
         let (send, decoded) = std::sync::mpsc::channel();
-        let samples = plan.samples.clone();
+        let count = samples.len();
         let started = std::thread::Builder::new().name("loopwerk-drop".into()).spawn(move || {
             // A Stems file gives every audio track, each under its stream number.
             let done: Vec<_> = samples
@@ -1673,11 +1714,10 @@ impl App {
         });
         match started {
             Ok(_) => {
-                let count = plan.samples.len();
                 self.status = Status::Hint(format!("Reading {count} sample{}", if count == 1 { "" } else { "s" }));
-                self.pending_drop = Some(PendingDrop { commands: plan.commands, decoded });
+                self.pending_drop = Some(PendingDrop { commands, decoded });
             }
-            Err(_) => self.run_drop(plan.commands),
+            Err(_) => self.run_drop(commands),
         }
     }
 
