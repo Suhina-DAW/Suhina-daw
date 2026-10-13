@@ -1,6 +1,6 @@
 ---
 description: How versions are numbered, how release builds and the nightly for Linux, Windows and macOS are made
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, Discord announcement
 type: howto
 status: current
 last_verified: 2026-10-13
@@ -62,6 +62,13 @@ the latest one never changes:
 ```text
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz
 ```
+
+Each new nightly is posted to Discord: the version, the download link and the first line of
+every commit since the previous nightly (at most 15). The post goes to the channel whose webhook
+URL is the repository secret `DISCORD_WEBHOOK` (Discord: channel settings › Integrations ›
+Webhooks; GitHub: Settings › Secrets and variables › Actions). Without the secret nothing is
+posted, and a failed post leaves the nightly published. Releases from version tags are not
+posted; they are announced by hand when the draft is published.
 
 The nightly never becomes the repository's "latest" release, and nothing is promoted from it: a
 release is made from a version tag as above.

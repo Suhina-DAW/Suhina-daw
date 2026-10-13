@@ -302,6 +302,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # The commit of the nightly being replaced, for the list of what changed since.
+      - name: Note the previous nightly
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Publish the nightly
         env:
           GH_TOKEN: ${{ github.token }}
@@ -324,3 +332,31 @@ jobs:
             --latest=false \
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
+      # Posts the new nightly to the Discord channel whose webhook is the secret DISCORD_WEBHOOK
+      # (Discord: channel settings > Integrations > Webhooks); without the secret nothing is
+      # posted. A failed post leaves the nightly published.
+      - name: Tell Discord
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PREVIOUS: ${{ steps.previous.outputs.sha }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "No DISCORD_WEBHOOK secret; nothing posted."
+            exit 0
+          fi
+          # The first line of each commit since the previous nightly, newest first, at most 15.
+          changes=""
+          if [ -n "$PREVIOUS" ]; then
+            changes=$(gh api "repos/$GITHUB_REPOSITORY/compare/$PREVIOUS...$GITHUB_SHA" \
+              --jq '[.commits[].commit.message | split("\n")[0]] | reverse | .[:15] | map("- " + .) | join("\n")' \
+              || true)
+          fi
+          link="https://github.com/$GITHUB_REPOSITORY/releases/tag/nightly"
+          message="**Suhina nightly \`$VERSION\`** is out: $link"
+          if [ -n "$changes" ]; then message="$message"$'\n\nNew since the last nightly:\n'"$changes"; fi
+          # Discord takes at most 2000 characters.
+          jq -n --arg content "${message:0:1990}" '{content: $content, allowed_mentions: {parse: []}}' \
+            | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
