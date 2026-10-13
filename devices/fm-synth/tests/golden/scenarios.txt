@@ -8,7 +8,7 @@
 # event <frame> on <key> <velocity 0-127> | off <key> | bend <0-16383> | wheel <0-127>
 #       | pressure <0-127> | sustain <0|1>
 # Voices are written for these tests; none comes from a product's library. `init` is the
-# initialised voice as Dexed defines it, the same bytes as `Patch::default()`.
+# FM synth's default voice, `Patch::default()` (docs/spec/dx7-voice-format.md › The default voice).
 
 scenario init 48000 24000 3
 patch 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 0 0 1 0 7 99 99 99 99 99 99 99 0 39 0 0 0 0 0 0 0 99 0 1 0 7 99 99 99 99 50 50 50 50 0 0 1 35 0 0 0 1 0 3 24 73 78 73 84 32 86 79 73 67 69 63
