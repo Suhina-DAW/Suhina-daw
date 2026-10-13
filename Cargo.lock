@@ -3861,6 +3861,7 @@ dependencies = [
  "suhina-library",
  "suhina-media",
  "suhina-output",
+ "suhina-plugins",
  "suhina-session",
  "suhina-ui",
  "winit",
