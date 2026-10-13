@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use loopwerk_model::*;
+use suhina_model::*;
 
 use crate::{AudioData, AudioPool, LaunchCommand, render_launches, render_offline_with_audio};
 
@@ -131,16 +131,16 @@ fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
 
-/// Compares `render` with the golden file `name`, little-endian f32. With `LOOPWERK_BLESS=1` the
+/// Compares `render` with the golden file `name`, little-endian f32. With `SUHINA_BLESS=1` the
 /// file is written instead (see tests/golden/README.md).
 fn assert_golden(name: &str, render: &[f32]) {
     let path = golden_dir().join(format!("{name}.f32"));
-    if std::env::var_os("LOOPWERK_BLESS").is_some() {
+    if std::env::var_os("SUHINA_BLESS").is_some() {
         let bytes: Vec<u8> = render.iter().flat_map(|s| s.to_le_bytes()).collect();
         std::fs::write(&path, bytes).unwrap();
         return;
     }
-    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}; run with LOOPWERK_BLESS=1", path.display()));
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}; run with SUHINA_BLESS=1", path.display()));
     let golden: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     assert_eq!(golden.len(), render.len(), "{name}: length differs from the golden file");
     let worst = max_diff(&golden, render);

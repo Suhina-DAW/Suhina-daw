@@ -2241,303 +2241,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "loopwerk"
-version = "0.0.1"
-dependencies = [
- "eframe",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-output",
- "loopwerk-session",
- "loopwerk-ui",
- "raw-window-handle",
- "zip",
-]
-
-[[package]]
-name = "loopwerk-als"
-version = "0.0.1"
-dependencies = [
- "flate2",
- "loopwerk-model",
- "roxmltree",
-]
-
-[[package]]
-name = "loopwerk-automation"
-version = "0.0.1"
-dependencies = [
- "hound",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-session",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "loopwerk-cli"
-version = "0.0.1"
-dependencies = [
- "hound",
- "loopwerk-als",
- "loopwerk-automation",
- "loopwerk-device-api",
- "loopwerk-device-fm-synth",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-output",
- "loopwerk-plugins",
- "loopwerk-session",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "loopwerk-device-api"
-version = "0.0.1"
-
-[[package]]
-name = "loopwerk-device-auto-pan"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-compressor"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-dj-eq"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-fm-synth"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
-]
-
-[[package]]
-name = "loopwerk-device-limiter"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-overdrive"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-registry"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-device-auto-pan",
- "loopwerk-device-compressor",
- "loopwerk-device-dj-eq",
- "loopwerk-device-fm-synth",
- "loopwerk-device-limiter",
- "loopwerk-device-overdrive",
- "loopwerk-device-utility",
- "loopwerk-device-vinyl-distortion",
-]
-
-[[package]]
-name = "loopwerk-device-utility"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-device-vinyl-distortion"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-dsp",
-]
-
-[[package]]
-name = "loopwerk-dsp"
-version = "0.0.1"
-
-[[package]]
-name = "loopwerk-engine"
-version = "0.0.1"
-dependencies = [
- "loopwerk-device-api",
- "loopwerk-device-registry",
- "loopwerk-model",
- "loopwerk-stretch",
- "rtrb",
-]
-
-[[package]]
-name = "loopwerk-ipc"
-version = "0.0.1"
-dependencies = [
- "libc",
- "memmap2",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "loopwerk-library"
-version = "0.0.1"
-dependencies = [
- "loopwerk-media",
- "notify-debouncer-full",
- "serde_json",
-]
-
-[[package]]
-name = "loopwerk-locr"
-version = "0.0.1"
-dependencies = [
- "base64",
- "loopwerk-model",
- "serde_json",
-]
-
-[[package]]
-name = "loopwerk-media"
-version = "0.0.1"
-dependencies = [
- "base64",
- "hound",
- "loopwerk-device-compressor",
- "loopwerk-device-limiter",
- "loopwerk-engine",
- "serde_json",
- "symphonia",
-]
-
-[[package]]
-name = "loopwerk-model"
-version = "0.0.1"
-
-[[package]]
-name = "loopwerk-output"
-version = "0.0.1"
-dependencies = [
- "cpal",
- "loopwerk-engine",
- "loopwerk-session",
-]
-
-[[package]]
-name = "loopwerk-plugin-host"
-version = "0.0.1"
-dependencies = [
- "clack-extensions",
- "clack-host",
- "clack-plugin",
- "interprocess",
- "libc",
- "libloading",
- "loopwerk-engine",
- "loopwerk-ipc",
- "loopwerk-model",
- "loopwerk-plugins",
- "loopwerk-session",
- "serde_json",
- "vst3",
- "windows-sys 0.61.2",
- "x11rb",
-]
-
-[[package]]
-name = "loopwerk-plugins"
-version = "0.0.1"
-dependencies = [
- "interprocess",
- "json5",
- "loopwerk-ipc",
- "serde_json",
-]
-
-[[package]]
-name = "loopwerk-session"
-version = "0.0.1"
-dependencies = [
- "hound",
- "loopwerk-als",
- "loopwerk-device-api",
- "loopwerk-device-fm-synth",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-locr",
- "loopwerk-media",
- "loopwerk-model",
- "loopwerk-plugins",
- "loopwerk-soundmap",
- "serde_json",
-]
-
-[[package]]
-name = "loopwerk-soundmap"
-version = "0.0.1"
-dependencies = [
- "bhtsne",
- "hound",
- "loopwerk-media",
- "realfft",
-]
-
-[[package]]
-name = "loopwerk-stretch"
-version = "0.0.1"
-dependencies = [
- "hound",
- "rustfft",
-]
-
-[[package]]
-name = "loopwerk-ui"
-version = "0.0.1"
-dependencies = [
- "egui",
- "egui_kittest",
- "hound",
- "loopwerk-device-api",
- "loopwerk-device-registry",
- "loopwerk-engine",
- "loopwerk-library",
- "loopwerk-media",
- "loopwerk-output",
- "loopwerk-plugins",
- "loopwerk-session",
- "loopwerk-soundmap",
- "serde_json",
-]
-
-[[package]]
 name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4147,6 +3850,303 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "suhina"
+version = "0.0.1"
+dependencies = [
+ "eframe",
+ "raw-window-handle",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-session",
+ "suhina-ui",
+ "zip",
+]
+
+[[package]]
+name = "suhina-als"
+version = "0.0.1"
+dependencies = [
+ "flate2",
+ "roxmltree",
+ "suhina-model",
+]
+
+[[package]]
+name = "suhina-automation"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-session",
+ "tokio",
+]
+
+[[package]]
+name = "suhina-cli"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "serde_json",
+ "suhina-als",
+ "suhina-automation",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-plugins",
+ "suhina-session",
+ "tokio",
+]
+
+[[package]]
+name = "suhina-device-api"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-device-auto-pan"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-compressor"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-dj-eq"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-fm-synth"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+]
+
+[[package]]
+name = "suhina-device-limiter"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-overdrive"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-registry"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-device-auto-pan",
+ "suhina-device-compressor",
+ "suhina-device-dj-eq",
+ "suhina-device-fm-synth",
+ "suhina-device-limiter",
+ "suhina-device-overdrive",
+ "suhina-device-utility",
+ "suhina-device-vinyl-distortion",
+]
+
+[[package]]
+name = "suhina-device-utility"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-device-vinyl-distortion"
+version = "0.0.1"
+dependencies = [
+ "suhina-device-api",
+ "suhina-dsp",
+]
+
+[[package]]
+name = "suhina-dsp"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-engine"
+version = "0.0.1"
+dependencies = [
+ "rtrb",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-model",
+ "suhina-stretch",
+]
+
+[[package]]
+name = "suhina-ipc"
+version = "0.0.1"
+dependencies = [
+ "libc",
+ "memmap2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "suhina-library"
+version = "0.0.1"
+dependencies = [
+ "notify-debouncer-full",
+ "serde_json",
+ "suhina-media",
+]
+
+[[package]]
+name = "suhina-locr"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "serde_json",
+ "suhina-model",
+]
+
+[[package]]
+name = "suhina-media"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "hound",
+ "serde_json",
+ "suhina-device-compressor",
+ "suhina-device-limiter",
+ "suhina-engine",
+ "symphonia",
+]
+
+[[package]]
+name = "suhina-model"
+version = "0.0.1"
+
+[[package]]
+name = "suhina-output"
+version = "0.0.1"
+dependencies = [
+ "cpal",
+ "suhina-engine",
+ "suhina-session",
+]
+
+[[package]]
+name = "suhina-plugin-host"
+version = "0.0.1"
+dependencies = [
+ "clack-extensions",
+ "clack-host",
+ "clack-plugin",
+ "interprocess",
+ "libc",
+ "libloading",
+ "serde_json",
+ "suhina-engine",
+ "suhina-ipc",
+ "suhina-model",
+ "suhina-plugins",
+ "suhina-session",
+ "vst3",
+ "windows-sys 0.61.2",
+ "x11rb",
+]
+
+[[package]]
+name = "suhina-plugins"
+version = "0.0.1"
+dependencies = [
+ "interprocess",
+ "json5",
+ "serde_json",
+ "suhina-ipc",
+]
+
+[[package]]
+name = "suhina-session"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "serde_json",
+ "suhina-als",
+ "suhina-device-api",
+ "suhina-device-fm-synth",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-locr",
+ "suhina-media",
+ "suhina-model",
+ "suhina-plugins",
+ "suhina-soundmap",
+]
+
+[[package]]
+name = "suhina-soundmap"
+version = "0.0.1"
+dependencies = [
+ "bhtsne",
+ "hound",
+ "realfft",
+ "suhina-media",
+]
+
+[[package]]
+name = "suhina-stretch"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "rustfft",
+]
+
+[[package]]
+name = "suhina-ui"
+version = "0.0.1"
+dependencies = [
+ "egui",
+ "egui_kittest",
+ "hound",
+ "serde_json",
+ "suhina-device-api",
+ "suhina-device-registry",
+ "suhina-engine",
+ "suhina-library",
+ "suhina-media",
+ "suhina-output",
+ "suhina-plugins",
+ "suhina-session",
+ "suhina-soundmap",
+]
 
 [[package]]
 name = "symphonia"

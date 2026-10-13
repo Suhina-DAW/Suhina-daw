@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
-use loopwerk_engine::AudioData;
-use loopwerk_library::{FileKind, Group, Item, Listing};
-use loopwerk_media::info::{Tempo, TempoSource};
-use loopwerk_session::{Category, Found, Projects};
+use suhina_engine::AudioData;
+use suhina_library::{FileKind, Group, Item, Listing};
+use suhina_media::info::{Tempo, TempoSource};
+use suhina_session::{Category, Found, Projects};
 
 use crate::drop::{BrowserItem, ItemKind};
 use crate::waveform::{Peaks, peaks};
@@ -100,7 +100,7 @@ impl Reader {
     fn start() -> Self {
         let (to, requests) = std::sync::mpsc::channel::<Request>();
         let (answers, from) = std::sync::mpsc::channel();
-        let started = std::thread::Builder::new().name("loopwerk-browser-files".into()).spawn(move || {
+        let started = std::thread::Builder::new().name("suhina-browser-files".into()).spawn(move || {
             while let Ok(request) = requests.recv() {
                 let (path, whole) = match request {
                     Request::Header(path) => (path, false),
@@ -118,7 +118,7 @@ impl Reader {
                 }
                 if let Some(data) = detect {
                     let tempo =
-                        loopwerk_media::tempo::detect(&data).map(|bpm| Tempo { bpm, source: TempoSource::Detected });
+                        suhina_media::tempo::detect(&data).map(|bpm| Tempo { bpm, source: TempoSource::Detected });
                     if tempo.is_some() {
                         let info = FileInfo { tempo, ..FileInfo::default() };
                         if answers.send(Answer { path, whole: false, info }).is_err() {
@@ -137,9 +137,9 @@ impl Reader {
 
 fn read_info(path: &Path, whole: bool) -> FileInfo {
     let mut info = FileInfo::default();
-    match loopwerk_media::info::kind_of(path) {
+    match suhina_media::info::kind_of(path) {
         Some(FileKind::Sample | FileKind::Stems) => {
-            match loopwerk_media::info::sample_info(path) {
+            match suhina_media::info::sample_info(path) {
                 Ok(header) => {
                     info.seconds = header.duration_seconds;
                     info.tempo = header.tempo;
@@ -148,7 +148,7 @@ fn read_info(path: &Path, whole: bool) -> FileInfo {
                 Err(e) => info.error = Some(e),
             }
             if whole {
-                match loopwerk_media::decode_file(path) {
+                match suhina_media::decode_file(path) {
                     Ok(data) => {
                         let seconds = data.frames() as f64 / f64::from(data.sample_rate.max(1));
                         info.seconds = Some(seconds);
@@ -160,7 +160,7 @@ fn read_info(path: &Path, whole: bool) -> FileInfo {
                 }
             }
         }
-        Some(FileKind::Midi) => match loopwerk_media::midi::read_file(path) {
+        Some(FileKind::Midi) => match suhina_media::midi::read_file(path) {
             Ok(midi) => {
                 let notes: Vec<(f64, f64, u8)> =
                     midi.tracks.iter().flat_map(|t| t.notes.iter().map(|n| (n.time, n.duration, n.key))).collect();
@@ -349,15 +349,9 @@ impl BrowserState {
 
     fn flat_rows(&mut self, projects: &mut Projects) -> Result<Vec<Row>, String> {
         let place = self.place.as_ref().map(Place::param);
-        let found = loopwerk_session::search_items(
-            projects,
-            &self.search,
-            self.category,
-            place.as_deref(),
-            &self.tag_filter,
-            0,
-        )
-        .map_err(|e| e.0)?;
+        let found =
+            suhina_session::search_items(projects, &self.search, self.category, place.as_deref(), &self.tag_filter, 0)
+                .map_err(|e| e.0)?;
         Ok(found
             .into_iter()
             .map(|f| {
@@ -420,8 +414,8 @@ impl BrowserState {
         if !open {
             return;
         }
-        for info in loopwerk_device_registry::DEVICES {
-            let is_instrument = info.role == loopwerk_device_api::Role::Instrument;
+        for info in suhina_device_registry::DEVICES {
+            let is_instrument = info.role == suhina_device_api::Role::Instrument;
             if is_instrument != instruments {
                 continue;
             }
@@ -440,7 +434,7 @@ impl BrowserState {
         };
         let mut vendors: Vec<(String, Vec<BrowserItem>)> = Vec::new();
         for plugin in env.catalog.plugins() {
-            let instrument = loopwerk_session::is_instrument(plugin);
+            let instrument = suhina_session::is_instrument(plugin);
             if !wanted(instrument) {
                 continue;
             }
@@ -458,7 +452,7 @@ impl BrowserState {
             }
         }
         vendors.sort_by(|a, b| {
-            (a.0 == "Unknown vendor").cmp(&(b.0 == "Unknown vendor")).then(loopwerk_library::natural_cmp(&a.0, &b.0))
+            (a.0 == "Unknown vendor").cmp(&(b.0 == "Unknown vendor")).then(suhina_library::natural_cmp(&a.0, &b.0))
         });
         let node = "group:plugins";
         let open = self.open.contains(node);
@@ -471,7 +465,7 @@ impl BrowserState {
             let vendor_open = self.open.contains(&key);
             rows.push(Row { item: heading(&key, &vendor), depth: 1, opens: true, open: vendor_open, context: None });
             if vendor_open {
-                list.sort_by(|a, b| loopwerk_library::natural_cmp(&a.name, &b.name));
+                list.sort_by(|a, b| suhina_library::natural_cmp(&a.name, &b.name));
                 for item in list {
                     rows.push(Row { item, depth: 2, opens: false, open: false, context: None });
                 }
@@ -480,7 +474,7 @@ impl BrowserState {
     }
 
     fn folder_rows(&mut self, projects: &mut Projects, folder: &Path, depth: usize, rows: &mut Vec<Row>) {
-        if depth > loopwerk_library::index::MAX_DEPTH {
+        if depth > suhina_library::index::MAX_DEPTH {
             return;
         }
         let listing = match self.listings.get(folder) {
@@ -548,9 +542,9 @@ impl BrowserState {
         }
         let voices = std::fs::metadata(path)
             .ok()
-            .filter(|m| m.len() <= loopwerk_device_registry::MAX_PRESET_BYTES as u64)
+            .filter(|m| m.len() <= suhina_device_registry::MAX_PRESET_BYTES as u64)
             .and_then(|_| std::fs::read(path).ok())
-            .and_then(|data| loopwerk_device_registry::preset_voices(&data).ok())
+            .and_then(|data| suhina_device_registry::preset_voices(&data).ok())
             .unwrap_or_default();
         let voices = Arc::new(voices);
         self.voices.insert(path.to_path_buf(), Arc::clone(&voices));
@@ -677,7 +671,7 @@ mod tests {
     #[test]
     fn an_unselected_sample_waiting_to_preview_keeps_its_audio() {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        let dir = std::env::temp_dir().join(format!("loopwerk-browser-preview-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-browser-preview-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("hat.wav");
         let spec = hound::WavSpec {
@@ -715,7 +709,7 @@ mod tests {
     #[test]
     fn a_previewed_loop_gets_its_tempo_too() {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        let dir = std::env::temp_dir().join(format!("loopwerk-browser-tempo-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-browser-tempo-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("loop.wav");
         let rate = 44_100u32;

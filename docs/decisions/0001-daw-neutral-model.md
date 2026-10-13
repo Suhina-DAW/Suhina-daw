@@ -15,7 +15,7 @@ covers:
 
 ## Context
 
-Loopwerk should open projects from more than one DAW: Ableton Live (`.als`) first, later
+Suhina should open projects from more than one DAW: Ableton Live (`.als`) first, later
 DAWproject and FL Studio (`.flp`), and possibly others. These programs organise a song in
 different ways:
 
@@ -51,7 +51,7 @@ Its key ideas:
 
 ## Decision
 
-`loopwerk-model` is a DAW-neutral model built on DAWproject's ideas, in three layers:
+`suhina-model` is a DAW-neutral model built on DAWproject's ideas, in three layers:
 
 1. **A common core** of concepts every DAW has:
    - a transport (tempo, time signature)
@@ -66,7 +66,7 @@ Its key ideas:
    - a **launcher**: scenes and per-track slot columns
 2. **Per-format extensions.** Every object carries an `Extensions` list where an importer keeps
    data the core does not model, keyed by format, verbatim. The exporter for the same format
-   writes it back, so `.als` → Loopwerk → `.als` loses nothing the core does not understand yet.
+   writes it back, so `.als` → Suhina → `.als` loses nothing the core does not understand yet.
 3. **Formats live in their own crates** (`crates/als`, later `crates/flp`, `crates/dawproject`) and
    convert to and from the core. Adding a format never requires changing another format.
 
@@ -89,8 +89,8 @@ A `Device` also holds `params`: the parameter values of a built-in device
 (`DeviceKind::Builtin`), as a list of a stable parameter id and a value in the parameter's own
 unit (decibels, hertz, a fraction, an option index). Parameters that are not listed keep their
 defaults, and the device limits each value to its range when it loads it, so a project written
-by an older or newer Loopwerk still opens. Plug-ins keep using `state`; placeholders have
-neither. Importers fill `params` when they map another DAW's device onto a Loopwerk device
+by an older or newer Suhina still opens. Plug-ins keep using `state`; placeholders have
+neither. Importers fill `params` when they map another DAW's device onto a Suhina device
 (first: Live's Utility, `docs/spec/als-format.md` › Devices).
 
 ## Consequences

@@ -20,7 +20,7 @@ covers:
 
 ## Context
 
-AGENTS.md rule 5: third-party plug-ins never run in the Loopwerk process. A plug-in that crashes
+AGENTS.md rule 5: third-party plug-ins never run in the Suhina process. A plug-in that crashes
 or hangs must not stop the engine or lose the project; the host reports it, keeps the project
 intact and can restart it. Projects imported from other DAWs already keep their plug-ins' ids
 and state (`DeviceKind::Clap`, `Vst3`, `Vst2` with `Device::state`); nothing runs them yet.
@@ -60,7 +60,7 @@ workspace forbids.
 
 ## Decision
 
-1. **The engine never loads a plug-in.** A separate executable, `loopwerk-plugin-host`, loads
+1. **The engine never loads a plug-in.** A separate executable, `suhina-plugin-host`, loads
    plug-ins and runs them; the engine talks to it only through the `ipc` crate.
 2. **Process model.** By default one host process per plug-in binary (every instance of one
    plug-in together), so plug-ins whose instances share state still work and one crash takes
@@ -141,7 +141,7 @@ workspace forbids.
    started audio processor on its audio thread. A plug-in is named `clap:<file>` or
    `clap:<file>#<id>`; the only `unsafe` the host needs for it is opening the file. A CLAP gain
    built into the host (`test:clap`, made with `clack-plugin`) lets the tests run the whole path
-   without a plug-in installed; `LOOPWERK_TEST_CLAP` runs them against a real file too.
+   without a plug-in installed; `SUHINA_TEST_CLAP` runs them against a real file too.
    VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
    thread (connected through their connection points, the controller given the component's
    state; the host makes the messages and attribute lists they send each other,
@@ -181,7 +181,7 @@ workspace forbids.
    VST3 component's `setState` and mirrors it to the controller. A VST3 project's controller
    state goes with the component's (`set_state` carries both, protocol version 2) and is
    restored after a restart. A plug-in that refuses the state runs with its defaults and the
-   caller is told (`offline::render_with_state`, `loopwerk-cli plugin run-device`). Measured on
+   caller is told (`offline::render_with_state`, `suhina-cli plugin run-device`). Measured on
    a real project: Valhalla VintageVerb and PSP VintageWarmer read their VST2 chunk banks
    (the output changes with the saved settings); OTT takes a parameter bank (`FxBk`) in
    `setState` without applying it. So the host also sets a parameter bank's current program as
@@ -203,9 +203,9 @@ workspace forbids.
    factory and VST3's `moduleinfo.json` are read without instantiating plug-ins where possible.
    It looks in the system's standard folders (and, for CLAP, the folders in `CLAP_PATH`) plus
    folders the user adds, so no setting is needed to find installed plug-ins. Implemented in
-   `loopwerk_plugins::scan` and `scan_pool` for CLAP and VST3:
+   `suhina_plugins::scan` and `scan_pool` for CLAP and VST3:
    - A VST3 bundle with a `moduleinfo.json` (JSON5) is read from it without loading anything.
-   - Everything else goes to a few long-lived `loopwerk-plugin-host --scan-worker` processes
+   - Everything else goes to a few long-lived `suhina-plugin-host --scan-worker` processes
      (half the processor's threads, at most 4), each reading file after file. A worker that
      crashes or hangs on a file is ended, the file is marked failed with the reason, and a new
      worker takes the rest. Shells (files with many plug-ins, such as Waves' WaveShell) go first
@@ -216,16 +216,16 @@ workspace forbids.
      load.
    - A file that failed keeps its reason and is not tried again until it changes.
    The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
-   folders and the catalog are kept as JSON in Loopwerk's settings folder.
-10. **Editors** open from the host process, floating above Loopwerk's window and owned by it,
-    as most hosts do: the window stays above Loopwerk, has no taskbar entry of its own and is
-    minimised with it. *Amended 2026-10-12* (was: embedded in a Loopwerk window on X11 and
-    Windows): owning works on every system and keeps the editor apart from Loopwerk's own
+   folders and the catalog are kept as JSON in Suhina's settings folder.
+10. **Editors** open from the host process, floating above Suhina's window and owned by it,
+    as most hosts do: the window stays above Suhina, has no taskbar entry of its own and is
+    minimised with it. *Amended 2026-10-12* (was: embedded in a Suhina window on X11 and
+    Windows): owning works on every system and keeps the editor apart from Suhina's own
     layout; embedding another process's window works only on X11 and Windows. The engine names
     its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11 window id);
     the host makes the editor's window owned by it (Win32 owner window, X11 `WM_TRANSIENT_FOR`).
     An owned window shares its input queue with the owner's thread on Windows, so the host
-    making one waits for Loopwerk's window thread; the session therefore opens and closes an
+    making one waits for Suhina's window thread; the session therefore opens and closes an
     editor on a thread of its own and the command answers at once (`editor_open: "opening"`),
     or both would wait for each other. More generally the window thread never waits for a host
     process: `Plugin::health` and `editor_open` answer from what they last knew while the
@@ -252,7 +252,7 @@ workspace forbids.
     silicon, Windows plug-ins on Linux through Wine.
 12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which
     load like any other. Windows-only plug-ins reach Linux through yabridge (GPL-3.0), which
-    wraps each one as a Linux CLAP or VST3 file; Loopwerk loads those like native plug-ins once
+    wraps each one as a Linux CLAP or VST3 file; Suhina loads those like native plug-ins once
     CLAP and VST3 hosting work, with nothing of its own to build. It costs a second process hop
     (our host, then yabridge's Wine process). Windows plug-ins that exist only as VST2 do not
     work this way (decision 8).
@@ -263,7 +263,7 @@ workspace forbids.
   (observed from plug-ins and hosts we may use, written in `docs/spec/`), an optional crate kept
   apart from the rest, no use of the VST trademark, and legal advice before release. Decided
   when we know which plug-ins people still use only as VST2.
-- **Our own Wine host** for Windows plug-ins on Linux (`loopwerk-plugin-host` built for Wine,
+- **Our own Wine host** for Windows plug-ins on Linux (`suhina-plugin-host` built for Wine,
   speaking the same protocol, so one hop instead of two and one place for crashes, scanning and
   editors). Decided after native CLAP and VST3 work and the cost of the yabridge path has been
   measured; yabridge's code (GPL-3.0) can be read for how it solves the same problems.

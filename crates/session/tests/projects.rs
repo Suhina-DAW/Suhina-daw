@@ -2,10 +2,10 @@
 //! keeps its player.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
 
-use loopwerk_engine::{AudioPool, Renderer};
-use loopwerk_model::Project;
-use loopwerk_session::{CommandKind, MAX_OPEN_PROJECTS, Player, ProjectId, Projects, Session, commands};
 use serde_json::{Value, json};
+use suhina_engine::{AudioPool, Renderer};
+use suhina_model::Project;
+use suhina_session::{CommandKind, MAX_OPEN_PROJECTS, Player, ProjectId, Projects, Session, commands};
 
 fn untitled(projects: &mut Projects) -> ProjectId {
     projects.add(Session::new(Project::default()), None).unwrap()

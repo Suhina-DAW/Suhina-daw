@@ -152,7 +152,7 @@ impl StretchThread {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop);
         let (inbox, mut incoming) = RingBuffer::<StretchWorker>::new(INBOX);
-        let handle = std::thread::Builder::new().name("loopwerk-stretch".into()).spawn(move || {
+        let handle = std::thread::Builder::new().name("suhina-stretch".into()).spawn(move || {
             let mut workers: Vec<StretchWorker> = Vec::new();
             while !stop_flag.load(Ordering::Relaxed) {
                 while let Ok(worker) = incoming.pop() {

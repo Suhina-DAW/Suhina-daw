@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use loopwerk_model::{AudioRegion, Clip};
+use suhina_model::{AudioRegion, Clip};
 
 /// File sample rates the direct reader plays; a file outside them is not read (a rate of 0 would
 /// freeze on one frame). Wider than [`STRETCH_SAMPLE_RATES`], since the direct reader is where a
@@ -317,7 +317,7 @@ impl AudioEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_model::*;
+    use suhina_model::*;
 
     const SR: u32 = 48_000;
 

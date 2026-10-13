@@ -12,7 +12,7 @@ covers:
   - crates/engine/src/audio.rs
   - crates/engine/src/launcher.rs
   - crates/ui/src/settings.rs
-  - apps/loopwerk-cli/src/play.rs
+  - apps/suhina-cli/src/play.rs
 ---
 
 # Arrangement editing
@@ -87,7 +87,7 @@ double-click on a handle removes that fade. Measurements are in
 
 A clip plays from its start marker (`Clip::offset`, in content beats) and, with a loop, around
 the loop from then on. Live keeps the start marker inside the loop: moving the loop moves the
-marker with it ([als-format](als-format.md) › Markers). **Loopwerk:** a project whose start marker
+marker with it ([als-format](als-format.md) › Markers). **Suhina:** a project whose start marker
 is at or past the loop end starts at the loop start, in every reader alike (notes, audio read
 directly or time-stretched, and launched clips).
 
@@ -107,7 +107,7 @@ start position the user sets; they differ on the first Stop.
 | Cubase | back to the start position, or stays ("Return to Start Position on Stop") | back to the start position | Preferences › Transport |
 | REAPER | Space: back to the start; Ctrl+Space: stays (pause) | | two keys |
 
-Loopwerk takes the common ground: Stop goes back to the marker by default, staying put is a
+Suhina takes the common ground: Stop goes back to the marker by default, staying put is a
 setting, and a second Stop goes to the beginning.
 
 **Commands.**
@@ -142,7 +142,7 @@ the ruler and the lanes, at the marker while stopped (measurements in
 pass the setting **Stop** (Settings › General): **Marker** (default) or **Stay**, saved as
 `stop = marker | here`.
 
-**From the command line** (`loopwerk-cli play --launcher`): `stop` returns to the marker,
+**From the command line** (`suhina-cli play --launcher`): `stop` returns to the marker,
 `stop here` stays, `pos <beats>` moves the marker. Agents pass `return` themselves; without it,
 Stop returns to the marker.
 

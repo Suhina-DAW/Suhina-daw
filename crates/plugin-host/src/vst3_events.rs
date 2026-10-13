@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use loopwerk_ipc::{Event as LinkEvent, EventKind, MAX_EVENTS};
+use suhina_ipc::{Event as LinkEvent, EventKind, MAX_EVENTS};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComWrapper};

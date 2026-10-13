@@ -15,12 +15,12 @@
 //! Gains, threshold, ratio, knee and mix are ramped, so they can be moved while playing. There
 //! is no lookahead, so the device adds no latency.
 
-use loopwerk_device_api::{
+use suhina_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use loopwerk_dsp::biquad::BUTTERWORTH_Q;
-use loopwerk_dsp::gain::db_to_gain;
-use loopwerk_dsp::{Biquad, Coefficients, Smoother};
+use suhina_dsp::biquad::BUTTERWORTH_Q;
+use suhina_dsp::gain::db_to_gain;
+use suhina_dsp::{Biquad, Coefficients, Smoother};
 
 /// Ramp for gain, threshold, ratio, knee and mix changes.
 pub const RAMP_SECONDS: f64 = 0.02;
