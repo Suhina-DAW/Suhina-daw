@@ -65,6 +65,14 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
    hash of the scope's items with their sizes and times: a scope opens with the map it had, and
    changes only when its items do. Measured on one machine: 1 000 items in 0.5 s, 10 000 in
    4.5 s, 50 000 in 18 s.
+   *Amended 2026-10-13 (#195), 200 000 items:* the limit of a map is 200 000 items (it was
+   100 000), for libraries of that size. The t-SNE settings stay. `bhtsne`'s learning rate
+   already grows with the item count (n / 48, at least 50). Early exaggeration is 12 for the
+   first 250 epochs. These are the settings that large-scale t-SNE work recommends for keeping
+   clusters apart at this size, so nothing is tuned by hand. Whether a UMAP-style layout
+   separates kinds better at 200 000 stays open (*Alternatives*). Drawing that many points is the
+   view's job: the spec's *Many items* (a density raster above 20 000 points in view, clusters
+   labelled without overlap).
 5. **Grid:** recursive splitting (the RasterFairy method): the cells are cut in two along the
    longer side and the points, sorted along the same axis, are shared between the halves in
    proportion to their cells, until a part holds at most 256 items. Each part's points are

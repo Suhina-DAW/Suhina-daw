@@ -111,9 +111,53 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   so a user can learn where things are. Adding or changing files lays the scope out again
   **(to decide:** whether new items are placed into the existing layout instead, until a
   Re-layout button is pressed**)**.
-- A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items);
-  meanwhile the map shows "Arranging…" over the previous layout or an empty map. A scope with
-  more than 100 000 items shows the first 100 000 and says so.
+- A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items, a
+  minute or more for 200 000); meanwhile the map shows "Arranging…" over the previous layout or
+  an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
+
+## Many items
+
+A library of 200 000 samples must stay readable and smooth (60 frames a second) at every zoom.
+Drawing every dot then only hides the dots under it, so the map changes how it draws with the
+number of points in view:
+
+- **Density** when more than 20 000 points are in view. The view is divided into cells of 3 by 3
+  screen pixels. Each cell is coloured by the mix of the kinds of the points in it (each
+  kind's colour weighted by its count). Its opacity grows with the logarithm of the count, from
+  faint for one point to full for the densest cell in view. Clusters then show as coloured
+  regions, and where kinds meet, their colours blend. Dimmed points (search, tags, legend,
+  Show similar) count only as a faint grey under the others. Points that need to be seen one
+  by one are drawn on top as dots: the selected ones, the ones in use, the similar ones, and
+  the one under the pointer or last previewed. Pointing, clicking, dragging and the tooltip work
+  on the points as before.
+- **Dots** when 20 000 points or fewer are in view. The dots grow as the points spread out: the
+  radius follows the room each point has on screen, from 1.5 to 6 pixels. A dot that would cover
+  its neighbours is drawn translucent, so overlapping dots read as a denser region rather
+  than a solid blob.
+- The grid layout draws the same way. A cell smaller than 3 pixels is part of the density;
+  larger cells are drawn as before.
+
+**Labels.** Every cluster of a kind gets a label, not one label for the whole kind. Kinds
+that sit in several places are named in each of them.
+
+- A **cluster** is a group of map cells (a 48 by 48 division of the map) in which the kind holds
+  at least a third of the points, joined to its neighbours across sides. The cluster's items are
+  its kind's items in those cells.
+- A cluster gets a label when it holds at least 8 items (32 for Other) and at least one in
+  2 000 of the items in the map, so a map of 200 000 shows at most about a hundred
+  candidates.
+- The label sits at the cluster's item nearest to the cluster's centre. Its size grows with the
+  cluster's size (the logarithm of its count), from the map's label size up to 1.7 times it.
+- **Labels never overlap.** They are placed from the largest cluster down. A label that would
+  overlap one already placed is moved up or down by its own height. If neither place is free,
+  it is left out for this zoom. Zooming in makes room, and smaller clusters appear. A label
+  that would fall outside the map area is left out too.
+- Labels fade out when zoomed in far enough to read point names, as before.
+
+**Kind toggles.** The legend works as before (click: only that kind; Ctrl+click: several). In
+the density view the dimmed kinds are drawn as faint grey, so the shown kinds stand out from
+the rest of the library. The legend's counts and the clusters are computed when the points
+change, not every frame.
 
 ## Kinds and colours
 
@@ -151,9 +195,8 @@ Every item has a kind. The kinds and the words in names that give them:
   kind is drawn a little paler, and the item's tooltip says "guessed".
 - Each kind has a colour from Suhina's own palette (the design brief's track colours, extended),
   chosen so that neighbouring kinds (kick and bass, snare and clap, the hats) are told apart.
-- **Labels.** The name of each kind with at least 8 items in view is written over its region, at
-  the item of that kind closest to the kind's centre, in the map's label style. Labels fade out
-  when zoomed in far enough to read point names.
+- **Labels.** Each cluster of a kind is named over its region, without overlapping another
+  label: *Many items* › Labels. Labels fade out when zoomed in far enough to read point names.
 - **Legend:** a row under the map with each kind, its colour and its count. Clicking a kind dims
   all others (Ctrl+click: several); clicking it again stops.
 
@@ -245,7 +288,9 @@ Over MCP, `item`, `place` and `folder` paths must be inside the server's read ro
 | Sample length in the map | 10 s by default, 1–60 s | not analysed, not shown |
 | Audio analysed per item | first 4 s | the rest is not read |
 | A file to analyse | 256 MiB | skipped with a reason |
-| Items in one map | 100 000 | the rest left out; the map says so |
+| Items in one map | 200 000 | the rest left out; the map says so |
+| Points drawn one by one | 20 000 in view | the density view (*Many items*) |
+| Label candidates | clusters of 8 or more items and of 1 in 2 000 of the map | smaller clusters get no label |
 | Grid part assigned exactly | 256 items | larger grids split first (ADR 0013) |
 | `count` in `soundmap.similar` | 100 | cut |
 | Feature cache per folder | 64 MiB | not read; the folder is analysed again |
@@ -285,8 +330,10 @@ translated from them (CONTRIBUTING.md › Clean-room).
   preset's state loads into the VST3 version of its plug-in.
 - Whether the guessed kinds are good enough with nearest neighbours, or a small classifier
   trained on openly licensed one-shots (CC-BY or CC0 only) is needed.
-- How the layout feels with real libraries of 1 000, 10 000 and 100 000 samples: perplexity,
-  the 4-second window and the feature weights are set by trying them.
+- How the layout feels with real libraries of 1 000, 10 000 and 200 000 samples: perplexity,
+  the 4-second window and the feature weights are set by trying them. With 200 000 items, also
+  whether t-SNE separates the kinds well enough or a UMAP-style layout is needed
+  ([ADR 0013](../decisions/0013-sample-map-analysis.md) › Alternatives).
 
 ## Not decided yet
 

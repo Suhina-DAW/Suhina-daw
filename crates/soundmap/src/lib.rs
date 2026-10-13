@@ -23,7 +23,7 @@ use layout::Standardised;
 /// A file larger than this is not analysed (spec › Limits).
 pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 /// Items in one map (spec › Limits).
-pub const MAX_ITEMS: usize = 100_000;
+pub const MAX_ITEMS: usize = 200_000;
 /// The default longest sample in the map, in seconds, and the range it may be set to.
 pub const DEFAULT_MAX_SECONDS: f32 = 10.0;
 pub const MAX_SECONDS_RANGE: (f32, f32) = (1.0, 60.0);
