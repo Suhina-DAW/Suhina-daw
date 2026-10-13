@@ -313,7 +313,7 @@ jobs:
 
           The desktop app is \`$APP\`; \`$BIN\` is the command-line tool, and \`$HOST\` is the process plug-ins run in, kept in the same folder. The binaries are not signed: macOS and Windows warn before running them. On Linux they need the ALSA library (\`libasound2\`).
 
-          Bugs and ideas: https://github.com/$GITHUB_REPOSITORY/issues (say which nightly: \`$VERSION\`).
+          Talk about it on Discord: https://discord.com/invite/e5JAZYMU. Bugs and ideas: https://github.com/$GITHUB_REPOSITORY/issues (say which nightly: \`$VERSION\`).
           EOF
           )
           gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true

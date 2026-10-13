@@ -37,7 +37,9 @@ release, so expect unfinished parts and bugs
 ([nightly downloads](https://github.com/suhina-daw/suhina-daw/releases/tag/nightly)).
 It and tagged versions hold the desktop app `suhina`, the command-line tool `suhina-cli` and the
 plug-in host `suhina-plugin-host`, for Linux (x86_64), Windows (x64) and macOS (universal). The
-host is the process plug-ins run in: keep the three in one folder. The binaries are not signed yet,
+host is the process plug-ins run in: keep the three in one folder. Tell us what works and what breaks
+on [Discord](https://discord.com/invite/e5JAZYMU) or in the
+[issues](https://github.com/suhina-daw/suhina-daw/issues). The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
 
