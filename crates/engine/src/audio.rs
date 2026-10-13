@@ -1,9 +1,16 @@
 //! Audio clip playback. Each clip placement becomes an [`AudioEvent`] when the renderer is built;
 //! `process` only reads decoded samples that are already in memory.
 //!
+//! This is the direct reader: it reads the file faster or slower, so speed and pitch change
+//! together ("re-pitch"). It plays unwarped clips, warped clips in Repitch mode, and warped
+//! clips the stretcher refuses (a segment outside 0.25x-4x, or a file it cannot take); the
+//! time-stretched path is `stretch.rs` (ADR 0003).
+//!
 //! Warped clips follow their warp markers: a beat in the clip maps to a time in the file, piece
-//! by piece. There is no time-stretching yet, so a clip that plays faster or slower than its file
-//! also sounds higher or lower ("re-pitch"); transpose applies to unwarped clips only.
+//! by piece. Transpose applies to unwarped clips only: a warped clip's speed is set by the tempo,
+//! and without a stretcher its pitch is set with it, so there is nothing left for transpose to
+//! change (Live greys Transpose out in Re-Pitch mode). A warped clip in a stretching mode that
+//! falls back to this reader loses its transpose for the same reason.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -387,6 +394,18 @@ mod tests {
         let e = event(&clip(2.0, 0.0, None), &region(false, &[], 0.0));
         assert!((file_seconds_at(&e, 1.0) - 0.5).abs() < 1e-3);
         assert!((file_seconds_at(&e, 1.5) - 0.75).abs() < 1e-3);
+    }
+
+    /// Without a stretcher a warped clip's pitch follows the tempo, so transpose changes nothing
+    /// (Repitch mode, and clips the stretcher refuses; #168).
+    #[test]
+    fn transpose_leaves_a_warped_clip_read_directly_unchanged() {
+        let markers = [(0.0, 0.0), (2.0, 0.75)];
+        let plain = event(&clip(2.0, 0.0, None), &region(true, &markers, 0.0));
+        let transposed = event(&clip(2.0, 0.0, None), &region(true, &markers, 7.0));
+        for beat in [0.0, 0.3, 1.0, 1.7] {
+            assert_eq!(file_seconds_at(&plain, beat), file_seconds_at(&transposed, beat), "beat {beat}");
+        }
     }
 
     #[test]

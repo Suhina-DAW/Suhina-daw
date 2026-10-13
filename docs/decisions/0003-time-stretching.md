@@ -66,6 +66,12 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    - Audio that already plays at its own speed and pitch everywhere (within 0.01 %) skips the
      stretcher and is read directly. Segments slower than 0.25x or faster than 4x re-pitch the
      clip.
+   - **Transpose needs the stretcher.** Read directly, a warped clip's speed is set by the tempo
+     and its pitch with it, so transpose has nothing left to change: `Repitch` mode has no
+     transpose (as in Live, which greys Transpose out in Re-Pitch mode), and a clip in a
+     stretching mode that falls back to re-pitch (a segment outside 0.25x-4x) loses its
+     transpose. Scaling the read speed by the transpose instead would take the clip off the
+     beat.
    - **Timing.** The input runs ahead of what is heard by `input_latency + speed *
      output_latency`. The voice feeds each call up to exactly that point for the speed playing,
      so a speed change (a new warp segment) is evened out over one call instead of shifting the
