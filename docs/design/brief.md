@@ -47,7 +47,9 @@ From [research](#sources) and the first design rounds:
 4. **Two type sizes:** 11 px for UI text, 10 px for small values. No bold headings. 9 px is
    kept for tags beside a name, 13 px for a page title (components › Global rules).
 5. **One window, no pop-ups.** Menus and pickers open in place. The exceptions are plug-in
-   editors, which float in their own windows (ADR 0006), and the project dialogs.
+   editors, which float in their own windows (ADR 0006), the project dialogs, and the sample map
+   when the user moves it into a window of its own for another screen
+   ([spec](../spec/sample-map.md) › Where the map is shown).
 6. **Progressive disclosure.** Controls appear when there is room or need (track height, toggled
    sections), never all at once.
 7. **Every grid shows its lines.** Columns and rows of the Session grid, bars and beats, key rows.

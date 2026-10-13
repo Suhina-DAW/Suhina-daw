@@ -171,6 +171,11 @@ pub struct Settings {
     pub map_grid: bool,
     pub map_hover_preview: bool,
     pub map_max_seconds: u32,
+    /// The sample map is in a window of its own (`docs/spec/sample-map.md` › Where the map is
+    /// shown), and where that window was: its left, top, width and height in points, on the
+    /// whole desktop, so a second screen counts.
+    pub map_window: bool,
+    pub map_window_rect: Option<[i32; 4]>,
     /// The audio output (Settings › Audio, `audio.setOutput`): host and device by name, empty
     /// for the default; sample rate and buffer size, 0 for the device's own.
     pub audio_host: String,
@@ -209,6 +214,8 @@ impl Default for Settings {
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
+            map_window: false,
+            map_window_rect: None,
             audio_host: String::new(),
             audio_device: String::new(),
             audio_sample_rate: 0,
@@ -289,7 +296,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -303,6 +310,8 @@ impl Settings {
             self.warp_mode.param(),
             on(self.map_hover_preview),
             self.map_max_seconds,
+            on(self.map_window),
+            self.map_window_rect.map_or_else(|| "none".to_string(), |[x, y, w, h]| format!("{x}, {y}, {w}, {h}")),
             self.audio_host,
             self.audio_device,
             self.audio_sample_rate,
@@ -374,6 +383,11 @@ impl Settings {
                         .unwrap_or(MAP_MAX_SECONDS)
                         .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
                 }
+                ("map_window", "on" | "off") => settings.map_window = value == "on",
+                ("map_window_rect", "none") => settings.map_window_rect = None,
+                ("map_window_rect", rect) if parse_window_rect(rect).is_some() => {
+                    settings.map_window_rect = parse_window_rect(rect);
+                }
                 ("zoom", percent) if percent.parse::<u32>().is_ok() => {
                     settings.zoom = percent.parse::<u32>().unwrap_or(ZOOM).clamp(ZOOMS.0, ZOOMS.1);
                 }
@@ -405,6 +419,21 @@ impl Settings {
 }
 
 use suhina_session::audio::{MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
+
+/// Reads a window's place, `left, top, width, height` in points. A position far off any screen
+/// or a size outside [`WINDOW_SIZES`] is refused, so a broken file cannot open a window nowhere.
+fn parse_window_rect(text: &str) -> Option<[i32; 4]> {
+    let parts: Vec<i32> = text.split(',').map(|p| p.trim().parse::<i32>()).collect::<Result<_, _>>().ok()?;
+    let [x, y, w, h] = <[i32; 4]>::try_from(parts).ok()?;
+    let on_desktop = |v: i32| (-WINDOW_POSITION..=WINDOW_POSITION).contains(&v);
+    let sized = |v: i32| (WINDOW_SIZES.0..=WINDOW_SIZES.1).contains(&v);
+    (on_desktop(x) && on_desktop(y) && sized(w) && sized(h)).then_some([x, y, w, h])
+}
+
+/// The smallest and largest a window of its own may be, in points, and how far from the origin
+/// of the desktop its corner may be.
+pub const WINDOW_SIZES: (i32, i32) = (200, 10_000);
+const WINDOW_POSITION: i32 = 30_000;
 
 /// Whether `id` can name a theme file: not empty and not a path.
 pub fn is_theme_id(id: &str) -> bool {
@@ -446,6 +475,8 @@ mod tests {
             audio_buffer: 256,
             audio_exclusive: true,
             zoom: 130,
+            map_window: true,
+            map_window_rect: Some([-1600, 40, 900, 700]),
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
@@ -479,6 +510,24 @@ mod tests {
             Settings::from_text("audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\n");
         assert_eq!(settings, Settings::default());
         assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn a_map_window_out_of_bounds_or_misread_is_not_kept() {
+        let (settings, warnings) = Settings::from_text(
+            "map_window = on
+map_window_rect = 10, 20, 800, 600
+",
+        );
+        assert_eq!((settings.map_window, settings.map_window_rect), (true, Some([10, 20, 800, 600])));
+        assert!(warnings.is_empty());
+        for bad in ["10, 20, 800", "10, 20, 50, 600", "99999, 0, 800, 600", "a, b, c, d", "1,2,3,4,5"] {
+            let (settings, warnings) = Settings::from_text(&format!(
+                "map_window_rect = {bad}
+"
+            ));
+            assert_eq!((settings.map_window_rect, warnings.len()), (None, 1), "{bad}");
+        }
     }
 
     #[test]

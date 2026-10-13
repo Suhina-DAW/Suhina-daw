@@ -237,6 +237,14 @@ impl Panel {
         parts.join(", ")
     }
 
+    /// Moves the map into a window of its own (`true`) or back into the browser. While it has a
+    /// window the browser shows its list, as it does for the large map.
+    pub fn set_window(&mut self, window: bool, state: &mut BrowserState) {
+        self.view.window = window;
+        self.view.large = false;
+        state.mode = if window { ResultsMode::List } else { ResultsMode::Other };
+    }
+
     /// Draws the map in `rect` (the browser's results area, or the main area when large).
     pub fn show(
         &mut self,
@@ -359,6 +367,11 @@ impl Panel {
                 self.view.large = !self.view.large;
                 // The large map takes the main area; the browser shows its list meanwhile.
                 state.mode = if self.view.large { ResultsMode::List } else { ResultsMode::Other };
+            }
+            MapEvent::ToggleWindow => {
+                self.set_window(!self.view.window, state);
+                settings.map_window = self.view.window;
+                return true;
             }
         }
         false

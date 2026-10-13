@@ -294,7 +294,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   them by name in the browser's folders and the project's folder at once, or in a folder typed or
   dropped on it (walked in the background), best match first; Apply relinks them in one undo step
   ([spec](docs/spec/missing-files.md)).
-- The **sample map** (the browser's List | Map switch, or large in the main area): the samples
+- The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
   toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
   samples), as a free cloud or snapped to a grid, with the kinds' names over their regions and a

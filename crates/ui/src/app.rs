@@ -175,8 +175,12 @@ pub struct App {
     window_title: String,
     /// The browser panel (`docs/spec/browser.md`), the same for every project.
     pub browser: BrowserState,
-    /// The sample map, in the browser's results or large in the main area.
+    /// The sample map, in the browser's results, large in the main area or in a window of its own.
     pub sample_map: crate::sample_map_panel::Panel,
+    /// The map's own window: where it opened (kept while it is open, so the window is not moved
+    /// back while the user moves it), a new place waiting to be saved, and a drag that started in
+    /// it, which the main window finishes.
+    map_window: MapWindow,
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
@@ -235,6 +239,7 @@ impl App {
             window_title: String::new(),
             browser: BrowserState::default(),
             sample_map: crate::sample_map_panel::Panel::default(),
+            map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
         }
@@ -448,6 +453,9 @@ impl App {
     pub fn set_settings(&mut self, ctx: &egui::Context, settings: Settings) {
         motion::set_enabled(ctx, settings.animations);
         self.arrangement.headers_left = settings.track_headers == Side::Left;
+        if settings.map_window {
+            self.sample_map.set_window(true, &mut self.browser);
+        }
         self.settings = settings;
         theme::set_palette(ctx, self.themes.palette(&self.settings.theme));
     }
@@ -750,6 +758,7 @@ impl App {
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
+        self.sample_map_window(ui.ctx(), &mut actions);
 
         let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
@@ -810,7 +819,7 @@ impl App {
                 .browser
                 .drag
                 .as_ref()
-                .and_then(|items| ui.ctx().pointer_latest_pos().map(|pointer| DropProbe::new(pointer, items)));
+                .and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
             // The large sample map takes the main area, except while something is dragged from
@@ -1312,6 +1321,10 @@ impl App {
                     self.shown = View::Arrangement;
                     self.settings_open = false;
                 }
+                let label = if self.sample_map.view.window { "Dock sample map" } else { "Sample map in a window" };
+                if ui.add(egui::Button::new(label).shortcut_text(keys("view.sampleMapWindow"))).clicked() {
+                    self.toggle_map_window();
+                }
                 let label = if self.sample_map.view.large { "Hide sample map" } else { "Sample map" };
                 if ui.add(egui::Button::new(label).shortcut_text(keys("view.sampleMap"))).clicked() {
                     self.settings_open = false;
@@ -1440,6 +1453,7 @@ impl App {
                 self.settings_open = false;
                 self.toggle_large_map();
             }
+            "view.sampleMapWindow" => self.toggle_map_window(),
             "view.zoomIn" => self.step_zoom(1),
             "view.zoomOut" => self.step_zoom(-1),
             "view.zoomReset" => {
@@ -1638,9 +1652,156 @@ impl App {
 
     /// Shows the sample map large in the main area, or closes it back into the browser.
     fn toggle_large_map(&mut self) {
+        if self.sample_map.view.window {
+            self.close_map_window();
+        }
         let large = !self.sample_map.view.large;
         self.sample_map.view.large = large;
         self.browser.mode = if large { ResultsMode::List } else { ResultsMode::Other };
+    }
+
+    /// Opens the sample map in a window of its own, or puts it back into the browser.
+    fn toggle_map_window(&mut self) {
+        if self.sample_map.view.window {
+            self.close_map_window();
+        } else {
+            self.settings_open = false;
+            self.sample_map.set_window(true, &mut self.browser);
+            self.settings.map_window = true;
+            self.settings_changed = true;
+        }
+    }
+
+    fn close_map_window(&mut self) {
+        self.sample_map.set_window(false, &mut self.browser);
+        self.map_window.drag = None;
+        if self.settings.map_window {
+            self.settings.map_window = false;
+            self.settings_changed = true;
+        }
+    }
+
+    /// Where a drag from the browser or the map is, in the main window: the pointer, or for a
+    /// drag that started in the map's own window, that window's pointer moved onto this one.
+    fn drag_pointer(&self, ctx: &egui::Context) -> Option<Pos2> {
+        match self.map_window.drag {
+            Some(remote) => {
+                let main = ctx.input(|i| i.viewport().inner_rect).map_or(Pos2::ZERO, |r| r.min);
+                remote.screen.map(|p| p - main.to_vec2())
+            }
+            None => ctx.pointer_latest_pos(),
+        }
+    }
+
+    /// Draws the sample map in its own window while it has one (`docs/spec/sample-map.md` ›
+    /// Where the map is shown), keeps where the window is, and follows a drag that starts in it.
+    fn sample_map_window(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if !self.sample_map.view.window {
+            self.map_window.opened_at = None;
+            self.map_window.drag = None;
+            return;
+        }
+        // The browser's own Map switch takes the map back.
+        if self.browser.mode == ResultsMode::Other {
+            self.close_map_window();
+            return;
+        }
+        let opened_at = *self.map_window.opened_at.get_or_insert(self.settings.map_window_rect);
+        let mut builder =
+            egui::ViewportBuilder::default().with_title("Sample map - Suhina").with_min_inner_size([320.0, 240.0]);
+        builder = match opened_at {
+            Some([x, y, w, h]) => builder.with_position([x as f32, y as f32]).with_inner_size([w as f32, h as f32]),
+            None => builder.with_inner_size(MAP_WINDOW_SIZE),
+        };
+        let revision = self.revision;
+        let had_drag = self.browser.drag.is_some();
+        let mut settings = self.settings.clone();
+        let (panel, browser, projects, keymap) =
+            (&mut self.sample_map, &mut self.browser, &mut self.projects, &self.keymap);
+        let id = egui::ViewportId::from_hash_of("sample-map-window");
+        let frame = ctx.show_viewport_immediate(id, builder, |ui, class| {
+            let embedded = class == egui::ViewportClass::EmbeddedWindow;
+            // Embedded (a toolkit without windows of its own, as in tests) the map gets a fixed size.
+            let rect = if embedded {
+                Rect::from_min_size(ui.available_rect_before_wrap().min, MAP_WINDOW_SIZE.into())
+            } else {
+                ui.max_rect()
+            };
+            ui.allocate_rect(rect, egui::Sense::hover());
+            ui.painter().rect_filled(rect, 0.0, theme::window_background());
+            let changed = panel.show(ui, rect, browser, projects, &mut settings, revision);
+            // The window has its own keyboard: its keys run the same actions as the main window's,
+            // unless a field in it is being typed in. Embedded, the main window reads them.
+            let keys = if embedded || ui.ctx().egui_wants_keyboard_input() {
+                Vec::new()
+            } else {
+                ui.input_mut(|i| keymap.pressed(i))
+            };
+            ui.input(|i| MapWindowFrame {
+                changed,
+                keys,
+                embedded,
+                close: i.viewport().close_requested(),
+                place: match (i.viewport().outer_rect, i.viewport().inner_rect) {
+                    (Some(outer), Some(inner)) => Some([
+                        outer.min.x.round() as i32,
+                        outer.min.y.round() as i32,
+                        inner.width().round() as i32,
+                        inner.height().round() as i32,
+                    ]),
+                    _ => None,
+                },
+                screen: i.viewport().inner_rect.zip(i.pointer.latest_pos()).map(|(r, p)| p + r.min.to_vec2()),
+                released: !i.pointer.primary_down(),
+                escape: i.key_pressed(Key::Escape),
+                ctrl: i.modifiers.command,
+                time: i.time,
+            })
+        });
+        if frame.changed || settings != self.settings {
+            self.settings = settings;
+            self.settings_changed = true;
+        }
+        if let Some(why) = self.sample_map.status.take() {
+            self.status = Status::Hint(why);
+        }
+        let added = std::mem::take(&mut self.sample_map.add);
+        if !added.is_empty() {
+            self.add_to_selected(added);
+        }
+        if frame.close {
+            self.close_map_window();
+            return;
+        }
+        for action in &frame.keys {
+            self.do_action(action, actions);
+        }
+        if !self.sample_map.view.window {
+            return;
+        }
+        // A drag that starts in the map's own window stays with that window until the button is
+        // let go; the main window reads it from there. Embedded, the window shares the input.
+        if !frame.embedded && self.browser.drag.is_some() && (self.map_window.drag.is_some() || !had_drag) {
+            self.map_window.drag = Some(RemoteDrag {
+                screen: frame.screen,
+                released: frame.released,
+                escape: frame.escape,
+                ctrl: frame.ctrl,
+            });
+        }
+        // Where the window is, saved once it has stayed put for a moment.
+        if let Some(place) = frame.place.filter(|p| self.settings.map_window_rect != Some(*p)) {
+            match self.map_window.moved {
+                Some((p, since)) if p == place && frame.time - since >= MAP_WINDOW_SETTLE => {
+                    self.settings.map_window_rect = Some(place);
+                    self.settings_changed = true;
+                    self.map_window.moved = None;
+                }
+                Some((p, _)) if p == place => {}
+                _ => self.map_window.moved = Some((place, frame.time)),
+            }
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(MAP_WINDOW_SETTLE));
+        }
     }
 
     fn close_large_map(&mut self) {
@@ -1683,9 +1844,14 @@ impl App {
     /// and the drop when the button is let go.
     fn browser_drag(&mut self, ui: &Ui) {
         let Some(items) = self.browser.drag.clone() else { return };
-        let (released, escape, ctrl, pointer) = ui.input(|i| {
+        let (mut released, mut escape, mut ctrl, mut pointer) = ui.input(|i| {
             (!i.pointer.primary_down(), i.key_pressed(Key::Escape), i.modifiers.command, i.pointer.latest_pos())
         });
+        // A drag from the map's own window: that window has the pointer until the button is let go.
+        if let Some(remote) = self.map_window.drag {
+            (released, escape, ctrl) = (remote.released, remote.escape, remote.ctrl);
+            pointer = self.drag_pointer(ui.ctx());
+        }
         let mut target = match self.shown {
             View::Session => self.view.drop.as_ref().and_then(|p| p.target),
             View::Arrangement => self.arrangement.drop.as_ref().and_then(|p| p.target),
@@ -1698,6 +1864,7 @@ impl App {
         }
         if escape {
             self.browser.drag = None;
+            self.map_window.drag = None;
             return;
         }
         let separate = ctrl != self.settings.drop_separate;
@@ -1724,6 +1891,7 @@ impl App {
         }
         if released {
             self.browser.drag = None;
+            self.map_window.drag = None;
             self.view.drop = None;
             self.arrangement.drop = None;
             if let Some(target) = target {
@@ -2103,6 +2271,48 @@ impl App {
 /// Keys are the shortcuts' (Tab switches the view, the arrows move the selection): egui's own
 /// keyboard focus, which Tab and the arrows move from widget to widget, is kept to text fields.
 /// A button that held it would also make every shortcut wait, as if the user were typing.
+/// The sample map's own window when nothing says where it was, in points.
+const MAP_WINDOW_SIZE: [f32; 2] = [900.0, 640.0];
+/// How long the map's window must stay put before its place is saved, in seconds.
+const MAP_WINDOW_SETTLE: f64 = 0.5;
+
+/// The sample map's own window, as the main window keeps track of it.
+#[derive(Debug, Default)]
+struct MapWindow {
+    /// Where it opened (`left, top, width, height`), set when it opens; `Some(None)` for the
+    /// default place.
+    opened_at: Option<Option<[i32; 4]>>,
+    /// A place it moved to and when, saved when it stays there.
+    moved: Option<([i32; 4], f64)>,
+    /// A drag from the browser that started in this window.
+    drag: Option<RemoteDrag>,
+}
+
+/// A drag that started in the map's own window, read from that window's input.
+#[derive(Debug, Clone, Copy)]
+struct RemoteDrag {
+    /// The pointer on the desktop, in points.
+    screen: Option<Pos2>,
+    released: bool,
+    escape: bool,
+    ctrl: bool,
+}
+
+/// What a frame of the map's own window reports back.
+struct MapWindowFrame {
+    changed: bool,
+    /// Keymap actions whose keys were pressed in that window.
+    keys: Vec<String>,
+    embedded: bool,
+    close: bool,
+    place: Option<[i32; 4]>,
+    screen: Option<Pos2>,
+    released: bool,
+    escape: bool,
+    ctrl: bool,
+    time: f64,
+}
+
 fn keys_for_shortcuts(ctx: &egui::Context) {
     let focused = ctx.memory(|m| m.focused());
     let typing = focused.is_some_and(|id| egui::text_edit::TextEditState::load(ctx, id).is_some());
@@ -2165,4 +2375,41 @@ fn describe(action: &Action) -> Option<String> {
         "edit.redo" => "Redone".into(),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One frame with the main window's content at `main` on the desktop; returns where a drag
+    /// is in the main window.
+    fn drag_pointer_in(app: &App, main: Rect, pointer: Option<Pos2>) -> Option<Pos2> {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        if let Some(info) = input.viewports.get_mut(&egui::ViewportId::ROOT) {
+            info.inner_rect = Some(main);
+        }
+        if let Some(p) = pointer {
+            input.events.push(egui::Event::PointerMoved(p));
+        }
+        let mut found = None;
+        let mut output = ctx.run_ui(input, |ui| found = app.drag_pointer(ui.ctx()));
+        output.textures_delta.clear();
+        found
+    }
+
+    #[test]
+    fn a_drag_from_the_map_window_lands_where_the_pointer_is_on_the_main_window() {
+        let mut app = App::new();
+        let main = Rect::from_min_size(Pos2::new(1920.0, 100.0), Vec2::new(1280.0, 800.0));
+        // A drag in the main window itself: its own pointer.
+        assert_eq!(drag_pointer_in(&app, main, Some(Pos2::new(40.0, 50.0))), Some(Pos2::new(40.0, 50.0)));
+        // From the map's window: the desktop position, moved onto the main window.
+        app.map_window.drag =
+            Some(RemoteDrag { screen: Some(Pos2::new(2020.0, 400.0)), released: false, escape: false, ctrl: false });
+        assert_eq!(drag_pointer_in(&app, main, None), Some(Pos2::new(100.0, 300.0)));
+        // Where the map's window cannot tell (no pointer over it yet), nothing is under the drag.
+        app.map_window.drag = Some(RemoteDrag { screen: None, released: false, escape: false, ctrl: false });
+        assert_eq!(drag_pointer_in(&app, main, None), None);
+    }
 }
