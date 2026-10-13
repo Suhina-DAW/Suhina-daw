@@ -212,6 +212,11 @@ with their parameters mapped (`crates/als/src/devices.rs`; so far the Utility, b
 | Location | `Path@Value`: absolute path of the `.dll` on the saving machine (**personal data**) | none |
 | Other | `Version`, `NumberOfParameters`, `Category`, window position | `DeviceType` (`1` for the instrument, `2` for the effect **(hypothesis)**), window position |
 
+The importer keeps a VST3 `ProcessorState` as the device's state and `ControllerState` in the
+`Vst3ControllerState` extension. A VST2 `Path` is kept in the `VstPath` extension, so it is
+saved with the project (`.locr` writes extensions) and goes with it when the project is shared.
+A plug-in of another kind (Audio Unit, CLAP) is skipped with a warning.
+
 The VST3 `Uid` fields, each written as eight hex digits and joined, give the class id in the
 canonical text form the VST3 scanner and `moduleinfo.json` use: checked against the scanned
 catalog for 21 different VST3 plug-ins across 169 Live Sets, all equal.
@@ -231,8 +236,10 @@ the VST3 SDK's `vst2persistence.h` (MIT, linked from ADR 0006), not the VST2 SDK
 | `UniqueId` | the plug-in id again |
 
 Checked on a real project's 14 VST2 plug-ins: every `FxBk` buffer is exactly
-`ProgramCount × (28 + 4 × ParameterCount)` bytes. State of another `Type`, or a buffer of the
-wrong length, is kept unread in the `VstPresetBuffer` extension with a warning. **Never commit a corpus file that contains a commercial plug-in's state.**
+`ProgramCount × (28 + 4 × ParameterCount)` bytes. State the importer cannot wrap (another `Type`, a buffer of
+the wrong length, an unknown `ByteOrder`, missing counts, more than 65 536 programs or
+parameters) is kept unread in the `VstPresetBuffer` extension with a warning; a missing
+`ByteOrder` is read as `2`. **Never commit a corpus file that contains a commercial plug-in's state.**
 
 ### Utility (`StereoGain`)
 

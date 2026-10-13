@@ -293,7 +293,7 @@ workspace forbids.
     drag and drop, the clipboard and text services, and some failed to open in `attached`
     without it (`crates/plugin-host/tests/manual.rs` opens one installed plug-in's editor by
     hand). The host opens a top-level window of its own on
-    its main thread (`crates/plugin-host/src/window.rs`, Win32), or for an embedded editor a
+    its main thread (`crates/plugin-host/src/window.rs`: Win32 here, `x11rb` on Linux), or for an embedded editor a
     clip and a view window as children of Suhina's, and attaches the plug-in's view to it (VST3 `IPlugView`
     with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps its
     messages in the main loop between control messages, and tells the engine unasked when the
