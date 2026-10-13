@@ -390,6 +390,7 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
         for (instance, loaded) in &mut instances {
             loaded.tick();
             if loaded.editor_tick() {
+                eprintln!("TRACE host sends EditorClosed instance={instance}");
                 send(&mut writer, &Message::EditorClosed { instance: *instance })?;
             } else if let Some(size) = loaded.editor_resized() {
                 send(

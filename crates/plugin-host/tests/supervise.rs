@@ -338,6 +338,15 @@ fn close_editor_window() {
     let atom = |name: &[u8]| connection.intern_atom(false, name).unwrap().reply().unwrap().atom;
     let (protocols, delete) = (atom(b"WM_PROTOCOLS"), atom(b"WM_DELETE_WINDOW"));
     let children = connection.query_tree(root).unwrap().reply().unwrap().children;
+    for w in &children {
+        let class = connection.get_property(false, *w, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64);
+        let class = class.ok().and_then(|c| c.reply().ok()).map(|c| String::from_utf8_lossy(&c.value).into_owned());
+        let attributes = connection.get_window_attributes(*w).ok().and_then(|c| c.reply().ok());
+        eprintln!(
+            "TRACE test child {w} class={class:?} map_state={:?} delete={delete}",
+            attributes.map(|a| a.map_state)
+        );
+    }
     let window = children
         .into_iter()
         .rfind(|w| {
@@ -373,12 +382,15 @@ fn an_editor_opens_in_a_window_and_closes() {
         assert!(!plugin.editor_open());
         // And it opens again after being closed; when the user closes its window, the host
         // says so unasked.
-        assert_eq!(plugin.open_editor().unwrap(), (300, 200));
-        close_editor_window();
-        let deadline = Instant::now() + PATIENT;
-        while plugin.editor_open() {
-            assert!(Instant::now() < deadline, "the closed window was not reported");
-            std::thread::sleep(Duration::from_millis(10));
+        for round in 0..40 {
+            assert_eq!(plugin.open_editor().unwrap(), (300, 200));
+            eprintln!("TRACE test round {round} opened");
+            close_editor_window();
+            let deadline = Instant::now() + PATIENT;
+            while plugin.editor_open() {
+                assert!(Instant::now() < deadline, "the closed window was not reported (round {round})");
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
     } else {
         assert!(matches!(opened, Err(PluginError::Host(_))), "{opened:?}");
