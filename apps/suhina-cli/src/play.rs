@@ -1,16 +1,16 @@
 //! Real-time playback on the default audio output: the arrangement once, or the clip launcher
-//! driven by typed commands. The device itself is `loopwerk-output`.
+//! driven by typed commands. The device itself is `suhina-output`.
 
 use std::io::BufRead;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use loopwerk_automation::AudioOutput;
-use loopwerk_engine::model::{LaneData, Project};
-use loopwerk_engine::{AudioPool, Renderer};
-use loopwerk_output::{Output, Progress, Stopped};
-use loopwerk_session::{Player, Session};
 use serde_json::{Value, json};
+use suhina_automation::AudioOutput;
+use suhina_engine::model::{LaneData, Project};
+use suhina_engine::{AudioPool, Renderer};
+use suhina_output::{Output, Progress, Stopped};
+use suhina_session::{Player, Session};
 
 /// Extra time to wait after the last frame, so the device can drain its buffer.
 const TAIL: Duration = Duration::from_millis(300);
@@ -82,7 +82,7 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     if project.launcher.columns.iter().all(|c| c.slots.iter().all(|s| s.clip.is_none())) {
         println!("note: the project has no clips in its clip launcher; only `play` (the arrangement) will sound");
     }
-    let Stopped { controller, output, progress, stream } = loopwerk_output::start_stopped(&project, audio)?;
+    let Stopped { controller, output, progress, stream } = suhina_output::start_stopped(&project, audio)?;
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());
@@ -116,12 +116,12 @@ pub fn launcher(project: Project, audio: &AudioPool) -> Result<(), String> {
     Ok(())
 }
 
-/// Plays projects opened over MCP on the default output device (see `loopwerk_output::open_player`).
+/// Plays projects opened over MCP on the default output device (see `suhina_output::open_player`).
 pub struct DeviceOutput;
 
 impl AudioOutput for DeviceOutput {
     fn open(&self, project: &Project, audio: &AudioPool) -> Result<(Player, String), String> {
-        loopwerk_output::open_player(project, audio)
+        suhina_output::open_player(project, audio)
     }
 }
 

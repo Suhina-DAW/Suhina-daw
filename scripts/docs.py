@@ -43,7 +43,7 @@ ROOT_DOCS = (
     ("AGENTS.md", "Rules for agents and contributors, the crate map, what to run before finishing"),
     ("CONTRIBUTING.md", "Clean-room rules, licences, AI-assisted contributions"),
     ("ROADMAP.md", "Milestones, what works now, what comes next"),
-    ("README.md", "What Loopwerk is, how to try and build it"),
+    ("README.md", "What Suhina is, how to try and build it"),
 )
 
 

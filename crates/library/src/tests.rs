@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use super::*;
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loopwerk-library-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-library-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -174,7 +174,7 @@ fn a_saved_index_is_brought_up_to_date_when_the_library_starts() {
     let samples = temp("start");
     pack(&samples);
     Library::new(Some(settings.clone())).add_folder(&samples).unwrap();
-    // While Loopwerk was closed: a file went and a folder came.
+    // While Suhina was closed: a file went and a folder came.
     std::fs::remove_file(samples.join("Drums/Kick 1.wav")).unwrap();
     touch(&samples.join("New/hit.wav"));
     // Times have a second's resolution on some systems; make the saved ones old.

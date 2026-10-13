@@ -8,9 +8,9 @@
 //! ([`EditorPlace`]) for the host process to put it there.
 
 use egui::{Align2, Pos2, Rect, Sense, Ui, Vec2};
-use loopwerk_engine::model::{DeviceKind, LaneData, Project, TrackId};
-use loopwerk_session::{Placement, PluginReport, PluginStatus};
 use serde_json::json;
+use suhina_engine::model::{DeviceKind, LaneData, Project, TrackId};
+use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::grid::gain_to_db;
 use crate::theme::{self, PAD, ROW};
@@ -50,7 +50,7 @@ pub struct DeviceBox {
     /// Its index among the track's devices, as the device commands take it.
     pub index: usize,
     pub name: String,
-    /// What it is: a built-in device, a plug-in format, or one Loopwerk cannot run.
+    /// What it is: a built-in device, a plug-in format, or one Suhina cannot run.
     pub kind: String,
     pub enabled: bool,
     /// Parameter ids and values as text.
@@ -241,7 +241,7 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     index,
                     name: d.name.clone(),
                     kind: match &d.kind {
-                        DeviceKind::Builtin(_) => "Loopwerk".into(),
+                        DeviceKind::Builtin(_) => "Suhina".into(),
                         DeviceKind::Clap { .. } => "CLAP".into(),
                         DeviceKind::Vst3 { .. } => "VST3".into(),
                         DeviceKind::Vst2 { .. } => "VST2".into(),
@@ -609,7 +609,7 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
 mod tests {
     use super::*;
     use crate::demo::demo_project;
-    use loopwerk_engine::model::{Device, DeviceParam, Extensions};
+    use suhina_engine::model::{Device, DeviceParam, Extensions};
 
     #[test]
     fn a_selected_clip_shows_its_properties() {

@@ -16,9 +16,9 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
-use loopwerk_engine::model::Project;
-use loopwerk_engine::{AudioPool, Controller, Renderer};
-use loopwerk_session::Player;
+use suhina_engine::model::Project;
+use suhina_engine::{AudioPool, Controller, Renderer};
+use suhina_session::Player;
 
 /// Frames the engine renders per block, ahead of the device. The plug-ins of a block get a
 /// share of this block's playing time (ADR 0006), whatever the device's buffer size.
@@ -126,7 +126,7 @@ impl Output {
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = Arc::clone(&stop);
         let render = std::thread::Builder::new()
-            .name("loopwerk-render".into())
+            .name("suhina-render".into())
             .spawn(move || render_ahead(renderer, producer, block, &stopping))
             .map_err(|e| format!("could not start the render thread: {e}"))?;
         stream.play().map_err(|e| format!("could not start audio output {device}: {e}"))?;
@@ -137,10 +137,10 @@ impl Output {
 /// The render thread: runs the engine a block at a time whenever the ring has room for one,
 /// until told to stop. Real-time: at the highest priority the system allows, and never
 /// allocating after its scratch block.
-/// The frames the engine renders per block: [`ENGINE_BLOCK`], or `LOOPWERK_ENGINE_BLOCK`
+/// The frames the engine renders per block: [`ENGINE_BLOCK`], or `SUHINA_ENGINE_BLOCK`
 /// (64 to 4096) to try another size.
 fn engine_block() -> usize {
-    std::env::var("LOOPWERK_ENGINE_BLOCK")
+    std::env::var("SUHINA_ENGINE_BLOCK")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| (64..=4096).contains(n))
@@ -148,8 +148,8 @@ fn engine_block() -> usize {
 }
 
 fn render_ahead(mut renderer: Renderer, mut ring: rtrb::Producer<f32>, frames: usize, stop: &AtomicBool) {
-    // `LOOPWERK_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
-    if !std::env::var_os("LOOPWERK_NO_REALTIME").is_some_and(|v| v == "1") {
+    // `SUHINA_NO_REALTIME=1` leaves the thread at its normal priority, to compare.
+    if !std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
         let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
     }
     let mut block = vec![0.0f32; frames * 2];
@@ -191,7 +191,7 @@ pub fn open_player(project: &Project, audio: &AudioPool) -> Result<(Player, Stri
     let (ready, opened) = mpsc::channel();
     let (close, closed) = mpsc::channel::<()>();
     std::thread::Builder::new()
-        .name("loopwerk-audio".into())
+        .name("suhina-audio".into())
         .spawn(move || match start_stopped(&project, &audio) {
             Ok(Stopped { controller, output, stream, .. }) => {
                 if ready.send(Ok((controller, output.describe()))).is_ok() {

@@ -7,7 +7,7 @@
 //! A group without devices stays what it was: its volume and mute scale the tracks routed
 //! through it (`track_gains`), with no buffer of its own.
 
-use loopwerk_model::{ChannelId, ChannelRole, Project, TrackId};
+use suhina_model::{ChannelId, ChannelRole, Project, TrackId};
 
 use crate::chain::Chain;
 use crate::plugin::{Delay, Plugins};
@@ -138,7 +138,7 @@ pub(crate) fn gains_until(
     track_gains(project, track)?;
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
-    let gain = |c: &loopwerk_model::Channel| if c.volume.is_finite() { c.volume.max(0.0) } else { 0.0 };
+    let gain = |c: &suhina_model::Channel| if c.volume.is_finite() { c.volume.max(0.0) } else { 0.0 };
     let mut volume = 1.0;
     let mut visited = Vec::new();
     let mut next = Some(channel);

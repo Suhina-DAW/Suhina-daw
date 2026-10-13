@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use loopwerk_engine::model::{LaneData, Project};
-pub use loopwerk_engine::{AudioData, AudioPool};
+use suhina_engine::model::{LaneData, Project};
+pub use suhina_engine::{AudioData, AudioPool};
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
@@ -73,7 +73,7 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
                             Ok(all) => done.extend(
                                 all.into_iter()
                                     .zip(0u16..)
-                                    .map(|(data, n)| (loopwerk_engine::model::stream_key(file, n), Ok(data))),
+                                    .map(|(data, n)| (suhina_engine::model::stream_key(file, n), Ok(data))),
                             ),
                             Err(e) => done.push((file.clone(), Err(failed(e)))),
                         }
@@ -141,14 +141,14 @@ pub fn missing_audio(project: &Project, project_dir: &Path) -> Vec<MissingAudio>
         }
     }
     // Count the clips that play each missing file.
-    let uses = |content: loopwerk_engine::model::ContentId, file: &str| {
+    let uses = |content: suhina_engine::model::ContentId, file: &str| {
         project
             .contents
             .iter()
             .filter(|c| c.id == content)
             .any(|c| c.lanes.iter().any(|l| matches!(&l.data, LaneData::Audio(r) if r.file == file)))
     };
-    let clips: Vec<loopwerk_engine::model::ContentId> = project
+    let clips: Vec<suhina_engine::model::ContentId> = project
         .arrangement
         .lanes
         .iter()
@@ -223,10 +223,10 @@ pub fn decode_file(path: &Path) -> Result<AudioData, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_engine::model::*;
+    use suhina_engine::model::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("loopwerk-media-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-media-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("set")).unwrap();
         dir
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn missing_files_are_listed_with_their_clips() {
-        let dir = std::env::temp_dir().join(format!("loopwerk-media-missing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suhina-media-missing-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("set")).unwrap();
         write_wav(&dir.join("set").join("here.wav"), 1, 100);
         let mut project =

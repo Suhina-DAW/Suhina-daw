@@ -4,7 +4,7 @@
   python scripts/test-signal.py corpus/devices/test-signal.wav
 
 A 48 kHz, 24-bit stereo WAV, 8 seconds, one second per section, so each device's effect shows
-in a section and a bounce can be compared with Loopwerk's render second by second:
+in a section and a bounce can be compared with Suhina's render second by second:
 
   0  100 Hz sine, both sides, -12 dBFS         lows: bass mono, EQ low band, filters
   1  1 kHz sine, both sides, -12 dBFS          mids: EQ mid band, distortion harmonics

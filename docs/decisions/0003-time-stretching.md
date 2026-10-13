@@ -53,7 +53,7 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    mode the window's Warp mode setting gives (`Rhythmic` by default); without a tempo it is not
    warped ([browser spec](../spec/browser.md) › Warping).
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
-   stretch voice when the renderer is built: a `loopwerk_stretch::Stretch` plus a playlist that
+   stretch voice when the renderer is built: a `suhina_stretch::Stretch` plus a playlist that
    says which part of the file plays when and how fast (warp marker segments and loop jumps, at
    the project tempo). The stretcher reads the playlist as one continuous input stream; each call
    covers one stretch of constant speed, and the speed is the ratio of the input it is given to
@@ -72,14 +72,14 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
      clip. Transients land within 2 ms of the warp markers at 0.95-1.5x and within 4 ms at 0.5x,
      with no drift; the timestretch backend needed restarts before every onset and measured
      corrections to get there (see the measurements).
-3. **Loading a project only decodes.** `loopwerk-media` decodes every file on all cores. The
+3. **Loading a project only decodes.** `suhina-media` decodes every file on all cores. The
    stretcher needs no pre-analysis.
 4. **Modes choose backends behind one interface.** Now:
 
    | Mode | Backend |
    |---|---|
    | `Repitch` | none (read the file faster or slower) |
-   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | `loopwerk-stretch`, our pure-Rust port of Signalsmith Stretch 1.3.2 (MIT), 120 ms blocks 30 ms apart; outside 0.25x-4x the clip is re-pitched |
+   | `Rhythmic`, `Tonal`, `Texture`, `Smooth`, `HighQuality` | `suhina-stretch`, our pure-Rust port of Signalsmith Stretch 1.3.2 (MIT), 120 ms blocks 30 ms apart; outside 0.25x-4x the clip is re-pitched |
 
    The modes all map to the same backend for now; they are kept in the model so projects keep
    the user's intent and later backends can tell them apart.

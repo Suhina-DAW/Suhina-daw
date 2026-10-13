@@ -71,9 +71,9 @@ pub enum PluginRequest {
 /// The themes as the page shows them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemesView {
-    /// Each theme's id, name and whether it comes with Loopwerk: the user's own first.
+    /// Each theme's id, name and whether it comes with Suhina: the user's own first.
     pub list: Vec<(String, String, bool)>,
-    /// The id of the theme in use, whether it comes with Loopwerk, its name and its colours.
+    /// The id of the theme in use, whether it comes with Suhina, its name and its colours.
     pub current: String,
     pub built_in: bool,
     pub name: String,
@@ -464,7 +464,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             section(&mut y, "Graphics");
             let r = row(&mut y);
             let note = match about.graphics_now {
-                Some(now) if now != settings.graphics => "Applies the next time Loopwerk starts",
+                Some(now) if now != settings.graphics => "Applies the next time Suhina starts",
                 _ => "How the window is drawn; OpenGL can resize more smoothly on some systems",
             };
             label(&painter, r, "Renderer", note);
@@ -488,7 +488,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             section(&mut y, "Plug-ins");
             let r = row(&mut y);
             let note = if about.editors_embeddable {
-                "In a window above Loopwerk, or inside the device panel as part of the chain"
+                "In a window above Suhina, or inside the device panel as part of the chain"
             } else {
                 "Inside the device panel is not available on this system; editors open in a window"
             };

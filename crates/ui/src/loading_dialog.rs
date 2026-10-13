@@ -4,7 +4,7 @@
 //! background; it closes by itself once nothing is loading.
 
 use egui::{Align2, Color32, Id, Key, Pos2, Rect, Sense, Ui, Vec2};
-use loopwerk_session::PluginProgress;
+use suhina_session::PluginProgress;
 
 use crate::theme::{self, PAD, ROW};
 use crate::widgets;

@@ -4,13 +4,13 @@
 
 use std::path::{Path, PathBuf};
 
-use loopwerk_library::Library;
-use loopwerk_session::{Projects, Session, blank_project};
 use serde_json::{Value, json};
+use suhina_library::Library;
+use suhina_session::{Projects, Session, blank_project};
 
 fn temp(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let dir = std::env::temp_dir().join(format!("loopwerk-soundmap-cmd-{name}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("suhina-soundmap-cmd-{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -54,7 +54,7 @@ fn hat(variant: usize) -> Vec<f32> {
 }
 
 fn projects(settings: &Path) -> Projects {
-    let plugins = loopwerk_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
+    let plugins = suhina_plugins::library::Library::new(Some(settings.join("plugins")), settings.join("no-host"));
     let mut projects = Projects::with_library(plugins);
     projects.set_file_library(Library::new(Some(settings.to_path_buf())));
     projects.add(Session::new(blank_project()), None).unwrap();
@@ -119,7 +119,7 @@ fn samples_are_analysed_laid_out_and_compared() {
         (info["state"].as_str(), info["kind"].as_str(), info["kindFrom"].as_str()),
         (Some("analysed"), Some("kick"), Some("name"))
     );
-    assert_eq!(info["features"].as_array().unwrap().len(), loopwerk_soundmap::features::FEATURE_COUNT);
+    assert_eq!(info["features"].as_array().unwrap().len(), suhina_soundmap::features::FEATURE_COUNT);
     let thing = samples.join("thing.wav").display().to_string();
     let info = run(&mut p, "soundmap.info", json!({ "item": thing })).unwrap();
     assert_eq!((info["kind"].as_str(), info["kindFrom"].as_str()), (Some("kick"), Some("guess")));

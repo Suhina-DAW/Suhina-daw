@@ -1,6 +1,6 @@
 //! Real-time time-stretching of warped audio clips (ADR 0003).
 //!
-//! Each warped clip placement gets a [`StretchVoice`]: a [`loopwerk_stretch::Stretch`] built with
+//! Each warped clip placement gets a [`StretchVoice`]: a [`suhina_stretch::Stretch`] built with
 //! the renderer and fed from the decoded file in memory. Its playlist says which part of the file
 //! plays when and how fast (warp marker segments, loop jumps). The stretcher reads the playlist
 //! as one continuous input stream; each call covers one stretch of constant speed, and the speed
@@ -13,8 +13,8 @@
 
 use std::sync::Arc;
 
-use loopwerk_model::{AudioRegion, Clip, StretchMode};
-use loopwerk_stretch::Stretch;
+use suhina_model::{AudioRegion, Clip, StretchMode};
+use suhina_stretch::Stretch;
 
 use crate::audio::AudioData;
 
@@ -345,7 +345,7 @@ impl StretchVoice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_model::*;
+    use suhina_model::*;
 
     fn sine(hz: f64, seconds: f64, sample_rate: u32) -> Arc<AudioData> {
         let frames = (seconds * f64::from(sample_rate)) as usize;

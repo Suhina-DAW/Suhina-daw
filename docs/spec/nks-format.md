@@ -1,5 +1,5 @@
 ---
-description: What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Loopwerk reads them
+description: What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them
 read_when: NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk
 type: spec
 status: planned
@@ -10,13 +10,13 @@ last_verified: 2026-10-12
 
 - **Sources:** public pages and open-source readers only (listed under *Sources*). Native
   Instruments publishes no description of the format; its SDK is given to partners on request
-  and is **not** a source for Loopwerk: nobody who has read it writes this code.
+  and is **not** a source for Suhina: nobody who has read it writes this code.
 - **Observed with:** nothing yet. Every statement is from the sources and is marked
   **(to observe)** until it is checked on preset files we saved ourselves from plug-ins we own
   (see *To observe*).
 - **Used by:** the browser and the sample map ([`sample-map.md`](sample-map.md) › NKS presets).
 - **Naming:** in user-facing text "Native Instruments preset files (.nksf)"; never the NKS logo,
-  never "NKS-ready" or "NKS-compatible" as Loopwerk's own branding (AGENTS.md rule 8).
+  never "NKS-ready" or "NKS-compatible" as Suhina's own branding (AGENTS.md rule 8).
 
 ## Files
 
@@ -32,7 +32,7 @@ last_verified: 2026-10-12
 - Older content of the maker's own products keeps previews in a separate library instead; not
   supported.
 - User and third-party presets usually live under `Documents\Native Instruments\User Content\
-  <plug-in>` (Windows) **(to observe** on macOS**)**. Loopwerk finds them only in folders the
+  <plug-in>` (Windows) **(to observe** on macOS**)**. Suhina finds them only in folders the
   user adds to the browser; the maker's database (`komplete.db3`), registry entries and service
   files are undocumented and are not read.
 
@@ -68,13 +68,13 @@ Missing keys are normal. Unknown keys are ignored.
 
 A map naming the plug-in in one or more formats: `VST.magic` (a VST2 id, 32-bit), `VST3.uid`
 (four 32-bit numbers), `VST3.plugin_name`, `AU.type`, `AU.subtype`, `AU.manufacturer`,
-`AU.name`, `plugin_name`. Loopwerk matches `VST3.uid` against installed VST3 plug-ins; the VST2
+`AU.name`, `plugin_name`. Suhina matches `VST3.uid` against installed VST3 plug-ins; the VST2
 id can only be matched when the VST3 version declares it is the same plug-in **(to observe)**.
 
 ### NICA
 
 A map with `ni8`: a list of pages, each a list of up to eight `{name, section, id}`, where `id`
-is the plug-in's parameter id. Loopwerk does not use it in the first version (it would map
+is the plug-in's parameter id. Suhina does not use it in the first version (it would map
 controller knobs).
 
 ### PCHK

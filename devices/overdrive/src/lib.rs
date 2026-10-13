@@ -8,13 +8,13 @@
 //! dry signal is delayed to line up with the oversampled path: the device always reports
 //! [`LATENCY`] frames, and with the mix at 0 the output is the input delayed exactly.
 
-use loopwerk_device_api::{
+use suhina_device_api::{
     Device, DeviceError, DeviceInfo, ParamInfo, ProcessContext, Role, Scale, Unit, check_sample_rate,
 };
-use loopwerk_dsp::biquad::BUTTERWORTH_Q;
-use loopwerk_dsp::gain::db_to_gain;
-use loopwerk_dsp::shape::Curve;
-use loopwerk_dsp::{Biquad, Coefficients, DcBlocker, OnePole, Oversampler2x, Smoother};
+use suhina_dsp::biquad::BUTTERWORTH_Q;
+use suhina_dsp::gain::db_to_gain;
+use suhina_dsp::shape::Curve;
+use suhina_dsp::{Biquad, Coefficients, DcBlocker, OnePole, Oversampler2x, Smoother};
 
 /// Delay the device adds, in frames.
 pub const LATENCY: u32 = Oversampler2x::LATENCY;

@@ -4,9 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
-use loopwerk_library::find::{MAX_NAMES, rank_candidates, walk_for_names};
-use loopwerk_model::LaneData;
 use serde_json::{Value, json};
+use suhina_library::find::{MAX_NAMES, rank_candidates, walk_for_names};
+use suhina_model::LaneData;
 
 use crate::{CommandError, Projects, Session};
 
@@ -25,9 +25,9 @@ fn texts(params: &Value, name: &str) -> Result<Vec<String>, CommandError> {
 
 impl Session {
     /// The audio files the project's clips name that cannot be found.
-    pub fn missing_files(&self) -> Vec<loopwerk_media::MissingAudio> {
+    pub fn missing_files(&self) -> Vec<suhina_media::MissingAudio> {
         let folder = self.audio_folder().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        loopwerk_media::missing_audio(self.project(), &folder)
+        suhina_media::missing_audio(self.project(), &folder)
     }
 }
 
@@ -138,7 +138,7 @@ pub fn search(
     folder: Option<&Path>,
     stop: &AtomicBool,
     walked: &AtomicUsize,
-) -> Result<(loopwerk_library::find::Found, Option<String>), CommandError> {
+) -> Result<(suhina_library::find::Found, Option<String>), CommandError> {
     let session = projects.active().and_then(|id| projects.get(id));
     let last_paths: Vec<(String, PathBuf)> = session
         .map(|s| {

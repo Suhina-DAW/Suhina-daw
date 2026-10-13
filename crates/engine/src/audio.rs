@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use loopwerk_model::{AudioRegion, Clip};
+use suhina_model::{AudioRegion, Clip};
 
 /// Decoded audio, interleaved f32.
 #[derive(Debug, Clone, PartialEq)]
@@ -272,7 +272,7 @@ impl AudioEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopwerk_model::*;
+    use suhina_model::*;
 
     const SR: u32 = 48_000;
 
