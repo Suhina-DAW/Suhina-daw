@@ -609,7 +609,13 @@ fn plan_clip(
         }
     }
     notes.sort_by(|a, b| a.time.total_cmp(&b.time));
-    Some(ClipPlan { offset: clip.offset, length: clip.length, loop_range, notes, audio: audio_plans })
+    Some(ClipPlan {
+        offset: crate::audio::start_beat(clip.offset, loop_range),
+        length: clip.length,
+        loop_range,
+        notes,
+        audio: audio_plans,
+    })
 }
 
 impl Renderer {
@@ -1295,6 +1301,15 @@ mod tests {
         let out = render(&p, &[(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })], 1.0);
         assert!(out.iter().all(|s| s.is_finite()));
         assert_onsets(&out, &[BEAT / 2, BEAT + BEAT / 2]);
+    }
+
+    /// A launched clip whose offset is past its loop end starts at the loop start (#166).
+    #[test]
+    fn a_launched_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let late = Clip { offset: 1.75, ..clip(1, 1.0, true) };
+        let p = project(vec![notes(1, vec![note(0.0, 60), note(0.5, 72)])], vec![vec![with(late)]]);
+        let out = render(&p, &[(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })], 1.0);
+        assert_onsets(&out, &[0, BEAT / 2, BEAT, BEAT + BEAT / 2]);
     }
 
     #[test]

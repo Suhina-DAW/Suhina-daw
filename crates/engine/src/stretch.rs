@@ -62,7 +62,7 @@ fn playlist(clip: &Clip, region: &AudioRegion, data: &AudioData, tempo_bpm: f64)
     let loop_range = clip.loop_range.filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start);
 
     let mut pieces = Vec::new();
-    let mut beat = clip.offset;
+    let mut beat = crate::audio::start_beat(clip.offset, loop_range.map(|r| (r.start, r.end)));
     let mut played = 0.0;
     let mut stream = 0.0;
     let mut max_rate: f64 = 0.0;
@@ -403,6 +403,17 @@ mod tests {
                 (3.5, 1000.0, 1500.0, 1.0, 5500.0), // beat 2–3, clip ends
             ]
         );
+    }
+
+    /// An offset past the loop end starts at the loop start, like the direct reader and the
+    /// notes, instead of playing what lies past the loop first (#166).
+    #[test]
+    fn an_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let data = sine(440.0, 4.0, 1000);
+        let r = region(&[(0.0, 0.0), (4.0, 2.0), (6.0, 4.0)], StretchMode::Smooth);
+        let (pieces, _) = playlist(&clip(4.0, 7.0, Some((2.0, 6.0))), &r, &data, 120.0).unwrap();
+        let summary: Vec<(f64, f64, f64)> = pieces.iter().map(|p| (p.out_start, p.src_start, p.src_end)).collect();
+        assert_eq!(summary, [(0.0, 1000.0, 2000.0), (1.0, 2000.0, 4000.0)]);
     }
 
     /// Clicks every `every` seconds: a 2 ms burst at full scale, silence between.

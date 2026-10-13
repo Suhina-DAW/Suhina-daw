@@ -137,6 +137,16 @@ impl Fades {
     }
 }
 
+/// The clip beat a clip starts playing from: its offset, or the loop start when the offset is at
+/// or past the loop end (`docs/spec/arrangement-editing.md` › Start marker and loop). Every
+/// reader (notes, direct and stretched audio, launched clips) starts there.
+pub(crate) fn start_beat(offset: f64, loop_range: Option<(f64, f64)>) -> f64 {
+    match loop_range {
+        Some((start, end)) if offset >= end => start,
+        _ => offset,
+    }
+}
+
 /// The project timing an audio event is resolved against.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timing {
@@ -204,15 +214,16 @@ impl AudioEvent {
         };
         let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
         let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+        let loop_range = clip
+            .loop_range
+            .filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start)
+            .map(|r| (r.start, r.end));
         Some(Self {
             start: to_frame(clip.start),
             end: to_frame(clip.start + clip.length),
             frames_per_beat,
-            offset: clip.offset,
-            loop_range: clip
-                .loop_range
-                .filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start)
-                .map(|r| (r.start, r.end)),
+            offset: start_beat(clip.offset, loop_range),
+            loop_range,
             rate,
             map,
             data,
@@ -401,6 +412,16 @@ mod tests {
         assert!((file_seconds_at(&e, 0.25) - 0.625).abs() < 1e-3);
         // After 0.5 beats the loop end is reached and playback wraps to its start.
         assert!((file_seconds_at(&e, 0.75) - 0.125).abs() < 1e-3);
+    }
+
+    /// An offset past the loop end starts at the loop start, as the notes do (#166).
+    #[test]
+    fn an_offset_past_the_loop_end_starts_at_the_loop_start() {
+        let e = event(&clip(4.0, 5.0, Some((0.0, 1.5))), &region(false, &[], 0.0));
+        assert!((file_seconds_at(&e, 0.25) - 0.125).abs() < 1e-3);
+        assert!((file_seconds_at(&e, 1.75) - 0.125).abs() < 1e-3, "and loops from there");
+        let at_end = event(&clip(4.0, 1.5, Some((0.0, 1.5))), &region(false, &[], 0.0));
+        assert!((file_seconds_at(&at_end, 0.25) - 0.125).abs() < 1e-3);
     }
 
     #[test]

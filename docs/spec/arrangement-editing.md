@@ -1,6 +1,6 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
 last_verified: 2026-10-12
@@ -82,6 +82,14 @@ horizontal drag sets the fade with its end on the grid (Alt held: free), up to t
 the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
 double-click on a handle removes that fade. Measurements are in
 [components](../design/components.md) › Arrangement view.
+
+## Start marker and loop
+
+A clip plays from its start marker (`Clip::offset`, in content beats) and, with a loop, around
+the loop from then on. Live keeps the start marker inside the loop: moving the loop moves the
+marker with it ([als-format](als-format.md) › Markers). **Loopwerk:** a project whose start marker
+is at or past the loop end starts at the loop start, in every reader alike (notes, audio read
+directly or time-stretched, and launched clips).
 
 ## Play position
 
