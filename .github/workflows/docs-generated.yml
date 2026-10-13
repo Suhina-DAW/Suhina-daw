@@ -1,12 +1,21 @@
 name: Generated docs
 
-# Regenerates docs/INDEX.md (from the documents' front matter) and docs/commands.md (from the
-# command registry) on main after every merge and commits them when they changed. Pull requests
-# leave both files alone, so two pull requests never conflict on them.
+# Regenerates docs/INDEX.md (from the documents' front matter), docs/commands.md (from the
+# command registry) and the parity figures (from scripts/parity/) on main after every merge, and
+# commits them when they changed. Pull requests leave all of them alone, so two pull requests never
+# conflict on them.
+#
+# The parity *report* is not here: it is a normal document whose marked parts are written by
+# scripts/parity/update_report.py and kept current by a check in ci.yml, so a pull request that
+# changes the numbers updates it in the same pull request. Only the figures, binary files that
+# would differ between matplotlib versions on contributors' machines, are rendered here.
+#
+# None of it needs a copy of the manual: the numbers it was read for are recorded in
+# scripts/parity/score.py. See docs/research/parity-live-12.md › Reproducing.
 #
 # Two jobs, so the key that may push to main never shares a machine with code from the repository
 # or its dependencies (build scripts, proc macros): `generate` builds and writes the files with no
-# secrets; `publish` runs only git, copies exactly those two files and pushes them.
+# secrets; `publish` runs only git, copies exactly those files and pushes them.
 #
 # The push uses a deploy key that the main ruleset lets bypass pull requests. Setup:
 # `ssh-keygen -t ed25519 -N "" -f docs-bot`; add docs-bot.pub under Settings › Deploy keys with
@@ -44,12 +53,20 @@ jobs:
         run: cargo run --quiet -p suhina-cli -- commands --markdown > docs/commands.md
       - name: docs/INDEX.md
         run: python3 scripts/docs.py index --write
+      # The parity figures: pure Python over the recorded numbers, so they cannot drift from the
+      # numbers the report's marked parts are rendered from.
+      - name: Parity figures
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check matplotlib
+          python3 scripts/parity/charts.py
       - uses: actions/upload-artifact@v4
         with:
           name: generated-docs
           path: |
             docs/INDEX.md
             docs/commands.md
+            docs/research/parity-live-12-by-area.png
+            docs/research/parity-live-12-overview.png
           retention-days: 1
 
   publish:
@@ -77,13 +94,22 @@ jobs:
             fi
             cp "$source" "docs/$name"
           done
+          # upload-artifact keeps the path below the files' common root, which is docs/ here.
+          for name in parity-live-12-by-area.png parity-live-12-overview.png; do
+            source="$GENERATED/research/$name"
+            if [ ! -f "$source" ] || [ -L "$source" ]; then
+              echo "::error::research/$name is missing from the generated files or is not a regular file."
+              exit 1
+            fi
+            cp "$source" "docs/research/$name"
+          done
           changed=$(git status --porcelain)
           if [ -z "$changed" ]; then
             echo "Generated documentation is current."
             exit 0
           fi
-          if printf '%s\n' "$changed" | grep -Ev '^ M docs/(INDEX|commands)\.md$|^\?\? docs/commands\.md$'; then
-            echo "::error::Only docs/INDEX.md and docs/commands.md may change (above: anything else)."
+          if printf '%s\n' "$changed" | grep -Ev '^.. docs/(INDEX|commands)\.md$|^.. docs/research/parity-live-12(-by-area|-overview)?\.png$'; then
+            echo "::error::Only the generated docs and the parity figures may change (above: anything else)."
             exit 1
           fi
           git diff --stat
@@ -93,8 +119,9 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/INDEX.md docs/commands.md
-          git commit -m "Docs: regenerate INDEX.md and commands.md"
+          git add docs/INDEX.md docs/commands.md \
+            docs/research/parity-live-12-by-area.png docs/research/parity-live-12-overview.png
+          git commit -m "Docs: regenerate INDEX.md, commands.md and the parity figures"
           if ! git push origin HEAD:main; then
             echo "::notice::main moved on during this run; the run for the newer commit regenerates the files."
           fi
