@@ -8,6 +8,9 @@ covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
   - crates/session/src/audio.rs
+  - crates/automation/src/render.rs
+  - crates/engine/src/cpu.rs
+  - apps/suhina-cli/src/main.rs
 ---
 
 # MCP server
@@ -23,6 +26,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Files.** Paths are relative to a root, or absolute paths beneath it. `..` and symlinks that
   lead outside are refused. Without `--read-root` the agent cannot open files; without
   `--write-root` it cannot write any. Existing files are replaced only with `overwrite: true`.
+  `project.save` writes below the write root only: with `path`, or over the project's own file
+  when that file is there (`overwrite: true` needed, as for any existing file; `overwrite` is an
+  MCP-only parameter, removed before the command runs).
   Commands that read files take the same paths and are checked the same way before they run:
   `clip.addFiles` (`paths`), `preview.play` (`path`), `device.add` and `track.add` (`preset`),
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of

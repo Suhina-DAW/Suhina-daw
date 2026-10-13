@@ -8,6 +8,9 @@ covers:
   - crates/engine/src/stretch.rs
   - crates/stretch/src/lib.rs
   - crates/media/src/lib.rs
+  - crates/engine/src/ahead.rs
+  - crates/engine/src/audio.rs
+  - crates/session/src/files.rs
 ---
 
 # 0003: Time-stretching and stretch modes

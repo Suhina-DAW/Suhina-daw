@@ -16,6 +16,7 @@ covers:
   - crates/ui/src/browser.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/drop.rs
+  - crates/ui/src/session_view.rs
 ---
 
 # Browser
@@ -356,4 +357,4 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
   discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
-- A system file dialog for adding a folder (ADR 0010 › Not decided yet).
+- A system file dialog for adding a folder (today a path is typed or a folder dropped).

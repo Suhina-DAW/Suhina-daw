@@ -220,6 +220,14 @@ impl Session {
         }
     }
 
+    /// Whether the clip copied for `clip.paste` plays audio: `Some(true)` for audio, `Some(false)`
+    /// for notes, `None` when nothing has been copied. The window uses it to pick the stacking
+    /// setting a paste follows.
+    pub fn copied_clip_is_audio(&self) -> Option<bool> {
+        let (_, content) = self.clipboard.as_ref()?;
+        Some(content.lanes.iter().any(|l| matches!(l.data, suhina_model::LaneData::Audio(_))))
+    }
+
     /// The project's decoded audio, which players are started with (ADR 0011).
     pub fn audio(&self) -> &suhina_engine::AudioPool {
         &self.audio

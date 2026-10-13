@@ -216,9 +216,9 @@ renderer without a deadline.
 
 ## Planned parts
 
-- **Projects:** copying clips, tracks and devices between open projects, and switching without
-  reopening the audio output ([ADR 0007](decisions/0007-several-open-projects.md) › Not decided
-  yet).
+- **Projects:** copying clips, tracks and devices between open projects
+  ([ADR 0007](decisions/0007-several-open-projects.md) › Not decided yet), and switching without
+  reopening the audio output (ADR 0007 › Consequences).
 - **Patch devices:** community devices as Pure Data patches run in the plug-in host process,
   with a command channel ([ADR 0008](decisions/0008-patch-devices.md), proposed).
 - **Render-ahead for launched clips:** arrangement clips are stretched ahead on the worker;

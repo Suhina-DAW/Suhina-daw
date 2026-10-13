@@ -16,7 +16,9 @@ covers:
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
   - crates/ui/src/project_dialog.rs
-  - crates/ui/src/app.rs
+  - crates/ui/src/browser_view.rs
+  - crates/ui/src/loading_dialog.rs
+  - crates/ui/src/missing_files.rs
 ---
 
 # Components
@@ -59,7 +61,7 @@ replaces them.
 ### Motion
 
 Animations are short and only show a change of state; with animations off (Settings ›
-Animations, or `--no-animations` for one run) every value jumps straight to its end.
+Interface › Animations, or `--no-animations` for one run) every value jumps straight to its end.
 
 | What | How |
 |---|---|

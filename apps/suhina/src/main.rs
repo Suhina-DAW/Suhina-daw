@@ -418,13 +418,14 @@ fn with_audio(mut session: Session, choice: &OutputChoice) -> (Session, Vec<Stri
 }
 
 /// The main window's native handle, for plug-in editors to float above it (ADR 0006): a Win32
-/// `HWND` or an X11 window id; `None` elsewhere (Wayland, macOS: their editors float on their
-/// own).
+/// `HWND` or an X11 window id; `None` elsewhere (Wayland, macOS), where the plug-in host cannot
+/// open editors yet.
 /// On Linux the window opens as an X11 one whenever an X server is there (`DISPLAY`): the
 /// desktop's own, or XWayland on a Wayland desktop, which every distribution ships. Plug-in
 /// editors are X11 windows (the hosts open them with `DISPLAY` too), and only an X11 window
 /// can own them or embed them (ADR 0006); a Wayland window could do neither. Without
-/// `DISPLAY` winit chooses as usual (Wayland), and editors open in windows of their own.
+/// `DISPLAY` winit chooses as usual (Wayland), and editors do not open: the host opens them
+/// only as X11 windows, so they need an X server.
 #[cfg(target_os = "linux")]
 fn x11_first() -> Option<eframe::EventLoopBuilderHook> {
     use winit::platform::x11::EventLoopBuilderExtX11;

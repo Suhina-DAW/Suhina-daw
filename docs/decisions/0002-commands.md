@@ -7,6 +7,11 @@ last_verified: 2026-10-13
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
+  - crates/session/src/projects.rs
+  - crates/session/src/plugins.rs
+  - crates/session/src/library.rs
+  - crates/session/src/audio.rs
+  - crates/session/src/devices.rs
 ---
 
 # 0002: Every action is a command

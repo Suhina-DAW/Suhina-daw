@@ -10,6 +10,7 @@ covers:
   - crates/session/src/preview.rs
   - crates/session/src/files.rs
   - crates/session/src/lib.rs
+  - crates/media/src/lib.rs
 ---
 
 # 0011: Previewing, and audio added to a playing project

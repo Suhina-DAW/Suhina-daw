@@ -9,6 +9,9 @@ covers:
   - crates/engine/src/swap.rs
   - crates/engine/src/ahead.rs
   - crates/session/src/lib.rs
+  - crates/engine/src/chain.rs
+  - crates/engine/src/launcher.rs
+  - crates/engine/src/plugin.rs
 ---
 
 # 0005: Edits while playing
