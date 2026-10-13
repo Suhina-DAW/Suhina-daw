@@ -20,7 +20,8 @@
       of a proprietary product (samples, presets, artwork, icons, interface text, visual design),
       and none of it was given to an agent. Screenshots used only to see where things are are
       fine ([ADR 0009](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0009-ui-toolkit-and-look.md)).
-- [ ] Every commit is signed off (`git commit -s`, [DCO](https://github.com/juhamikael/Loopwerk/blob/main/CONTRIBUTING.md#developer-certificate-of-origin)).
+- [ ] Every commit ends with a `Signed-off-by:` line (`git commit -s`): you confirm you may contribute
+      the code under the project's licence ([DCO](https://github.com/juhamikael/Loopwerk/blob/main/CONTRIBUTING.md#developer-certificate-of-origin)).
 
 **Works and is tested**
 - [ ] I tried every change by hand and it works as intended, also the parts an AI agent wrote.
