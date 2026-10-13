@@ -1,6 +1,8 @@
 # Suhina
 <img width="12525" height="3663" alt="suhina-logo" src="https://github.com/user-attachments/assets/7efa72b4-fba5-42f3-9503-0ea9f4e864f6" />
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/xeHvKnjfQN)
+
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
@@ -144,10 +146,6 @@ trademark of Steinberg Media Technologies GmbH.
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 | [`docs/shortcuts.md`](docs/shortcuts.md) | Keyboard shortcuts in the desktop app, and how to change them |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is built and published |
-
-## Community
-
-- Discord: <https://discord.gg/xeHvKnjfQN>
 
 ## License
 
