@@ -478,6 +478,19 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value) -> Result<Value, 
             }
         }
         "preview.play" => confine_file(workspace, &mut params, "path")?,
+        "project.relinkFiles" => {
+            if let Some(paths) = params.get_mut("to").and_then(Value::as_array_mut) {
+                for path in paths.iter_mut() {
+                    let given = path.as_str().ok_or("to must be a list of file paths")?;
+                    *path = json!(display_path(&workspace.readable(given)?));
+                }
+            }
+        }
+        "library.findFiles" => {
+            if let Some(folder) = params.get("folder").and_then(Value::as_str) {
+                params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));
+            }
+        }
         "device.add" | "track.add" => confine_file(workspace, &mut params, "preset")?,
         "library.list" => {
             let folder = params.get("folder").and_then(Value::as_str).ok_or("folder must be a text")?;
@@ -671,6 +684,8 @@ mod confine_tests {
             ("soundmap.similar", json!({ "item": outside.clone() })),
             ("soundmap.info", json!({ "item": outside.clone() })),
             ("soundmap.analyse", json!({ "folder": dir.join("outside").display().to_string() })),
+            ("project.relinkFiles", json!({ "files": ["a.wav"], "to": [outside.clone()] })),
+            ("library.findFiles", json!({ "names": ["a.wav"], "folder": dir.join("outside").display().to_string() })),
         ] {
             assert!(confine(&workspace, id, params.clone()).is_err(), "{id} {params}");
         }

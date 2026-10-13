@@ -417,14 +417,28 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
             Some(i) => events.push(MapEvent::Add(i)),
             None => view.fit(),
         }
-    } else if response.clicked() {
-        match under {
-            Some(i) => {
-                events.push(MapEvent::Select { items: vec![i], add: ctrl });
-                events.push(MapEvent::Preview(i));
-                view.previewed = Some(i);
+    } else {
+        // A point is selected and previewed when the button goes down, so it sounds at once. A
+        // point of a selection of several waits for the release, so pressing it to drag them
+        // all keeps the selection.
+        let many = points.iter().filter(|p| p.selected).count() > 1;
+        let deferred = |i: usize| many && !ctrl && points.get(i).is_some_and(|p| p.selected);
+        let pressed = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+        if pressed && let Some(i) = under.filter(|i| !deferred(*i)) {
+            events.push(MapEvent::Select { items: vec![i], add: ctrl });
+            events.push(MapEvent::Preview(i));
+            view.previewed = Some(i);
+        }
+        if response.clicked() {
+            match under {
+                Some(i) if deferred(i) => {
+                    events.push(MapEvent::Select { items: vec![i], add: false });
+                    events.push(MapEvent::Preview(i));
+                    view.previewed = Some(i);
+                }
+                Some(_) => {}
+                None => view.similar = None,
             }
-            None => view.similar = None,
         }
     }
     if response.secondary_clicked() {
