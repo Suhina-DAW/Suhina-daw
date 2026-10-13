@@ -1,0 +1,81 @@
+name: Plug-in problem
+description: A third-party plug-in is not found, does not load, crashes, sounds wrong or its editor misbehaves
+labels: [bug, plug-ins]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Plug-ins run in a separate host process, so a crashing plug-in should never take Suhina down.
+        If it did, say so below: that is a bug in Suhina itself.
+  - type: input
+    id: plugin
+    attributes:
+      label: Plug-in name, vendor and version
+      placeholder: e.g. Surge XT 1.3.4 (Surge Synth Team)
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Format
+      options:
+        - CLAP
+        - VST3
+        - VST2
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What goes wrong
+      options:
+        - Not found by the scan
+        - Fails to load
+        - Plug-in host crashes or hangs
+        - Suhina itself crashes or hangs
+        - Wrong or no sound
+        - Editor window does not open or draw
+        - Parameters, automation or state are lost
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens and how to reproduce it
+      description: Steps, what you expected and what happened. Does the plug-in work in another host?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Suhina version or commit
+      description: Settings > About, or `suhina-cli --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `suhina-cli plugins list` for this plug-in, logs or screenshots
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the open issues for this plug-in.
+          required: true
+        - label: I attached no plug-in binaries, presets or other files I am not allowed to share.
+          required: true

@@ -1,4 +1,4 @@
-//! Commands for devices on tracks (ADR 0004): listing the built-in devices, adding, removing and
+//! Commands for devices on tracks (ADR 0004): listing the built-in effects and instruments, adding, removing and
 //! switching them, and setting their parameters. Each edit is one undo step, and a playing
 //! engine hears it at once: a chain that keeps its devices keeps playing (held notes, tails).
 
@@ -12,7 +12,7 @@ use crate::{CommandError, ParamEdit, Session};
 /// Devices one track may hold.
 const MAX_DEVICES: usize = 64;
 
-/// The built-in devices and their parameters.
+/// The built-in effects and instruments with their parameters.
 pub(crate) fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(Value::Array(suhina_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
 }
@@ -141,10 +141,10 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         }
         (Some(id), _) => id,
         (None, Some(p)) => p.device,
-        (None, None) => return Err("id must be a built-in device id, from devices.list".into()),
+        (None, None) => return Err("id must be the id of a built-in effect or instrument, from devices.list".into()),
     };
     let info = suhina_device_registry::info(id)
-        .ok_or_else(|| format!("no built-in device {id:?}; devices.list lists them"))?;
+        .ok_or_else(|| format!("no built-in effect or instrument {id:?}; devices.list lists them"))?;
     if info.role == Role::Instrument {
         let track = track_id(&session.project, params)?;
         if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
@@ -235,7 +235,7 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     let index = device_index(channel.devices.len(), params)?;
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
     let DeviceKind::Builtin(id) = &device.kind else {
-        return Err("only built-in devices have parameters here; plug-in parameters come later".into());
+        return Err("only built-in effects and instruments have parameters here; plug-in parameters come later".into());
     };
     let info = suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
     let param_index = info

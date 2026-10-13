@@ -208,11 +208,11 @@ fn parse_color(text: &str) -> Option<[u8; 3]> {
     Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
-/// A built-in device and its parameter values (plain values, ADR 0004), for the group the
+/// A built-in effect or instrument and its parameter values (plain values, ADR 0004), for the group the
 /// stems play into.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceSetting {
-    /// The built-in device's id.
+    /// The id of the built-in effect or instrument.
     pub id: &'static str,
     /// Whether the file has it switched on; a device that is off is added but disabled.
     pub enabled: bool,

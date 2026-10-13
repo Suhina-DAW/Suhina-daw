@@ -50,11 +50,11 @@ L1  als           engine -----------------+
       reader       no file I/O
         \        /
 L0        model                    dsp, device-api
-      the project as pure data       devices/* (built-in devices)
+      the project as pure data       devices/* (built-in effects and instruments)
 ```
 
 Within layer 2, `session` uses `library` and `media`, `library` uses `media`, and `media` uses
-neither. The built-in devices sit apart: `dsp` and `device-api` depend on nothing in Suhina, and each
+neither. The built-in effects and instruments sit apart: `dsp` and `device-api` depend on nothing in Suhina, and each
 device crate under `devices/` depends only on those two ([ADR 0004](decisions/0004-built-in-devices.md)).
 The engine does not run them yet (see *Planned parts*).
 
@@ -75,7 +75,7 @@ The engine does not run them yet (see *Planned parts*).
 | `suhina-cli` | The command line: render, play, mcp. | all of the above |
 | `suhina` | The desktop app: opens a project (argument, a dropped `.locr` or `.als`, or the project dialog), makes new ones (blank or from a template), keeps the recent projects, decodes its audio into the session, plays it stopped through `output` and runs `ui` in an eframe window; starts the browser's library (`browser.json` and its indexes in the app-data folder) and records opened projects among its recent ones; folders dropped on the window join the browser; loads and saves the settings, keymap and theme files (a theme file saved elsewhere is read again; theme backups and the theme template are zips in `exports/`, and theme files or zips dropped on the window are added). | session, media, library, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
-| `device-registry` | Every built-in device by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
+| `device-registry` | Every built-in effect or instrument by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
 | `device-api` | The `Device` trait, `DeviceInfo` (an effect or an instrument) and `ParamInfo` (plain values in their unit, conversion to knob travel), `NoteEvent` for instruments, and the contract tests every device runs (`conformance::check`, with note checks for instruments). | nothing |
 | `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region with each block's notes and controllers (`Event`, up to 1024 a block), one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Linked into the engine's process through `plugins`. | nothing |
 | `plugins` | The engine's side of plug-in hosting: `Plugin::start` loads an instance into a `suhina-plugin-host` process (the one its group shares, `Launch::group`, or one of its own) and returns a control half (health, ping, state, parameters, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. `scan` and `scan_pool` find installed CLAP and VST3 plug-ins (standard folders, `CLAP_PATH`, folders the user adds), read VST3 bundles' `moduleinfo.json` without loading them and load the rest in a few long-lived `--scan-worker` processes with per-file timeouts, into a catalog that can be saved. `PluginAudio::process_with_events` sends an instrument its notes. `offline::render` runs audio (and `render_with_events` notes) through a plug-in without a deadline (`suhina-cli plugin run`, `plugin run-device`). The session starts a project's plug-ins with it and hands their audio halves to the engine. | ipc |
@@ -111,7 +111,7 @@ The engine does not run them yet (see *Planned parts*).
    warped clip placement (two stretchers each, so a fresh one takes over before every strong
    onset and transients stay on the grid; ADR 0003), the prepared launcher clips, the
    per-track gains (group and master chain included) and a device chain for each track whose
-   channel holds built-in devices, made through `device-registry` and prepared (ADR 0004); a
+   channel holds built-in effects and instruments, made through `device-registry` and prepared (ADR 0004); a
    group with devices is a bus that sums the chains of its tracks before its own run (ADR 0004
    › 10, `buses.rs`), with
    a slot for each plug-in device the session knows of (ADR 0006), and the delay lines of

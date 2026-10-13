@@ -1,6 +1,6 @@
 //! Device chains on tracks (ADR 0004 › the engine side).
 //!
-//! A track whose channel holds built-in devices gets a [`Chain`]: everything the track plays in
+//! A track whose channel holds built-in effects and instruments gets a [`Chain`]: everything the track plays in
 //! a block (its sine voices, audio clips, launched clips) is summed into the chain's buffer
 //! instead of the output, the devices run over it in order, and only then do the track's pan
 //! and volume apply. When the first device is an instrument, the track's notes go to it as
@@ -11,7 +11,7 @@
 //! A plug-in device takes a [`PluginSlot`] in the chain (ADR 0006): it gets the block's events
 //! with their frames and runs once per block, so the devices run one after another over the
 //! whole block, each split at the events, rather than piece by piece. The output is the same
-//! for built-in devices, which only ever see their own input.
+//! for built-in effects and instruments, which only ever see their own input.
 //!
 //! A group track whose channel holds devices is a bus (see `buses`): the chains of the tracks
 //! that play into it add their output to its buffer instead of the output, and its devices run
@@ -243,7 +243,7 @@ impl Chain {
     }
 
     /// Runs the devices over the rest of the block one stage further, for chains that run
-    /// their plug-ins at the same time: built-in devices run here, with the block's `context`;
+    /// their plug-ins at the same time: built-in effects and instruments run here, with the block's `context`;
     /// at the next plug-in that takes the block without waiting, the block is handed over and
     /// this returns true, for [`Chain::collect`] to wait for it once every chain has handed its
     /// block over. Returns false once every device has run (a plug-in that cannot take a block

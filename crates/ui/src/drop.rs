@@ -43,7 +43,7 @@ pub struct BrowserItem {
     pub key: String,
     pub name: String,
     pub kind: ItemKind,
-    /// A plug-in rather than a built-in device.
+    /// A plug-in rather than a built-in effect or instrument.
     pub plugin: bool,
 }
 

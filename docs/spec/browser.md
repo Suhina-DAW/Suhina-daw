@@ -35,7 +35,7 @@ project.
 
 - **Item:** anything the browser lists. A *file* (sample, MIDI file, preset, project), a *built-in
   device* (an instrument or an effect) or an installed *plug-in*. An item is named by a key: a
-  file by its absolute path, a voice in a preset bank by `<path>#<n>` (1–32), a built-in device
+  file by its absolute path, a voice in a preset bank by `<path>#<n>` (1–32), a built-in effect or instrument
   by `device:<id>`, a plug-in by `plugin:<spec>` (the spec `plugins.list` gives).
 - **Folder:** a folder the user added to the browser. Only added folders are listed; there are
   none at first.
@@ -104,12 +104,12 @@ recent group's items (a flat list).
 
 **The category filter** narrows what the tree shows: Samples, MIDI and Presets show files of
 that kind and the folders that hold any (by the index; a folder not indexed yet is shown);
-Instruments and Effects show only those built-in devices and plug-ins with that role
+Instruments and Effects show only those built-in effects and instruments, and plug-ins with that role
 (a plug-in with the *instrument* feature counts as an instrument); Plug-ins shows only
 plug-ins. All shows everything.
 
 **Search text:** a flat list of matching items (the tree's place and category still narrow it),
-at most 500, from the index of every folder, the built-in devices and the plug-ins. An item
+at most 500, from the index of every folder, the built-in effects and instruments, and the plug-ins. An item
 matches when every word of the search appears in its name or in its path below its folder,
 without regard to case. Exact name matches come first, then names that start with the
 first word, then names with a word that starts with it, then the rest; shorter names first,
@@ -249,7 +249,7 @@ changes.
 
 **One undo step:** everything one drop does (new tracks, new scenes, clips) is undone together.
 
-### Built-in devices, presets and plug-ins
+### Built-in effects and instruments, presets and plug-ins
 
 | Dropped on | Result |
 |---|---|
@@ -316,7 +316,7 @@ the CLI can do the same.
 |---|---|---|
 | `track.add` | `kind?` (`audio`, `midi`), `name?`, `after?`, `device?`, `preset?`, `voice?` | adds a track with its mixer channel, clip slots for every scene and an Arrangement lane, after track `after` or at the end of the regular tracks; with `device` (a built-in id or a plug-in from `plugins.list`) or `preset`, the device too, and `kind` follows from it |
 | `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?` | places samples, MIDI files and Stems files as in *Files*: on `track` (or new tracks when it is missing; a Stems file's group goes into `track` when it is a group), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track; returns the clips, the new tracks, the Stems groups (`groups`) and what was `skipped` |
-| `device.add` | adds `preset?` and `voice?` (1–32) | the built-in device with a preset's values |
+| `device.add` | adds `preset?` and `voice?` (1–32) | the built-in effect or instrument with a preset's values |
 
 **Preview** (Transport kind, on the active project's player): `preview.play {path, from?, track?}`
 previews a sample from `from` seconds, or a MIDI file through `track`'s instrument (the FM synth
@@ -346,8 +346,9 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
 
 ## Not decided yet
 
-- Presets of the other built-in devices and of plug-ins (a preset format of Suhina's own,
-  CLAP preset discovery, VST3 presets).
+- Loading presets of the other built-in effects and instruments (stock presets and their format:
+  [ADR 0014](../decisions/0014-stock-presets.md)), and presets of plug-ins (CLAP preset
+  discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
 - A system file dialog for adding a folder (ADR 0010 › Not decided yet).

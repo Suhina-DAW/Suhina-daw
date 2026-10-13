@@ -1,4 +1,4 @@
-//! The interface between Suhina's built-in devices and whatever runs them (ADR 0004).
+//! The interface between Suhina's built-in effects and instruments and whatever runs them (ADR 0004).
 //!
 //! A device describes itself with a static [`DeviceInfo`]: a stable id, a name and its
 //! parameters ([`ParamInfo`]). The host prepares it off the audio thread, then calls

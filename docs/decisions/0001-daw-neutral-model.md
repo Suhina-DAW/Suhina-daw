@@ -83,9 +83,9 @@ How each DAW maps onto the core:
 - **FL playlist track** → an arrangement lane with no track binding.
 - **Ableton Session view** → launcher columns (one per track) × scenes.
 
-## Amendment: built-in device parameters (2026-10-11)
+## Amendment: built-in effect or instrument parameters (2026-10-11)
 
-A `Device` also holds `params`: the parameter values of a built-in device
+A `Device` also holds `params`: the parameter values of a built-in effect or instrument
 (`DeviceKind::Builtin`), as a list of a stable parameter id and a value in the parameter's own
 unit (decibels, hertz, a fraction, an option index). Parameters that are not listed keep their
 defaults, and the device limits each value to its range when it loads it, so a project written

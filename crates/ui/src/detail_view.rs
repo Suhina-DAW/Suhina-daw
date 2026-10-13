@@ -50,7 +50,7 @@ pub struct DeviceBox {
     /// Its index among the track's devices, as the device commands take it.
     pub index: usize,
     pub name: String,
-    /// What it is: a built-in device, a plug-in format, or one Suhina cannot run.
+    /// What it is: a built-in effect or instrument, a plug-in format, or one Suhina cannot run.
     pub kind: String,
     pub enabled: bool,
     /// Parameter ids and values as text.
@@ -695,7 +695,7 @@ mod tests {
         // Not playing: nothing runs, nothing to press.
         let stopped = shown(None, false);
         assert_eq!((stopped.state, stopped.button()), (PluginState::Stopped, None));
-        // A built-in device has no plug-in part.
+        // A built-in effect or instrument has no plug-in part.
         let Detail::Devices(chain) = build(&demo_project(), Some(TrackId(1)), None) else { panic!() };
         assert!(chain.devices.iter().all(|d| d.plugin.is_none()));
     }

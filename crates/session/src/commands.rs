@@ -491,24 +491,28 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "devices.list",
-        label: "List the built-in devices (id, name, effect or instrument) with their parameters (id, range, default, unit, options)",
+        label: "List the built-in effects and instruments (id, name, effect or instrument) with their parameters (id, range, default, unit, options)",
         params: &[],
         kind: CommandKind::Read,
         run: devices::list,
     },
     CommandSpec {
         id: "track.devices",
-        label: "List the devices on a track in order, with every built-in device's parameter values",
+        label: "List the devices on a track in order, with the parameter values of every built-in effect and instrument",
         params: &[TRACK],
         kind: CommandKind::Read,
         run: devices::track_devices,
     },
     CommandSpec {
         id: "device.add",
-        label: "Add a built-in device to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given",
+        label: "Add a built-in effect or instrument to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given",
         params: &[
             TRACK,
-            optional("id", ParamType::Text, "built-in device id, from devices.list (not needed with a preset)"),
+            optional(
+                "id",
+                ParamType::Text,
+                "id of a built-in effect or instrument, from devices.list (not needed with a preset)",
+            ),
             optional(
                 "position",
                 ParamType::Integer,
@@ -534,7 +538,7 @@ static COMMANDS: &[CommandSpec] = &[
             optional(
                 "device",
                 ParamType::Text,
-                "a built-in device id from devices.list, or a plug-in from plugins.list",
+                "the id of a built-in effect or instrument, from devices.list, or a plug-in from plugins.list",
             ),
             optional("preset", ParamType::Text, "a preset file for the device (DX7 voice data for the FM synth)"),
             optional("voice", ParamType::Integer, "which voice of a preset bank, from 1"),
@@ -625,7 +629,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "device.setParam",
-        label: "Set a parameter of a built-in device on a track; the value is limited to the parameter's range",
+        label: "Set a parameter of a built-in effect or instrument on a track; the value is limited to the parameter's range",
         params: &[
             TRACK,
             DEVICE,

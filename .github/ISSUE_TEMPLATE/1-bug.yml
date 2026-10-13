@@ -1,0 +1,86 @@
+name: Bug
+description: Something in Suhina does not work as it should (crash, wrong sound, UI, files)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A problem with a third-party plug-in has its own form, **Plug-in problem**.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the demo project (or attach a small one)
+        2. Launch clip 2 on track 1
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of problem
+      options:
+        - Crash or freeze
+        - Sound (clicks, dropouts, wrong timing or pitch, silence)
+        - Wrong result in an offline render
+        - User interface
+        - Opening, saving or importing a file
+        - CLI or MCP
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Suhina version or commit
+      description: Settings > About, or `suhina-cli --version`.
+      placeholder: e.g. 0.1.0 (8791883)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: e.g. Windows 11 24H2, macOS 15.1, Ubuntu 24.04 (PipeWire)
+    validations:
+      required: true
+  - type: input
+    id: audio
+    attributes:
+      label: Audio device, driver, sample rate and buffer size
+      description: Needed for sound problems.
+      placeholder: e.g. Focusrite Scarlett 2i2, ASIO, 48 kHz, 256 samples
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots or a project file
+      description: Paste error output or drag files here. A small project that shows the problem helps most.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the open issues and this is not reported yet.
+          required: true
+        - label: It still happens with the newest version or `main`.
+        - label: Attached files contain no samples, presets or other content I am not allowed to share.
+          required: true

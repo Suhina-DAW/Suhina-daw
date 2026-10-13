@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Rights problem (code, content or design that may infringe)
+    url: https://github.com/juhamikael/Loopwerk/blob/main/IP.md
+    about: Read IP.md first; such reports are handled before any other work.

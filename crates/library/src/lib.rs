@@ -30,7 +30,7 @@ const STORE_FILE: &str = "browser.json";
 const INDEX_FOLDER: &str = "library";
 
 /// What a browser item is, from its key (`docs/spec/browser.md` › Terms): a file by its
-/// absolute path, a voice of a preset bank as `<path>#<n>`, a built-in device as
+/// absolute path, a voice of a preset bank as `<path>#<n>`, a built-in effect or instrument as
 /// `device:<id>`, a plug-in as `plugin:<spec>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {

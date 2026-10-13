@@ -1,4 +1,4 @@
-//! Live's own devices that map onto Suhina's built-in devices (ADR 0004). Each mapping follows
+//! Live's own devices that map onto Suhina's built-in effects and instruments (ADR 0004). Each mapping follows
 //! `docs/spec/als-format.md` › Devices: the element Live stores, the unit of every value, and
 //! the Suhina parameter it becomes. Parameter ids are the devices' stable ids
 //! (`devices/<name>` in this repository).

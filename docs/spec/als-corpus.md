@@ -20,7 +20,7 @@ made by you, in your own copy of Live, from scratch.
 - **Change one thing per file.** Each file is the previous one plus exactly one edit, saved under
   a new name. Then a diff between neighbours shows only what that edit changed.
 - **Only your own content.** No samples, presets, clips or devices from Live's Core Library or
-  Packs. Audio comes from your own recording or from Suhina itself (see step 08).
+  Packs. Audio comes from your own recording or from Suhina itself ([Series 2](#series-2-audio)).
 - **Don't click around.** Live also saves view state (selected track, scroll position, open
   panels). Every extra click adds noise to the diff. Make the edit, save, move on.
 - **Record what you did.** Fill in the log table at the end (copy it to `corpus/als/README.md`).
@@ -113,10 +113,10 @@ sets. "The C3 clip" is the session clip in 1-MIDI slot 1 (C3, loop on, 2 bars).
 | 61 | `61-audio-warp-off.als` | Session audio clip on 4-loopwerk-demo: Warp off. |
 | 62 | `62-audio-unwarped-loop-start.als` | Move the loop **Position** to about one second. Log the exact value Live shows. |
 
-## Series 6: built-in devices
+## Series 6: devices
 
 Teaches the importer how Live stores the parameters of its own devices, so they can be mapped
-onto Suhina's devices (ROADMAP › Built-in devices, step 1), and gives a bounce of each
+onto Suhina's devices ([device import](device-import.md)), and gives a bounce of each
 setting to compare Suhina's sound with. It works differently from series 1–4 in three ways:
 
 - **Its own project:** `corpus/devices/`, so device files do not mix with the format series.

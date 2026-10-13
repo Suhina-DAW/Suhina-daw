@@ -1,6 +1,6 @@
 ---
-description: The interface of built-in devices (Device trait, parameters, real-time rules, contract tests) and the dsp crate
-read_when: device, built-in device, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
+description: The interface of built-in effects and instruments (Device trait, parameters, real-time rules, contract tests) and the dsp crate
+read_when: device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
 last_verified: 2026-10-12
@@ -13,7 +13,7 @@ covers:
   - crates/session/src/devices.rs
 ---
 
-# 0004: Built-in devices
+# 0004: Built-in effects and instruments
 
 - **Status:** accepted
 - **Date:** 2026-10-11
@@ -26,7 +26,7 @@ devices): first a utility and an auto-pan, then a DJ EQ, distortion, dynamics, d
 and synths. Projects imported from other DAWs refer to those DAWs' devices, which come in as
 placeholders today (`DeviceKind::Foreign` in the model) and should later map onto ours.
 
-Built-in devices run inside the engine (AGENTS.md rule 5 covers third-party plug-ins only), so
+Built-in effects and instruments run inside the engine (AGENTS.md rule 5 covers third-party plug-ins only), so
 they are bound by the same rules as the engine: no allocation, locking or I/O on the audio
 thread, and no panics. They also have to work from every front end: each parameter is a command
 (rule 6) and can be automated.
@@ -86,7 +86,7 @@ the device code should not have to change when it lands.
 
 9. **The engine runs device chains on tracks** (added 2026-10-12, LOOP-35).
    `crates/device-registry` makes a device from its `DeviceKind::Builtin` id. When the renderer's
-   graph is built, a track whose channel holds enabled built-in devices gets a chain: the
+   graph is built, a track whose channel holds enabled built-in effects and instruments gets a chain: the
    devices made, prepared, given the project's parameter values (`Device::params`, by
    parameter id; missing ones at their defaults) and reset. Everything the track plays in a
    block (sine voices, audio clips, stretched and launched clips) goes into the chain's buffer
@@ -130,8 +130,8 @@ the device code should not have to change when it lands.
   that plays notes), `device.remove`, `device.setEnabled` and `device.setParam` (values stored
   limited to the parameter's range). `device.add {preset, voice?}` adds a device with a preset's
   values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
-  parameter's value, which the project stores like any other (presets of other devices are not
-  decided yet; [browser spec](../spec/browser.md)).
+  parameter's value, which the project stores like any other (stock presets for the other devices:
+  [ADR 0014](0014-stock-presets.md), their loader is not built yet).
 - **Chains on return and master channels, and sends into chains.** Latency compensation is
   built for track and group chains (10 above): a device's `latency()` (the overdrive and vinyl
   distortion, 31 frames; the limiter, its 1.5 ms lookahead) delays every
