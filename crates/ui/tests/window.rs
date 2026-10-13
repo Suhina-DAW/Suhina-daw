@@ -1389,6 +1389,54 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
     let _clean = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn the_sample_map_opens_in_a_window_of_its_own_and_docks_back() {
+    let mut harness = window(demo_app());
+    // Hiding the browser for the test changed a setting already.
+    let _ = harness.state_mut().take_changed_settings();
+    assert!(harness.query_by_label("Dock").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::M);
+    harness.run();
+    // Without windows of their own (as here) the toolkit draws it as a window inside this one.
+    assert!(harness.state().sample_map.view.window);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(true));
+    assert!(harness.query_by_label("Dock").is_some(), "the map's bar offers to dock it");
+    assert!(harness.query_by_label("Large").is_none(), "no large view while it has a window");
+    harness.get_by_label("Dock").click();
+    harness.run();
+    assert!(!harness.state().sample_map.view.window);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
+    assert!(harness.query_by_label("Dock").is_none());
+
+    // The View menu does the same.
+    harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label_contains("Sample map in a window").click();
+    harness.run();
+    assert!(harness.state().sample_map.view.window);
+}
+
+#[test]
+fn a_saved_map_window_opens_at_the_start() {
+    let mut app = demo_app();
+    let settings = suhina_ui::settings::Settings {
+        map_window: true,
+        map_window_rect: Some([100, 80, 700, 500]),
+        browser_open: false,
+        ..Default::default()
+    };
+    app.set_settings(&egui::Context::default(), settings);
+    let mut harness = window(app);
+    assert!(harness.state().sample_map.view.window);
+    assert!(harness.query_by_label("Dock").is_some());
+    // The large view takes the map out of its window.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::M);
+    harness.run();
+    assert!(!harness.state().sample_map.view.window);
+    assert!(harness.state().sample_map.view.large);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
+}
+
 /// Renders the Arrangement view with an audio clip, linear and in decibels, to
 /// `target/ui-snapshots/arrangement-waveform*.png`, to look at the clip waveform in the window:
 /// `cargo test -p suhina-ui --test window -- --ignored render_the_clip_waveform`.

@@ -92,6 +92,8 @@ pub enum MapEvent {
     Layout(Layout),
     /// The large-view button.
     ToggleLarge,
+    /// The button that moves the map into a window of its own, or back into the browser.
+    ToggleWindow,
 }
 
 /// The view's own state, kept by the browser between frames.
@@ -101,6 +103,8 @@ pub struct MapView {
     pub preview_on_hover: bool,
     /// The map is shown large, in the main area.
     pub large: bool,
+    /// The map is in a window of its own.
+    pub window: bool,
     zoom: f32,
     /// The map position at the middle of the view.
     centre: [f32; 2],
@@ -123,6 +127,7 @@ impl Default for MapView {
             layout: Layout::Cloud,
             preview_on_hover: true,
             large: false,
+            window: false,
             zoom: 1.0,
             centre: [0.5, 0.5],
             hovered: None,
@@ -369,9 +374,21 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
     child.label(egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL));
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
-            .button(if view.large { "Close" } else { "Large" })
-            .on_hover_text("Show the map in the main area")
+            .button(if view.window { "Dock" } else { "Window" })
+            .on_hover_text(if view.window {
+                "Put the map back into the browser"
+            } else {
+                "Open the map in a window of its own, for another screen"
+            })
             .clicked()
+        {
+            events.push(MapEvent::ToggleWindow);
+        }
+        if !view.window
+            && ui
+                .button(if view.large { "Close" } else { "Large" })
+                .on_hover_text("Show the map in the main area")
+                .clicked()
         {
             events.push(MapEvent::ToggleLarge);
         }
