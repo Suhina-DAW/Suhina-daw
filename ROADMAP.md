@@ -7,7 +7,7 @@ Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
 | M0 | **Foundation:** workspace, GPL-3.0-or-later, clean-room rules, DAW-neutral model | done |
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
-| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.locr`) work; more commands to come |
+| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `suhina-cli plugin run` puts a file through one; `suhina-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `suhina-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `suhina-cli plugin params` lists a plug-in's parameters, and `suhina-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
@@ -184,10 +184,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
   as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
-- Projects are saved in Suhina's own format, `.locr` (versioned JSON, plug-in state included,
-  audio referred to by path): `project.save { path?, copy? }`; `.locr` files open in the app,
+- Projects are saved in Suhina's own format, `.suhina` (versioned JSON, plug-in state included,
+  audio referred to by path): `project.save { path?, copy? }`; `.suhina` files, and `.locr`
+  files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
-  [spec](docs/spec/locr-format.md)).
+  [spec](docs/spec/suhina-format.md)).
 - Still to do: more commands (notes, clips, sends), MCP resources.
 
 ### M4 Clip launching (in progress)
@@ -270,7 +271,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
   (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
-  as `.locr` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
+  as `.suhina` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
   Save as template writes a copy to the templates folder. The tab and window title mark unsaved
   changes with a dot, and closing a project, opening another in its place or quitting with
   unsaved changes asks whether to save them.
