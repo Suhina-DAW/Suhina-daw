@@ -42,6 +42,7 @@ impl ParamType {
             Self::Decibels => "decibels",
             Self::Text => "text",
             Self::Tracks => "tracks",
+            Self::Texts => "texts",
         }
     }
 }
