@@ -10,7 +10,7 @@ Usage:
   <outputs.json>  a list of {"name": "...", "output": {audio.setOutput parameters}}; each step
                   changes only what it gives, so a list can set the host once and then the
                   buffer size, for example:
-                  [{"name": "ASIO 256", "output": {"host": "ASIO", "device": "Apollo", "buffer_frames": 256}},
+                  [{"name": "ASIO 256", "output": {"host": "ASIO", "device": "My Interface", "buffer_frames": 256}},
                    {"name": "ASIO 512", "output": {"buffer_frames": 512}}]
 
 Environment: MEASURE_SECONDS (default 20) how long each output plays, MEASURE_BEAT (default

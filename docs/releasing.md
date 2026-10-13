@@ -56,7 +56,8 @@ workflow artifacts without creating a release, to test the pipeline.
 `suhina-plugin-host` is the process plug-ins run in ([ADR 0006](decisions/0006-plug-in-hosting.md));
 `suhina-cli` looks for it in its own folder, so the two stay side by side. The smoke test runs
 the VST3 test plug-in built into the host through the packaged CLI. Each archive also holds
-`LICENSE`, `NOTICE`, `README.md` and `ATTRIBUTION.md`.
+`LICENSE`, `NOTICE`, `README.md`, `ATTRIBUTION.md` and the licences of the ported code,
+`LICENSE-APACHE` (the FM synth) and `LICENSE-signalsmith.txt` (the time stretcher).
 
 ## Not yet
 

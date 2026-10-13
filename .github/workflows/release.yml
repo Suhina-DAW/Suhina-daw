@@ -126,6 +126,9 @@ jobs:
               done ;;
           esac
           cp LICENSE NOTICE README.md ATTRIBUTION.md "dist/$PACKAGE/"
+          # Licences of the code ported from other projects: the FM synth (Apache-2.0) and the
+          # time stretcher (MIT).
+          cp devices/fm-synth/LICENSE-APACHE crates/stretch/LICENSE-signalsmith.txt "dist/$PACKAGE/"
 
       - name: Smoke test
         shell: bash
