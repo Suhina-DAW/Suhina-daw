@@ -10,7 +10,14 @@
 //! message, applied at the start of the next block. Messages are numbered and every graph
 //! records the last number it already contains, so a graph built before a message (still on
 //! its way to the audio thread) gets the message again when it takes over.
+//!
+//! A running plug-in reaches the audio thread the same way, as a message
+//! ([`Controller::send_plugin`]): its processor goes into its slot in the playing graph, or
+//! waits until a graph with that slot takes over, and every later graph takes it over from the
+//! one before (ADR 0006). The processor it replaces, and those of slots that are gone, go back
+//! to be dropped off the audio thread.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -19,7 +26,9 @@ use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::ahead::StretchThread;
 use crate::audio::AudioPool;
+use crate::chain::Placed;
 use crate::launcher::Controller;
+use crate::plugin::{PluginProcessor, PluginSlotInfo, Plugins};
 use crate::{Graph, MAX_AUDIO_VOICES, Renderer};
 
 /// How far ahead of the playhead a new graph with stretched clips takes over, in seconds: time
@@ -32,6 +41,10 @@ const QUEUE: usize = 16;
 const PARAM_QUEUE: usize = 1024;
 /// Parameter messages the audio thread remembers, to apply again to a graph built before them.
 const RECENT_PARAMS: usize = 256;
+/// Plug-in processors that can wait in either direction, and wait for their slot.
+const PLUGIN_QUEUE: usize = 64;
+
+type Processor = Box<dyn PluginProcessor>;
 
 /// A new value for one parameter of a device on a track (ADR 0005, amendment).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +80,10 @@ pub(crate) struct SwapState {
     /// The last parameter messages, oldest overwritten first.
     recent: Vec<ParamChange>,
     recent_next: usize,
+    plugins: Option<Consumer<(u64, Processor)>>,
+    retired_plugins: Option<Producer<Processor>>,
+    /// Processors whose slot no graph has had yet; allocated with room for `PLUGIN_QUEUE`.
+    parked: Vec<(u64, Processor)>,
 }
 
 /// The controller's end: builds graphs and takes old ones back to free them.
@@ -78,12 +95,19 @@ pub(crate) struct Updater {
     stretch: Option<StretchThread>,
     params: Producer<ParamChange>,
     param_seq: u64,
+    /// What is known about the project's plug-in devices; every graph is built with it.
+    plugin_info: HashMap<u64, PluginSlotInfo>,
+    plugins: Producer<(u64, Processor)>,
+    retired_plugins: Consumer<Processor>,
 }
 
 impl Updater {
     fn collect(&mut self) {
         while let Ok(graph) = self.retired.pop() {
             drop(graph);
+        }
+        while let Ok(processor) = self.retired_plugins.pop() {
+            drop(processor);
         }
     }
 }
@@ -100,11 +124,16 @@ impl Renderer {
         let (swaps, incoming) = RingBuffer::new(QUEUE);
         let (retired_producer, retired) = RingBuffer::new(QUEUE);
         let (params, param_consumer) = RingBuffer::new(PARAM_QUEUE);
+        let (plugins, plugin_consumer) = RingBuffer::new(PLUGIN_QUEUE);
+        let (retired_plugins_producer, retired_plugins) = RingBuffer::new(PLUGIN_QUEUE);
         self.swap.incoming = Some(incoming);
         self.swap.retired = Some(retired_producer);
         self.swap.params = Some(param_consumer);
         self.swap.recent = Vec::with_capacity(RECENT_PARAMS);
         self.swap.recent_next = 0;
+        self.swap.plugins = Some(plugin_consumer);
+        self.swap.retired_plugins = Some(retired_plugins_producer);
+        self.swap.parked = Vec::with_capacity(PLUGIN_QUEUE);
         Updater {
             swaps,
             retired,
@@ -113,6 +142,28 @@ impl Renderer {
             stretch: None,
             params,
             param_seq: 0,
+            plugin_info: self.plugin_info.clone(),
+            plugins,
+            retired_plugins,
+        }
+    }
+
+    /// Takes the plug-in processors that have arrived: each goes into its slot in the playing
+    /// graph (the one it replaces goes back), or waits for a graph that has its slot. Never
+    /// allocates: the waiting list was allocated with its full capacity, and a processor is
+    /// taken only when there is room for whatever it displaces.
+    pub(crate) fn receive_plugins(&mut self) {
+        let swap = &mut self.swap;
+        let (Some(incoming), Some(retired)) = (swap.plugins.as_mut(), swap.retired_plugins.as_mut()) else { return };
+        while retired.slots() > 0 && swap.parked.len() < swap.parked.capacity() {
+            let Ok((key, processor)) = incoming.pop() else { break };
+            match place(&mut self.graph.chains, key, processor) {
+                Placed::Replaced(Some(old)) => {
+                    let _full = retired.push(old);
+                }
+                Placed::Replaced(None) => {}
+                Placed::NoSlot(processor) => park(&mut swap.parked, retired, key, processor),
+            }
         }
     }
 
@@ -175,6 +226,24 @@ impl Renderer {
                 }
             }
         }
+        // Running plug-ins carry over to their slots in the new graph wherever the chain around
+        // them changed, and waiting ones take theirs if it has them now.
+        for chain in &mut self.graph.chains {
+            for slot in chain.plugin_slots().filter(|s| s.processor.is_none()) {
+                slot.processor = old
+                    .chains
+                    .iter_mut()
+                    .flat_map(|c| c.plugin_slots())
+                    .find(|o| o.key == slot.key && o.processor.is_some())
+                    .and_then(|o| o.processor.take());
+                if slot.processor.is_none()
+                    && let Some(index) = self.swap.parked.iter().position(|(key, _)| *key == slot.key)
+                {
+                    slot.processor = Some(self.swap.parked.swap_remove(index).1);
+                }
+            }
+        }
+        self.graph.direct_delay.adopt(&mut old.direct_delay);
         // Parameter messages newer than the new graph's project apply to it again, in order.
         let mut newer = [usize::MAX; RECENT_PARAMS];
         let mut count = 0;
@@ -238,8 +307,10 @@ impl Renderer {
             }
             self.stretch_fresh = false;
         } else {
-            if swap.arrangement.is_some() {
-                self.graph.ahead.rewind();
+            // The new graph's voices are at the start; the next start is at the marker.
+            let start = self.start_frame();
+            if swap.arrangement.is_some() || start > 0 {
+                self.graph.ahead.move_to(start);
             }
             self.stretch_fresh = true;
         }
@@ -254,6 +325,32 @@ impl Renderer {
         monitor.arrangement.store(self.time(), Ordering::Relaxed);
         monitor.stretch_underruns.store(self.stretch_underruns(), Ordering::Relaxed);
         monitor.frames_per_beat.store(self.graph.frames_per_beat.to_bits(), Ordering::Relaxed);
+        monitor.start_beat.store(self.start_beat.to_bits(), Ordering::Relaxed);
+    }
+}
+
+/// Puts `processor` into the slot of plug-in `key` among `chains`.
+fn place(chains: &mut [crate::chain::Chain], key: u64, mut processor: Processor) -> Placed {
+    for chain in chains.iter_mut() {
+        match chain.place(key, processor) {
+            Placed::NoSlot(back) => processor = back,
+            placed => return placed,
+        }
+    }
+    Placed::NoSlot(processor)
+}
+
+/// Keeps `processor` until a graph with its slot takes over; one for the same plug-in that was
+/// already waiting goes back. Never allocates: the caller checked there is room.
+fn park(parked: &mut Vec<(u64, Processor)>, retired: &mut Producer<Processor>, key: u64, processor: Processor) {
+    if let Some(index) = parked.iter().position(|(k, _)| *k == key) {
+        let (_, old) = parked.swap_remove(index);
+        let _full = retired.push(old);
+    }
+    if parked.len() < parked.capacity() {
+        parked.push((key, processor));
+    } else {
+        let _full = retired.push(processor);
     }
 }
 
@@ -276,7 +373,9 @@ impl Controller {
     pub fn update(&mut self, project: &Project) -> Result<(), String> {
         let updater = &mut self.updater;
         updater.collect();
-        let mut graph = Graph::build(project, &updater.audio, updater.sample_rate).map_err(|e| e.to_string())?;
+        let mut plugins = Plugins { info: updater.plugin_info.clone(), processors: HashMap::new() };
+        let mut graph =
+            Graph::build(project, &updater.audio, updater.sample_rate, &mut plugins).map_err(|e| e.to_string())?;
         let monitor = &self.monitor;
         let (at, arrangement) = if monitor.running() {
             let ahead =
@@ -317,6 +416,88 @@ impl Controller {
             .map_err(|_| "the audio engine has not taken the previous parameter changes yet".to_string())?;
         updater.param_seq = seq;
         Ok(())
+    }
+
+    /// Tells the graphs built from now on what is known about the project's plug-in devices
+    /// (ADR 0006): which have a slot, which are instruments, the delay each adds. Takes effect
+    /// with the next [`Controller::update`].
+    pub fn set_plugin_info(&mut self, info: HashMap<u64, PluginSlotInfo>) {
+        self.updater.plugin_info = info;
+    }
+
+    /// What the graphs are built with about plug-in devices.
+    pub fn plugin_info(&self) -> &HashMap<u64, PluginSlotInfo> {
+        &self.updater.plugin_info
+    }
+
+    /// Sends the running plug-in `processor` for the plug-in device `key` to the audio thread:
+    /// it plays from the next block in which a graph has its slot, replacing any processor
+    /// there (a restarted plug-in replaces its crashed one). Fails if the queue is full.
+    pub fn send_plugin(&mut self, key: u64, processor: Box<dyn PluginProcessor>) -> Result<(), String> {
+        let updater = &mut self.updater;
+        updater.collect();
+        updater
+            .plugins
+            .push((key, processor))
+            .map_err(|_| "the audio engine has not taken the previous plug-ins yet".to_string())
+    }
+
+    /// Drops processors the audio thread has given back (replaced, or of removed devices), and
+    /// what the preview voice let go of.
+    pub fn collect(&mut self) {
+        self.updater.collect();
+        self.preview.collect();
+    }
+
+    /// Builds the graphs from now on with `audio` (ADR 0011): the session's pool after files
+    /// were added. Takes effect with the next [`Controller::update`].
+    pub fn set_audio(&mut self, audio: Arc<AudioPool>) {
+        self.updater.audio = audio;
+    }
+
+    /// The audio the graphs are built with.
+    pub fn audio(&self) -> &Arc<AudioPool> {
+        &self.updater.audio
+    }
+
+    /// Previews `data` from `from` seconds at `gain` (linear), replacing any preview (ADR 0011).
+    /// Fails if the queue is full.
+    pub fn preview_sample(&mut self, data: Arc<crate::AudioData>, from: f64, gain: f32) -> Result<(), String> {
+        let from = if from.is_finite() { from.max(0.0) } else { 0.0 };
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Sample { data, from, gain })
+    }
+
+    /// Previews notes ([`crate::preview_notes`] makes them) through their track's instrument,
+    /// or through their fallback instrument when the track has none; the fallback plays at
+    /// `gain` (linear). Replaces any preview. Fails if the queue is full.
+    pub fn preview_notes(&mut self, notes: crate::PreviewNotes, gain: f32) -> Result<(), String> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Notes { notes: Box::new(notes), gain })
+    }
+
+    /// A fallback instrument for [`crate::preview_notes`]: the FM synth with its first voice,
+    /// prepared at the renderer's rate.
+    pub fn preview_instrument(&self) -> Option<Box<dyn loopwerk_device_api::Device>> {
+        let mut device = loopwerk_device_registry::create("fm-synth")?;
+        device.prepare(f64::from(self.updater.sample_rate)).ok()?;
+        device.reset();
+        Some(device)
+    }
+
+    /// Stops the preview. Fails if the queue is full.
+    pub fn preview_stop(&mut self) -> Result<(), String> {
+        self.preview.send(crate::preview::PreviewCommand::Stop)
+    }
+
+    /// Whether a preview plays, and where.
+    pub fn preview_monitor(&self) -> &crate::PreviewMonitor {
+        &self.preview_monitor
+    }
+
+    /// The renderer's sample rate.
+    pub fn sample_rate(&self) -> u32 {
+        self.updater.sample_rate
     }
 
     /// Runs the renderer's stretch worker on a thread of its own (ADR 0003), for this graph and

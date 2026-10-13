@@ -96,20 +96,42 @@ the device code should not have to change when it lands.
    and launched) go to it as note events at their frames, the chain running in pieces split at
    each event, and note-offs follow from each note's end; stopping the transport or a column
    releases them. A track without devices is mixed straight into the output exactly as
-   before. Unknown ids, plug-ins and other DAWs' devices pass the sound through for now. Chains
+   before. Unknown ids, plug-ins that are not installed and other DAWs' devices pass the sound
+   through; installed plug-ins run in the same chain ([ADR 0006](0006-plug-in-hosting.md)), so
+   the devices of a chain run one after another over a whole block, each split at the events.
+   Chains
    hold at most 1024 frames, so the renderer splits longer blocks. A graph swap (ADR 0005)
    hands a chain's running devices to the new graph when the same devices sit on the same
    track, so held notes and tails carry on through an edit and the new parameter values
    apply; otherwise the new chain starts fresh and the old devices are freed with the old
    graph, off the audio thread. A render with chains is 2 s longer, for releases and tails.
 
+10. **A group with devices is a bus** (added 2026-10-12, with Stems files, whose mastering
+   compressor and limiter must act on the sum of the stems). When a group track's channel holds
+   devices, the tracks routed into it (at any depth) no longer reach the output on their own:
+   each gets a chain, one without devices when it has none, whose output goes into the group's
+   chain buffer at the track's pan and the volumes from its channel up to the group; the
+   group's devices run over the sum, and the volumes from the group to the master apply after
+   them (a group's pan does not apply, as before). Chains are ordered so a bus comes after
+   every chain that feeds it, and a block runs them in that order. Latency compensation follows
+   every path: a bus's input waits for the slowest chain feeding it, and the output for the
+   slowest path, so a track with a lookahead device inside a group with another still starts
+   with the rest (`crates/engine/src/buses.rs`). A group without devices stays a gain on the
+   tracks routed through it, with no buffer of its own.
+
 ## Not decided yet
 
 - **Automation lanes** for device parameters (LOOP-39). The commands exist: `devices.list`,
-  `track.devices`, `device.add` (an instrument always first, one per track), `device.remove`,
-  `device.setEnabled` and `device.setParam` (values stored limited to the parameter's range).
-- **Chains on group, return and master channels**, and latency compensation for devices that
-  report latency (the overdrive and vinyl distortion, 31 frames).
+  `track.devices`, `device.add` (an instrument always first, one per track, and only on a track
+  that plays notes), `device.remove`, `device.setEnabled` and `device.setParam` (values stored
+  limited to the parameter's range). `device.add {preset, voice?}` adds a device with a preset's
+  values: `device-registry::preset` reads DX7 voice data for the FM synth and gives every
+  parameter's value, which the project stores like any other (presets of other devices are not
+  decided yet; [browser spec](../spec/browser.md)).
+- **Chains on return and master channels, and sends into chains.** Latency compensation is
+  built for track and group chains (10 above): a device's `latency()` (the overdrive and vinyl
+  distortion, 31 frames; the limiter, its 1.5 ms lookahead) delays every
+  other track to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences).
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI

@@ -32,10 +32,12 @@ clip; devices (ADR 0004) will add many more parameters.
 1. **The renderer is split into a graph and its state.** The *graph* is everything derived from
    the project: note and audio events, stretched clip placements and their stretch voices, the
    launcher's prepared clips, lengths and the tempo. The *state* is what playing has produced:
-   the playhead, the transport, sounding note voices, playing audio clips, and the launcher's
+   the playhead and the play start marker, the transport, sounding note voices, playing audio
+   clips, and the launcher's
    runtime (what each column plays, fades and has queued, the beat, the tempo, quantisation).
 2. **An edit builds a new graph off the audio thread.** `Controller::update(project)` builds it
-   on the calling thread with the audio pool and sample rate the renderer was built with, and
+   on the calling thread with the audio pool and sample rate the renderer was built with (or
+   the pool given since with `Controller::set_audio`, when files were added; ADR 0011), and
    sends it to the audio thread through a lock-free queue (`rtrb`).
 3. **The swap happens at an exact frame.** The controller picks a frame a little ahead of the
    playhead it reads from the monitor (`SWAP_AHEAD`), moves the new graph's stretch voices there
@@ -56,15 +58,27 @@ clip; devices (ADR 0004) will add many more parameters.
 5. **Nothing is freed on the audio thread.** The old graph goes back to the controller through
    a second queue and is dropped there, on the next update or when the controller is dropped. If
    that queue is full, the audio thread keeps the old graph and takes no new one until it can.
-6. **If the playhead moved unexpectedly** (the transport stopped or started between the build
-   and the swap), the swap moves the stretch voices to where the playhead really is
-   (`AheadReader::move_to`). Until the worker has done so, stretched clips are silent; they
+6. **If the playhead moved unexpectedly** (the transport stopped, started or jumped between the
+   build and the swap), the swap moves the stretch voices to where the playhead really is
+   (`AheadReader::move_to`); with the transport stopped, to the play start marker, where the
+   next start begins. Until the worker has done so, stretched clips are silent; they
    never play out of time.
 7. **The stretch worker thread serves every graph.** It owns a list of workers; a new graph's
    worker joins it before the graph is sent, and a worker leaves when its graph has been dropped.
 8. **The session notifies the player.** After an edit or undo/redo command changes the project,
    `Session::execute` calls `Player::update`, so the CLI, MCP and a future UI all get the same
    behaviour.
+
+## Amendment: running plug-ins across graphs (2026-10-12)
+
+A plug-in's audio half is not part of any graph's project: it is started by the session and
+sent to the audio thread as a message (`Controller::send_plugin`), placed in its slot in the
+playing graph or kept until a graph with its slot takes over. A swap hands every running
+plug-in to its slot in the new graph, by key, even where the chain around it changed, and the
+delay lines of latency compensation carry their sound over when their length stays the same.
+What a graph knows about plug-in devices (`Controller::set_plugin_info`: which have a slot,
+which play notes, their latency) is set before the graph is built
+([ADR 0006](0006-plug-in-hosting.md)).
 
 ## Amendment: edits in the next block (2026-10-12)
 

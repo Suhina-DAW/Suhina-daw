@@ -17,7 +17,7 @@ usage: loopwerk-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [
        loopwerk-cli commands [--markdown]
        loopwerk-cli mcp [--read-root <dir>] [--write-root <dir>] [--audio]
        loopwerk-cli plugins (scan [--all] | list | folders | add-folder <dir> | remove-folder <dir>
-                             | check <project.als>)
+                             | check <project.als> | set-hosting <plug-in> (binary | vendor | instance))
        loopwerk-cli plugin run <plug-in> (<in-audio> | -) <out.wav> [--tail <seconds>] [--state <file>]
        loopwerk-cli plugin run-device <project.als> <device> (<in-audio> | -) <out.wav> [--tail <seconds>]
                                      [--from <bar>] [--seconds <seconds>]
@@ -36,7 +36,9 @@ commands:
   plugins   find installed plug-ins: scan looks in the standard folders and the added ones
             (only new and changed files, or every file with --all), list shows what was found,
             folders shows where scans look, add-folder and remove-folder change that; check
-            lists a project's plug-ins and the installed plug-in found for each, or none
+            lists a project's plug-ins and the installed plug-in found for each, or none;
+            set-hosting chooses whether a plug-in's instances share a process per file (the
+            default), per vendor, or each run in one of their own
   fm-synth  fm-synth voices: list the voices in a DX7 voice or bank file (.syx)
   plugin    plugin run: put an audio file through a plug-in (a name or id from plugins list)
             in its own process, offline, and write a 32-bit float stereo WAV; --tail adds
@@ -51,7 +53,7 @@ commands:
             its window is closed, then --save writes the state it has to a file
 
 options:
-  <project.als>      a Live Set to import
+  <project.als>      a Live Set to import, or a Loopwerk project (.locr) to open
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
@@ -246,7 +248,7 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
     }
     Ok(Args {
-        source: source.ok_or(format!("missing project: give a .als file or --demo\n\n{USAGE}"))?,
+        source: source.ok_or(format!("missing project: give a .locr or .als file, or --demo\n\n{USAGE}"))?,
         output,
         scene,
         launcher,
@@ -261,17 +263,18 @@ fn load_project(args: &Args) -> Result<(Project, AudioPool), String> {
     let (project, audio) = match &args.source {
         Source::Demo => (demo_project(), AudioPool::new()),
         Source::Als(path) => {
-            let import = loopwerk_als::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            // A Loopwerk project (.locr) or a Live Set to import.
+            let (session, warnings) = loopwerk_session::Session::open(path).map_err(|e| e.0)?;
             let folder = path.parent().unwrap_or(std::path::Path::new("."));
             let started = std::time::Instant::now();
-            let (audio, audio_warnings) = loopwerk_media::load_project_audio(&import.project, folder);
-            for warning in import.warnings.iter().chain(&audio_warnings) {
+            let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
+            for warning in warnings.iter().chain(&audio_warnings) {
                 eprintln!("warning: {warning}");
             }
             if !audio.files.is_empty() {
                 eprintln!("audio: {} files decoded in {:.1} s", audio.files.len(), started.elapsed().as_secs_f64());
             }
-            (import.project, audio)
+            (session.project().clone(), audio)
         }
     };
     let mut project = match args.scene {
@@ -361,7 +364,12 @@ fn fm_synth(args: &[String]) -> Result<(), String> {
 fn render(args: &Args) -> Result<(), String> {
     let path = args.output.as_ref().ok_or("missing --output")?;
     let (project, audio) = load_project(args)?;
-    let summary = render_wav(&project, &audio, path, args.sample_rate)?;
+    let mut library = loopwerk_plugins::library::Library::default();
+    let env = loopwerk_session::PluginEnv::from_library(&mut library);
+    let summary = render_wav(&project, &audio, path, args.sample_rate, Some(&env))?;
+    for notice in &summary.plugins {
+        eprintln!("plug-ins: {notice}");
+    }
     println!("wrote {} ({:.2} s, {} Hz)", path.display(), summary.seconds, summary.sample_rate);
     Ok(())
 }
@@ -478,6 +486,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: f64::from(audio.sample_rate),
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     // An instrument's notes: its track's arrangement, from the bar asked for or the first clip.
     let events = match &device_source {
@@ -556,6 +565,9 @@ fn plugins(args: &[String]) -> Result<(), String> {
         ["folders"] => ("plugins.folders", serde_json::json!({})),
         ["add-folder", folder] => ("plugins.addFolder", serde_json::json!({ "folder": folder })),
         ["remove-folder", folder] => ("plugins.removeFolder", serde_json::json!({ "folder": folder })),
+        ["set-hosting", plugin, hosting] => {
+            ("plugins.setHosting", serde_json::json!({ "plugin": plugin, "hosting": hosting }))
+        }
         _ => {
             return Err(format!(
                 "unknown plugins command
@@ -645,6 +657,7 @@ fn edit_plugin<'a>(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
@@ -690,6 +703,7 @@ fn print_params(
         max_frames: loopwerk_plugins::offline::BLOCK_FRAMES,
         sample_rate: 48_000.0,
         timeout: std::time::Duration::from_secs(30),
+        group: None,
     };
     let (mut plugin, _audio) = loopwerk_plugins::Plugin::start(launch).map_err(|e| e.to_string())?;
     if let Some(state) = state
@@ -727,7 +741,8 @@ fn mcp(args: &[String]) -> Result<(), String> {
         }
     }
     let workspace = Workspace::new(read_root.as_deref(), write_root.as_deref())?;
-    let mut server = LoopwerkMcp::new(workspace);
+    let library = loopwerk_library::Library::new(loopwerk_plugins::library::settings_folder());
+    let mut server = LoopwerkMcp::new(workspace).with_file_library(library);
     if audio {
         server = server.with_audio_output(std::sync::Arc::new(play::DeviceOutput));
     }
@@ -784,6 +799,8 @@ fn demo_project() -> Project {
         offset: 0.0,
         loop_range: None,
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
 

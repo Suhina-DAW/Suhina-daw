@@ -1,0 +1,28 @@
+{
+  "name": "Loopwerk Light",
+  "description": "Loopwerk's warm greys turned light, for bright rooms.",
+  "colors": {
+    "window.background": "#F4F2EE",
+    "panel.background": "#E9E6E0",
+    "panel.hoverBackground": "#E1DDD6",
+    "control.background": "#DCD8D0",
+    "control.hoverBackground": "#D2CDC4",
+    "control.activeBackground": "#C2BCB1",
+    "control.playingBackground": "#B8B1A5",
+    "border": "#D3CEC6",
+    "border.strong": "#C2BCB1",
+    "text.primary": "#1F1D1A",
+    "text.secondary": "#5E5952",
+    "text.hint": "#8E887F",
+    "text.value": "#3A3632",
+    "text.playing": "#000000",
+    "accent": "#5A54D6",
+    "recording": "#D93036",
+    "meter.normal": "#3F9B4A",
+    "meter.hot": "#C9A227",
+    "slot.empty": "#BDB7AD",
+    "track.mutedBackground": "#DAD6CF",
+    "pan.background": "#E4E0D9",
+    "pan.centre": "#9E978C"
+  }
+}

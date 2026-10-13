@@ -6,6 +6,7 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
+use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
 use crate::menus::{self, TrackMenu};
 use crate::motion;
@@ -32,6 +33,9 @@ pub struct SessionViewState {
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
     drag: Option<(TrackId, Control, f64)>,
+    /// A drag from the browser over the window: the view says which target is under the
+    /// pointer (`docs/spec/browser.md` › Dragging into the project).
+    pub drop: Option<DropProbe>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +69,7 @@ pub fn show(
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0);
+    painter.rect_filled(area, 0.0, theme::window_background());
 
     // Fixed bands: header on top, mixer at the bottom, scene column on the right.
     let header = Rect::from_min_size(area.min, Vec2::new(area.width(), ROW));
@@ -93,8 +97,8 @@ pub fn show(
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - body.height()).max(0.0));
 
     // Lines between the bands.
-    painter.hline(area.x_range(), header.bottom(), theme::hairline(theme::LINE_STRONG));
-    painter.hline(area.x_range(), mixer.top() - 1.0, theme::hairline(theme::LINE_STRONG));
+    painter.hline(area.x_range(), header.bottom(), theme::hairline(theme::border_strong()));
+    painter.hline(area.x_range(), mixer.top() - 1.0, theme::hairline(theme::border_strong()));
 
     let bands = Bands { header, body, mixer, top: body.top() - state.scroll.y, scenes: grid.scenes.len() };
     // Where each track column is this frame, for a dragged header to find its place.
@@ -121,6 +125,49 @@ pub fn show(
         let progress = progress.get(index).copied().flatten();
         draw_column(ui, &painter, &bands, clip, span, column, track_number, progress, state, actions);
     }
+    // The empty space right of the last track: buttons that add a track, and new tracks for
+    // what the browser drops there.
+    let empty = Rect::from_min_max(
+        Pos2::new(track_x.max(area.left()), area.top()),
+        Pos2::new(returns_x - 1.0, mixer.top() - 1.0),
+    );
+    if empty.width() > 24.0 {
+        empty_space(ui, &painter, empty, actions);
+    }
+    if let Some(probe) = state.drop.as_mut() {
+        let row_of = |y: f32| ((y - bands.top) / PITCH).floor().max(0.0) as usize;
+        for (column, span) in &spans {
+            if column.kind != ColumnKind::Track {
+                continue;
+            }
+            let header_rect = Rect::from_x_y_ranges(*span, header.y_range());
+            probe.offer(header_rect, DropTarget::Track(column.track));
+            let column_body = Rect::from_x_y_ranges(*span, body.y_range()).intersect(tracks_clip);
+            if column_body.contains(probe.pointer) {
+                let scene = row_of(probe.pointer.y).min(grid.scenes.len());
+                let top = bands.top + scene as f32 * PITCH;
+                let cell = Rect::from_x_y_ranges(*span, egui::Rangef::new(top, top + ROW)).intersect(column_body);
+                let target = if probe.files {
+                    DropTarget::Slot { track: column.track, scene }
+                } else {
+                    DropTarget::Track(column.track)
+                };
+                probe.offer(if probe.files { cell } else { column_body }, target);
+            }
+        }
+        if empty.width() > 0.0 && empty.contains(probe.pointer) {
+            let scene = if probe.pointer.y > body.top() { row_of(probe.pointer.y).min(grid.scenes.len()) } else { 0 };
+            probe.offer(empty, DropTarget::NewTracks { beat: None, scene: Some(scene) });
+        }
+        if let Some(target_area) = probe.area {
+            painter.with_clip_rect(area).rect_stroke(
+                target_area.shrink(0.5),
+                0.0,
+                egui::Stroke::new(1.5, theme::accent()),
+                StrokeKind::Inside,
+            );
+        }
+    }
     // A header let go over a column moves its track there: before the column under the
     // pointer, or after it from its right half; a group moves with its tracks.
     let target_of = |x: f32| spans.iter().find(|(_, span)| span.contains(x)).map(|(c, span)| (*c, x > span.center()));
@@ -131,7 +178,7 @@ pub fn show(
         && let Some((_, span)) = spans.iter().find(|(c, _)| c.track == column.track)
     {
         let x = if after { span.max + 0.5 } else { span.min - 0.5 };
-        painter.with_clip_rect(tracks_clip).vline(x, area.y_range(), egui::Stroke::new(2.0, theme::ACCENT));
+        painter.with_clip_rect(tracks_clip).vline(x, area.y_range(), egui::Stroke::new(2.0, theme::accent()));
     }
     if let Some((dragged, x)) = state.track_drop.take()
         && let Some((target, after)) = target_of(x)
@@ -150,21 +197,21 @@ pub fn show(
     }
 
     if returns_width > 0.0 {
-        painter.vline(returns_x - 0.5, area.y_range(), theme::hairline(theme::LINE_STRONG));
+        painter.vline(returns_x - 0.5, area.y_range(), theme::hairline(theme::border_strong()));
     }
 
     // Scene column, fixed on the right.
-    painter.vline(scenes_x - 0.5, area.y_range(), theme::hairline(theme::LINE_STRONG));
+    painter.vline(scenes_x - 0.5, area.y_range(), theme::hairline(theme::border_strong()));
     let scene_span = egui::Rangef::new(scenes_x, area.right());
     let header_rect = Rect::from_x_y_ranges(scene_span, header.y_range());
-    painter.rect_filled(header_rect, 0.0, theme::SURFACE_2);
+    painter.rect_filled(header_rect, 0.0, theme::control_background());
     widgets::text_in(
         &painter,
         header_rect.shrink2(Vec2::new(PAD, 0.0)),
         Align2::LEFT_CENTER,
         "Main",
         theme::ui_font(theme::TEXT),
-        theme::TEXT_PRIMARY,
+        theme::text_primary(),
     );
     scene_column(
         ui,
@@ -175,7 +222,40 @@ pub fn show(
         actions,
     );
     let main_mixer = Rect::from_x_y_ranges(scene_span, mixer.y_range());
-    painter.rect_filled(main_mixer, 0.0, theme::SURFACE_1);
+    painter.rect_filled(main_mixer, 0.0, theme::panel_background());
+}
+
+/// The two buttons that add an empty track, at the top of the empty space after the tracks;
+/// the space below takes drops (`docs/spec/browser.md` › Files).
+pub(crate) fn empty_space(ui: &Ui, painter: &egui::Painter, area: Rect, actions: &mut Vec<Action>) {
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mut y = area.top() + PAD;
+    for (kind, label) in [("midi", "+ MIDI track"), ("audio", "+ Audio track")] {
+        let width = (widgets::text_width(ui, label, font.clone()) + PAD * 2.0).min(area.width() - PAD * 2.0);
+        let rect = Rect::from_min_size(Pos2::new(area.left() + PAD, y), Vec2::new(width, ROW));
+        y = rect.bottom() + 2.0;
+        if rect.bottom() > area.bottom() || width <= 0.0 {
+            break;
+        }
+        let response = widgets::button_area(ui, rect, Id::new(("add-track", kind, area.min.x as i32)), label);
+        let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, fill);
+        widgets::text_in(painter, rect, Align2::CENTER_CENTER, label, font.clone(), theme::text_secondary());
+        if response.clicked() {
+            actions.push(Action::new("track.add", json!({ "kind": kind })));
+        }
+    }
+    if area.height() > y - area.top() + ROW * 2.0 {
+        let hint = Rect::from_min_max(Pos2::new(area.left(), y), area.max);
+        widgets::text_in(
+            painter,
+            hint.shrink(PAD),
+            Align2::CENTER_CENTER,
+            "Drop files or devices to add a track",
+            font,
+            theme::text_hint(),
+        );
+    }
 }
 
 /// The view's horizontal bands, and where the first scene row is after scrolling.
@@ -222,7 +302,7 @@ fn draw_column(
     mixer_strip(ui, &mixer_painter, mixer_rect, column, track_number, state, id, actions);
     // Column separator through header, grid and mixer.
     let full = egui::Rangef::new(bands.header.top(), bands.mixer.bottom());
-    painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::LINE_STRONG));
+    painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::border_strong()));
 }
 
 fn column_header(
@@ -239,10 +319,10 @@ fn column_header(
     // Right-click opens the track's menu.
     // A click selects the track, a drag moves it, a right-click opens its menu.
     let response = ui.interact(rect, Id::new(("session-header", column.track.0)), Sense::click_and_drag());
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(column.track);
     }
-    if response.drag_stopped()
+    if response.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(dragged) = state.track_drag.take()
         && let Some(pointer) = response.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
     {
@@ -262,11 +342,11 @@ fn column_header(
     if response.clicked() {
         state.selected = Some(column.track);
     }
-    let fill = if state.selected == Some(column.track) { theme::SURFACE_3 } else { theme::SURFACE_2 };
+    let fill = if state.selected == Some(column.track) { theme::control_active() } else { theme::control_background() };
     painter.rect_filled(rect, 0.0, fill);
     let strip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
     painter.rect_filled(strip, 0.0, lane(rgb(column.color), column.mute));
-    let color = if column.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
+    let color = if column.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(
         painter,
         rect.shrink2(Vec2::new(PAD, 0.0)),
@@ -323,13 +403,13 @@ fn column_body(
             actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
         }
         slot_cell(painter, rect, column, slot, hover, pulse, progress);
-        painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::LINE));
+        painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
 
     if column.kind == ColumnKind::Return {
         // Returns have no slots, but the scene lines run through them.
         for scene in 0..scenes {
-            painter.hline(span, top + scene as f32 * PITCH + ROW + 0.5, theme::hairline(theme::LINE));
+            painter.hline(span, top + scene as f32 * PITCH + ROW + 0.5, theme::hairline(theme::border()));
         }
         return;
     }
@@ -344,10 +424,10 @@ fn column_body(
     if response.clicked() {
         actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
     }
-    let fill = motion::mix(theme::SURFACE_1, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response));
+    let fill = motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response));
     painter.rect_filled(stop_rect, 0.0, fill);
     let square = Rect::from_center_size(stop_rect.center(), Vec2::splat(7.0));
-    let color = if column.stop_queued { theme::ACCENT } else { theme::TEXT_SECONDARY };
+    let color = if column.stop_queued { theme::accent() } else { theme::text_secondary() };
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
 }
 
@@ -370,41 +450,41 @@ fn slot_cell(
     let font = theme::ui_font(theme::TEXT);
     match slot.state {
         SlotState::Empty => {
-            painter.rect_filled(rect, 0.0, theme::SURFACE_0);
+            painter.rect_filled(rect, 0.0, theme::window_background());
         }
         SlotState::EmptyStop => {
-            painter.rect_filled(rect, 0.0, motion::mix(theme::SURFACE_0, theme::SURFACE_1, hover));
-            painter.rect_filled(mark_rect(EMPTY_MARK), 0.0, theme::EMPTY_MARK);
+            painter.rect_filled(rect, 0.0, motion::mix(theme::window_background(), theme::panel_background(), hover));
+            painter.rect_filled(mark_rect(EMPTY_MARK), 0.0, theme::slot_empty());
         }
         SlotState::Stopped | SlotState::Queued => {
-            let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
+            let fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
             painter.rect_filled(rect, 0.0, lane(fill, column.mute));
             let (mark, text) = if slot.enabled {
-                (track_color, theme::TEXT_VALUE)
+                (track_color, theme::text_value())
             } else {
-                (theme::TEXT_TERTIARY, theme::TEXT_TERTIARY)
+                (theme::text_hint(), theme::text_hint())
             };
             if slot.state == SlotState::Queued {
                 painter.rect_filled(mark_rect(CLIP_MARK), 0.0, mark.gamma_multiply(0.5));
                 // The outline breathes while the clip waits for its launch.
-                let accent = theme::ACCENT.gamma_multiply(0.45 + 0.55 * pulse);
+                let accent = theme::accent().gamma_multiply(0.45 + 0.55 * pulse);
                 painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(accent), StrokeKind::Outside);
                 painter.rect_stroke(rect, 0.0, theme::hairline(accent), StrokeKind::Inside);
             } else {
                 painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(mark, column.mute));
             }
-            let text = if column.mute { theme::TEXT_TERTIARY } else { text };
+            let text = if column.mute { theme::text_hint() } else { text };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
         }
         SlotState::Playing => {
-            painter.rect_filled(rect, 0.0, lane(theme::SURFACE_3_BRIGHT, column.mute));
+            painter.rect_filled(rect, 0.0, lane(theme::control_playing(), column.mute));
             painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(track_color, column.mute));
-            let text = if column.mute { theme::TEXT_TERTIARY } else { Color32::WHITE };
+            let text = if column.mute { theme::text_hint() } else { theme::text_playing() };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
             let done = progress.unwrap_or(1.0).clamp(0.0, 1.0);
             let line =
                 Rect::from_min_size(Pos2::new(rect.left(), rect.bottom() - 2.0), Vec2::new(rect.width() * done, 2.0));
-            painter.rect_filled(line, 0.0, theme::ACCENT);
+            painter.rect_filled(line, 0.0, theme::accent());
         }
     }
 }
@@ -420,7 +500,7 @@ fn mixer_strip(
     id: Id,
     actions: &mut Vec<Action>,
 ) {
-    painter.rect_filled(rect, 0.0, theme::SURFACE_1);
+    painter.rect_filled(rect, 0.0, theme::panel_background());
     let inner = rect.shrink(PAD);
     let track = column.track;
 
@@ -456,7 +536,7 @@ fn mixer_strip(
         Some((t, Control::Pan, v)) if t == track => v,
         _ => committed_pan.unwrap_or(column.pan),
     };
-    widgets::knob(painter, knob_rect.center(), theme::KNOB, ((pan_shown + 1.0) / 2.0) as f32, theme::TEXT_PRIMARY);
+    widgets::knob(painter, knob_rect.center(), theme::KNOB, ((pan_shown + 1.0) / 2.0) as f32, theme::text_primary());
 
     // Values row: pan left, volume right (the volume is the draggable value).
     let label_volume = match state.drag {
@@ -471,7 +551,7 @@ fn mixer_strip(
         Align2::LEFT_CENTER,
         &widgets::format_pan(pan_shown),
         mono.clone(),
-        theme::TEXT_SECONDARY,
+        theme::text_secondary(),
     );
     let volume_rect =
         Rect::from_min_max(Pos2::new(inner.center().x, inner.top()), Pos2::new(inner.right(), values.bottom()));
@@ -501,7 +581,7 @@ fn mixer_strip(
         Some((t, Control::Volume, v)) if t == track => v,
         _ => committed_volume.unwrap_or(column.volume_db),
     };
-    let volume_color = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, widgets::hover(ui, &volume_response));
+    let volume_color = motion::mix(theme::text_value(), theme::text_primary(), widgets::hover(ui, &volume_response));
     widgets::text_in(painter, values, Align2::RIGHT_CENTER, &widgets::format_db(volume_shown), mono, volume_color);
 
     // Toggle row: track on, showing the track number.
@@ -553,9 +633,9 @@ fn scene_column(
         if response.clicked() {
             actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
         }
-        let hover = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, widgets::hover(ui, &response));
+        let hover = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
         let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
-        let fill = motion::mix(hover, theme::SURFACE_3_BRIGHT, playing);
+        let fill = motion::mix(hover, theme::control_playing(), playing);
         painter.rect_filled(rect, 0.0, fill);
         let inner = rect.shrink2(Vec2::new(PAD, 0.0));
         let mut name = scene.name.clone();
@@ -569,7 +649,7 @@ fn scene_column(
             Align2::RIGHT_CENTER,
             &number,
             theme::mono_font(theme::TEXT_SMALL),
-            theme::TEXT_TERTIARY,
+            theme::text_hint(),
         );
         let name_rect = Rect::from_min_max(inner.min, Pos2::new(inner.right() - 18.0, inner.bottom()));
         widgets::text_in(
@@ -578,9 +658,9 @@ fn scene_column(
             Align2::LEFT_CENTER,
             &name,
             theme::ui_font(theme::TEXT),
-            theme::TEXT_PRIMARY,
+            theme::text_primary(),
         );
-        painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::LINE));
+        painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
     let stop_top = top + grid.scenes.len() as f32 * PITCH;
     let rect = Rect::from_x_y_ranges(span, egui::Rangef::new(stop_top, stop_top + ROW));
@@ -592,10 +672,10 @@ fn scene_column(
         painter.rect_filled(
             rect,
             0.0,
-            motion::mix(theme::SURFACE_1, theme::HOVER_ON_SURFACE_1, widgets::hover(ui, &response)),
+            motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response)),
         );
         let square = Rect::from_min_size(Pos2::new(rect.left() + PAD, rect.center().y - 3.5), Vec2::splat(7.0));
-        painter.rect_stroke(square, 0.0, theme::hairline(theme::TEXT_SECONDARY), StrokeKind::Inside);
+        painter.rect_stroke(square, 0.0, theme::hairline(theme::text_secondary()), StrokeKind::Inside);
         let text = Rect::from_min_max(Pos2::new(square.right() + PAD, rect.top()), rect.max);
         widgets::text_in(
             painter,
@@ -603,7 +683,7 @@ fn scene_column(
             Align2::LEFT_CENTER,
             "Stop all",
             theme::ui_font(theme::TEXT),
-            theme::TEXT_SECONDARY,
+            theme::text_secondary(),
         );
     }
 }

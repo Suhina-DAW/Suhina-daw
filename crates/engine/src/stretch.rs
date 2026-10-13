@@ -367,6 +367,7 @@ mod tests {
             warp_markers: markers.iter().map(|&(time, audio_time)| WarpMarker { time, audio_time }).collect(),
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         }
     }
 
@@ -378,6 +379,8 @@ mod tests {
             offset,
             loop_range: loop_range.map(|(start, end)| LoopRange { start, end }),
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }

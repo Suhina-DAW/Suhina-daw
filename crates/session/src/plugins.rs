@@ -53,6 +53,16 @@ static PLUGIN_COMMANDS: &[CommandSpec<Projects>] = &[
         run: remove_folder,
     },
     CommandSpec {
+        id: "plugins.setHosting",
+        label: "Choose how a plug-in's instances share host processes from their next start: binary (one process per plug-in file, the default), vendor (one per vendor) or instance (a process of its own for each)",
+        params: &[
+            param("plugin", ParamType::Text, "plug-in name, id or file, from plugins.list"),
+            param("hosting", ParamType::Text, "binary, vendor or instance"),
+        ],
+        kind: CommandKind::Plugins,
+        run: set_hosting,
+    },
+    CommandSpec {
         id: "plugins.check",
         label: "List a project's plug-in devices and the installed plug-in found for each: how it was found (same, declared, vst2-id, same-name, newer-version) and whether its saved settings are promised to carry over",
         params: &[optional("project", ParamType::Integer, "project id, from projects.list (default the active one)")],
@@ -80,6 +90,10 @@ fn paths(list: &[std::path::PathBuf]) -> Vec<String> {
 }
 
 fn list(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
+    let library = projects.library_mut();
+    let specs: Vec<String> = library.catalog().plugins().map(|p| p.spec()).collect();
+    let hosting: std::collections::HashMap<String, loopwerk_plugins::library::Hosting> =
+        specs.into_iter().map(|spec| (spec.clone(), library.hosting(&spec))).collect();
     let catalog = projects.library_mut().catalog();
     let plugins: Vec<Value> = catalog
         .plugins()
@@ -92,6 +106,7 @@ fn list(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
                 "version": p.version,
                 "features": p.features,
                 "file": p.path.display().to_string(),
+                "hosting": hosting.get(&p.spec()).copied().unwrap_or_default().name(),
             })
         })
         .collect();
@@ -133,6 +148,25 @@ fn folders(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
 fn add_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let added = projects.library_mut().add_folder(folder_param(params)?)?;
     Ok(json!({ "added": added, "folders": paths(projects.library_mut().custom_folders()) }))
+}
+
+fn set_hosting(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    use loopwerk_plugins::library::Hosting;
+    let name = params.get("plugin").and_then(Value::as_str).ok_or("plugin must be a plug-in name, id or file")?;
+    let hosting = params
+        .get("hosting")
+        .and_then(Value::as_str)
+        .and_then(Hosting::parse)
+        .ok_or("hosting must be binary, vendor or instance")?;
+    let library = projects.library_mut();
+    let catalog = library.catalog();
+    let plugin = catalog
+        .find(name)
+        .or_else(|| catalog.plugins().find(|p| p.spec() == name))
+        .ok_or_else(|| format!("no plug-in {name:?} in the catalog; plugins.list lists them"))?;
+    let (spec, shown) = (plugin.spec(), plugin.name.clone());
+    library.set_hosting(&spec, hosting)?;
+    Ok(json!({ "plugin": shown, "hosting": hosting.name() }))
 }
 
 fn remove_folder(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {

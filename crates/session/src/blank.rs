@@ -1,0 +1,80 @@
+//! The project a new blank project starts as: two note tracks, two audio tracks, two returns, the
+//! main channel and eight empty scenes, so there is somewhere to put clips and devices before
+//! tracks can be added.
+
+use loopwerk_model::{
+    Arrangement, ArrangementLane, Channel, ChannelId, ChannelRole, ContentKinds, Extensions, Launcher, LauncherColumn,
+    Project, Scene, Slot, Track, TrackId, Transport,
+};
+
+/// Scenes a blank project has.
+const SCENES: usize = 8;
+
+pub fn blank_project() -> Project {
+    let main = ChannelId(100);
+    let returns = [(ChannelId(90), "A Return"), (ChannelId(91), "B Return")];
+    let tracks = [("1 MIDI", true), ("2 MIDI", true), ("3 Audio", false), ("4 Audio", false)];
+    let channel = |id: ChannelId, name: &str, role: ChannelRole, output: Option<ChannelId>| Channel {
+        id,
+        name: name.into(),
+        role,
+        volume: 1.0,
+        pan: 0.0,
+        mute: false,
+        solo: false,
+        output,
+        sends: Vec::new(),
+        devices: Vec::new(),
+        extensions: Extensions::default(),
+    };
+    let mut project = Project { transport: Transport::default(), ..Project::default() };
+    let mut lanes = Vec::new();
+    let mut columns = Vec::new();
+    for (index, (name, notes)) in tracks.into_iter().enumerate() {
+        let id = index as u32 + 1;
+        project.tracks.push(Track {
+            id: TrackId(id),
+            name: name.into(),
+            color: None,
+            content: ContentKinds { notes, audio: !notes },
+            channel: Some(ChannelId(id)),
+            parent: None,
+            extensions: Extensions::default(),
+        });
+        project.channels.push(channel(ChannelId(id), name, ChannelRole::Regular, Some(main)));
+        lanes.push(ArrangementLane { name: name.into(), track: Some(TrackId(id)), clips: Vec::new() });
+        columns.push(LauncherColumn { track: TrackId(id), slots: vec![Slot { clip: None, has_stop: true }; SCENES] });
+    }
+    for (offset, (id, name)) in returns.into_iter().enumerate() {
+        let track = TrackId(10 + offset as u32);
+        project.tracks.push(Track {
+            id: track,
+            name: name.into(),
+            color: None,
+            content: ContentKinds::default(),
+            channel: Some(id),
+            parent: None,
+            extensions: Extensions::default(),
+        });
+        project.channels.push(channel(id, name, ChannelRole::Effect, Some(main)));
+    }
+    project.channels.push(channel(main, "Main", ChannelRole::Master, None));
+    project.arrangement = Arrangement { lanes };
+    project.launcher =
+        Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), tempo_bpm: None }).collect(), columns };
+    project
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_project_holds_together() {
+        let project = blank_project();
+        assert_eq!(project.validate(), Ok(()));
+        assert_eq!(project.tracks.len(), 6);
+        assert_eq!(project.launcher.scenes.len(), SCENES);
+        assert!(project.contents.is_empty());
+    }
+}

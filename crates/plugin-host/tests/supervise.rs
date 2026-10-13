@@ -20,6 +20,7 @@ fn launch(plugin: &str) -> Launch {
         max_frames: FRAMES as u32,
         sample_rate: 48_000.0,
         timeout: PATIENT,
+        group: None,
     }
 }
 

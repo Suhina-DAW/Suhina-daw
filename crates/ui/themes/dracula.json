@@ -1,0 +1,28 @@
+{
+  "name": "Dracula",
+  "description": "The Dracula palette (MIT, draculatheme.com), mapped onto Loopwerk's tokens.",
+  "colors": {
+    "window.background": "#191A21",
+    "panel.background": "#21222C",
+    "panel.hoverBackground": "#282A36",
+    "control.background": "#343746",
+    "control.hoverBackground": "#424450",
+    "control.activeBackground": "#44475A",
+    "control.playingBackground": "#6272A4",
+    "border": "#2C2E3B",
+    "border.strong": "#44475A",
+    "text.primary": "#F8F8F2",
+    "text.secondary": "#BFC1D0",
+    "text.hint": "#6272A4",
+    "text.value": "#E2E2DC",
+    "text.playing": "#FFFFFF",
+    "accent": "#BD93F9",
+    "recording": "#FF5555",
+    "meter.normal": "#50FA7B",
+    "meter.hot": "#F1FA8C",
+    "slot.empty": "#44475A",
+    "track.mutedBackground": "#2A2C38",
+    "pan.background": "#1E1F27",
+    "pan.centre": "#6272A4"
+  }
+}

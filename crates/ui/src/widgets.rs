@@ -42,6 +42,11 @@ pub fn fitted(painter: &Painter, text: &str, font: FontId, color: Color32, max_w
     painter.layout_job(job)
 }
 
+/// How wide `text` is in `font`.
+pub fn text_width(ui: &Ui, text: &str, font: FontId) -> f32 {
+    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, Color32::WHITE).size().x)
+}
+
 /// Draws one line of text in `rect`, cut to its width, aligned horizontally by `align` and
 /// centred vertically.
 pub fn text_in(painter: &Painter, rect: Rect, align: Align2, text: &str, font: FontId, color: Color32) {
@@ -67,10 +72,10 @@ pub fn hover(ui: &Ui, response: &Response) -> f32 {
 pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color32) {
     let hover = hover(ui, response);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), on, motion::VALUE);
-    let off_fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
-    let off_text = motion::mix(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hover);
-    let on_fill = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, hover);
-    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::SURFACE_0, lit))
+    let off_fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
+    let off_text = motion::mix(theme::text_hint(), theme::text_secondary(), hover);
+    let on_fill = motion::mix(theme::text_value(), theme::text_primary(), hover);
+    (motion::mix(off_fill, on_fill, lit), motion::mix(off_text, theme::window_background(), lit))
 }
 
 /// A track's solo button: draws it in `rect` and returns the command a click asks for. A click
@@ -87,9 +92,9 @@ pub fn solo_button(
     let label = if solo { format!("End solo on {name}") } else { format!("Solo {name}") };
     let response = button_area(ui, rect, id, label);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), solo, motion::VALUE);
-    let off = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, &response));
-    painter.rect_filled(rect, 0.0, motion::mix(off, theme::ACCENT, lit));
-    let text = motion::mix(theme::TEXT_SECONDARY, theme::SURFACE_0, lit);
+    let off = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, &response));
+    painter.rect_filled(rect, 0.0, motion::mix(off, theme::accent(), lit));
+    let text = motion::mix(theme::text_secondary(), theme::window_background(), lit);
     text_in(painter, rect, Align2::CENTER_CENTER, "S", theme::ui_font(theme::TEXT_SMALL), text);
     if !response.clicked() {
         return None;
@@ -104,17 +109,17 @@ pub fn solo_button(
 /// A dropdown field (components › Dropdown): the current choice and a chevron; the caller opens
 /// its menu from `response`.
 pub fn dropdown(ui: &Ui, painter: &Painter, rect: Rect, response: &Response, text: &str) {
-    let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover(ui, response));
+    let fill = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, response));
     painter.rect_filled(rect, 0.0, fill);
     let inner = rect.shrink2(Vec2::new(4.0, 0.0));
     let chevron = Rect::from_center_size(Pos2::new(inner.right() - 3.0, rect.center().y), Vec2::new(6.0, 4.0));
     painter.add(egui::Shape::convex_polygon(
         vec![chevron.left_top(), chevron.right_top(), chevron.center_bottom()],
-        theme::TEXT_TERTIARY,
+        theme::text_hint(),
         Stroke::NONE,
     ));
     let label = Rect::from_min_max(inner.min, Pos2::new(chevron.left() - 4.0, inner.bottom()));
-    text_in(painter, label, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::TEXT_VALUE);
+    text_in(painter, label, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::text_value());
 }
 
 /// What a value control did this frame.
@@ -141,17 +146,17 @@ pub fn drag_value(
         *preview = None;
         return Drag::Done(default);
     }
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         *preview = Some(if value.is_finite() { value } else { range.0 });
     }
-    if response.dragged() {
+    if response.dragged_by(egui::PointerButton::Primary) {
         let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
         let start = preview.unwrap_or(value);
         let next = (start - f64::from(response.drag_delta().y) * per_point * fine).clamp(range.0, range.1);
         *preview = Some(next);
         return Drag::Moving(next);
     }
-    if response.drag_stopped() {
+    if response.drag_stopped_by(egui::PointerButton::Primary) {
         return match preview.take() {
             Some(done) => Drag::Done(done),
             None => Drag::None,
@@ -176,8 +181,8 @@ pub fn value_area(ui: &Ui, rect: Rect, id: egui::Id, label: impl ToString, value
 /// `position` 0 … 1 (components › Mixer strip).
 pub fn knob(painter: &Painter, center: Pos2, size: f32, position: f32, pointer: Color32) {
     let radius = size * 9.0 / 22.0;
-    painter.circle_filled(center, radius, theme::SURFACE_2);
-    painter.circle_stroke(center, radius, theme::hairline(theme::TEXT_TERTIARY));
+    painter.circle_filled(center, radius, theme::control_background());
+    painter.circle_stroke(center, radius, theme::hairline(theme::text_hint()));
     let angle = (-135.0 + 270.0 * position.clamp(0.0, 1.0)).to_radians();
     let tip = center + Vec2::new(angle.sin(), -angle.cos()) * (radius - 1.0);
     painter.line_segment([center, tip], Stroke::new(1.5, pointer));

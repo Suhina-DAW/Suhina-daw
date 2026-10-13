@@ -31,6 +31,20 @@ pub struct Projects {
     active: Option<ProjectId>,
     last_id: u32,
     library: Library,
+    /// What sessions start plug-ins with, made from the library when first needed and again
+    /// after a scan or a change of how plug-ins are hosted.
+    plugin_env: Option<std::sync::Arc<crate::PluginEnv>>,
+    /// The window plug-in editors open over, for the active project's session.
+    editor_owner: Option<u64>,
+    /// The browser's library (ADR 0012); kept nowhere until one is given with
+    /// [`Projects::set_file_library`].
+    files: loopwerk_library::Library,
+    /// The sample map's analysis (ADR 0013), made when first needed.
+    pub(crate) sound_map: Option<loopwerk_soundmap::SoundMap>,
+    /// Analysis runs only once started ([`Projects::start_sound_map`]), as indexing does.
+    pub(crate) sound_map_started: bool,
+    /// The library revision the sound map was last brought in line with.
+    pub(crate) sound_map_revision: Option<u64>,
 }
 
 const PROJECT: Param = param("project", ParamType::Integer, "project id, from projects.list");
@@ -180,8 +194,59 @@ impl Projects {
         Self { library, ..Self::default() }
     }
 
+    /// The plug-in library. Taking it for changing counts as changing it: sessions get a new
+    /// catalog the next time they start a plug-in.
     pub fn library_mut(&mut self) -> &mut Library {
+        self.plugin_env = None;
         &mut self.library
+    }
+
+    /// What sessions start plug-ins with (ADR 0006): the catalog, the host executable and how
+    /// plug-ins share host processes.
+    pub fn plugin_env(&mut self) -> std::sync::Arc<crate::PluginEnv> {
+        if let Some(env) = &self.plugin_env {
+            return std::sync::Arc::clone(env);
+        }
+        let env = std::sync::Arc::new(crate::PluginEnv::from_library(&mut self.library));
+        self.plugin_env = Some(std::sync::Arc::clone(&env));
+        env
+    }
+
+    /// Uses `library` for the browser and the `library.*` commands: the desktop app and the
+    /// MCP server give it Loopwerk's settings folder.
+    pub fn set_file_library(&mut self, library: loopwerk_library::Library) {
+        self.files = library;
+        // The sound map keeps its caches beside the library's indexes.
+        self.sound_map = None;
+        self.sound_map_revision = None;
+    }
+
+    /// The browser's library.
+    pub fn file_library_mut(&mut self) -> &mut loopwerk_library::Library {
+        &mut self.files
+    }
+
+    /// The window plug-in editors open over (a Win32 `HWND`, an X11 window id): the desktop
+    /// app's main window, so editors float above it. `None` gives them windows of their own.
+    pub fn set_editor_owner(&mut self, owner: Option<u64>) {
+        self.editor_owner = owner;
+    }
+
+    /// Keeps the active project's plug-ins in line with it (ADR 0006): starts new ones in the
+    /// background, takes in the ones that have started, notices crashes. Call it often from the
+    /// thread that owns the projects (the window calls it every frame); commands call it too.
+    /// Returns what the user should hear about.
+    pub fn poll_plugins(&mut self) -> Vec<String> {
+        let Some(active) = self.active else { return Vec::new() };
+        if self.get(active).is_none_or(|s| s.player().is_none()) {
+            return Vec::new();
+        }
+        let env = self.plugin_env();
+        let owner = self.editor_owner;
+        let Some(session) = self.get_mut(active) else { return Vec::new() };
+        session.set_plugin_env(env);
+        session.set_editor_owner(owner);
+        session.sync_plugins()
     }
 
     /// Runs command `id`: a `projects.*` or `plugins.*` command on the open projects (and the
@@ -197,14 +262,37 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) = PROJECT_COMMANDS.iter().chain(plugin_commands()).find(|c| c.id == id) {
+        if let Some(spec) = PROJECT_COMMANDS
+            .iter()
+            .chain(plugin_commands())
+            .chain(crate::library_commands())
+            .chain(crate::sound_map_commands())
+            .find(|c| c.id == id)
+        {
             if project.is_some() {
                 return Err(format!("{id} does not run on one project; it takes no target project").into());
             }
             check_params(id, spec.params, params)?;
             return (spec.run)(self, params);
         }
-        self.session_mut(project)?.execute(id, params)
+        // A command may need a plug-in that has started meanwhile, or add one.
+        self.poll_plugins();
+        let target = project.or(self.active);
+        let result = self.session_mut(project)?.execute(id, params);
+        self.poll_plugins();
+        if let Ok(value) = &result {
+            crate::library::record_use(&mut self.files, id, params, value);
+        }
+        // A project saved under a new name is shown by it.
+        if id == "project.save"
+            && let Ok(saved) = &result
+            && saved.get("copy") == Some(&Value::Bool(false))
+            && let Some(open) = self.open.iter_mut().find(|o| Some(o.id) == target)
+            && let Some(stem) = open.session.source().and_then(|s| s.file_stem())
+        {
+            open.name = stem.to_string_lossy().into_owned();
+        }
+        result
     }
 
     fn activate(&mut self, id: ProjectId) {
@@ -220,7 +308,12 @@ impl Projects {
 
 /// Every command, project commands first, as `commands.list` shows them.
 pub fn all_commands() -> Value {
-    let projects = PROJECT_COMMANDS.iter().chain(plugin_commands()).map(CommandSpec::describe);
+    let projects = PROJECT_COMMANDS
+        .iter()
+        .chain(plugin_commands())
+        .chain(crate::library_commands())
+        .chain(crate::sound_map_commands())
+        .map(CommandSpec::describe);
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 

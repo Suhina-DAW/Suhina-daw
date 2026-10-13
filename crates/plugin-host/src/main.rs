@@ -2,9 +2,10 @@
 //!
 //! `loopwerk-plugin-host --control <address>` connects to the engine's control socket and
 //! answers its messages (`loopwerk_plugins::protocol`) on the main thread, which also serves the
-//! plug-in's main-thread callbacks; once a plug-in is loaded, a thread of its own serves audio
-//! blocks through `loopwerk-ipc`. When the control connection closes, the engine is gone and
-//! the process exits.
+//! plug-ins' main-thread callbacks and their editors. It runs any number of plug-in instances,
+//! each loaded and unloaded on its own and named by the number the engine gave it; each has
+//! its own link and a thread of its own that serves its audio blocks through `loopwerk-ipc`.
+//! When the control connection closes, the engine is gone and the process exits.
 //!
 //! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-in built in for tests
 //! ([`test_clap`]), and simple test processors ([`processors`]) that crash or hang on purpose.
@@ -17,15 +18,17 @@ mod test_vst3;
 mod vst3;
 mod vst3_editor;
 mod vst3_events;
+mod vst3_message;
 mod vst3_params;
 mod window;
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use interprocess::TryClone;
 use loopwerk_ipc::Served;
@@ -38,6 +41,31 @@ use processors::Processor;
 const POLL: Duration = Duration::from_millis(100);
 /// How often the main thread looks for plug-in callbacks while no message comes.
 const TICK: Duration = Duration::from_millis(10);
+/// The same while an editor is open where the main thread cannot wait for its window's events
+/// (X11): often enough for input and drawing to feel immediate.
+#[cfg(not(windows))]
+const EDITOR_TICK: Duration = Duration::from_millis(1);
+/// How long unloading waits for an instance's audio thread to stop; one still running then is
+/// stuck in the plug-in, and the instance is left behind rather than taking the process with it.
+const UNLOAD_WAIT: Duration = Duration::from_secs(1);
+/// Most instances one process runs.
+const MAX_INSTANCES: usize = 1024;
+
+/// Asks an audio thread to stop and waits up to `wait` for it to end; whether it did (or there
+/// was none).
+pub(crate) fn audio_stopped<T>(stop: &AtomicBool, audio: Option<&thread::JoinHandle<T>>, wait: Duration) -> bool {
+    stop.store(true, Ordering::Release);
+    let deadline = Instant::now() + wait;
+    loop {
+        if audio.is_none_or(thread::JoinHandle::is_finished) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -189,14 +217,29 @@ impl Loaded {
         }
     }
 
-    /// Stops the audio thread (a hung one is left behind; the process is about to exit).
+    /// Closes the editor, stops the audio thread and lets go of the plug-in. An audio thread
+    /// that does not stop is stuck in the plug-in's code: the plug-in is then left as it is
+    /// (never deactivated or freed under it), so the other instances go on.
     fn unload(self) {
         match self {
-            Self::Clap(plugin) => drop(plugin),
-            Self::Vst3(plugin) => drop(plugin),
+            Self::Clap(mut plugin) => {
+                plugin.close_editor();
+                if plugin.stop_audio(UNLOAD_WAIT) {
+                    drop(plugin);
+                } else {
+                    std::mem::forget(plugin);
+                }
+            }
+            Self::Vst3(mut plugin) => {
+                plugin.close_editor();
+                if plugin.stop_audio(UNLOAD_WAIT) {
+                    drop(plugin);
+                } else {
+                    std::mem::forget(plugin);
+                }
+            }
             Self::Test { stop, audio, .. } => {
-                stop.store(true, Ordering::Release);
-                if audio.is_finished() {
+                if audio_stopped(&stop, Some(&audio), UNLOAD_WAIT) {
                     let _ = audio.join();
                 }
             }
@@ -234,82 +277,151 @@ fn send(writer: &mut impl Write, message: &Message) -> std::io::Result<()> {
     writer.flush()
 }
 
+/// The engine's messages, on Windows passed through a thread that wakes the main thread when
+/// one comes, so the main thread can wait for its windows' messages instead of polling them.
+#[cfg(windows)]
+fn wakeful(messages: std::sync::mpsc::Receiver<Message>) -> std::sync::mpsc::Receiver<Message> {
+    let waker = window::Waker::current();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let _forwarder = thread::Builder::new().name("control messages".into()).spawn(move || {
+        for message in messages {
+            if sender.send(message).is_err() {
+                return;
+            }
+            waker.wake();
+        }
+        // The engine is gone: wake the main thread to notice.
+        waker.wake();
+    });
+    receiver
+}
+
+#[cfg(not(windows))]
+fn wakeful(messages: std::sync::mpsc::Receiver<Message>) -> std::sync::mpsc::Receiver<Message> {
+    messages
+}
+
+/// The next message from the engine, or a timeout after the main thread has had something
+/// else to do: on Windows a window message (an editor's input, painting, a plug-in's timer),
+/// which is then served at once; elsewhere a tick.
+#[cfg(windows)]
+fn next_message(messages: &std::sync::mpsc::Receiver<Message>) -> Result<Message, RecvTimeoutError> {
+    match messages.try_recv() {
+        Ok(message) => Ok(message),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            window::wait(TICK);
+            messages.try_recv().map_err(|e| match e {
+                std::sync::mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout,
+                std::sync::mpsc::TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+            })
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn next_message(messages: &std::sync::mpsc::Receiver<Message>) -> Result<Message, RecvTimeoutError> {
+    messages.recv_timeout(if window::any_open() { EDITOR_TICK } else { TICK })
+}
+
+/// The instances loaded, by the number the engine gave each.
+type Instances = BTreeMap<u32, Loaded>;
+
 fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
     let stream = loopwerk_plugins::connect(address)?;
     let mut writer = stream.try_clone()?;
-    let messages = loopwerk_plugins::read_lines(stream);
-    let mut loaded: Option<Loaded> = None;
+    let messages = wakeful(loopwerk_plugins::read_lines(stream));
+    let mut instances = Instances::new();
     loop {
-        // Between messages: the plug-in's main-thread callbacks and its editor's window.
+        // Between messages: the plug-ins' main-thread callbacks and their editors' windows.
         window::pump();
-        if let Some(loaded) = &mut loaded {
+        for (instance, loaded) in &mut instances {
             loaded.tick();
             if loaded.editor_tick() {
-                send(&mut writer, &Message::EditorClosed)?;
+                send(&mut writer, &Message::EditorClosed { instance: *instance })?;
             }
         }
-        let message = match messages.recv_timeout(TICK) {
+        let message = match next_message(&messages) {
             Ok(message) => message,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         };
-        let reply = match message {
-            Message::Hello { .. } => Message::Hello { version: VERSION },
-            Message::Load { plugin, link, sample_rate } if loaded.is_none() => {
-                match load(&plugin, &link, sample_rate) {
-                    Ok(fresh) => {
-                        let latency = fresh.latency();
-                        loaded = Some(fresh);
-                        Message::Loaded { latency }
-                    }
-                    Err(message) => Message::Error { message },
-                }
-            }
-            Message::Load { .. } => Message::Error { message: "a plug-in is already loaded".into() },
-            Message::Ping { id } => Message::Pong { id },
-            Message::OpenEditor => match loaded.as_mut().map(Loaded::open_editor) {
-                Some(Ok(size)) => Message::EditorOpened { width: size.width, height: size.height },
-                Some(Err(message)) => Message::Error { message },
-                None => Message::Error { message: "no plug-in loaded".into() },
-            },
-            Message::CloseEditor => {
-                if let Some(loaded) = &mut loaded {
-                    loaded.close_editor();
-                }
-                Message::EditorClosed
-            }
-            Message::GetParams => match loaded.as_mut().map(Loaded::params) {
-                Some(Ok(params)) => Message::Params { params },
-                Some(Err(message)) => Message::Error { message },
-                None => Message::Error { message: "no plug-in loaded".into() },
-            },
-            Message::SetParam { id, value } => match loaded.as_mut().map(|p| p.set_param(id, value)) {
-                Some(Ok(param)) => Message::Param { param },
-                Some(Err(message)) => Message::Error { message },
-                None => Message::Error { message: "no plug-in loaded".into() },
-            },
-            Message::GetState => match loaded.as_mut().map(Loaded::state) {
-                Some(Ok((data, controller))) => Message::State { data, controller },
-                Some(Err(message)) => Message::Error { message },
-                None => Message::Error { message: "no plug-in loaded".into() },
-            },
-            Message::SetState { data, controller } => match loaded.as_mut() {
-                Some(plugin) => match plugin.set_state(&data, controller.as_deref()).and_then(|()| plugin.state()) {
-                    Ok((data, controller)) => Message::State { data, controller },
-                    Err(message) => Message::Error { message },
-                },
-                None => Message::Error { message: "no plug-in loaded".into() },
-            },
-            Message::Quit => break,
-            other => Message::Error { message: format!("unexpected message {other:?}") },
-        };
-        let mut out = reply.encode();
-        out.push('\n');
-        writer.write_all(out.as_bytes())?;
-        writer.flush()?;
+        if message == Message::Quit {
+            break;
+        }
+        send(&mut writer, &answer(&mut instances, message))?;
     }
-    if let Some(loaded) = loaded {
+    for (_, loaded) in std::mem::take(&mut instances) {
         loaded.unload();
     }
     Ok(())
+}
+
+/// The reply to one message from the engine (anything but `quit`).
+fn answer(instances: &mut Instances, message: Message) -> Message {
+    let failed = |instance: u32, message: String| Message::Error { instance: Some(instance), message };
+    let missing = |instance: u32| Message::Error { instance: Some(instance), message: "no such instance".into() };
+    match message {
+        Message::Hello { .. } => Message::Hello { version: VERSION },
+        Message::Ping { id } => Message::Pong { id },
+        Message::Load { instance, .. } if instances.contains_key(&instance) => {
+            failed(instance, format!("instance {instance} is already loaded"))
+        }
+        Message::Load { instance, .. } if instances.len() >= MAX_INSTANCES => {
+            failed(instance, format!("at most {MAX_INSTANCES} plug-ins run in one process"))
+        }
+        Message::Load { instance, plugin, link, sample_rate } => match load(&plugin, &link, sample_rate) {
+            Ok(fresh) => {
+                let latency = fresh.latency();
+                instances.insert(instance, fresh);
+                Message::Loaded { instance, latency }
+            }
+            Err(message) => failed(instance, message),
+        },
+        Message::Unload { instance } => {
+            if let Some(loaded) = instances.remove(&instance) {
+                loaded.unload();
+            }
+            Message::Unloaded { instance }
+        }
+        Message::OpenEditor { instance, owner } => match instances.get_mut(&instance).map(|loaded| {
+            window::set_owner(owner);
+            loaded.open_editor()
+        }) {
+            Some(Ok(size)) => Message::EditorOpened { instance, width: size.width, height: size.height },
+            Some(Err(message)) => failed(instance, message),
+            None => missing(instance),
+        },
+        Message::CloseEditor { instance } => {
+            if let Some(loaded) = instances.get_mut(&instance) {
+                loaded.close_editor();
+            }
+            Message::EditorClosed { instance }
+        }
+        Message::GetParams { instance } => match instances.get_mut(&instance).map(Loaded::params) {
+            Some(Ok(params)) => Message::Params { instance, params },
+            Some(Err(message)) => failed(instance, message),
+            None => missing(instance),
+        },
+        Message::SetParam { instance, id, value } => {
+            match instances.get_mut(&instance).map(|p| p.set_param(id, value)) {
+                Some(Ok(param)) => Message::Param { instance, param },
+                Some(Err(message)) => failed(instance, message),
+                None => missing(instance),
+            }
+        }
+        Message::GetState { instance } => match instances.get_mut(&instance).map(Loaded::state) {
+            Some(Ok((data, controller))) => Message::State { instance, data, controller },
+            Some(Err(message)) => failed(instance, message),
+            None => missing(instance),
+        },
+        Message::SetState { instance, data, controller } => match instances.get_mut(&instance) {
+            Some(plugin) => match plugin.set_state(&data, controller.as_deref()).and_then(|()| plugin.state()) {
+                Ok((data, controller)) => Message::State { instance, data, controller },
+                Err(message) => failed(instance, message),
+            },
+            None => missing(instance),
+        },
+        other => Message::Error { instance: other.instance(), message: format!("unexpected message {other:?}") },
+    }
 }

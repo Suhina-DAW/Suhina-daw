@@ -1,6 +1,9 @@
 # Raw sample data used as golden test references: never convert line endings.
 *.f32 binary
 *.syx binary
+# Stems test files (crates/media/tests/data).
+*.mp4 binary
+*.m4a binary
 
 # Generated on main after every merge (.github/workflows/docs-generated.yml); collapsed in diffs.
 docs/INDEX.md linguist-generated=true

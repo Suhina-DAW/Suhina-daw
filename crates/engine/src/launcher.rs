@@ -29,6 +29,8 @@ const STRETCH_LOOP_BEATS: f64 = 8_192.0;
 const NONE: u32 = u32::MAX;
 /// Monitor value for "a stop is queued".
 const STOP: u32 = u32::MAX - 1;
+/// The latest beat the play start marker can be at: over 16 hours at 120 bpm.
+pub const MAX_START_BEAT: f64 = 120_000.0;
 
 /// A grid that launches wait for. Beats are quarter notes.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,10 +57,20 @@ impl Quantization {
 /// `Project::launcher`; out-of-range indices are ignored.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LaunchCommand {
-    /// Start the transport from beat 0; nothing happens if it is running.
+    /// Start the transport from the play start marker; nothing happens if it is running.
     Play,
-    /// Stop the transport, every clip and the arrangement at once.
+    /// Stop the transport, every clip and the arrangement at once. The playhead goes back to the
+    /// play start marker; when the transport is already stopped, the marker goes back to beat 0
+    /// (`docs/spec/arrangement-editing.md` › Play position).
     Stop,
+    /// Like [`LaunchCommand::Stop`], but the play start marker moves to where the playhead was,
+    /// so the next start carries on from there.
+    StopHere,
+    /// Moves the play start marker to `beat` (non-finite values are ignored, others are kept
+    /// within 0 … [`MAX_START_BEAT`]). While the transport runs, playback jumps there at once.
+    SetPosition {
+        beat: f64,
+    },
     LaunchClip {
         column: usize,
         slot: usize,
@@ -115,6 +127,8 @@ pub struct LauncherMonitor {
     /// playhead's beat.
     pub(crate) frames_per_beat: AtomicU64,
     metronome: AtomicBool,
+    /// The play start marker, in beats (f64 bits).
+    pub(crate) start_beat: AtomicU64,
 }
 
 impl LauncherMonitor {
@@ -131,6 +145,7 @@ impl LauncherMonitor {
             stretch_underruns: AtomicU64::new(0),
             frames_per_beat: AtomicU64::new(0),
             metronome: AtomicBool::new(false),
+            start_beat: AtomicU64::new(0f64.to_bits()),
         }
     }
 
@@ -139,9 +154,15 @@ impl LauncherMonitor {
         self.running.load(Ordering::Relaxed)
     }
 
-    /// Beats since the transport started.
+    /// The playhead, in beats: where the transport started (the play start marker) plus the
+    /// beats played since. While stopped it is at the marker.
     pub fn beat(&self) -> f64 {
         f64::from_bits(self.beat.load(Ordering::Relaxed))
+    }
+
+    /// Where the transport starts from, in beats: the play start marker.
+    pub fn start_beat(&self) -> f64 {
+        f64::from_bits(self.start_beat.load(Ordering::Relaxed))
     }
 
     pub fn tempo_bpm(&self) -> f64 {
@@ -175,6 +196,8 @@ pub struct Controller {
     producer: rtrb::Producer<LaunchCommand>,
     pub(crate) monitor: Arc<LauncherMonitor>,
     pub(crate) updater: crate::swap::Updater,
+    pub(crate) preview: crate::preview::PreviewSender,
+    pub(crate) preview_monitor: Arc<crate::preview::PreviewMonitor>,
 }
 
 impl Controller {
@@ -526,11 +549,14 @@ fn plan_clip(
                 }
             }
             LaneData::Audio(region) => {
-                let Some(data) = audio.files.get(&region.file) else { continue };
-                // Placed at frame 0; a looping clip is given an endless length.
+                let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
+                // Placed at frame 0; a looping clip is given an endless length. Fades belong to
+                // arrangement clips; a launched clip has only the click guard.
                 let placed = loopwerk_model::Clip {
                     start: 0.0,
                     length: if loop_range.is_some() { ENDLESS_BEATS } else { clip.length },
+                    fade_in: 0.0,
+                    fade_out: 0.0,
                     ..clip.clone()
                 };
                 let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
@@ -575,7 +601,13 @@ impl Renderer {
     pub fn controller(&mut self) -> Controller {
         let (producer, consumer) = rtrb::RingBuffer::new(QUEUE_CAPACITY);
         self.graph.launcher.control = Some(consumer);
-        Controller { producer, monitor: Arc::clone(&self.graph.launcher.monitor), updater: self.updater() }
+        Controller {
+            producer,
+            monitor: Arc::clone(&self.graph.launcher.monitor),
+            updater: self.updater(),
+            preview: self.preview.sender(),
+            preview_monitor: Arc::clone(&self.preview.monitor),
+        }
     }
 
     /// The launcher state, as other threads see it.
@@ -591,7 +623,9 @@ impl Renderer {
                     self.start_transport();
                 }
             }
-            LaunchCommand::Stop => self.stop_transport(),
+            LaunchCommand::Stop => self.stop_transport(false),
+            LaunchCommand::StopHere => self.stop_transport(true),
+            LaunchCommand::SetPosition { beat } => self.set_position(beat),
             LaunchCommand::SetMetronome { on, gain } => {
                 self.metronome.set(on, gain);
                 self.graph.launcher.monitor.metronome.store(self.metronome.on(), Ordering::Relaxed);
@@ -658,30 +692,51 @@ impl Renderer {
 
     fn start_transport(&mut self) {
         self.running = true;
-        self.origin = self.position;
-        self.time_at_origin = 0;
-        self.metronome.reset();
-        self.next_event = 0;
-        self.next_audio = 0;
-        self.active_audio_count = 0;
-        // The stretch voices are rewound when the transport stops, so the worker has them ready
-        // by the next start; only a start without a stop before it rewinds here.
+        // The stretch voices are moved to the marker when the transport stops or the marker
+        // moves, so the worker has them ready by the next start; only a start without either
+        // before it moves them here.
         if !self.stretch_fresh {
-            self.graph.ahead.rewind();
+            self.graph.ahead.move_to(self.start_frame());
             self.stretch_fresh = true;
         }
-        self.graph.launcher.beat = 0.0;
+        self.locate(self.start_beat);
         self.graph.launcher.monitor.running.store(true, Ordering::Relaxed);
     }
 
-    fn stop_transport(&mut self) {
-        self.running = false;
-        self.metronome.reset();
+    /// Plays the arrangement from `beat` from the next frame on: notes that start there or
+    /// later, audio clips from wherever they are at that beat. Notes that started before it are
+    /// not played (`docs/spec/arrangement-editing.md` › Play position).
+    fn locate(&mut self, beat: f64) {
+        self.origin = self.position;
+        self.time_at_origin = self.frame_of_beat(beat);
+        let time = self.time_at_origin;
+        self.next_event = self.graph.events.partition_point(|e| e.start < time);
+        // Audio clips that started before `time` and are still playing there start mid-clip.
+        self.next_audio = 0;
         self.active_audio_count = 0;
-        if !self.stretch_fresh {
-            self.graph.ahead.rewind();
-            self.stretch_fresh = true;
-        }
+        self.metronome.reset_at(beat);
+        self.graph.launcher.beat = beat;
+    }
+
+    /// The arrangement frame of `beat`, in the playing graph's tempo.
+    pub(crate) fn frame_of_beat(&self, beat: f64) -> u64 {
+        let frame = (beat * self.graph.frames_per_beat).round();
+        if frame.is_finite() && frame > 0.0 { frame as u64 } else { 0 }
+    }
+
+    /// The play start marker's arrangement frame.
+    pub(crate) fn start_frame(&self) -> u64 {
+        self.frame_of_beat(self.start_beat)
+    }
+
+    /// The arrangement beat playing now.
+    fn playhead_beat(&self) -> f64 {
+        let fpb = self.graph.frames_per_beat;
+        if fpb > 0.0 { self.time() as f64 / fpb } else { 0.0 }
+    }
+
+    /// Ends every sounding note and device tail that the transport stopping or jumping cuts.
+    fn release_sounding(&mut self) {
         for voice in self.voices.iter_mut().filter(|v| v.active) {
             voice.end = voice.end.min(self.position);
         }
@@ -689,6 +744,25 @@ impl Renderer {
         for chain in &mut self.graph.chains {
             chain.release_all(frame);
         }
+        self.active_audio_count = 0;
+    }
+
+    /// Stops the transport; the playhead goes back to the marker, or, with `here`, the marker
+    /// moves to the playhead. Stopping while stopped moves the marker to beat 0.
+    fn stop_transport(&mut self, here: bool) {
+        self.start_beat = if !self.running {
+            0.0
+        } else if here {
+            self.playhead_beat().clamp(0.0, MAX_START_BEAT)
+        } else {
+            self.start_beat
+        };
+        self.running = false;
+        self.metronome.reset();
+        self.release_sounding();
+        // Ready for the next start, at the marker.
+        self.graph.ahead.move_to(self.start_frame());
+        self.stretch_fresh = true;
         let launcher = &mut self.graph.launcher;
         for column in &mut launcher.columns {
             column.pending = None;
@@ -698,8 +772,38 @@ impl Renderer {
             }
         }
         launcher.pending_tempo = None;
-        launcher.beat = 0.0;
+        launcher.beat = self.start_beat;
         launcher.monitor.running.store(false, Ordering::Relaxed);
+    }
+
+    /// Moves the play start marker to `beat`; while running, playback jumps there. Launches and
+    /// a scene tempo still waiting are queued again for the next boundary from the new beat.
+    fn set_position(&mut self, beat: f64) {
+        if !beat.is_finite() {
+            return;
+        }
+        self.start_beat = beat.clamp(0.0, MAX_START_BEAT);
+        if !self.running {
+            self.graph.ahead.move_to(self.start_frame());
+            self.stretch_fresh = true;
+            self.graph.launcher.beat = self.start_beat;
+            return;
+        }
+        self.release_sounding();
+        self.locate(self.start_beat);
+        // Read from the new place; until the worker gets there, stretched clips are silent.
+        self.graph.ahead.move_to(self.time_at_origin);
+        self.stretch_fresh = false;
+        let launcher = &mut self.graph.launcher;
+        let at_beat = launcher.launch_beat();
+        for column in &mut launcher.columns {
+            if let Some(pending) = column.pending.as_mut() {
+                pending.at_beat = at_beat;
+            }
+        }
+        if let Some((at, _)) = launcher.pending_tempo.as_mut() {
+            *at = at_beat;
+        }
     }
 
     /// Applies commands queued by a [`Controller`]. Called at the start of each block.
@@ -732,7 +836,6 @@ impl Renderer {
             let chains = &mut self.graph.chains;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
-            let fade_in = self.fade_frames;
             let (tempo, project_tempo) = (launcher.tempo_bpm, launcher.project_tempo_bpm);
             let Some(column) = launcher.columns.get_mut(index) else { continue };
             for state in [&mut column.playing, &mut column.fading] {
@@ -753,7 +856,7 @@ impl Renderer {
                             // The same fades as the direct reader: in at the start, out at a
                             // clip end.
                             let until_end = a.event.end as f64 - p.elapsed_frames;
-                            let fade = (p.elapsed_frames / fade_in).min(until_end / fade_in).clamp(0.0, 1.0) as f32;
+                            let fade = a.event.fades().gain(p.elapsed_frames, until_end);
                             (frame[0] * a.stretch_gains.0 * fade, frame[1] * a.stretch_gains.1 * fade)
                         }
                         _ => {
@@ -929,6 +1032,8 @@ mod tests {
             offset: 0.0,
             loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }
@@ -1232,6 +1337,7 @@ mod tests {
             warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 1.0 }],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let content = ClipContent {
             id: ContentId(1),
@@ -1272,6 +1378,7 @@ mod tests {
             warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 2.0, audio_time: 0.9 }],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let content = ClipContent {
             id: ContentId(1),

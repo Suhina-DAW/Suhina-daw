@@ -125,6 +125,8 @@ mod tests {
             offset: 0.0,
             loop_range,
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }

@@ -13,9 +13,11 @@ rust-version = "1.95"
 loopwerk-model = { path = "crates/model" }
 loopwerk-engine = { path = "crates/engine" }
 loopwerk-als = { path = "crates/als" }
+loopwerk-locr = { path = "crates/locr" }
 loopwerk-session = { path = "crates/session" }
 loopwerk-automation = { path = "crates/automation" }
 loopwerk-media = { path = "crates/media" }
+loopwerk-library = { path = "crates/library" }
 loopwerk-dsp = { path = "crates/dsp" }
 loopwerk-device-api = { path = "crates/device-api" }
 loopwerk-ipc = { path = "crates/ipc" }
@@ -26,18 +28,24 @@ loopwerk-device-dj-eq = { path = "devices/dj-eq" }
 loopwerk-device-vinyl-distortion = { path = "devices/vinyl-distortion" }
 loopwerk-device-overdrive = { path = "devices/overdrive" }
 loopwerk-device-fm-synth = { path = "devices/fm-synth" }
+loopwerk-device-compressor = { path = "devices/compressor" }
+loopwerk-device-limiter = { path = "devices/limiter" }
 loopwerk-device-registry = { path = "crates/device-registry" }
 loopwerk-stretch = { path = "crates/stretch" }
 loopwerk-output = { path = "crates/output" }
 loopwerk-ui = { path = "crates/ui" }
+loopwerk-soundmap = { path = "crates/soundmap" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }  # MIT OR Apache-2.0
+base64 = "0.22"  # MIT OR Apache-2.0
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }  # MIT
 roxmltree = "0.21"  # MIT OR Apache-2.0
 cpal = "0.18"  # Apache-2.0
 serde_json = "1"  # MIT OR Apache-2.0
 rtrb = "0.3"  # MIT OR Apache-2.0
+notify-debouncer-full = "0.6"  # MIT OR Apache-2.0; with notify (CC0-1.0)
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

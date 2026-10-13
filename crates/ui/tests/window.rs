@@ -9,12 +9,27 @@ use loopwerk_ui::arrangement_view::{self, ArrangementViewState};
 use loopwerk_ui::demo::demo_project;
 use loopwerk_ui::grid::Grid;
 use loopwerk_ui::session_view::{self, SessionViewState};
+use loopwerk_ui::themes::FileAction;
 use loopwerk_ui::timeline::Timeline;
 use loopwerk_ui::widgets::Action;
 use loopwerk_ui::{App, OpenAs, Status, View, theme};
 use serde_json::json;
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
+
+/// A file dropped on the window in a test.
+#[derive(Debug)]
+struct TestFile(std::path::PathBuf);
+
+impl egui::DroppedFile for TestFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Ok(Vec::new())
+    }
+}
 
 struct SessionHarness {
     grid: Grid,
@@ -82,14 +97,27 @@ fn return_tracks_have_a_mixer_but_no_slots() {
 }
 
 fn window(app: App) -> Harness<'static, App> {
-    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    window_with_step(app, 0.25)
+}
+
+/// Like [`window`], with `step` seconds a frame (a double-click needs frames closer together),
+/// and a second of frames for animations to settle.
+fn window_with_step(app: App, step: f32) -> Harness<'static, App> {
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(step)
+        .with_max_steps((1.0 / step).ceil() as u64)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
     theme::install(&harness.ctx);
     harness.run();
     harness
 }
 
+/// The demo project in the window, with the browser hidden so the views have the whole width
+/// (the browser has tests of its own, in `browser.rs`).
 fn demo_app() -> App {
     let mut app = App::new();
+    app.set_browser_open(false);
     app.set_session(Session::new(demo_project()), &[]);
     app
 }
@@ -173,6 +201,34 @@ fn dragging_a_clip_moves_it_on_the_bar_grid() {
     assert!(!starts.contains(&64.0), "{starts:?}");
 }
 
+#[test]
+fn moving_the_view_with_the_middle_button_over_a_clip_leaves_the_clip_alone() {
+    let mut harness = arrangement_app();
+    let starts = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect::<Vec<_>>())
+    };
+    let before = starts(&harness);
+    let from = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().center();
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Middle,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    harness.hover_at(from);
+    harness.run();
+    harness.input_mut().events.push(button(from, true));
+    harness.run();
+    for step in 1..=4 {
+        harness.hover_at(from + egui::vec2(-20.0 * step as f32, 0.0));
+        harness.run();
+    }
+    let to = from + egui::vec2(-80.0, 0.0);
+    harness.input_mut().events.push(button(to, false));
+    harness.run();
+    assert_eq!(starts(&harness), before);
+}
+
 /// Drags the clip labelled `label` by `by` points in the Arrangement view.
 fn drag_clip(harness: &mut Harness<'static, App>, label: &str, by: egui::Vec2) {
     let from = harness.get_by_label(label).rect().center();
@@ -232,6 +288,82 @@ fn dragging_a_clip_down_moves_it_to_the_next_track() {
     assert!(bass.contains(&64.0), "{bass:?}");
 }
 
+/// The demo project in the Arrangement view with `renderer` (stopped, made from the demo
+/// project) as its player, driven by the test instead of an audio device.
+fn arrangement_app_with_engine(renderer: &mut loopwerk_engine::Renderer) -> Harness<'static, App> {
+    let mut session = Session::new(demo_project());
+    session.attach_player(loopwerk_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness
+}
+
+/// Renders a block, so the engine takes the commands sent so far.
+fn render_a_block(renderer: &mut loopwerk_engine::Renderer) {
+    renderer.process(&mut [0.0f32; 2 * 64]);
+}
+
+#[test]
+fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
+    let mut renderer =
+        loopwerk_engine::Renderer::stopped(&demo_project(), &loopwerk_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let monitor = renderer.monitor();
+    let ruler = harness.get_by_label("Ruler").rect();
+    // 8 points a beat by default, so the grid is a bar: 130 points in is beat 16.25, bar 5.
+    let at = egui::pos2(ruler.left() + 130.0, ruler.center().y);
+    harness.hover_at(at);
+    harness.run();
+    harness.drag_at(at);
+    harness.drop_at(at);
+    harness.run();
+    render_a_block(&mut renderer);
+    assert_eq!(monitor.start_beat(), 16.0);
+    assert!(!monitor.running());
+
+    // Play starts there; Stop goes back to it, as the setting says by default.
+    harness.get_by_label("Play").click();
+    harness.run();
+    render_a_block(&mut renderer);
+    assert!(monitor.running() && monitor.beat() >= 16.0);
+    for _ in 0..400 {
+        render_a_block(&mut renderer);
+    }
+    harness.get_by_label("Stop").click();
+    // While playing the window repaints on its own: step it instead of running it to rest.
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat(), monitor.beat()), (false, 16.0, 16.0));
+
+    // With Stop set to stay, the marker moves to where it stopped.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    harness.get_by_label("Stop: Stay").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_changed_settings().map(|s| s.stop),
+        Some(loopwerk_ui::settings::StopReturn::Here)
+    );
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run();
+    for _ in 0..375 {
+        render_a_block(&mut renderer);
+    }
+    harness.get_by_label("Stop").click();
+    // While playing the window repaints on its own: step it instead of running it to rest.
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    // 375 blocks of 64 frames at 120 bpm are one beat, and the blocks around Play and Stop.
+    assert!((monitor.start_beat() - 17.0).abs() < 0.03, "{}", monitor.start_beat());
+}
+
 #[test]
 fn arrangement_headers_turn_tracks_off() {
     let mut harness = arrangement_app();
@@ -248,7 +380,11 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(harness.state().settings_open());
+    harness.get_by_label("Settings page: Interface").click();
+    harness.run();
     harness.get_by_label("Animations: Off").click();
+    harness.run();
+    harness.get_by_label("Settings page: Arrangement").click();
     harness.run();
     harness.get_by_label("Track headers: Left").click();
     harness.run();
@@ -260,6 +396,128 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.get_by_label("Close settings").click();
     harness.run();
     assert!(!harness.state().settings_open());
+}
+
+#[test]
+fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
+    let mut harness = window(demo_app());
+    let mut colors = theme::Palette::DARK;
+    colors.accent = egui::Color32::from_rgb(0x12, 0xAB, 0x9F);
+    let night =
+        loopwerk_ui::themes::ThemeEntry { id: "night".into(), theme: theme::Theme { name: "Night".into(), colors } };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_themes(&ctx, vec![night], Some("themes".into()));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Theme").click();
+    harness.run();
+    assert!(harness.query_by_label("Theme: Loopwerk Dark").is_some());
+    harness.get_by_label("Theme: Night").click();
+    harness.run();
+    assert_eq!(theme::accent(), colors.accent);
+    assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.theme), Some("night".into()));
+
+    // A copy to change becomes the theme in use, and is handed out to be written.
+    harness.get_by_label("Duplicate theme").click();
+    harness.run();
+    let saved: Vec<_> = harness
+        .state_mut()
+        .take_theme_actions()
+        .into_iter()
+        .map(|a| match a {
+            FileAction::Save { id, theme } => (id, theme.name),
+            other => (format!("{other:?}"), String::new()),
+        })
+        .collect();
+    assert_eq!(saved, [("night-copy".to_string(), "Night copy".to_string())]);
+    assert_eq!(harness.state().settings().theme, "night-copy");
+    for button in ["Reload themes", "Open the themes folder", "Back up themes", "Export the theme template"] {
+        harness.get_by_label(button).click();
+        harness.run();
+    }
+    assert_eq!(
+        harness.state_mut().take_theme_actions(),
+        [FileAction::Reload, FileAction::OpenFolder, FileAction::Backup, FileAction::ExportTemplate]
+    );
+
+    // A theme file dropped on the window is handed out to be brought in.
+    harness.input_mut().dropped_files.push(std::sync::Arc::new(TestFile("dark blue.json".into())));
+    harness.run();
+    assert_eq!(harness.state_mut().take_theme_actions(), [FileAction::Import("dark blue.json".into())]);
+
+    // A file saved elsewhere redraws the window.
+    colors.accent = egui::Color32::from_rgb(1, 2, 3);
+    let edited = loopwerk_ui::themes::ThemeEntry {
+        id: "night-copy".into(),
+        theme: theme::Theme { name: "Night copy".into(), colors },
+    };
+    harness.state_mut().put_theme(&ctx, edited);
+    assert_eq!(theme::accent(), colors.accent);
+}
+
+#[test]
+fn tab_only_switches_the_view() {
+    let mut harness = window(demo_app());
+    harness.run();
+    for expected in [View::Arrangement, View::Session, View::Arrangement] {
+        harness.key_press(Key::Tab);
+        harness.run();
+        assert_eq!(harness.state().view(), expected);
+        // No widget took the keyboard, so the next Tab is a shortcut again.
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
+    for key in [Key::ArrowDown, Key::ArrowRight] {
+        harness.key_press(key);
+        harness.run();
+        assert!(!harness.ctx.egui_wants_keyboard_input());
+    }
+}
+
+#[test]
+fn ctrl_t_asks_for_a_new_project_and_ctrl_s_saves_one() {
+    let dir = std::env::temp_dir().join(format!("loopwerk-ui-save-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let mut app = demo_app();
+    app.set_default_folders(dir.join("Projects"), dir.join("Templates"));
+    let mut harness = window(app);
+
+    // Ctrl+T: the dialog, which asks for its lists; a blank project is handed out to be made.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::T);
+    harness.run();
+    assert!(harness.state().project_dialog_open());
+    assert_eq!(harness.state_mut().take_lists_wanted(), Some(dir.join("Templates")));
+    harness.get_by_label("New blank project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_new_request(), Some(loopwerk_ui::NewProject::Blank));
+    assert!(!harness.state().project_dialog_open());
+
+    // Ctrl+S on a project without a .locr file asks for a name, in the projects folder.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    harness.run();
+    harness.get_by_label("Name").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.get_by_label("Name").type_text("Night drive");
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.run();
+    let saved = dir.join("Projects").join("Night drive.locr");
+    assert!(saved.is_file(), "{:?}", harness.state().status());
+    assert_eq!(harness.state_mut().take_saved_path(), Some(saved.clone()));
+    let session = harness.state().session();
+    assert_eq!(session.and_then(|s| s.source()), Some(saved.as_path()));
+
+    // Saved again without asking; a template is a copy in the templates folder.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    harness.run();
+    assert!(harness.query_by_label("Name").is_none(), "asked again");
+    harness.state_mut().do_action("file.saveTemplate", &mut Vec::new());
+    harness.run();
+    harness.get_by_label("Save").click();
+    harness.run();
+    assert!(dir.join("Templates").join("Night drive.locr").is_file());
+    assert_eq!(harness.state().session().and_then(|s| s.source()), Some(saved.as_path()));
+    let _clean = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -419,6 +677,7 @@ fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::wavefo
         warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 4.0, audio_time: 2.0 }],
         gain: 1.0,
         transpose: 0.0,
+        stream: None,
     };
     project.contents.push(ClipContent {
         id: ContentId(300),
@@ -434,6 +693,8 @@ fn project_with_audio() -> (loopwerk_engine::model::Project, loopwerk_ui::wavefo
         offset: 0.0,
         loop_range: Some(LoopRange { start: 0.0, end: 4.0 }),
         enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -482,6 +743,71 @@ fn dragging_an_audio_clips_gain_sets_it() {
     });
     // 30 points up at 0.1 dB a point: +3 dB.
     assert!(gain.is_some_and(|g| (g - 1.4125).abs() < 1e-3), "{gain:?}");
+}
+
+/// The Loop clip's fade-in and fade-out in the project.
+fn loop_fades(harness: &Harness<'static, App>) -> Option<(f64, f64)> {
+    let session = harness.state().session()?;
+    let lane =
+        session.project().arrangement.lanes.iter().find(|l| l.track == Some(loopwerk_engine::model::TrackId(30)))?;
+    lane.clips.first().map(|clip| (clip.fade_in, clip.fade_out))
+}
+
+/// Drags the control labelled `label` sideways by `dx` points.
+fn drag_sideways(harness: &mut Harness<'static, App>, label: &str, dx: f32) {
+    let from = harness.get_by_label(label).rect().center();
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + egui::vec2(dx / 2.0, 0.0));
+    harness.run();
+    harness.hover_at(from + egui::vec2(dx, 0.0));
+    harness.run();
+    harness.drop_at(from + egui::vec2(dx, 0.0));
+    harness.run();
+}
+
+#[test]
+fn dragging_a_fade_handle_sets_the_fade_on_the_grid_and_a_double_click_removes_it() {
+    let mut harness = window_with_step(audio_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    // The handles show on the selected clip.
+    assert!(harness.query_by_label("Fade-in of Loop on Loop").is_none());
+    harness.get_by_label("Clip Loop on Loop at bar 1").click();
+    harness.run();
+
+    // 8 points a beat and a bar grid at this zoom: 3 beats right ends the fade on bar 2.
+    drag_sideways(&mut harness, "Fade-in of Loop on Loop", 24.0);
+    assert_eq!(loop_fades(&harness), Some((4.0, 0.0)));
+    // The fade-out, 3 beats left from the clip's end at beat 16: on bar 4, 4 beats long.
+    drag_sideways(&mut harness, "Fade-out of Loop on Loop", -24.0);
+    assert_eq!(loop_fades(&harness), Some((4.0, 4.0)));
+    // Each drag is one undo step.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(loop_fades(&harness), Some((4.0, 0.0)));
+
+    // A fade cannot reach past the other one: the fade-in stops where the clip has room.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    harness.run();
+    drag_sideways(&mut harness, "Fade-in of Loop on Loop", 200.0);
+    assert_eq!(loop_fades(&harness), Some((12.0, 4.0)));
+
+    // A double-click removes the fade.
+    let handle = harness.get_by_label("Fade-in of Loop on Loop").rect().center();
+    harness.hover_at(handle);
+    harness.run();
+    // Press and release in one frame each, a few frames apart: a double-click.
+    for _ in 0..2 {
+        harness.hover_at(handle);
+        harness.drag_at(handle);
+        harness.drop_at(handle);
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(loop_fades(&harness), Some((0.0, 4.0)));
 }
 
 fn two_projects() -> Harness<'static, App> {
@@ -722,6 +1048,40 @@ fn render_the_session_window() {
     harness.run();
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("settings.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.state_mut().set_project_lists(
+        vec!["C:/Music/Loopwerk/Projects/Night drive.locr".into(), "C:/Music/Sets/Old jam.als".into()],
+        vec!["C:/Music/Loopwerk/Templates/Beat starter.locr".into(), "C:/Music/Loopwerk/Templates/Live rig.als".into()],
+    );
+    harness.state_mut().open_project_dialog(false);
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("project-dialog.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.state_mut().do_action("file.saveAs", &mut Vec::new());
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("save-prompt.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Theme").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("settings-theme.png")).unwrap_or_else(|e| panic!("{e}"));
+    harness.get_by_label("Settings page: Arrangement").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(folder.join("settings-arrangement.png")).unwrap_or_else(|e| panic!("{e}"));
     harness.get_by_label("Settings page: Shortcuts").click();
     harness.run();
     harness.remove_cursor();
@@ -777,4 +1137,32 @@ fn render_the_session_window() {
     harness.run_steps(12);
     let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
     image.save(folder.join("drop.png")).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Renders the Session and Arrangement views in every theme that comes with Loopwerk, to
+/// `target/ui-snapshots/theme-<id>-session.png` and `-arrangement.png`, to look them over. Needs
+/// a GPU adapter: `cargo test -p loopwerk-ui -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_every_built_in_theme() {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    for (id, _) in theme::built_in_themes() {
+        let mut harness =
+            Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), demo_app());
+        theme::install(&harness.ctx);
+        let ctx = harness.ctx.clone();
+        harness.state_mut().use_theme(&ctx, id);
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        image.save(folder.join(format!("theme-{id}-session.png"))).unwrap_or_else(|e| panic!("{e}"));
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        image.save(folder.join(format!("theme-{id}-arrangement.png"))).unwrap_or_else(|e| panic!("{e}"));
+    }
 }

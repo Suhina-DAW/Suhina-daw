@@ -8,6 +8,7 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use loopwerk_engine::model::TrackId;
 use serde_json::json;
 
+use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
 use crate::motion;
@@ -23,6 +24,8 @@ const RULER: f32 = ROW;
 const DEFAULT_LANE: f32 = 48.0;
 const MIN_LANE: f32 = 20.0;
 const MAX_LANE: f32 = 400.0;
+/// How much a point of wheel movement with Alt held grows the lanes (as a power of e).
+const LANE_ZOOM_PER_POINT: f32 = 0.004;
 /// Heights at which a header shows its next group (components › Track header levels).
 const SHOWS_MIXER: f32 = 48.0;
 const SHOWS_ROUTING: f32 = 70.0;
@@ -43,10 +46,15 @@ const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 400.0);
 const TAIL_BARS: f64 = 16.0;
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
 const CLIP_GAIN_RANGE: (f64, f64) = (-70.0, 24.0);
-
-const PAN_BACKGROUND: Color32 = Color32::from_rgb(0x23, 0x22, 0x20);
-const PAN_CENTRE: Color32 = Color32::from_rgb(0x55, 0x52, 0x4C);
-const BEAT_LINE: Color32 = theme::SURFACE_1;
+/// A fade handle: the square drawn at a clip's top corner, and the area that takes the pointer.
+const FADE_HANDLE: f32 = 7.0;
+const FADE_HANDLE_HIT: f32 = 11.0;
+/// The gain field at an audio clip's top right, and how far it stays from the clip's right edge
+/// so the fade-out handle has room.
+const GAIN_FIELD: Vec2 = Vec2::new(44.0, 12.0);
+const GAIN_FIELD_INSET: f32 = 12.0;
+/// The play start marker on the ruler: a triangle this wide and tall, pointing down.
+const MARKER: Vec2 = Vec2::new(9.0, 6.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -61,6 +69,41 @@ struct ClipDrag {
     index: usize,
     start: f64,
     target: TrackId,
+}
+
+/// Which end of a clip a fade belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FadeEdge {
+    In,
+    Out,
+}
+
+/// A fade handle being dragged: the clip, which fade, and its length so far in beats before
+/// snapping.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FadeDrag {
+    key: (TrackId, usize),
+    edge: FadeEdge,
+    raw: f64,
+}
+
+/// What a clip shows that a drag in progress changes before the project does: its gain and its
+/// fades.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Shown {
+    gain_db: f64,
+    fade_in: f64,
+    fade_out: f64,
+}
+
+impl Shown {
+    fn of(clip: &ClipBox) -> Self {
+        Self {
+            gain_db: clip.audio_view.as_ref().map_or(0.0, |v| v.gain_db),
+            fade_in: clip.fade_in,
+            fade_out: clip.fade_out,
+        }
+    }
 }
 
 /// A lane on screen this frame: its track, where it is, and whether it can take notes or audio.
@@ -90,11 +133,17 @@ pub struct ArrangementViewState {
     value_drag: Option<(TrackId, Control, f64)>,
     /// A clip gain being dragged, and its value so far.
     gain_drag: Option<((TrackId, usize), f64)>,
+    fade_drag: Option<FadeDrag>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
+    /// The middle button is held after being pressed over the timeline: the view follows it.
+    panning: bool,
+    /// A drag from the browser over the window: the view says which target is under the
+    /// pointer (`docs/spec/browser.md` › Dragging into the project).
+    pub drop: Option<DropProbe>,
 }
 
 impl Default for ArrangementViewState {
@@ -111,9 +160,12 @@ impl Default for ArrangementViewState {
             clip_drag: None,
             value_drag: None,
             gain_drag: None,
+            fade_drag: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
+            panning: false,
+            drop: None,
         }
     }
 }
@@ -133,9 +185,62 @@ impl ArrangementViewState {
         self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
     }
 
+    /// Scales every track lane's height by `factor`, keeping the content `anchor` points below
+    /// the top of the lanes where it is, as Alt and the wheel do.
+    fn zoom_lanes(&mut self, lanes: &[Lane], factor: f32, anchor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let lanes: Vec<&Lane> = lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+        // Every lane already at the limit it is zoomed towards: nothing moves.
+        let stuck = lanes.iter().all(|l| {
+            let h = self.height(l);
+            (factor > 1.0 && h >= MAX_LANE) || (factor < 1.0 && h <= MIN_LANE)
+        });
+        if stuck {
+            return;
+        }
+        let content = |state: &Self| lanes.iter().map(|l| state.height(l) + 1.0).sum::<f32>();
+        let before = content(self);
+        for lane in &lanes {
+            let height = self.height(lane) * factor;
+            self.heights.insert(lane.track, height.clamp(MIN_LANE, MAX_LANE));
+        }
+        let ratio = if before > 0.0 { content(self) / before } else { 1.0 };
+        self.scroll.y = ((self.scroll.y + anchor) * ratio - anchor).max(0.0);
+    }
+
+    /// What the clip at `key` shows: the project's gain and fades, or the value of a drag in
+    /// progress on it (fades on `grid`, or free when it is `None`).
+    fn shown(&self, key: (TrackId, usize), clip: &ClipBox, grid: Option<f64>) -> Shown {
+        let mut shown = Shown::of(clip);
+        if let Some((k, v)) = self.gain_drag
+            && k == key
+        {
+            shown.gain_db = v;
+        }
+        if let Some(drag) = self.fade_drag.filter(|d| d.key == key) {
+            match drag.edge {
+                FadeEdge::In => shown.fade_in = fade_length(drag.raw, FadeEdge::In, clip, shown.fade_out, grid),
+                FadeEdge::Out => shown.fade_out = fade_length(drag.raw, FadeEdge::Out, clip, shown.fade_in, grid),
+            }
+        }
+        shown
+    }
+
     fn height(&self, lane: &Lane) -> f32 {
         self.heights.get(&lane.track).copied().unwrap_or(DEFAULT_LANE)
     }
+}
+
+/// Where a click `raw` beats into the ruler puts the play start marker: on the clip grid, or
+/// where it was with `free` (Alt held); never before the start.
+fn ruler_beat(raw: f64, bar_beats: f64, beat_width: f32, free: bool) -> f64 {
+    let grid = snap(beat_width, bar_beats);
+    let beat = if free || grid <= 0.0 { raw } else { (raw / grid).round() * grid };
+    // Free clicks keep a thousandth of a beat, as the engine reports it.
+    let beat = if free { (beat * 1000.0).round() / 1000.0 } else { beat };
+    if beat.is_finite() { beat.max(0.0) } else { 0.0 }
 }
 
 /// The grid clips snap to at a zoom level: a sixteenth, a beat or a bar, whichever is at least
@@ -148,6 +253,29 @@ fn snap(beat_width: f32, bar_beats: f64) -> f64 {
     } else {
         bar_beats
     }
+}
+
+/// A fade's length after a drag of `raw` beats: its end on the grid (unless `grid` is `None`,
+/// Alt held), and no longer than the clip leaves beside the other fade.
+fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<f64>) -> f64 {
+    let end = clip.start + clip.length;
+    let snapped = match grid.filter(|g| *g > 0.0) {
+        Some(g) => match edge {
+            FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
+            FadeEdge::Out => end - ((end - raw) / g).round() * g,
+        },
+        None => raw,
+    };
+    let room = (clip.length - other).max(0.0);
+    if snapped.is_finite() { snapped.clamp(0.0, room) } else { 0.0 }
+}
+
+/// The gain a clip's fades give `beats` into a clip `length` beats long: linear, 0 … 1
+/// (`docs/spec/arrangement-editing.md` › Fades).
+fn fade_gain(beats: f64, length: f64, fade_in: f64, fade_out: f64) -> f32 {
+    let fade_in = if fade_in > 0.0 { beats / fade_in } else { 1.0 };
+    let fade_out = if fade_out > 0.0 { (length - beats) / fade_out } else { 1.0 };
+    (fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
 }
 
 /// Where a volume sits on a field, 0 … 1, with 0 dB at 85 % (components › Value field).
@@ -172,7 +300,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::SURFACE_0);
+    painter.rect_filled(area, 0.0, theme::window_background());
 
     // The header column, on either side, and the timeline beside it.
     let max_header = (area.width() - 120.0).max(HEADER_COLUMN_RANGE.0);
@@ -196,7 +324,8 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         Rect::from_min_max(Pos2::new(area.left(), ruler.bottom() + 1.0), Pos2::new(area.right(), fixed_top - 1.0));
     let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
 
-    // Zoom around the pointer with Ctrl and the wheel; the wheel alone scrolls.
+    // Zoom around the pointer with Ctrl and the wheel, lane heights with Alt and the wheel; the
+    // wheel alone scrolls.
     if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0 && time.contains(pointer) {
@@ -204,7 +333,34 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             state.beat_width = (state.beat_width * zoom).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
             state.scroll.x = beat * state.beat_width - (pointer.x - time.left());
         }
-        state.scroll -= ui.input(|i| i.smooth_scroll_delta());
+        let (alt, wheel) = ui.input(|i| (i.modifiers.alt, i.smooth_scroll_delta()));
+        if alt {
+            // Some systems turn Alt and the wheel into a sideways scroll; either axis zooms.
+            let steps = if wheel.y == 0.0 { wheel.x } else { wheel.y };
+            if steps != 0.0 && pointer.y > lanes_area.top() {
+                state.zoom_lanes(&timeline.lanes, (steps * LANE_ZOOM_PER_POINT).exp(), pointer.y - lanes_area.top());
+            }
+        } else {
+            state.scroll -= wheel;
+        }
+    }
+    // Free movement with the middle button held: the timeline follows the pointer both ways.
+    let (middle_pressed, middle_down, delta) = ui.input(|i| {
+        (
+            i.pointer.button_pressed(egui::PointerButton::Middle),
+            i.pointer.button_down(egui::PointerButton::Middle),
+            i.pointer.delta(),
+        )
+    });
+    if middle_pressed {
+        state.panning = ui.ctx().pointer_interact_pos().is_some_and(|p| time.contains(p) && p.y > ruler.top());
+    }
+    if !middle_down {
+        state.panning = false;
+    }
+    if state.panning {
+        state.scroll -= delta;
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     let content_width = ((timeline.end + TAIL_BARS * bar_beats) as f32) * state.beat_width;
     let content_height: f32 =
@@ -218,7 +374,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let last_beat = f64::from((state.scroll.x + time.width()) / state.beat_width);
 
     // Ruler: bar numbers, a line at each labelled bar.
-    painter.rect_filled(ruler, 0.0, theme::SURFACE_1);
+    painter.rect_filled(ruler, 0.0, theme::panel_background());
     let bar_width = bar_beats as f32 * state.beat_width;
     let label_every = [1u32, 2, 4, 8, 16, 32, 64].into_iter().find(|n| *n as f32 * bar_width >= 40.0).unwrap_or(128);
     let first_bar = (first_beat / bar_beats).floor() as u32;
@@ -233,7 +389,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     for bar in first_bar..=last_bar {
         let x = x_of(f64::from(bar) * bar_beats).round() + 0.5;
         if bar % label_every == 0 {
-            ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::LINE));
+            ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::border()));
             let label = Rect::from_min_max(Pos2::new(x + 3.0, ruler.top()), Pos2::new(x + 40.0, ruler.bottom()));
             widgets::text_in(
                 &ruler_painter,
@@ -241,27 +397,52 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
                 Align2::LEFT_CENTER,
                 &(bar + 1).to_string(),
                 theme::mono_font(theme::TEXT_SMALL),
-                theme::TEXT_SECONDARY,
+                theme::text_secondary(),
             );
         }
         // Grid in the lanes: every bar, and beats when they are far enough apart.
         for band in grid_bands.iter().filter(|b| b.span() > 0.0) {
             if bar_width >= 6.0 || bar % label_every == 0 {
-                grid_painter.vline(x, *band, theme::hairline(theme::LINE));
+                grid_painter.vline(x, *band, theme::hairline(theme::border()));
             }
             if state.beat_width >= 10.0 {
                 for beat in 1..bar_beats.ceil() as u32 {
                     let x = x_of(f64::from(bar) * bar_beats + f64::from(beat)).round() + 0.5;
-                    grid_painter.vline(x, *band, theme::hairline(BEAT_LINE));
+                    grid_painter.vline(x, *band, theme::hairline(theme::panel_background()));
                 }
             }
         }
     }
-    painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
+    painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border_strong()));
+
+    // A click on the ruler moves the play start marker there, on the clip grid (Alt: free); while
+    // playing, playback jumps there (`docs/spec/arrangement-editing.md` › Play position).
+    let ruler_response = ui.interact(ruler, Id::new("arrangement-ruler"), Sense::click());
+    ruler_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Ruler"));
+    if ruler_response.clicked()
+        && let Some(pointer) = ruler_response.interact_pointer_pos()
+    {
+        let free = ui.input(|i| i.modifiers.alt);
+        let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width);
+        actions.push(Action::new(
+            "transport.setPosition",
+            json!({ "beats": ruler_beat(raw, bar_beats, state.beat_width, free) }),
+        ));
+    }
+    // The marker: a small triangle hanging from the ruler's lower edge.
+    let marker_x = x_of(timeline.start_beat).round() + 0.5;
+    if (time.left()..=time.right()).contains(&marker_x) {
+        let (top, half) = (ruler.bottom() - MARKER.y, MARKER.x / 2.0);
+        ruler_painter.add(egui::Shape::convex_polygon(
+            vec![Pos2::new(marker_x - half, top), Pos2::new(marker_x + half, top), Pos2::new(marker_x, ruler.bottom())],
+            theme::text_primary(),
+            egui::Stroke::NONE,
+        ));
+    }
 
     // Header column top, beside the ruler: right-click moves the headers to the other side.
     let corner = Rect::from_x_y_ranges(headers, ruler.y_range());
-    painter.rect_filled(corner, 0.0, theme::SURFACE_1);
+    painter.rect_filled(corner, 0.0, theme::panel_background());
     let corner_response = ui.interact(corner, Id::new("arrangement-header-corner"), Sense::click());
     corner_response.context_menu(|ui| {
         let text = if state.headers_left { "Track headers on the right" } else { "Track headers on the left" };
@@ -271,7 +452,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
     });
     let edge_x = if state.headers_left { headers.max + 0.5 } else { headers.min - 0.5 };
-    painter.vline(edge_x, area.y_range(), theme::hairline(theme::LINE_STRONG));
+    painter.vline(edge_x, area.y_range(), theme::hairline(theme::border_strong()));
 
     // Where every lane is this frame, so a dragged clip can find the lane under the pointer.
     let mut rows = Vec::new();
@@ -326,7 +507,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &groups, state, actions);
-        lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::LINE_STRONG));
+        lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::border_strong()));
     }
 
     // A track header let go over a lane moves the track (and a group's tracks) there: above the
@@ -344,7 +525,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     {
         let y = if below { row.time.bottom() + 0.5 } else { row.time.top() - 0.5 };
         if lane.track != dragged {
-            painter.with_clip_rect(lanes_area).hline(area.x_range(), y, egui::Stroke::new(2.0, theme::ACCENT));
+            painter.with_clip_rect(lanes_area).hline(area.x_range(), y, egui::Stroke::new(2.0, theme::accent()));
         }
     }
     if let Some((dragged, y)) = state.track_drop.take()
@@ -365,7 +546,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
 
     // Fixed rows: return tracks, then the main track, each a name and a volume.
-    painter.hline(area.x_range(), fixed.top() - 0.5, theme::hairline(theme::LINE_STRONG));
+    painter.hline(area.x_range(), fixed.top() - 0.5, theme::hairline(theme::border_strong()));
     let fixed_painter = painter.with_clip_rect(fixed);
     for lane in &returns {
         let Some(row) = row_of(lane.track) else { continue };
@@ -389,15 +570,15 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         fixed_row(ui, &fixed_painter, header, fixed, lane, state, actions);
-        fixed_painter.hline(area.x_range(), row.time.bottom() + 0.5, theme::hairline(theme::LINE));
+        fixed_painter.hline(area.x_range(), row.time.bottom() + 0.5, theme::hairline(theme::border()));
     }
     if let Some(db) = timeline.main_volume_db {
         let y = fixed.bottom() - ROW;
         let header = Rect::from_x_y_ranges(headers, egui::Rangef::new(y, y + ROW));
-        fixed_painter.rect_filled(header, 0.0, theme::SURFACE_1);
+        fixed_painter.rect_filled(header, 0.0, theme::panel_background());
         let inner = header.shrink2(Vec2::new(PAD, 2.0));
         let font = theme::ui_font(theme::TEXT);
-        widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::TEXT_PRIMARY);
+        widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::text_primary());
         let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
         volume_text(&fixed_painter, field, db, 0.0);
     }
@@ -415,6 +596,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             rect,
             &lane_look,
             clip,
+            Shown::of(clip),
             start,
             &x_of,
             state.beat_width,
@@ -423,12 +605,65 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         );
     }
 
+    // The empty space under the last lane: buttons that add a track, and new tracks for what
+    // the browser drops there, at the beat under the pointer.
+    let empty =
+        Rect::from_min_max(Pos2::new(area.left(), tracks_bottom + 1.0), Pos2::new(area.right(), lanes_area.bottom()));
+    if empty.height() > theme::ROW + 4.0 {
+        let buttons = Rect::from_x_y_ranges(time.x_range(), empty.y_range());
+        crate::session_view::empty_space(ui, &painter, buttons, actions);
+    }
+    let beat_at = |x: f32, free: bool| {
+        let raw = f64::from((x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
+        if free {
+            raw
+        } else {
+            let grid = snap(state.beat_width, bar_beats);
+            ((raw / grid).round() * grid).max(0.0)
+        }
+    };
+    let free = ui.input(|i| i.modifiers.alt);
+    if let Some(probe) = state.drop.as_mut() {
+        for row in rows.iter() {
+            let Some(lane) = timeline.lanes.iter().find(|l| l.track == row.track) else { continue };
+            if lane.kind != ColumnKind::Track {
+                continue;
+            }
+            probe.offer(Rect::from_x_y_ranges(headers, row.clip.y_range()), DropTarget::Track(row.track));
+            if probe.files {
+                let beat = beat_at(probe.pointer.x, free);
+                let x = x_of(beat);
+                let mark =
+                    Rect::from_x_y_ranges(egui::Rangef::new(x, (x + 2.0).min(row.clip.right())), row.clip.y_range());
+                if row.clip.contains(probe.pointer) && probe.target.is_none() {
+                    probe.target = Some(DropTarget::Lane { track: row.track, beat });
+                    probe.area = Some(row.clip);
+                    painter.rect_filled(mark, 0.0, theme::accent());
+                }
+            } else {
+                probe.offer(row.clip, DropTarget::Track(row.track));
+            }
+        }
+        if empty.height() > 0.0 && empty.contains(probe.pointer) {
+            let beat = beat_at(probe.pointer.x.max(time.left()), free);
+            probe.offer(empty, DropTarget::NewTracks { beat: Some(beat), scene: None });
+        }
+        if let Some(target_area) = probe.area {
+            painter.rect_stroke(
+                target_area.shrink(0.5),
+                0.0,
+                egui::Stroke::new(1.5, theme::accent()),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
     // The header column's inner edge resizes it.
     let edge = Rect::from_x_y_ranges(egui::Rangef::new(edge_x - 3.0, edge_x + 3.0), area.y_range());
     let response = ui
         .interact(edge, Id::new("arrangement-header-edge"), Sense::drag())
         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-    if response.dragged() {
+    if response.dragged_by(egui::PointerButton::Primary) {
         let dx = response.drag_delta().x;
         let width = if state.headers_left { state.header_width + dx } else { state.header_width - dx };
         state.header_width = width.clamp(HEADER_COLUMN_RANGE.0, HEADER_COLUMN_RANGE.1.min(max_header));
@@ -438,7 +673,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     if timeline.running || timeline.beat > 0.0 {
         let x = x_of(timeline.beat).round() + 0.5;
         if x >= time.left() && x <= time.right() {
-            painter.vline(x, time.y_range(), theme::hairline(theme::ACCENT));
+            painter.vline(x, time.y_range(), theme::hairline(theme::accent()));
         }
     }
 }
@@ -497,14 +732,14 @@ fn clip_box<'a>(
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
     response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, actions));
-    if response.clicked() || response.drag_started() {
+    if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
         state.selected = Some(key);
     }
-    if response.drag_started() {
+    if response.drag_started_by(egui::PointerButton::Primary) {
         state.clip_drag =
             Some(ClipDrag { track: lane.track, index: clip.index, start: clip.start, target: lane.track });
     }
-    if response.dragged()
+    if response.dragged_by(egui::PointerButton::Primary)
         && let Some(drag) = state.clip_drag.as_mut()
         && (drag.track, drag.index) == key
     {
@@ -513,7 +748,7 @@ fn clip_box<'a>(
             drag.target = target;
         }
     }
-    if response.drag_stopped()
+    if response.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(drag) = state.clip_drag.take()
         && (drag.track, drag.index) == key
     {
@@ -530,9 +765,26 @@ fn clip_box<'a>(
         }
         // Drawn where it was dropped until the project has moved it.
         let rect = clip_rect(space, start, clip.length, x_of);
-        paint_clip(&painter.with_clip_rect(row.clip), rect, lane, clip, start, x_of, state.beat_width, waveforms, true);
+        let shown = Shown::of(clip);
+        paint_clip(
+            &painter.with_clip_rect(row.clip),
+            rect,
+            lane,
+            clip,
+            shown,
+            start,
+            x_of,
+            state.beat_width,
+            waveforms,
+            true,
+        );
         return None;
     }
+
+    // What the clip shows: the project's values, or those of a drag in progress, so the
+    // waveform follows the gain and the fades while they are dragged.
+    let fade_grid = (!ui.input(|i| i.modifiers.alt)).then_some(grid);
+    let mut shown = state.shown(key, clip, fade_grid);
 
     // An audio clip big enough shows its gain, which a vertical drag changes.
     let mut gain_paint = None;
@@ -540,19 +792,18 @@ fn clip_box<'a>(
         && state.clip_drag.is_none_or(|d| !mine(&d))
     {
         let rect = clip_rect(space, clip.start, clip.length, x_of);
-        let field = Rect::from_min_size(Pos2::new(rect.right() - 48.0, rect.top() + 3.0), Vec2::new(44.0, 12.0));
+        let field = Rect::from_min_size(
+            Pos2::new(rect.right() - GAIN_FIELD_INSET - GAIN_FIELD.x, rect.top() + 3.0),
+            GAIN_FIELD,
+        );
         if rect.width() >= 80.0 && rect.height() >= 30.0 && field.intersects(row.clip) {
-            let shown = match state.gain_drag {
-                Some((k, v)) if k == key => v,
-                _ => view.gain_db,
-            };
             let label = format!("Gain of {name} on {}", lane.name);
             let response = widgets::value_area(
                 ui,
                 field.intersect(row.clip),
                 Id::new(("clip-gain", lane.track.0, clip.index)),
                 &label,
-                widgets::format_db(shown),
+                widgets::format_db(shown.gain_db),
             );
             let mut preview = match state.gain_drag {
                 Some((k, v)) if k == key => Some(v),
@@ -572,11 +823,84 @@ fn clip_box<'a>(
                 }
                 Drag::None => {}
             }
-            let shown = match state.gain_drag {
+            shown.gain_db = match state.gain_drag {
                 Some((k, v)) if k == key => v,
                 _ => committed.unwrap_or(view.gain_db),
             };
-            gain_paint = Some((field, shown, widgets::hover(ui, &response)));
+            gain_paint = Some((field, shown.gain_db, widgets::hover(ui, &response)));
+        }
+    }
+
+    // Fade handles at the top corners of an audio clip, while it is hovered or selected: a
+    // horizontal drag sets the fade (its end on the grid, free with Alt), a double-click
+    // removes it.
+    let mut handles = Vec::new();
+    let rect = clip_rect(space, clip.start, clip.length, x_of);
+    let selected = state.selected == Some(key);
+    let fading = state.fade_drag.is_some_and(|d| d.key == key);
+    let pointer_in = ui.ctx().pointer_hover_pos().is_some_and(|p| visible.contains(p));
+    let fits = rect.width() >= 3.0 * FADE_HANDLE && rect.height() >= 2.0 * FADE_HANDLE;
+    if clip.audio && fits && state.clip_drag.is_none_or(|d| !mine(&d)) && (pointer_in || selected || fading) {
+        let grid = fade_grid;
+        for edge in [FadeEdge::In, FadeEdge::Out] {
+            let (current, now, other) = match edge {
+                FadeEdge::In => (clip.fade_in, shown.fade_in, shown.fade_out),
+                FadeEdge::Out => (clip.fade_out, shown.fade_out, shown.fade_in),
+            };
+            let handle = fade_handle(rect, edge, now as f32 * state.beat_width);
+            let hit = handle.expand((FADE_HANDLE_HIT - FADE_HANDLE) / 2.0).intersect(row.clip);
+            if hit.width() <= 0.0 || hit.height() <= 0.0 {
+                continue;
+            }
+            let which = if edge == FadeEdge::In { "Fade-in" } else { "Fade-out" };
+            let label = format!("{which} of {name} on {}", lane.name);
+            let id = Id::new(("clip-fade", lane.track.0, clip.index, edge == FadeEdge::In));
+            let response =
+                ui.interact(hit, id, Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            response.widget_info(|| {
+                let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, &label);
+                info.value = Some(now);
+                info
+            });
+            let mine_fade = |d: &FadeDrag| d.key == key && d.edge == edge;
+            let mut done = None;
+            if response.double_clicked() {
+                state.fade_drag = None;
+                done = Some(0.0);
+            } else {
+                if response.drag_started_by(egui::PointerButton::Primary) {
+                    state.fade_drag = Some(FadeDrag { key, edge, raw: current });
+                }
+                if response.dragged_by(egui::PointerButton::Primary)
+                    && let Some(drag) = state.fade_drag.as_mut().filter(|d| mine_fade(d))
+                {
+                    let dx = f64::from(response.drag_delta().x / state.beat_width);
+                    drag.raw += if edge == FadeEdge::In { dx } else { -dx };
+                }
+                if response.drag_stopped_by(egui::PointerButton::Primary)
+                    && let Some(drag) = state.fade_drag.take_if(|d| mine_fade(d))
+                {
+                    done = Some(fade_length(drag.raw, edge, clip, other, grid));
+                }
+            }
+            let length = match (done, state.fade_drag) {
+                (Some(v), _) => v,
+                (None, Some(d)) if mine_fade(&d) => fade_length(d.raw, edge, clip, other, grid),
+                _ => now,
+            };
+            if let Some(v) = done
+                && (v - current).abs() > 1e-9
+            {
+                let param = if edge == FadeEdge::In { "in" } else { "out" };
+                let mut params = json!({ "track": lane.track.0, "index": clip.index });
+                params[param] = json!((v * 1e6).round() / 1e6);
+                actions.push(Action::new("clip.setFades", params));
+            }
+            match edge {
+                FadeEdge::In => shown.fade_in = length,
+                FadeEdge::Out => shown.fade_out = length,
+            }
+            handles.push((edge, widgets::hover(ui, &response)));
         }
     }
 
@@ -585,12 +909,12 @@ fn clip_box<'a>(
         drag => {
             let start = drag.filter(mine).map_or(clip.start, |d| snapped(d.start));
             let rect = clip_rect(space, start, clip.length, x_of);
-            let selected = state.selected == Some(key);
             paint_clip(
                 &painter.with_clip_rect(row.clip),
                 rect,
                 lane,
                 clip,
+                shown,
                 start,
                 x_of,
                 state.beat_width,
@@ -603,7 +927,7 @@ fn clip_box<'a>(
     // The gain sits on top of the clip.
     if let Some((field, db, hover)) = gain_paint {
         let gain_painter = painter.with_clip_rect(row.clip);
-        let fill = motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover);
+        let fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
         gain_painter.rect_filled(field, 0.0, fill);
         let text = format!("{} dB", widgets::format_db(db));
         let font = theme::mono_font(theme::TEXT_TINY);
@@ -613,10 +937,30 @@ fn clip_box<'a>(
             Align2::RIGHT_CENTER,
             &text,
             font,
-            theme::TEXT_VALUE,
+            theme::text_value(),
         );
     }
+    // The handles sit on top of everything on the clip, where the fades now end.
+    let handle_painter = painter.with_clip_rect(row.clip);
+    for (edge, hover) in handles {
+        let length = if edge == FadeEdge::In { shown.fade_in } else { shown.fade_out };
+        let handle = fade_handle(rect, edge, length as f32 * state.beat_width);
+        let fill = motion::mix(theme::text_secondary(), theme::text_primary(), hover);
+        handle_painter.rect_filled(handle, 0.0, fill);
+        handle_painter.rect_stroke(handle, 0.0, theme::hairline(theme::window_background()), StrokeKind::Outside);
+    }
     result
+}
+
+/// The square of a fade handle: at the clip's top corner with no fade, at the fade's end along
+/// the top edge with one, `fade` points from the clip's edge; always inside the clip.
+fn fade_handle(clip: Rect, edge: FadeEdge, fade: f32) -> Rect {
+    let fade = if fade.is_finite() { fade.max(0.0) } else { 0.0 };
+    let left = match edge {
+        FadeEdge::In => (clip.left() + fade).min(clip.right() - FADE_HANDLE),
+        FadeEdge::Out => (clip.right() - fade - FADE_HANDLE).max(clip.left()),
+    };
+    Rect::from_min_size(Pos2::new(left.round(), clip.top()), Vec2::splat(FADE_HANDLE))
 }
 
 fn view_rect(painter: &egui::Painter) -> Rect {
@@ -630,6 +974,7 @@ fn paint_clip(
     rect: Rect,
     lane: &Lane,
     clip: &ClipBox,
+    shown: Shown,
     start: f64,
     x_of: &dyn Fn(f64) -> f32,
     beat_width: f32,
@@ -641,10 +986,10 @@ fn paint_clip(
         return;
     }
     let dim = |c: Color32| if lane.mute || !clip.enabled { c.gamma_multiply(0.55) } else { c };
-    painter.rect_filled(rect, 0.0, if selected { theme::SURFACE_3 } else { theme::SURFACE_2 });
-    let color = if clip.enabled { rgb(lane.color) } else { theme::TEXT_TERTIARY };
+    painter.rect_filled(rect, 0.0, if selected { theme::control_active() } else { theme::control_background() });
+    let color = if clip.enabled { rgb(lane.color) } else { theme::text_hint() };
     painter.rect_filled(Rect::from_min_size(rect.min, Vec2::new(rect.width(), 2.0)), 0.0, dim(color));
-    let text_color = if clip.enabled && !lane.mute { theme::TEXT_VALUE } else { theme::TEXT_TERTIARY };
+    let text_color = if clip.enabled && !lane.mute { theme::text_value() } else { theme::text_hint() };
     let has_name = rect.height() >= 20.0;
     if has_name {
         // The name stays in view while the clip's start is scrolled off to the left.
@@ -668,8 +1013,8 @@ fn paint_clip(
         && let Some(peaks) = waveforms.get(&view.file)
     {
         // One line per pixel column in view: the range of the samples it covers, scaled by
-        // the clip's gain and kept inside the clip.
-        let gain = if view.gain_db.is_finite() { 10f32.powf(view.gain_db as f32 / 20.0) } else { 0.0 };
+        // the clip's gain and its fades and kept inside the clip.
+        let gain = if shown.gain_db.is_finite() { 10f32.powf(shown.gain_db as f32 / 20.0) } else { 0.0 };
         let (middle, half) = (marks.center().y, marks.height() / 2.0);
         let from = rect.left().max(view_rect(painter).left()).floor();
         let to = rect.right().min(view_rect(painter).right()).ceil();
@@ -679,6 +1024,7 @@ fn paint_clip(
         while x < to {
             let elapsed = f64::from(x - rect.left()) * per_point;
             let (low, high) = peaks.range(view.seconds(elapsed), view.seconds(elapsed + per_point));
+            let gain = gain * fade_gain(elapsed + per_point / 2.0, clip.length, shown.fade_in, shown.fade_out);
             let top = middle - (high * gain).clamp(-1.0, 1.0) * half;
             let bottom = (middle - (low * gain).clamp(-1.0, 1.0) * half).max(top + 1.0);
             painter.vline(x + 0.5, egui::Rangef::new(top, bottom), stroke);
@@ -701,8 +1047,22 @@ fn paint_clip(
             painter.rect_filled(Rect::from_min_size(Pos2::new(x, y - 1.0), Vec2::new(width, 2.0)), 0.0, dim(color));
         }
     }
+    // A fade is a line over the waveform, from the clip's bottom corner to where it ends at
+    // the top.
+    if clip.audio {
+        let fade_stroke = theme::hairline(dim(theme::text_secondary()));
+        let (top, bottom) = (rect.top() + 2.0, rect.bottom());
+        if shown.fade_in > 0.0 {
+            let end = (rect.left() + shown.fade_in as f32 * beat_width).min(rect.right());
+            painter.line_segment([Pos2::new(rect.left(), bottom), Pos2::new(end, top)], fade_stroke);
+        }
+        if shown.fade_out > 0.0 {
+            let from = (rect.right() - shown.fade_out as f32 * beat_width).max(rect.left());
+            painter.line_segment([Pos2::new(from, top), Pos2::new(rect.right(), bottom)], fade_stroke);
+        }
+    }
     if selected {
-        painter.rect_stroke(rect, 0.0, theme::hairline(theme::TEXT_PRIMARY), StrokeKind::Inside);
+        painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
     }
 }
 
@@ -717,7 +1077,7 @@ fn routing(
 ) {
     let current = lane.output.and_then(|t| groups.iter().find(|(g, _)| *g == t)).map_or("Main", |(_, name)| name);
     let label = Rect::from_min_size(rect.min, Vec2::new(18.0, rect.height()));
-    widgets::text_in(painter, label, Align2::LEFT_CENTER, "→", theme::ui_font(theme::TEXT_SMALL), theme::TEXT_TERTIARY);
+    widgets::text_in(painter, label, Align2::LEFT_CENTER, "→", theme::ui_font(theme::TEXT_SMALL), theme::text_hint());
     let field = Rect::from_min_max(Pos2::new(label.right(), rect.top()), rect.max);
     let mut picked = None;
     let response =
@@ -749,11 +1109,11 @@ fn fixed_row(
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) {
-    painter.rect_filled(rect, 0.0, theme::SURFACE_1);
+    painter.rect_filled(rect, 0.0, theme::panel_background());
     let inner = rect.shrink2(Vec2::new(PAD, 2.0));
     let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
     let name = Rect::from_min_max(inner.min, Pos2::new(field.left() - PAD, inner.bottom()));
-    let color = if lane.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
+    let color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), color);
     let id = Id::new(("arrangement-header", lane.track.0));
     value_control(ui, painter, field, clip, lane, Control::Volume, true, id, state, actions);
@@ -789,10 +1149,10 @@ fn track_header(
             state.selected_tracks = vec![lane.track];
         }
     }
-    if body.drag_started() {
+    if body.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(lane.track);
     }
-    if body.drag_stopped()
+    if body.drag_stopped_by(egui::PointerButton::Primary)
         && let Some(dragged) = state.track_drag.take()
         && let Some(pointer) = body.interact_pointer_pos().or_else(|| ui.ctx().pointer_latest_pos())
     {
@@ -809,7 +1169,7 @@ fn track_header(
         menus::track_menu(ui, &menu, actions);
     });
     let selected = state.selected_tracks.contains(&lane.track);
-    painter.rect_filled(rect, 0.0, if selected { theme::SURFACE_2 } else { theme::SURFACE_1 });
+    painter.rect_filled(rect, 0.0, if selected { theme::control_background() } else { theme::panel_background() });
     let inner = Rect::from_min_max(
         Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
         Pos2::new(rect.right() - PAD, rect.bottom() - HEADER_PAD_Y),
@@ -822,7 +1182,7 @@ fn track_header(
     let square = Rect::from_min_size(Pos2::new(solo.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     painter.rect_filled(square, 0.0, if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) });
     let name = Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), row.max);
-    let name_color = if lane.mute { theme::TEXT_TERTIARY } else { theme::TEXT_PRIMARY };
+    let name_color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), name_color);
     if solo.intersects(clip)
         && let Some(action) =
@@ -871,7 +1231,7 @@ fn track_header(
         let response = ui
             .interact(edge.intersect(lanes_area), id.with("resize"), Sense::drag())
             .on_hover_cursor(egui::CursorIcon::ResizeVertical);
-        if response.dragged() {
+        if response.dragged_by(egui::PointerButton::Primary) {
             let height = (state.height(lane) + response.drag_delta().y).clamp(MIN_LANE, MAX_LANE);
             state.heights.insert(lane.track, height);
         }
@@ -952,12 +1312,12 @@ fn value_control(
 
 /// A volume field: fill from the left up to the level, a tick at its end, the value on the right.
 fn volume_field(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
-    painter.rect_filled(rect, 0.0, motion::mix(theme::SURFACE_2, theme::HOVER_ON_SURFACE_2, hover));
+    painter.rect_filled(rect, 0.0, motion::mix(theme::control_background(), theme::control_hover(), hover));
     let x = rect.left() + rect.width() * volume_position(db);
-    painter.rect_filled(Rect::from_min_max(rect.min, Pos2::new(x, rect.bottom())), 0.0, theme::SURFACE_3_BRIGHT);
+    painter.rect_filled(Rect::from_min_max(rect.min, Pos2::new(x, rect.bottom())), 0.0, theme::control_playing());
     let tick = x.round() - 0.5;
-    painter.vline(tick, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(theme::TEXT_VALUE));
-    painter.vline(tick, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(theme::TEXT_VALUE));
+    painter.vline(tick, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(theme::text_value()));
+    painter.vline(tick, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(theme::text_value()));
     let text = rect.shrink2(Vec2::new(4.0, 0.0));
     widgets::text_in(
         painter,
@@ -965,13 +1325,13 @@ fn volume_field(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
         Align2::RIGHT_CENTER,
         &widgets::format_db(db),
         theme::mono_font(theme::TEXT_SMALL),
-        theme::TEXT_PRIMARY,
+        theme::text_primary(),
     );
 }
 
 /// A volume as a plain value, for the compact return and main rows.
 fn volume_text(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
-    let color = motion::mix(theme::TEXT_VALUE, theme::TEXT_PRIMARY, hover);
+    let color = motion::mix(theme::text_value(), theme::text_primary(), hover);
     widgets::text_in(
         painter,
         rect,
@@ -984,21 +1344,21 @@ fn volume_text(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
 
 /// A pan field: a bar along the bottom from the centre, a centre tick, the value in the middle.
 fn pan_field(painter: &egui::Painter, rect: Rect, pan: f64, hover: f32) {
-    painter.rect_filled(rect, 0.0, motion::mix(PAN_BACKGROUND, theme::HOVER_ON_SURFACE_1, hover));
+    painter.rect_filled(rect, 0.0, motion::mix(theme::pan_background(), theme::panel_hover(), hover));
     let centre = rect.center().x.round() - 0.5;
-    painter.vline(centre, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(PAN_CENTRE));
-    painter.vline(centre, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(PAN_CENTRE));
+    painter.vline(centre, egui::Rangef::new(rect.top(), rect.top() + 2.0), theme::hairline(theme::pan_centre()));
+    painter.vline(centre, egui::Rangef::new(rect.bottom() - 2.0, rect.bottom()), theme::hairline(theme::pan_centre()));
     let to = rect.center().x + rect.width() / 2.0 * pan.clamp(-1.0, 1.0) as f32;
     let bar =
         Rect::from_min_max(Pos2::new(centre.min(to), rect.bottom() - 2.0), Pos2::new(centre.max(to), rect.bottom()));
-    painter.rect_filled(bar, 0.0, theme::TEXT_VALUE);
+    painter.rect_filled(bar, 0.0, theme::text_value());
     widgets::text_in(
         painter,
         rect,
         Align2::CENTER_CENTER,
         &widgets::format_pan(pan),
         theme::mono_font(theme::TEXT_SMALL),
-        theme::TEXT_PRIMARY,
+        theme::text_primary(),
     );
 }
 
@@ -1016,9 +1376,95 @@ mod tests {
     }
 
     #[test]
+    fn alt_and_the_wheel_zoom_every_lane_within_its_limits() {
+        let timeline = Timeline::build(&crate::demo::demo_project(), None);
+        let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+        let mut state = ArrangementViewState::default();
+        state.set_lane_height(tracks[0].track, 100.0);
+        state.zoom_lanes(&timeline.lanes, 2.0, 0.0);
+        assert_eq!(state.height(tracks[0]), 200.0);
+        assert!(tracks[1..].iter().all(|l| state.height(l) == DEFAULT_LANE * 2.0));
+        // The content under the pointer stays put: what was 10 points down is now 20.
+        state.scroll.y = 0.0;
+        state.zoom_lanes(&timeline.lanes, 0.5, 10.0);
+        assert_eq!(state.scroll.y, 0.0);
+        state.scroll.y = 40.0;
+        state.zoom_lanes(&timeline.lanes, 2.0, 10.0);
+        assert!((state.scroll.y - 90.0).abs() < 1.0, "{}", state.scroll.y);
+        for _ in 0..50 {
+            state.zoom_lanes(&timeline.lanes, 0.5, 0.0);
+        }
+        assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
+        state.zoom_lanes(&timeline.lanes, f32::NAN, 0.0);
+        assert!(tracks.iter().all(|l| state.height(l) == MIN_LANE));
+    }
+
+    fn audio_clip() -> ClipBox {
+        let timeline = Timeline::build(&crate::demo::demo_project(), None);
+        let clip = timeline.lanes.iter().flat_map(|l| &l.clips).next().cloned().unwrap();
+        ClipBox { start: 2.0, length: 8.0, fade_in: 1.0, fade_out: 0.0, audio: true, ..clip }
+    }
+
+    #[test]
+    fn a_dragged_gain_or_fade_is_what_the_clip_shows() {
+        let clip = audio_clip();
+        let key = (TrackId(1), 0);
+        let mut state = ArrangementViewState::default();
+        assert_eq!(state.shown(key, &clip, Some(1.0)), Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0 });
+        // The waveform is drawn with the gain being dragged, not the one in the project.
+        state.gain_drag = Some((key, -12.0));
+        assert_eq!(state.shown(key, &clip, Some(1.0)).gain_db, -12.0);
+        assert_eq!(state.shown((TrackId(1), 1), &clip, Some(1.0)).gain_db, 0.0, "only on the dragged clip");
+        // A fade being dragged: on the grid, or free with Alt.
+        state.fade_drag = Some(FadeDrag { key, edge: FadeEdge::Out, raw: 2.6 });
+        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out, 3.0);
+        assert!((state.shown(key, &clip, None).fade_out - 2.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_fade_ends_on_the_grid_and_leaves_room_for_the_other() {
+        let clip = audio_clip();
+        // The fade-in's end snaps to the grid in project beats: the clip starts at beat 2.
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, Some(4.0)), 2.0);
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, None), 1.3);
+        // The fade-out's start snaps: the clip ends at beat 10.
+        assert_eq!(fade_length(1.3, FadeEdge::Out, &clip, 0.0, Some(4.0)), 2.0);
+        // Never below 0, never past the other fade.
+        assert_eq!(fade_length(-5.0, FadeEdge::In, &clip, 0.0, None), 0.0);
+        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 3.0, None), 5.0);
+        assert_eq!(fade_length(f64::NAN, FadeEdge::In, &clip, 0.0, None), 0.0);
+    }
+
+    #[test]
+    fn fade_handles_follow_the_fade_and_stay_inside_the_clip() {
+        let clip = Rect::from_min_size(Pos2::new(100.0, 10.0), Vec2::new(80.0, 40.0));
+        assert_eq!(fade_handle(clip, FadeEdge::In, 0.0).min, Pos2::new(100.0, 10.0));
+        assert_eq!(fade_handle(clip, FadeEdge::Out, 0.0).max.x, 180.0);
+        assert_eq!(fade_handle(clip, FadeEdge::In, 20.0).min.x, 120.0);
+        assert_eq!(fade_handle(clip, FadeEdge::Out, 500.0).min.x, 100.0);
+        assert_eq!(fade_handle(clip, FadeEdge::In, f32::NAN).min.x, 100.0);
+        // Linear: half-way into the fade-in, half the level; full in between the fades.
+        assert_eq!(fade_gain(0.5, 8.0, 1.0, 2.0), 0.5);
+        assert_eq!(fade_gain(4.0, 8.0, 1.0, 2.0), 1.0);
+        assert_eq!(fade_gain(7.0, 8.0, 1.0, 2.0), 0.5);
+    }
+
+    #[test]
     fn clips_snap_to_a_grid_that_follows_the_zoom() {
         assert_eq!(snap(60.0, 4.0), 0.25);
         assert_eq!(snap(20.0, 4.0), 1.0);
         assert_eq!(snap(4.0, 3.0), 3.0);
+    }
+
+    #[test]
+    fn a_ruler_click_lands_on_the_clip_grid_unless_alt_is_held() {
+        // 8 points a beat: the grid is a bar.
+        assert_eq!(ruler_beat(17.9, 4.0, 8.0, false), 16.0);
+        assert_eq!(ruler_beat(18.1, 4.0, 8.0, false), 20.0);
+        // 60 points a beat: sixteenths.
+        assert_eq!(ruler_beat(2.13, 4.0, 60.0, false), 2.25);
+        assert_eq!(ruler_beat(2.1337, 4.0, 60.0, true), 2.134);
+        assert_eq!(ruler_beat(-3.0, 4.0, 8.0, true), 0.0);
+        assert_eq!(ruler_beat(f64::NAN, 4.0, 8.0, false), 0.0);
     }
 }

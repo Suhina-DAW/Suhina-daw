@@ -8,6 +8,8 @@ covers:
   - crates/ipc/**
   - crates/plugins/**
   - crates/plugin-host/**
+  - crates/engine/src/plugin.rs
+  - crates/session/src/rack.rs
 ---
 
 # 0006: Plug-in hosting
@@ -65,6 +67,27 @@ workspace forbids.
    down one product, not all. Per plug-in the user can choose *its own process per instance* or
    *one process per vendor*. Where consecutive plug-ins of a chain live in the same process, they
    run in one round trip per block.
+   *Built:* a host process runs any number of instances, each loaded and unloaded on its own
+   under a number the engine gives it, with its own link (shared memory and doorbells) and its
+   own audio thread; the host's main thread serves every instance's callbacks and editors, and
+   several editors may be open at once. A VST3 module is loaded once per process however many
+   instances use it, so `InitDll`/`ModuleEntry` and `ExitDll`/`ModuleExit` run once (`clack-host`
+   does the same for a CLAP entry's `init`/`deinit`). An instance whose audio thread does not
+   stop when it is unloaded is stuck in the plug-in and is left as it is, so the others go on.
+   On the engine side, `Launch::group` names the process an instance starts in: instances with
+   the same host executable and group share the process a registry in `crates/plugins` keeps
+   while any of them lives; `None` is a process of its own. Requests from the instances are
+   taken in turn, and replies are matched by their `op` and instance. Each group counts the
+   processes started for it (its generation): when an instance is restarted because the
+   process died, does not answer, or this instance hung in it, the process is ended and a new
+   one started, and the instances loaded into the old one report *crashed* until their own
+   restart loads them into the new one (never a second new one). A restart of a healthy
+   instance unloads and loads it again in the same process. The last instance to go ends the
+   process. The hosting choice per plug-in (`Hosting`: `binary`, the default, `instance` or
+   `vendor`) is kept in `plugin-hosting.json` in the settings folder; `library::group_for`
+   turns it into the group: `file:<path>` (every plug-in in one file or shell together),
+   `vendor:<name>` (the file's group when the vendor is unknown) or none. Chains do not yet run
+   several plug-ins of one process in one round trip.
 3. **The boundary.**
    - **Shared memory**, one region per host process: a block header (frame count, transport,
      a sequence number), the audio buffers sized for the largest block, and lock-free rings of
@@ -80,8 +103,13 @@ workspace forbids.
      (automation) reaches a VST3 processor as a parameter change at its frame and a CLAP plug-in
      as a parameter event at its frame.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
-     state save and load, latency changes, editor open and close, ping. *Built:* parameters
-     (protocol version 3): `get_params` lists each with its id, name, group, range, default,
+     state save and load, latency changes, editor open and close, ping. *Built:* protocol
+     version 6 (`open_editor` names the window that owns the editor's, decision 10); since
+     version 5: `load` names the instance (a number the engine chooses), and every message about
+     one instance and its reply carry that number: `unload` (answered `unloaded`), state,
+     parameters and editors, and `editor_closed` when it comes unasked; an `error` carries the
+     instance of the request it answers. `hello`, `ping` and `quit` are about the process.
+     Parameters (since version 3): `get_params` lists each with its id, name, group, range, default,
      current value, the plug-in's own text for it, steps and flags; `set_param` sets one in its
      own range (a VST3 plug-in's normalized, a CLAP plug-in's plain), on a VST3 controller at
      once and on the processor (VST3 parameter changes, CLAP parameter events) at the start of
@@ -98,7 +126,11 @@ workspace forbids.
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
    the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
-   the chain was compensated for.
+   the chain was compensated for. `project.save` asks every running plug-in for its state as it
+   is then, each on a thread of its own, waits at most a second for the answers (the last state
+   read stands in for one that has not answered) and writes that, with the last state of
+   stopped ones
+   ([ADR 0010](0010-project-files.md)).
 6. **`unsafe` only in two crates.** `crates/ipc` (shared memory and block sync, linked into the
    engine) and `crates/plugin-host` (the plug-in host process) may use `unsafe`; every other
    crate stays `forbid`. Both offer safe APIs, keep `unsafe` blocks small, explain each one in a
@@ -112,7 +144,9 @@ workspace forbids.
    without a plug-in installed; `LOOPWERK_TEST_CLAP` runs them against a real file too.
    VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
    thread (connected through their connection points, the controller given the component's
-   state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
+   state; the host makes the messages and attribute lists they send each other,
+   `IHostApplication::createInstance` in `crates/plugin-host/src/vst3_message.rs`, without which
+   iZotope's plug-ins crash as soon as they are connected and others when given a state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
    silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
@@ -131,9 +165,12 @@ workspace forbids.
    `Plugin Compatibility Class`, which the scanner asks through `IPluginCompatibility`); a VST3
    whose class id is derived from the VST2 id by the SDK's convention (`VST`, the 4-byte id, the
    first nine bytes of the name in lower case; the name part is not compared, as a project keeps
-   the name its host showed); the same name once build words (`x64`, `64bit`) and a leading
-   vendor name are set aside; and last the nearest newer version of the same name (`Serum` →
-   `Serum 2`, `Pro-Q 2` → `Pro-Q 3`). Only the first three promise that the state carries over;
+   the name its host showed); the same name once build words (`x64`, `64bit`, `.64`) and a
+   leading vendor name are set aside, or the name without its number when the installed
+   plug-in's version starts with that number (`Nexus 5` finds a VST3 named `Nexus` whose
+   version is 5.x and whose class id follows no convention); and last the nearest newer version
+   of the same name (`Serum` → `Serum 2`, `Pro-Q 2` → `Pro-Q 3`, and with the number inside
+   the name, `Ozone 8 Imager` → `Ozone 11 Imager`). Only the first three promise that the state carries over;
    for the last two the state is handed over and the plug-in decides, and the result says
    which (`keeps_state`). Vendors declare their own older builds rather than older products:
    the Pro-Q 3 module declares the VST2 builds of Pro-Q 3, not Pro-Q 2, which is why the name
@@ -180,14 +217,29 @@ workspace forbids.
    - A file that failed keeps its reason and is not tried again until it changes.
    The `plugins.*` commands run scans and choose the added folders (ADR 0002 amendment); the
    folders and the catalog are kept as JSON in Loopwerk's settings folder.
-10. **Editors** open from the host process: embedded in a Loopwerk window on X11 and Windows,
-    floating on Wayland and macOS, which have no public way to embed another process's window.
+10. **Editors** open from the host process, floating above Loopwerk's window and owned by it,
+    as most hosts do: the window stays above Loopwerk, has no taskbar entry of its own and is
+    minimised with it. *Amended 2026-10-12* (was: embedded in a Loopwerk window on X11 and
+    Windows): owning works on every system and keeps the editor apart from Loopwerk's own
+    layout; embedding another process's window works only on X11 and Windows. The engine names
+    its window in `open_editor` (`owner`, protocol version 6: a Win32 `HWND`, an X11 window id);
+    the host makes the editor's window owned by it (Win32 owner window, X11 `WM_TRANSIENT_FOR`).
+    An owned window shares its input queue with the owner's thread on Windows, so the host
+    making one waits for Loopwerk's window thread; the session therefore opens and closes an
+    editor on a thread of its own and the command answers at once (`editor_open: "opening"`),
+    or both would wait for each other. More generally the window thread never waits for a host
+    process: `Plugin::health` and `editor_open` answer from what they last knew while the
+    process is busy (a sibling loading in a shared process takes seconds), and reading a
+    plug-in's state now and then, and stopping it, run on threads of their own. A host whose
+    window thread hangs can be ended like any other (decision 4). The host's main loop waits for its windows' messages
+    (`MsgWaitForMultipleObjectsEx`, woken by the control messages' thread) rather than looking
+    every 10 ms, which made editors such as Pro-Q 4 lag; on X11 it looks every millisecond while
+    an editor is open.
     *Built on Windows:* the host opens a top-level window of its own on its main thread
     (`crates/plugin-host/src/window.rs`, Win32) and attaches the plug-in's view to it (VST3
     `IPlugView` with an `IPlugFrame` for size requests; CLAP's `gui` extension, embedded), pumps
     its messages in the main loop between control messages, and tells the engine unasked when
-    the user closes it (`editor_closed`, protocol version 4). Until Loopwerk has a window of its
-    own, the editor's window is a top-level one rather than embedded in Loopwerk's. Checked with
+    the user closes it (`editor_closed`, protocol version 4). Checked with
     Valhalla VintageVerb and Pro-Q 3 (VST3); no CLAP plug-in with an editor was at hand.
     *Built on Linux (X11):* the host's window comes from `x11rb`, the plug-in's view is embedded
     by window id (VST3 `X11EmbedWindowID`, CLAP `x11`), and the host serves the plug-in's own
@@ -224,6 +276,9 @@ workspace forbids.
   many plug-in products this is noticeable. Grouping by product and running chains in one round
   trip keep it bounded; *in process* is not offered.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
+- Host processes and scan workers start without a window of their own (`host_command`; on
+  Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a
+  console window for each; plug-in editors still open their windows.
 - Measured with `ipc` on Windows (test `round_trips_with_another_process`, 128 frames, the peer
   at normal priority): blocks back to back take 0.7 µs per round trip, because the peer is still
   spinning; with 2.5 ms between blocks, as in playback, 19 µs on average and 0.8 ms at worst,
@@ -231,7 +286,46 @@ workspace forbids.
 - Work goes in this order: this ADR; `ipc` with a host that crashes and hangs on purpose; CLAP;
   a CLI command that runs a WAV through a plug-in; VST3; finding the replacements for a
   project's VST2 plug-ins (done), then loading them with their state; plug-ins in the
-  engine's track chain together with built-in devices (LOOP-35); editors (Windows and X11 done).
+  engine's track chain together with built-in devices (LOOP-35, done, #100); editors (Windows
+  and X11 done).
+- **In the engine (#100).** The engine never sees `plugins`: a plug-in device's slot in a
+  track's chain holds a `PluginProcessor` (`crates/engine/src/plugin.rs`), which the session
+  implements over `PluginAudio` (`Hosted`, `crates/session/src/rack.rs`). A slot runs once per
+  block with the block's notes at their frames (VST3 `inputEvents`, CLAP note events; an
+  all-notes-off becomes the sustain pedal and controller 123), so the chain runs its devices
+  one after another over the whole block rather than piece by piece. The block's plug-ins wait
+  together until 60 % of the block's playing time has passed (decision 4); a slot that misses
+  leaves the sound as it was (an effect) or silent (an instrument) and counts the miss, and the
+  next block goes on. A block that is not sent at all (the host still busy with the one
+  before) keeps its releases (note-offs, the sustain pedal, all notes off) for the next block
+  that is, so no note is left hanging; stopping releases each held key on its own before the
+  all-notes-off, which many plug-ins ignore. Offline (`Renderer::set_offline`, every
+  `render_*` function, the CLI's and MCP's WAV renders) each block waits up to 10 s, through
+  the same `process`.
+  Each plug-in device has a key made from its channel, its plug-in and how many of the same
+  plug-in come before it on that channel, so it keeps its running plug-in when devices are
+  added, removed or moved around it; its processor reaches the audio thread as a message
+  (`Controller::send_plugin`), waits there for a graph that has its slot, and is handed from
+  graph to graph; a restarted plug-in's processor replaces the crashed one, which goes back to
+  be dropped off the audio thread.
+- **Projects.** While a project plays, the session finds each plug-in device in the catalog
+  (`plugins.check`'s matching), starts it with the saved state (and VST3 controller state) on a
+  thread of its own, and hands it over; a project's plug-ins stop when it stops playing (a
+  tab switch) and each keeps its last state for when it starts again, as one whose device is
+  removed does for an undo. A plug-in that is not installed is *missing*: no slot, the sound
+  passes, its state stays in the project untouched and is saved back as it was; the status bar
+  names it. Every 30 s the session reads each running plug-in's state, so a restart after a
+  crash gets back what was set in its editor (decision 5); saving the project
+  (`project.save`) reads each one's state then and writes it into the project, so a reopened
+  project, or a plug-in started again from scratch, gets the same settings. Crashes and hangs are noticed within 250 ms and shown on the
+  device; `device.restart` starts it again (one that could not start at all is started from
+  scratch with the project's state).
+- **Latency** is compensated: every track is heard as late as the one whose devices (built-in
+  and plug-ins, as each reports) delay it most, up to 2 s, through delay lines made with the
+  graph. A plug-in's latency is known once it has started, which builds a new graph. The
+  playhead shows what the engine renders, so it runs ahead of what is heard by that delay.
+- Not built yet: consecutive plug-ins of one process in one round trip; automating plug-in
+  parameters from the engine; latency a plug-in changes while it runs (read once, at start).
 
 ## Sources
 

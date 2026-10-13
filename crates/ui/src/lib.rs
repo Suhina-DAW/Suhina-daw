@@ -4,18 +4,27 @@
 
 mod app;
 pub mod arrangement_view;
+pub mod browser;
+pub mod browser_view;
 pub mod demo;
 pub mod detail_view;
+pub mod drop;
 pub mod grid;
 pub mod keymap;
+pub mod loading_dialog;
 pub mod menus;
+pub mod missing_files;
 pub mod motion;
+pub mod project_dialog;
+pub mod sample_map;
+pub mod sample_map_panel;
 pub mod session_view;
 pub mod settings;
 pub mod settings_view;
 pub mod theme;
+pub mod themes;
 pub mod timeline;
 pub mod waveform;
 pub mod widgets;
 
-pub use app::{App, OpenAs, Status, View};
+pub use app::{App, NewProject, OpenAs, Status, View};

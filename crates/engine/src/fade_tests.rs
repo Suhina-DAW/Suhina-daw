@@ -1,0 +1,239 @@
+//! Clip fades in the renderer (`docs/spec/arrangement-editing.md` › Fades): golden renders of a
+//! fade-in and a fade-out, the same envelope on stretched clips, block-size independence, and
+//! launched clips, which have none.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use loopwerk_model::*;
+
+use crate::{AudioData, AudioPool, LaunchCommand, render_launches, render_offline_with_audio};
+
+/// A low rate keeps the golden files small.
+const SR: u32 = 8_000;
+/// Frames per beat at 120 bpm.
+const BEAT: usize = SR as usize / 2;
+/// The click guard at the clip's ends, in frames (2 ms).
+const GUARD: f64 = 0.002 * SR as f64;
+
+/// One audio track playing `file` from an arrangement clip of `length` beats with the given
+/// fades, and the same clip in its launcher slot.
+fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Project {
+    let clip = Clip {
+        content: ContentId(1),
+        start: 0.0,
+        length,
+        offset: 0.0,
+        loop_range: None,
+        enabled: true,
+        fade_in,
+        fade_out,
+        extensions: Extensions::default(),
+    };
+    Project {
+        tracks: vec![Track {
+            id: TrackId(1),
+            name: "Audio".into(),
+            color: None,
+            content: ContentKinds { notes: false, audio: true },
+            channel: Some(ChannelId(1)),
+            parent: None,
+            extensions: Extensions::default(),
+        }],
+        channels: vec![Channel {
+            id: ChannelId(1),
+            name: "Audio".into(),
+            role: ChannelRole::Regular,
+            volume: 1.0,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+            output: None,
+            sends: Vec::new(),
+            devices: Vec::new(),
+            extensions: Extensions::default(),
+        }],
+        contents: vec![ClipContent {
+            id: ContentId(1),
+            name: "c".into(),
+            length,
+            lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
+            extensions: Extensions::default(),
+        }],
+        arrangement: Arrangement {
+            lanes: vec![ArrangementLane { name: "Audio".into(), track: Some(TrackId(1)), clips: vec![clip.clone()] }],
+        },
+        launcher: Launcher {
+            scenes: vec![Scene::default()],
+            columns: vec![LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(clip), has_stop: true }] }],
+        },
+        ..Project::default()
+    }
+}
+
+fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f64) -> AudioRegion {
+    AudioRegion {
+        file: file.into(),
+        absolute_file: None,
+        sample_rate: Some(SR),
+        channels: Some(1),
+        duration_seconds: Some(seconds),
+        warped,
+        stretch,
+        warp_markers: vec![
+            WarpMarker { time: 0.0, audio_time: 0.0 },
+            WarpMarker { time: seconds * 2.0, audio_time: seconds },
+        ],
+        gain: 1.0,
+        transpose: 0.0,
+        stream: None,
+    }
+}
+
+/// Two seconds of a constant 0.25, so the render shows the envelope itself.
+fn constant() -> (AudioRegion, AudioPool) {
+    let mut pool = AudioPool::new();
+    pool.files
+        .insert("dc.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples: vec![0.25; 16_000] }));
+    (region("dc.wav", false, StretchMode::Repitch, 2.0), pool)
+}
+
+/// Two seconds of a 220 Hz sine.
+fn sine() -> AudioPool {
+    let samples = (0..16_000).map(|i| (std::f64::consts::TAU * 220.0 * i as f64 / f64::from(SR)).sin() as f32 * 0.5);
+    let mut pool = AudioPool::new();
+    pool.files
+        .insert("sine.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples: samples.collect() }));
+    pool
+}
+
+fn left(out: &[f32]) -> Vec<f32> {
+    out.as_chunks::<2>().0.iter().map(|[l, _]| *l).collect()
+}
+
+fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
+}
+
+/// The envelope the spec describes, written out independently of the engine: a linear fade-in
+/// over `fade_in` frames, a linear fade-out over the last `fade_out` frames, and the click guard.
+fn expected_gain(frame: usize, frames: usize, fade_in: f64, fade_out: f64) -> f64 {
+    let since_start = frame as f64;
+    let until_end = (frames - frame) as f64;
+    let guard = (since_start / GUARD).min(until_end / GUARD).min(1.0);
+    let fade_in = if fade_in > 0.0 { (since_start / fade_in).min(1.0) } else { 1.0 };
+    let fade_out = if fade_out > 0.0 { (until_end / fade_out).min(1.0) } else { 1.0 };
+    guard * fade_in * fade_out
+}
+
+fn golden_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
+}
+
+/// Compares `render` with the golden file `name`, little-endian f32. With `LOOPWERK_BLESS=1` the
+/// file is written instead (see tests/golden/README.md).
+fn assert_golden(name: &str, render: &[f32]) {
+    let path = golden_dir().join(format!("{name}.f32"));
+    if std::env::var_os("LOOPWERK_BLESS").is_some() {
+        let bytes: Vec<u8> = render.iter().flat_map(|s| s.to_le_bytes()).collect();
+        std::fs::write(&path, bytes).unwrap();
+        return;
+    }
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}; run with LOOPWERK_BLESS=1", path.display()));
+    let golden: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+    assert_eq!(golden.len(), render.len(), "{name}: length differs from the golden file");
+    let worst = max_diff(&golden, render);
+    assert!(worst < 1e-6, "{name}: differs from the golden file by {worst}");
+}
+
+/// A 2-beat clip (1 s) with `fade_in` and `fade_out` beats, rendered offline: the left channel.
+fn render_constant(fade_in: f64, fade_out: f64, block: usize) -> Vec<f32> {
+    let (region, pool) = constant();
+    left(&render_offline_with_audio(&project(region, 2.0, fade_in, fade_out), &pool, SR, block).unwrap())
+}
+
+#[test]
+fn a_fade_in_renders_like_its_golden_file() {
+    let out = render_constant(1.0, 0.0, 512);
+    assert_eq!(out.len(), 2 * BEAT);
+    // The level the clip reaches once the fade is over.
+    let full = out[BEAT + BEAT / 2];
+    assert!(full > 0.0);
+    for (frame, sample) in out.iter().enumerate() {
+        let expected = f64::from(full) * expected_gain(frame, out.len(), BEAT as f64, 0.0);
+        assert!((f64::from(*sample) - expected).abs() < 1e-6, "frame {frame}: {sample}, expected {expected}");
+    }
+    // Half-way through the fade, half the level.
+    assert!((out[BEAT / 2] - full * 0.5).abs() < 1e-6);
+    assert_golden("fade-in", &out);
+}
+
+#[test]
+fn a_fade_out_renders_like_its_golden_file() {
+    let out = render_constant(0.0, 0.5, 512);
+    let full = out[BEAT / 2];
+    for (frame, sample) in out.iter().enumerate() {
+        let expected = f64::from(full) * expected_gain(frame, out.len(), 0.0, BEAT as f64 / 2.0);
+        assert!((f64::from(*sample) - expected).abs() < 1e-6, "frame {frame}: {sample}, expected {expected}");
+    }
+    // The fade-out starts exactly half a beat before the end.
+    assert_eq!(out[2 * BEAT - BEAT / 2 - 1], full);
+    assert!(out[2 * BEAT - BEAT / 2 + 1] < full);
+    assert_golden("fade-out", &out);
+}
+
+#[test]
+fn fades_do_not_depend_on_the_block_size() {
+    let reference = render_constant(0.75, 0.5, 512);
+    for block in [1, 64, 333, 4096] {
+        assert_eq!(render_constant(0.75, 0.5, block), reference, "block {block}");
+    }
+}
+
+#[test]
+fn bad_fades_are_an_error_not_a_crash() {
+    let (region, pool) = constant();
+    for (fade_in, fade_out) in [(3.0, 1.0), (-1.0, 0.0), (0.0, f64::NAN)] {
+        let result = render_offline_with_audio(&project(region.clone(), 2.0, fade_in, fade_out), &pool, SR, 512);
+        assert_eq!(
+            result.err(),
+            Some(crate::RenderError::InvalidProject(vec![ValidationError::BadFades { lane: 0, clip: 0 }])),
+            "fades {fade_in} and {fade_out}"
+        );
+    }
+}
+
+#[test]
+fn stretched_clips_have_the_same_fades() {
+    let pool = sine();
+    let warped = region("sine.wav", true, StretchMode::Smooth, 2.0);
+    let render = |fade_in, fade_out| {
+        left(&render_offline_with_audio(&project(warped.clone(), 4.0, fade_in, fade_out), &pool, SR, 512).unwrap())
+    };
+    let plain = render(0.0, 0.0);
+    let faded = render(1.0, 1.5);
+    assert_eq!(plain.len(), faded.len());
+    // The stretcher's output is the same; only the envelope over it changes.
+    let frames = plain.len();
+    let (fade_in, fade_out) = (BEAT as f64, 1.5 * BEAT as f64);
+    for (frame, (p, f)) in plain.iter().zip(&faded).enumerate() {
+        let fades = (frame as f64 / fade_in).min(1.0) * ((frames - frame) as f64 / fade_out).min(1.0);
+        let expected = f64::from(*p) * fades;
+        assert!((f64::from(*f) - expected).abs() < 1e-5, "frame {frame}: {f}, expected {expected}");
+    }
+}
+
+#[test]
+fn launched_clips_ignore_arrangement_fades() {
+    let (region, pool) = constant();
+    let commands = [
+        (0.0, LaunchCommand::SetQuantization(crate::Quantization::None)),
+        (0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
+    ];
+    let launch = |fade_in, fade_out| {
+        let mut p = project(region.clone(), 2.0, fade_in, fade_out);
+        p.arrangement.lanes.clear();
+        render_launches(&p, &pool, SR, &commands, 1.0).unwrap()
+    };
+    assert_eq!(launch(1.0, 0.5), launch(0.0, 0.0));
+}

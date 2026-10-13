@@ -12,7 +12,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -54,9 +54,15 @@ impl PluginInfo {
         if is_vst3(&self.path) { "vst3" } else { "clap" }
     }
 
-    /// How the host is asked to load it (`clap:<file>#<id>` or `vst3:<file>#<id>`).
+    /// How the host is asked to load it (`clap:<file>#<id>` or `vst3:<file>#<id>`). A
+    /// plug-in built into the host for tests has its name as its file (`test:vst3`) and is
+    /// loaded by it.
     pub fn spec(&self) -> String {
-        format!("{}:{}#{}", self.format(), self.path.display(), self.id)
+        let path = self.path.display().to_string();
+        if path.starts_with("test:") {
+            return path;
+        }
+        format!("{}:{}#{}", self.format(), path, self.id)
     }
 }
 
@@ -172,7 +178,7 @@ fn stamp(path: &Path) -> Option<(u64, u64)> {
 /// Reads `file` in a `host --scan` process, waiting at most `timeout`. `file` may also be a
 /// `test:` name the host understands, for tests.
 pub fn scan_file(host: &Path, file: &str, timeout: Duration) -> Scanned {
-    let child = Command::new(host)
+    let child = crate::host_command(host)
         .args(["--scan", file])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -314,6 +320,13 @@ impl Catalog {
 
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// Adds the plug-ins `path` holds as if a scan had read them (plug-ins described some other
+    /// way, and tests with the host's own test plug-ins). Replaces what was known about `path`.
+    pub fn insert(&mut self, path: PathBuf, plugins: Vec<PluginInfo>) {
+        self.entries.retain(|e| e.path != path);
+        self.entries.push(Entry { path, modified: 0, size: 0, scanned: Scanned::Plugins(plugins) });
     }
 
     /// Every plug-in found, in file order.

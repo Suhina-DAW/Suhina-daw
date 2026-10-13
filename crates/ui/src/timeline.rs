@@ -24,7 +24,7 @@ pub struct NoteMark {
 /// How an audio clip reads its file: which file, and the file position at each clip beat.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioView {
-    /// The region's `file`, the key of the decoded audio and its waveform.
+    /// The region's pool key (`AudioRegion::pool_key`), the key of the decoded audio and its waveform.
     pub file: String,
     /// Where the clip starts in its content, in beats, and its loop.
     pub offset: f64,
@@ -69,6 +69,9 @@ pub struct ClipBox {
     pub name: String,
     pub enabled: bool,
     pub audio: bool,
+    /// Fade-in and fade-out, in beats (`clip.setFades`).
+    pub fade_in: f64,
+    pub fade_out: f64,
     /// For an audio clip, how to draw its waveform.
     pub audio_view: Option<AudioView>,
     pub notes: Vec<NoteMark>,
@@ -109,6 +112,8 @@ pub struct Timeline {
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
+    /// The play start marker: where the transport starts, in beats.
+    pub start_beat: f64,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
 }
@@ -145,6 +150,8 @@ impl Timeline {
                                 length: clip.length,
                                 name: content.map(|c| c.name.clone()).unwrap_or_default(),
                                 enabled: clip.enabled,
+                                fade_in: clip.fade_in,
+                                fade_out: clip.fade_out,
                                 audio: content
                                     .is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)))),
                                 audio_view: content.and_then(|c| audio_view(c, clip, project.transport.tempo_bpm)),
@@ -180,17 +187,28 @@ impl Timeline {
         let end = lanes.iter().flat_map(|l| &l.clips).map(|c| c.start + c.length).fold(0.0, f64::max);
         let main_volume_db =
             project.channels.iter().find(|c| c.role == ChannelRole::Master).map(|c| gain_to_db(c.volume));
-        let mut timeline =
-            Self { lanes, main_volume_db, end, bar_beats, running: false, beat: 0.0, waveforms: Arc::default() };
+        let mut timeline = Self {
+            lanes,
+            main_volume_db,
+            end,
+            bar_beats,
+            running: false,
+            beat: 0.0,
+            start_beat: 0.0,
+            waveforms: Arc::default(),
+        };
         timeline.follow(monitor);
         timeline
     }
 
-    /// Takes the transport and playhead from the engine, leaving the rest as it was built.
+    /// Takes the transport, playhead and play start marker from the engine, leaving the rest as
+    /// it was built.
     pub fn follow(&mut self, monitor: Option<&LauncherMonitor>) {
-        let (running, beat) = monitor.map_or((false, 0.0), |m| (m.running(), m.beat()));
+        let (running, beat, start) = monitor.map_or((false, 0.0, 0.0), |m| (m.running(), m.beat(), m.start_beat()));
+        let beats = |b: f64| if b.is_finite() { b.max(0.0) } else { 0.0 };
         self.running = running;
-        self.beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+        self.beat = beats(beat);
+        self.start_beat = beats(start);
     }
 }
 
@@ -210,7 +228,7 @@ fn audio_view(content: &ClipContent, clip: &Clip, tempo_bpm: f64) -> Option<Audi
     markers.dedup_by(|a, b| a.0 == b.0);
     let rate = if region.warped { 1.0 } else { 2f64.powf(region.transpose / 12.0) };
     Some(AudioView {
-        file: region.file.clone(),
+        file: region.pool_key().into_owned(),
         offset: clip.offset,
         loop_range: clip.loop_range.filter(|r| r.end > r.start).map(|r| (r.start, r.end)),
         markers: if region.warped { markers } else { Vec::new() },

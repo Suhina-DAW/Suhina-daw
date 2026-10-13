@@ -4,29 +4,48 @@
 
 mod ahead;
 mod audio;
+mod buses;
+#[cfg(test)]
+mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod fade_tests;
 mod launcher;
 mod metronome;
+mod plugin;
+#[cfg(test)]
+mod plugin_tests;
+mod preview;
+#[cfg(test)]
+mod preview_tests;
 mod stretch;
 mod swap;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ahead::AheadReader;
 pub use ahead::StretchWorker;
-use audio::AudioEvent;
 pub use audio::{AudioData, AudioPool};
+use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 use launcher::Launcher;
-pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, Quantization, Queued};
+pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
+pub use loopwerk_device_api::NoteEvent as DeviceEvent;
 use loopwerk_device_api::ProcessContext;
 pub use loopwerk_model as model;
 use loopwerk_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use plugin::{DEADLINE_SHARE, Delay};
+pub use plugin::{OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, plugin_devices, plugin_key};
+pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 
+/// The most frames a plug-in is asked to process at once: the size of a device chain's block.
+pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;
 /// Voices that can sound at once. A note that arrives when all are busy steals the oldest.
 const MAX_VOICES: usize = 64;
 /// Audio clips that can play at once; more overlapping clips than this are skipped.
@@ -46,6 +65,8 @@ const ATTACK_SECONDS: f64 = 0.002;
 const MAX_RENDER_SECONDS: f64 = 60.0 * 60.0;
 /// Extra length of a render when tracks have devices, for instrument releases and effect tails.
 const CHAIN_TAIL_SECONDS: f64 = 2.0;
+/// Most delay latency compensation makes up for, in seconds.
+pub(crate) const MAX_LATENCY_SECONDS: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderError {
@@ -83,6 +104,8 @@ struct StretchEvent {
     end: u64,
     gain_left: f32,
     gain_right: f32,
+    /// The click guard and the clip's fades, as the direct reader has them.
+    fades: Fades,
     /// The launcher column of the clip's track, or `NO_COLUMN`.
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
@@ -154,6 +177,10 @@ pub(crate) struct Graph {
     /// Every track's bus and the gains its sources are mixed at (muted tracks at zero), so
     /// sounding voices follow an edit to their track's mix.
     routes: Vec<(TrackId, u32, (f32, f32))>,
+    /// Latency compensation: the most delay any chain adds, in frames, and the delay of
+    /// everything that does not go through a chain (each chain delays itself up to it).
+    latency: u32,
+    direct_delay: Delay,
 }
 
 pub struct Renderer {
@@ -169,13 +196,15 @@ pub struct Renderer {
     /// The stretch voices are at their first frame and nothing has played them since.
     stretch_fresh: bool,
     stretch_scratch: Vec<f32>,
-    fade_frames: f64,
     /// Frames rendered since the renderer was built.
     position: u64,
     /// The frame at which the transport last started or the tempo last changed, and the
     /// arrangement frame playing then: arrangement time is `position - origin + time_at_origin`.
     origin: u64,
     time_at_origin: u64,
+    /// The play start marker, in beats: where the transport starts and, while stopped, the
+    /// playhead (`docs/spec/arrangement-editing.md` › Play position).
+    start_beat: f64,
     running: bool,
     /// What the graph was built from, so a controller can build the next one (ADR 0005).
     audio: Arc<AudioPool>,
@@ -185,6 +214,12 @@ pub struct Renderer {
     metronome: metronome::Metronome,
     /// The frame of the current block being rendered, for events sent to device chains.
     block_frame: usize,
+    /// Rendering offline: plug-ins are waited for without a real-time deadline (ADR 0006).
+    offline: bool,
+    /// What is known about the project's plug-in devices, for the graphs built after edits.
+    plugin_info: HashMap<u64, PluginSlotInfo>,
+    /// The browser's preview voice (ADR 0011).
+    preview: preview::Preview,
 }
 
 impl Renderer {
@@ -195,7 +230,17 @@ impl Renderer {
 
     /// A renderer that also plays audio clips whose files are in `audio`.
     pub fn with_audio(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
-        let graph = Graph::build(project, audio, sample_rate)?;
+        Self::with_plugins(project, audio, sample_rate, Plugins::new())
+    }
+
+    /// A renderer whose plug-in devices run in the processors `plugins` holds (ADR 0006).
+    pub fn with_plugins(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        mut plugins: Plugins,
+    ) -> Result<Self, RenderError> {
+        let graph = Graph::build(project, audio, sample_rate, &mut plugins)?;
         graph.launcher.monitor.running.store(true, std::sync::atomic::Ordering::Relaxed);
         graph
             .launcher
@@ -212,23 +257,36 @@ impl Renderer {
             active_audio_count: 0,
             stretch_fresh: true,
             stretch_scratch: vec![0.0; STRETCH_BLOCK * 2],
-            fade_frames: (0.002 * f64::from(sample_rate)).max(1.0),
             position: 0,
             origin: 0,
             time_at_origin: 0,
+            start_beat: 0.0,
             running: true,
             audio: Arc::new(audio.clone()),
             swap: swap::SwapState::default(),
             underruns_before: 0,
             metronome: metronome::Metronome::new(sample_rate),
             block_frame: 0,
+            offline: false,
+            plugin_info: plugins.info,
+            preview: preview::Preview::new(sample_rate),
         })
     }
 
     /// A renderer whose transport is stopped: silent until it receives [`LaunchCommand::Play`]
     /// or a launch.
     pub fn stopped(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Self, RenderError> {
-        let mut renderer = Self::with_audio(project, audio, sample_rate)?;
+        Self::stopped_with_plugins(project, audio, sample_rate, Plugins::new())
+    }
+
+    /// [`Renderer::stopped`] with plug-in devices running in `plugins`.
+    pub fn stopped_with_plugins(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        plugins: Plugins,
+    ) -> Result<Self, RenderError> {
+        let mut renderer = Self::with_plugins(project, audio, sample_rate, plugins)?;
         renderer.running = false;
         renderer.graph.launcher.monitor.running.store(false, std::sync::atomic::Ordering::Relaxed);
         Ok(renderer)
@@ -238,14 +296,26 @@ impl Renderer {
         self.sample_rate
     }
 
+    /// Renders offline from now on: plug-ins are waited for as long as they take (up to
+    /// [`OFFLINE_TIMEOUT`] a block) instead of until the block's real-time deadline.
+    pub fn set_offline(&mut self, offline: bool) {
+        self.offline = offline;
+    }
+
+    /// The delay latency compensation adds to everything, in frames: the most any track's
+    /// devices add.
+    pub fn latency(&self) -> u32 {
+        self.graph.latency
+    }
+
     /// Length of the arrangement including release tails, in frames.
     pub fn length(&self) -> u64 {
         self.graph.length
     }
 
-    /// The arrangement frame playing now.
+    /// The arrangement frame playing now; while stopped, the play start marker's.
     fn time(&self) -> u64 {
-        self.position - self.origin + self.time_at_origin
+        if self.running { self.position - self.origin + self.time_at_origin } else { self.start_frame() }
     }
 
     /// Whether the transport is running.
@@ -270,6 +340,8 @@ impl Renderer {
     /// Commands from a [`Controller`] are applied first. Never allocates.
     pub fn process(&mut self, out: &mut [f32]) {
         self.receive_swap();
+        self.receive_plugins();
+        self.preview.receive(&mut self.graph.chains);
         let mut rest = out;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
@@ -301,12 +373,25 @@ impl Renderer {
         }
     }
 
+    /// When the plug-ins of a block of `frames` frames starting now must have answered: a share
+    /// of the block's playing time, so a late plug-in costs its own sound, not the device's
+    /// deadline. `None` offline.
+    fn deadline(&self, frames: usize) -> Option<Instant> {
+        if self.offline {
+            return None;
+        }
+        let seconds = frames as f64 / f64::from(self.sample_rate) * DEADLINE_SHARE;
+        Some(Instant::now() + Duration::from_secs_f64(seconds))
+    }
+
     fn process_chunk(&mut self, out: &mut [f32]) {
         let frames = out.len() / 2;
+        let deadline = if self.graph.chains.is_empty() { None } else { self.deadline(frames) };
         for chain in &mut self.graph.chains {
-            chain.begin(frames);
+            chain.begin(frames, deadline);
         }
         self.block_frame = 0;
+        self.preview.begin(&self.graph.chains);
         self.drain_commands();
         self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
@@ -327,6 +412,7 @@ impl Renderer {
             for chain in self.graph.chains.iter_mut().filter(|c| c.instrument) {
                 chain.release_due(frame, self.position);
             }
+            self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
             let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
             let click = self.metronome.frame(self.running, beat, bar_beats);
@@ -389,9 +475,19 @@ impl Renderer {
         if running {
             self.mix_stretched(out, block_start);
         }
-        for chain in &mut self.graph.chains {
-            chain.finish(out, frames, &context);
+        // What went straight to the output waits for the slowest chain (latency compensation).
+        self.graph.direct_delay.run(out);
+        // In order, so a bus has every chain that plays into it before it runs.
+        for i in 0..self.graph.chains.len() {
+            let (done, later) = self.graph.chains.split_at_mut(i + 1);
+            let Some(chain) = done.last_mut() else { continue };
+            match chain.target.and_then(|t| t.checked_sub(i + 1)).and_then(|t| later.get_mut(t)) {
+                Some(bus) => chain.finish(bus.input(frames), frames, &context),
+                None => chain.finish(out, frames, &context),
+            }
         }
+        // The preview comes after every track and the main channel's mix (ADR 0011).
+        self.preview.finish(out, frames, &mut self.graph.chains);
         self.block_frame = 0;
     }
 
@@ -402,7 +498,6 @@ impl Renderer {
         // Arrangement time of the block's first frame.
         let time_start = block_start - self.origin + self.time_at_origin;
         let time_end = time_start + (out.len() / 2) as u64;
-        let fade_frames = self.fade_frames;
         let scratch = &mut self.stretch_scratch;
         let launcher = &self.graph.launcher;
         let ahead = &mut self.graph.ahead;
@@ -425,7 +520,7 @@ impl Renderer {
                     }
                     let since_start = (frame - event.start) as f64;
                     let until_end = (event.end - frame) as f64;
-                    let fade = (since_start / fade_frames).min(until_end / fade_frames).min(1.0) as f32;
+                    let fade = event.fades.gain(since_start, until_end);
                     let at = (frame - time_start) as usize;
                     let (l, r) = (left * event.gain_left * fade, right * event.gain_right * fade);
                     if let Some(chain) = bus_chain(chains, event.bus) {
@@ -561,7 +656,12 @@ pub(crate) fn route(project: &Project, chains: &[Chain], track: TrackId) -> Opti
 impl Graph {
     /// Builds the graph for `project`: validates it and prepares every event and voice. Allocates;
     /// call it off the audio thread.
-    pub(crate) fn build(project: &Project, audio: &AudioPool, sample_rate: u32) -> Result<Box<Self>, RenderError> {
+    pub(crate) fn build(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        plugins: &mut Plugins,
+    ) -> Result<Box<Self>, RenderError> {
         if !(8_000..=384_000).contains(&sample_rate) {
             return Err(RenderError::InvalidSampleRate(sample_rate));
         }
@@ -581,14 +681,9 @@ impl Graph {
                 .and_then(|i| u32::try_from(i).ok())
                 .unwrap_or(NO_COLUMN)
         };
-        let chains: Vec<Chain> = project
-            .tracks
-            .iter()
-            .filter_map(|track| {
-                let gains = track_gains(project, track.id)?;
-                Chain::build(project, track.id, column_of(track.id), gains, sample_rate)
-            })
-            .collect();
+        // Device chains, group buses and latency compensation: every track is heard as late as
+        // the path whose devices delay it most.
+        let (chains, latency) = buses::build(project, sample_rate, plugins, column_of);
         let mut events = Vec::new();
         let mut audio_events = Vec::new();
         let mut stretch_events = Vec::new();
@@ -609,7 +704,7 @@ impl Graph {
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
-                            let Some(data) = audio.files.get(&region.file) else { continue };
+                            let Some(data) = audio.files.get(region.pool_key().as_ref()) else { continue };
                             let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                             // Warped clips are time-stretched as they play; the rest, and clips
                             // the stretcher cannot handle, are re-pitched.
@@ -626,6 +721,7 @@ impl Graph {
                                     end,
                                     gain_left: gains.0 * gain,
                                     gain_right: gains.1 * gain,
+                                    fades: Fades::new(clip, frames_per_beat, sample_rate),
                                     column,
                                     bus,
                                 });
@@ -658,7 +754,7 @@ impl Graph {
             .unwrap_or(0)
             .max(notes_end);
         let tail = if chains.is_empty() { 0 } else { (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64 };
-        let length = if length > 0 { length + tail } else { 0 };
+        let length = if length > 0 { length + tail + u64::from(latency) } else { 0 };
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
             return Err(RenderError::TooLong { seconds });
@@ -681,6 +777,8 @@ impl Graph {
                 })
                 .collect(),
             chains,
+            latency,
+            direct_delay: Delay::new(latency as usize),
         }))
     }
 }
@@ -698,7 +796,20 @@ pub fn render_offline_with_audio(
     sample_rate: u32,
     block_frames: usize,
 ) -> Result<Vec<f32>, RenderError> {
-    let mut renderer = Renderer::with_audio(project, audio, sample_rate)?;
+    render_offline_with_plugins(project, audio, sample_rate, block_frames, Plugins::new())
+}
+
+/// Like [`render_offline_with_audio`], with plug-in devices running in `plugins`. The same
+/// `process` as playback, waiting for each plug-in instead of a real-time deadline.
+pub fn render_offline_with_plugins(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    block_frames: usize,
+    plugins: Plugins,
+) -> Result<Vec<f32>, RenderError> {
+    let mut renderer = Renderer::with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
     let total = usize::try_from(renderer.length())
         .ok()
         .and_then(|frames| frames.checked_mul(2))
@@ -720,10 +831,23 @@ pub fn render_launches(
     commands: &[(f64, LaunchCommand)],
     seconds: f64,
 ) -> Result<Vec<f32>, RenderError> {
+    render_launches_with_plugins(project, audio, sample_rate, commands, seconds, Plugins::new())
+}
+
+/// Like [`render_launches`], with plug-in devices running in `plugins`.
+pub fn render_launches_with_plugins(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    commands: &[(f64, LaunchCommand)],
+    seconds: f64,
+    plugins: Plugins,
+) -> Result<Vec<f32>, RenderError> {
     if !(seconds.is_finite() && seconds >= 0.0) || seconds > MAX_RENDER_SECONDS {
         return Err(RenderError::TooLong { seconds });
     }
-    let mut renderer = Renderer::stopped(project, audio, sample_rate)?;
+    let mut renderer = Renderer::stopped_with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
     let frame_of = |at: f64| (at.max(0.0) * f64::from(sample_rate)).round() as usize;
     let total = frame_of(seconds);
     let mut out = vec![0.0f32; total.saturating_mul(2)];
@@ -750,7 +874,7 @@ pub fn render_launches(
 /// Solo: while any channel is soloed, a track sounds only if a channel on its way to the master
 /// is soloed (its own, or a group it plays into), or a soloed track plays into it (a group), or
 /// it is a return track, so effects stay audible.
-fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
+pub(crate) fn track_gains(project: &Project, track: TrackId) -> Option<(f32, f32)> {
     let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
     let channel = project.channels.iter().find(|c| c.id == channel_id)?;
     let pan = if channel.pan.is_finite() { channel.pan.clamp(-1.0, 1.0) } else { 0.0 };
@@ -927,6 +1051,8 @@ mod tests {
             offset: 0.0,
             loop_range: None,
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }
@@ -1129,6 +1255,7 @@ mod tests {
             ],
             gain: 1.0,
             transpose: 0.0,
+            stream: None,
         };
         let mut project =
             project_with(vec![ContentLane { target: None, data: LaneData::Audio(region) }], vec![clip(0.0, beats)], 1);
@@ -1561,5 +1688,145 @@ mod tests {
                 assert!((ratio - want).abs() < 0.01, "{edit:?} side {right}: {ratio}");
             }
         }
+    }
+
+    /// Renders `frames` frames from `renderer` in 333-frame blocks.
+    fn frames(renderer: &mut Renderer, frames: usize) -> Vec<f32> {
+        let mut out = vec![0.0f32; frames * 2];
+        for block in out.chunks_mut(333 * 2) {
+            renderer.process(block);
+        }
+        out
+    }
+
+    /// Notes before beat 2 end well before it; notes from beat 2 on.
+    fn notes_around_beat_two() -> Project {
+        let notes = vec![note(0.0, 0.25, 60), note(1.0, 0.25, 62), note(2.0, 0.5, 64), note(3.25, 0.5, 67)];
+        project_with(untargeted(notes), vec![clip(0.0, 4.0)], 1)
+    }
+
+    #[test]
+    fn playing_from_a_beat_renders_the_tail_of_the_whole_render() {
+        let beat = SR as usize / 2;
+        let project = notes_around_beat_two();
+        let whole = render_offline(&project, SR, 256).unwrap();
+        // Running from the start, jumped to beat 2 before the first block.
+        let mut renderer = Renderer::new(&project, SR).unwrap();
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        let tail = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert!(tail.iter().any(|s| s.abs() > 0.1));
+        assert_eq!(max_diff(&tail, &whole[2 * beat * 2..]), 0.0);
+        // Stopped, the marker set, then started: the same.
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        renderer.handle(LaunchCommand::Play);
+        let started = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert_eq!(max_diff(&started, &whole[2 * beat * 2..]), 0.0);
+    }
+
+    #[test]
+    fn audio_clips_play_from_their_middle_when_the_transport_starts_inside_them() {
+        let beat = SR as usize / 2;
+        for mode in [StretchMode::Repitch, StretchMode::Smooth] {
+            // 4 s on 8 beats at 120 bpm: the clip runs from beat 0 to 8.
+            let (project, pool) = stretched_project(440.0, 4.0, 8.0, 120.0, mode);
+            let whole = render_offline_with_audio(&project, &pool, SR, 333).unwrap();
+            let mut renderer = Renderer::stopped(&project, &pool, SR).unwrap();
+            renderer.handle(LaunchCommand::SetPosition { beat: 3.0 });
+            renderer.handle(LaunchCommand::Play);
+            let tail = frames(&mut renderer, whole.len() / 2 - 3 * beat);
+            let reference = &whole[3 * beat * 2..];
+            assert!(tail.iter().any(|s| s.abs() > 0.1), "{mode:?}");
+            let worst = max_diff(&tail, reference);
+            // A stretcher started mid-clip has no history yet: close, not identical.
+            let allowed = if mode == StretchMode::Repitch { 0.0 } else { 0.05 };
+            assert!(worst <= allowed, "{mode:?}: differs by {worst}");
+            assert_eq!(renderer.stretch_underruns(), 0, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn a_jump_while_playing_plays_on_from_the_new_beat() {
+        let beat = SR as usize / 2;
+        let project = notes_around_beat_two();
+        let whole = render_offline(&project, SR, 256).unwrap();
+        let mut renderer = Renderer::new(&project, SR).unwrap();
+        // Half a beat in (nothing sounding), jump to beat 2.
+        let before = frames(&mut renderer, beat / 2);
+        assert_eq!(max_diff(&before, &whole[..beat]), 0.0);
+        renderer.handle(LaunchCommand::SetPosition { beat: 2.0 });
+        let after = frames(&mut renderer, whole.len() / 2 - 2 * beat);
+        assert_eq!(max_diff(&after, &whole[2 * beat * 2..]), 0.0);
+        let monitor = renderer.monitor();
+        assert!(monitor.running());
+        assert_eq!(monitor.start_beat(), 2.0);
+    }
+
+    #[test]
+    fn stop_returns_to_the_marker_and_a_second_stop_to_the_start() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.5 });
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (1.5, 1.5), "stopped, the playhead is at the marker");
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, SR as usize / 2);
+        assert!((monitor.beat() - 2.5).abs() < 1e-3, "{}", monitor.beat());
+        renderer.handle(LaunchCommand::Stop);
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (1.5, 1.5));
+        renderer.handle(LaunchCommand::Stop);
+        frames(&mut renderer, 10);
+        assert_eq!((monitor.start_beat(), monitor.beat()), (0.0, 0.0));
+    }
+
+    #[test]
+    fn stop_here_moves_the_marker_to_the_playhead() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.0 });
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, SR as usize);
+        renderer.handle(LaunchCommand::StopHere);
+        frames(&mut renderer, 10);
+        assert!((monitor.start_beat() - 3.0).abs() < 1e-3, "{}", monitor.start_beat());
+        // The next start carries on from there.
+        renderer.handle(LaunchCommand::Play);
+        frames(&mut renderer, 10);
+        assert!(monitor.beat() > 3.0 - 1e-3 && monitor.beat() < 3.01, "{}", monitor.beat());
+        // Stopped already, it goes to the start like Stop.
+        renderer.handle(LaunchCommand::StopHere);
+        renderer.handle(LaunchCommand::StopHere);
+        frames(&mut renderer, 10);
+        assert_eq!(monitor.start_beat(), 0.0);
+    }
+
+    #[test]
+    fn hostile_positions_are_ignored_or_kept_in_range() {
+        let project = notes_around_beat_two();
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        for (beat, want) in [(f64::NAN, 0.0), (-4.0, 0.0), (f64::INFINITY, 0.0), (1e300, MAX_START_BEAT)] {
+            renderer.handle(LaunchCommand::SetPosition { beat });
+            frames(&mut renderer, 1);
+            assert_eq!(monitor.start_beat(), want, "{beat}");
+        }
+        // Far past the end: plays silence, never panics.
+        renderer.handle(LaunchCommand::Play);
+        assert!(frames(&mut renderer, 1000).iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn the_metronome_waits_for_the_next_beat_after_a_start_between_beats() {
+        let project = project_with(untargeted(Vec::new()), vec![clip(0.0, 4.0)], 1);
+        let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::SetMetronome { on: true, gain: Some(0.5) });
+        renderer.handle(LaunchCommand::SetPosition { beat: 1.5 });
+        renderer.handle(LaunchCommand::Play);
+        let out = frames(&mut renderer, SR as usize / 2);
+        // The first click is at beat 2, a quarter of a second in.
+        assert_onsets(&out, &[SR as usize / 4]);
     }
 }

@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -92,7 +92,7 @@ struct Worker {
 
 impl Worker {
     fn start(host: &Path) -> Result<Self, String> {
-        let mut child = Command::new(host)
+        let mut child = crate::host_command(host)
             .arg("--scan-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

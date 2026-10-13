@@ -1,11 +1,11 @@
 //! The command registry. Each command is a [`CommandSpec`]; new commands are added to
 //! [`COMMANDS`] with tests below.
 
-use loopwerk_engine::{ColumnStatus, LaunchCommand, Quantization, Queued};
+use loopwerk_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use loopwerk_model::{ArrangementLane, Channel, ChannelId, ChannelRole, Clip, LaneData, Project, Track, TrackId};
 use serde_json::{Value, json};
 
-use crate::{CommandError, Session, devices};
+use crate::{CommandError, Session, devices, files, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -24,6 +24,12 @@ pub enum CommandKind {
     /// Scans for plug-ins or changes where scans look (ADR 0006); belongs to Loopwerk, not to
     /// one project. Runs on [`crate::Projects`].
     Plugins,
+    /// Acts on one of the project's running plug-ins (opens or closes its editor, restarts
+    /// it); never changes the project or its undo history.
+    Plugin,
+    /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
+    /// to Loopwerk, not to one project. Runs on [`crate::Projects`].
+    Library,
 }
 
 impl ParamType {
@@ -49,6 +55,8 @@ impl CommandKind {
             Self::Transport => "transport",
             Self::Projects => "projects",
             Self::Plugins => "plugins",
+            Self::Plugin => "plugin",
+            Self::Library => "library",
         }
     }
 }
@@ -68,6 +76,8 @@ pub enum ParamType {
     Text,
     /// A list of tracks, each an id or a name.
     Tracks,
+    /// A list of texts (file paths).
+    Texts,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,13 +115,17 @@ impl<T> CommandSpec<T> {
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
         for p in self.params {
-            if p.ty == ParamType::Tracks {
-                let items = json!({ "type": ["integer", "string"] });
+            if matches!(p.ty, ParamType::Tracks | ParamType::Texts) {
+                let items = if p.ty == ParamType::Tracks {
+                    json!({ "type": ["integer", "string"] })
+                } else {
+                    json!({ "type": "string" })
+                };
                 properties.insert(p.name.to_string(), json!({ "type": "array", "items": items, "description": p.doc }));
                 continue;
             }
             let ty = match p.ty {
-                ParamType::Tracks => json!("array"),
+                ParamType::Tracks | ParamType::Texts => json!("array"),
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -158,6 +172,20 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[],
         kind: CommandKind::Read,
         run: list,
+    },
+    CommandSpec {
+        id: "project.save",
+        label: "Save the project as a Loopwerk project (.locr) with its plug-ins' state as it is now; without a path, to the .locr file it was opened from or last saved to",
+        params: &[
+            optional("path", ParamType::Text, "file to save to; .locr is added when missing"),
+            optional(
+                "copy",
+                ParamType::Bool,
+                "true writes a copy (a template, a backup) and the project stays with its own file",
+            ),
+        ],
+        kind: CommandKind::Read,
+        run: save,
     },
     CommandSpec {
         id: "project.info",
@@ -275,6 +303,18 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_clip_gain,
     },
     CommandSpec {
+        id: "clip.setFades",
+        label: "Set an audio clip's fade-in and fade-out lengths, in beats; together at most the clip's length",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            optional("in", ParamType::Number, "fade-in length in beats from the clip's start, at least 0; 0 is none"),
+            optional("out", ParamType::Number, "fade-out length in beats before the clip's end, at least 0; 0 is none"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_clip_fades,
+    },
+    CommandSpec {
         id: "clip.copy",
         label: "Copy an arrangement clip, with what it plays, for clip.paste",
         params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
@@ -361,17 +401,28 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "transport.play",
-        label: "Start the transport from the beginning: the arrangement plays, launches follow the beat",
+        label: "Start the transport from the play start marker (beat 0 unless moved): the arrangement plays, launches follow the beat",
         params: &[],
         kind: CommandKind::Transport,
         run: play,
     },
     CommandSpec {
         id: "transport.stop",
-        label: "Stop the transport, the arrangement and every launched clip at once",
-        params: &[],
+        label: "Stop the transport, the arrangement and every launched clip at once; stopping while stopped moves the play start marker to beat 0",
+        params: &[optional(
+            "return",
+            ParamType::Text,
+            "marker (default): the playhead goes back to the play start marker; here: the marker moves to where the playhead stopped",
+        )],
         kind: CommandKind::Transport,
         run: stop,
+    },
+    CommandSpec {
+        id: "transport.setPosition",
+        label: "Move the play start marker, where the transport starts; while playing, playback jumps there at once",
+        params: &[param("beats", ParamType::Number, "beats from the beginning, 0 … 120000")],
+        kind: CommandKind::Transport,
+        run: set_position,
     },
     CommandSpec {
         id: "transport.setMetronome",
@@ -452,15 +503,106 @@ static COMMANDS: &[CommandSpec] = &[
         label: "Add a built-in device to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given",
         params: &[
             TRACK,
-            param("id", ParamType::Text, "built-in device id, from devices.list"),
+            optional("id", ParamType::Text, "built-in device id, from devices.list (not needed with a preset)"),
             optional(
                 "position",
                 ParamType::Integer,
                 "where in the chain, from 0 (default: last; an instrument is always first)",
             ),
+            optional("preset", ParamType::Text, "a preset file to load: DX7 voice data (.syx) for the FM synth"),
+            optional("voice", ParamType::Integer, "which voice of a preset bank, from 1 (default 1)"),
         ],
         kind: CommandKind::Edit,
         run: devices::add,
+    },
+    CommandSpec {
+        id: "track.add",
+        label: "Add an audio or MIDI track with its mixer channel, clip slots and arrangement lane, optionally with a device (an instrument makes a MIDI track, an effect an audio track)",
+        params: &[
+            optional("kind", ParamType::Text, "audio or midi (default: from the device)"),
+            optional("name", ParamType::Text, "the track's name (default: the device's, or Audio n / MIDI n)"),
+            optional(
+                "after",
+                ParamType::Track,
+                "put it after this track, in its group (default: after the last regular track)",
+            ),
+            optional(
+                "device",
+                ParamType::Text,
+                "a built-in device id from devices.list, or a plug-in from plugins.list",
+            ),
+            optional("preset", ParamType::Text, "a preset file for the device (DX7 voice data for the FM synth)"),
+            optional("voice", ParamType::Integer, "which voice of a preset bank, from 1"),
+        ],
+        kind: CommandKind::Edit,
+        run: files::add_track,
+    },
+    CommandSpec {
+        id: "project.missingFiles",
+        label: "List the audio files the project's clips name that cannot be found, with where they were and how many clips play each",
+        params: &[],
+        kind: CommandKind::Read,
+        run: crate::relink::missing_files,
+    },
+    CommandSpec {
+        id: "project.relinkFiles",
+        label: "Point every clip that plays a missing (or any) audio file at another file, as one undo step; library.findFiles finds candidates",
+        params: &[
+            param("files", ParamType::Texts, "the files as project.missingFiles names them"),
+            param("to", ParamType::Texts, "for each, the file to play instead (the same order); at most 4096"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::relink::relink_files,
+    },
+    CommandSpec {
+        id: "clip.addFiles",
+        label: "Place samples and MIDI files as clips: on a track (or new tracks when none is given), one after another from a beat in the arrangement or down the clip slots from a scene; separate gives each clip a track of its own",
+        params: &[
+            param(
+                "paths",
+                ParamType::Texts,
+                "the files: samples (wav, aiff, flac, mp3, ogg) and MIDI files (.mid); at most 256",
+            ),
+            optional(
+                "track",
+                ParamType::Track,
+                "the track to place them on; files it cannot hold go on a new track after it (default: new tracks)",
+            ),
+            optional("start", ParamType::Number, "arrangement beat the first clip starts at"),
+            optional("scene", ParamType::Integer, "scene number, from 1, of the first clip slot"),
+            optional(
+                "separate",
+                ParamType::Bool,
+                "one track per clip, side by side, instead of one after another (default false)",
+            ),
+            optional("stack", ParamType::Bool, "in the arrangement, keep the clips the new ones cover (default false)"),
+            optional(
+                "warp",
+                ParamType::Text,
+                "stretch mode for samples with a known tempo: repitch, rhythmic (default), tonal, texture, smooth, high-quality",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: files::add_files,
+    },
+    CommandSpec {
+        id: "preview.play",
+        label: "Preview a sample or a MIDI file once, at its own speed, after the main channel; a MIDI file plays through a track's instrument or the FM synth",
+        params: &[
+            param("path", ParamType::Text, "the sample or MIDI file"),
+            optional("from", ParamType::Number, "seconds into the file to start at (default 0)"),
+            optional("track", ParamType::Track, "a MIDI file plays through this track's instrument when it has one"),
+            optional("gain", ParamType::Number, "level in dB (default -6)"),
+        ],
+        kind: CommandKind::Transport,
+        run: preview::play,
+    },
+    CommandSpec {
+        id: "preview.stop",
+        label: "Stop the preview",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: preview::stop,
     },
     CommandSpec {
         id: "device.remove",
@@ -492,6 +634,49 @@ static COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Edit,
         run: devices::set_param,
     },
+    CommandSpec {
+        id: "device.addPlugin",
+        label: "Add an installed plug-in to a track; an instrument goes first and plays the track's notes, an effect goes last unless a position is given. It starts while the project plays",
+        params: &[
+            TRACK,
+            param("plugin", ParamType::Text, "plug-in name, id or file, from plugins.list"),
+            optional(
+                "position",
+                ParamType::Integer,
+                "where in the chain, from 0 (default: last; an instrument is always first)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::add_plugin,
+    },
+    CommandSpec {
+        id: "device.plugin",
+        label: "Where a plug-in device stands: loading, running, missing, crashed or failed, the installed plug-in found for it, its latency, whether its editor is open",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Read,
+        run: devices::plugin_status,
+    },
+    CommandSpec {
+        id: "device.openEditor",
+        label: "Open a plug-in device's editor in a window of its own; changes there are heard at once",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::open_editor,
+    },
+    CommandSpec {
+        id: "device.closeEditor",
+        label: "Close a plug-in device's editor",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::close_editor,
+    },
+    CommandSpec {
+        id: "device.restart",
+        label: "Restart a plug-in device that crashed or stopped answering, in a fresh process with its last state",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::restart,
+    },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
         id: "edit.redo",
@@ -513,12 +698,33 @@ fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     ))
 }
 
+fn save(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let copy = match params.get("copy") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err("copy must be true or false".into()),
+    };
+    let path = match params.get("path") {
+        Some(Value::String(path)) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
+        Some(Value::String(_)) | None | Some(Value::Null) => match session.source() {
+            Some(source) if source.extension().is_some_and(|e| e.eq_ignore_ascii_case(loopwerk_locr::EXTENSION)) => {
+                source.to_path_buf()
+            }
+            _ => return Err("the project has no .locr file yet; give a path to save it to".into()),
+        },
+        Some(_) => return Err("path must be text".into()),
+    };
+    let written = session.save(&path, copy)?;
+    Ok(json!({ "path": written.display().to_string(), "copy": copy }))
+}
+
 fn info(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     let p = session.project();
     let arrangement_clips: usize = p.arrangement.lanes.iter().map(|l| l.clips.len()).sum();
     let launcher_clips = p.launcher.columns.iter().flat_map(|c| &c.slots).filter(|s| s.clip.is_some()).count();
     Ok(json!({
         "source": session.source().map(|s| s.display().to_string()),
+        "unsaved_changes": session.has_unsaved_changes(),
         "tempo_bpm": p.transport.tempo_bpm,
         "time_signature": format!("{}/{}", p.transport.time_signature.numerator, p.transport.time_signature.denominator),
         "tracks": p.tracks.len(),
@@ -579,7 +785,7 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
     let (notes, audio) = content.map_or((0, None), |c| {
         c.lanes.iter().fold((0, None), |(n, a), lane| match &lane.data {
             LaneData::Notes(notes) => (n + notes.len(), a),
-            LaneData::Audio(region) => (n, Some(region.file.clone())),
+            LaneData::Audio(region) => (n, Some(region)),
         })
     });
     json!({
@@ -590,8 +796,11 @@ fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: 
         "start": clip.start,
         "length": clip.length,
         "enabled": clip.enabled,
+        "fade_in": clip.fade_in,
+        "fade_out": clip.fade_out,
         "notes": notes,
-        "audio_file": audio,
+        "audio_file": audio.map(|r| r.file.as_str()),
+        "audio_stream": audio.and_then(|r| r.stream),
     })
 }
 
@@ -668,7 +877,7 @@ fn with_descendants(p: &Project, track: TrackId) -> Vec<TrackId> {
     p.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
 }
 
-fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let p = &mut session.project;
     let members = track_list(p, params)?;
     let parents: Vec<Option<TrackId>> =
@@ -870,6 +1079,46 @@ fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, Command
         return Err("only an audio clip has a gain".into());
     }
     Ok(json!({ "gain_db": to_db(gain) }))
+}
+
+fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let length_of = |name: &str| -> Result<Option<f64>, CommandError> {
+        match params.get(name) {
+            None => Ok(None),
+            Some(_) => {
+                let beats = number(params, name)?;
+                if beats < 0.0 {
+                    return Err(format!("{name} must be at least 0 beats, got {beats}").into());
+                }
+                Ok(Some(beats))
+            }
+        }
+    };
+    let (fade_in, fade_out) = (length_of("in")?, length_of("out")?);
+    if fade_in.is_none() && fade_out.is_none() {
+        return Err("give in, out or both, in beats".into());
+    }
+    let (lane, index) = lane_and_index(&session.project, params)?;
+    let p = &mut session.project;
+    let clip = p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?;
+    let audio = p.content(clip.content).is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))));
+    if !audio {
+        return Err("only an audio clip has fades".into());
+    }
+    let changed =
+        Clip { fade_in: fade_in.unwrap_or(clip.fade_in), fade_out: fade_out.unwrap_or(clip.fade_out), ..clip.clone() };
+    if !changed.fades_valid() {
+        return Err(format!(
+            "the fades ({} + {} beats) are longer than the clip ({} beats)",
+            changed.fade_in, changed.fade_out, changed.length
+        )
+        .into());
+    }
+    let result = json!({ "fade_in": changed.fade_in, "fade_out": changed.fade_out });
+    if let Some(slot) = p.arrangement.lanes.get_mut(lane).and_then(|l| l.clips.get_mut(index)) {
+        *slot = changed;
+    }
+    Ok(result)
 }
 
 fn copy_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -1086,8 +1335,9 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
 
 /// Clears `[from, to)` on a lane for a clip placed there (docs/spec/arrangement-editing.md):
 /// clips entirely inside are removed, clips reaching in are shortened, and a clip around it is
-/// split in two, the second part continuing its content from where it was.
-fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
+/// split in two, the second part continuing its content from where it was. A split clip's
+/// first part keeps its fade-in and the second its fade-out; fades are fitted to what is left.
+pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
     let mut kept = Vec::with_capacity(clips.len() + 1);
     for clip in clips.drain(..) {
         let (start, end) = (clip.start, clip.start + clip.length);
@@ -1095,12 +1345,23 @@ fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
             kept.push(clip);
             continue;
         }
+        let split = start < from && end > to;
         if start < from {
-            kept.push(Clip { length: from - start, ..clip.clone() });
+            let mut first = Clip { length: from - start, ..clip.clone() };
+            if split {
+                first.fade_out = 0.0;
+            }
+            first.fit_fades();
+            kept.push(first);
         }
         if end > to {
             let offset = content_at(&clip, to - start);
-            kept.push(Clip { start: to, length: end - to, offset, ..clip });
+            let mut second = Clip { start: to, length: end - to, offset, ..clip };
+            if split {
+                second.fade_in = 0.0;
+            }
+            second.fit_fades();
+            kept.push(second);
         }
     }
     *clips = kept;
@@ -1151,8 +1412,13 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
 }
 
 fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    let preview_state = session.player().map(|player| {
+        let preview = player.preview_monitor();
+        json!({ "playing": preview.playing(), "seconds": (preview.seconds() * 1000.0).round() / 1000.0 })
+    });
     let monitor = session.player_mut()?.monitor();
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
+    let start_beat = monitor.start_beat();
     let monitor_metronome = monitor.metronome();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
@@ -1187,14 +1453,17 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
             })
         })
         .collect();
-    let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+    // Rounded once, so the beat and the position agree.
+    let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
     Ok(json!({
         "running": running,
         "metronome": monitor_metronome,
         "tempo_bpm": tempo,
-        "beat": (beat * 1000.0).round() / 1000.0,
+        "beat": beat,
         "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),
+        "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
+        "preview": preview_state,
     }))
 }
 
@@ -1207,9 +1476,24 @@ fn play(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(json!({ "transport": "playing" }))
 }
 
-fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
-    send(session, LaunchCommand::Stop)?;
+fn stop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let command = match params.get("return") {
+        None => LaunchCommand::Stop,
+        Some(Value::String(s)) if s == "marker" => LaunchCommand::Stop,
+        Some(Value::String(s)) if s == "here" => LaunchCommand::StopHere,
+        Some(other) => return Err(format!("return must be \"marker\" or \"here\", got {other}").into()),
+    };
+    send(session, command)?;
     Ok(json!({ "transport": "stopped" }))
+}
+
+fn set_position(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let beats = number(params, "beats")?;
+    if !(0.0..=MAX_START_BEAT).contains(&beats) {
+        return Err(format!("beats must be between 0 and {MAX_START_BEAT}, got {beats}").into());
+    }
+    send(session, LaunchCommand::SetPosition { beat: beats })?;
+    Ok(json!({ "start_beat": beats }))
 }
 
 fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

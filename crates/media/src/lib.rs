@@ -1,6 +1,11 @@
 //! Audio files for a project: finds the files its audio clips refer to and decodes them into
 //! memory with symphonia (MPL-2.0), so the engine can play them without touching the disk.
 
+pub mod info;
+pub mod midi;
+pub mod stems;
+pub mod tempo;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,7 +21,7 @@ use symphonia::core::meta::MetadataOptions;
 
 /// Longest file we decode, so one huge or hostile file cannot exhaust memory (about 2.6 GiB of
 /// stereo f32 at 48 kHz).
-const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
+pub(crate) const MAX_SECONDS: f64 = 60.0 * 60.0 * 2.0;
 
 /// Loads every audio file the project uses. Same as [`decode_project_audio`].
 pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
@@ -28,19 +33,21 @@ pub fn load_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, 
 /// path is tried. Files that cannot be found or decoded are reported in the returned warnings and
 /// left out.
 pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool, Vec<String>) {
-    // Each file once, with where to look for it.
-    let mut wanted: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    // Each file once (once more when a Stems file is played whole as well as by track), with
+    // where to look for it and whether all of its audio tracks are wanted.
+    let mut wanted: Vec<(String, Vec<PathBuf>, bool)> = Vec::new();
     for content in &project.contents {
         for lane in &content.lanes {
             let LaneData::Audio(region) = &lane.data else { continue };
-            if wanted.iter().any(|(file, _)| *file == region.file) {
+            let streams = region.stream.is_some();
+            if wanted.iter().any(|(file, _, s)| *file == region.file && *s == streams) {
                 continue;
             }
             let mut candidates = vec![project_dir.join(&region.file)];
             if let Some(absolute) = &region.absolute_file {
                 candidates.push(PathBuf::from(absolute));
             }
-            wanted.push((region.file.clone(), candidates));
+            wanted.push((region.file.clone(), candidates, streams));
         }
     }
 
@@ -52,12 +59,24 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
             .map(|_| {
                 scope.spawn(|| {
                     let mut done = Vec::new();
-                    while let Some((file, candidates)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        let result = match candidates.iter().find(|p| p.is_file()) {
-                            None => Err(format!("audio file {file} not found")),
-                            Some(path) => decode_file(path).map_err(|e| format!("audio file {}: {e}", path.display())),
+                    while let Some((file, candidates, streams)) = wanted.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let Some(path) = candidates.iter().find(|p| p.is_file()) else {
+                            done.push((file.clone(), Err(format!("audio file {file} not found"))));
+                            continue;
                         };
-                        done.push((file.clone(), result));
+                        let failed = |e: String| format!("audio file {}: {e}", path.display());
+                        if !*streams {
+                            done.push((file.clone(), decode_file(path).map_err(failed)));
+                            continue;
+                        }
+                        match stems::decode_streams(path) {
+                            Ok(all) => done.extend(
+                                all.into_iter()
+                                    .zip(0u16..)
+                                    .map(|(data, n)| (loopwerk_engine::model::stream_key(file, n), Ok(data))),
+                            ),
+                            Err(e) => done.push((file.clone(), Err(failed(e)))),
+                        }
                     }
                     done
                 })
@@ -78,6 +97,74 @@ pub fn decode_project_audio(project: &Project, project_dir: &Path) -> (AudioPool
     }
     warnings.sort();
     (pool, warnings)
+}
+
+/// A file the project's audio clips name that is found neither at its path relative to the
+/// project's folder nor at its absolute path (`docs/spec/missing-files.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingAudio {
+    /// The file as the clips name it (their relative path).
+    pub file: String,
+    /// Where it was looked for last: its absolute path when the project has one, otherwise its
+    /// path from the project's folder.
+    pub last_path: PathBuf,
+    /// How many clips (in the arrangement and the clip slots) play it.
+    pub clips: usize,
+}
+
+/// Where a region's file is: its path from the project's folder, then its absolute path.
+pub fn locate(file: &str, absolute: Option<&str>, project_dir: &Path) -> Option<PathBuf> {
+    let relative = project_dir.join(file);
+    if relative.is_file() {
+        return Some(relative);
+    }
+    absolute.map(PathBuf::from).filter(|p| p.is_file())
+}
+
+/// The project's audio files that cannot be found, each once, in the order the project names
+/// them. Only looks at whether files exist; nothing is decoded.
+pub fn missing_audio(project: &Project, project_dir: &Path) -> Vec<MissingAudio> {
+    let mut out: Vec<MissingAudio> = Vec::new();
+    let mut found: Vec<&str> = Vec::new();
+    for content in &project.contents {
+        for lane in &content.lanes {
+            let LaneData::Audio(region) = &lane.data else { continue };
+            if found.contains(&region.file.as_str()) || out.iter().any(|m| m.file == region.file) {
+                continue;
+            }
+            if locate(&region.file, region.absolute_file.as_deref(), project_dir).is_some() {
+                found.push(&region.file);
+                continue;
+            }
+            let last_path = region.absolute_file.as_ref().map_or_else(|| project_dir.join(&region.file), PathBuf::from);
+            out.push(MissingAudio { file: region.file.clone(), last_path, clips: 0 });
+        }
+    }
+    // Count the clips that play each missing file.
+    let uses = |content: loopwerk_engine::model::ContentId, file: &str| {
+        project
+            .contents
+            .iter()
+            .filter(|c| c.id == content)
+            .any(|c| c.lanes.iter().any(|l| matches!(&l.data, LaneData::Audio(r) if r.file == file)))
+    };
+    let clips: Vec<loopwerk_engine::model::ContentId> = project
+        .arrangement
+        .lanes
+        .iter()
+        .flat_map(|l| l.clips.iter().map(|c| c.content))
+        .chain(
+            project
+                .launcher
+                .columns
+                .iter()
+                .flat_map(|c| c.slots.iter().filter_map(|s| s.clip.as_ref().map(|c| c.content))),
+        )
+        .collect();
+    for missing in &mut out {
+        missing.clips = clips.iter().filter(|c| uses(**c, &missing.file)).count();
+    }
+    out
 }
 
 /// Decodes a whole audio file (WAV, AIFF, FLAC, MP3, Ogg Vorbis) to interleaved f32.
@@ -178,6 +265,7 @@ mod tests {
                         warp_markers: Vec::new(),
                         gain: 1.0,
                         transpose: 0.0,
+                        stream: None,
                     }),
                 }],
                 extensions: Extensions::default(),
@@ -216,6 +304,24 @@ mod tests {
     }
 
     #[test]
+    fn missing_files_are_listed_with_their_clips() {
+        let dir = std::env::temp_dir().join(format!("loopwerk-media-missing-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("set")).unwrap();
+        write_wav(&dir.join("set").join("here.wav"), 1, 100);
+        let mut project =
+            project_with_audio("gone.wav", Some(dir.join("elsewhere").join("gone.wav").display().to_string()));
+        let missing = missing_audio(&project, &dir.join("set"));
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].file, "gone.wav");
+        assert_eq!(missing[0].last_path, dir.join("elsewhere").join("gone.wav"));
+        assert_eq!(missing[0].clips, project.arrangement.lanes.iter().map(|l| l.clips.len()).sum::<usize>());
+        project = project_with_audio("here.wav", None);
+        assert!(missing_audio(&project, &dir.join("set")).is_empty());
+        assert_eq!(locate("here.wav", None, &dir.join("set")), Some(dir.join("set").join("here.wav")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn missing_and_broken_files_are_warnings() {
         let dir = temp_dir("broken");
         std::fs::write(dir.join("set").join("noise.wav"), b"definitely not audio").unwrap();
@@ -224,5 +330,37 @@ mod tests {
         let (pool, warnings) = load_project_audio(&project_with_audio("noise.wav", None), &dir.join("set"));
         assert!(pool.files.is_empty() && warnings.len() == 1, "{warnings:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stems_file_is_decoded_once_with_a_key_per_track() {
+        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("data");
+        let mut project = project_with_audio("tones-aac.stem.mp4", None);
+        let lane = project.contents[0].lanes[0].clone();
+        project.contents[0].lanes.clear();
+        // Stems 1 and 3, and the same file played whole (its first track, the master).
+        for stream in [Some(1), Some(3), None] {
+            let mut lane = lane.clone();
+            if let LaneData::Audio(region) = &mut lane.data {
+                region.stream = stream;
+            }
+            project.contents[0].lanes.push(lane);
+        }
+        let (pool, warnings) = load_project_audio(&project, &data);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let mut keys: Vec<_> = pool.files.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "tones-aac.stem.mp4",
+                "tones-aac.stem.mp4#0",
+                "tones-aac.stem.mp4#1",
+                "tones-aac.stem.mp4#2",
+                "tones-aac.stem.mp4#3",
+                "tones-aac.stem.mp4#4"
+            ]
+        );
+        assert_eq!(pool.files["tones-aac.stem.mp4#1"].frames(), 44_100);
     }
 }

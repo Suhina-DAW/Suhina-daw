@@ -80,13 +80,21 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 12] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 20] = [
+    ("file.new", "New project or open one", "File"),
+    ("file.open", "Open a project", "File"),
+    ("file.save", "Save the project", "File"),
+    ("file.saveAs", "Save the project under another name", "File"),
+    ("file.saveTemplate", "Save the project as a template", "File"),
     ("transport.toggle", "Play or stop", "Transport"),
     ("view.toggle", "Switch between Session and Arrangement", "View"),
     ("view.session", "Show the Session view", "View"),
     ("view.arrangement", "Show the Arrangement view", "View"),
     ("settings.open", "Open or close Settings", "View"),
     ("view.detail", "Show or hide the detail area", "View"),
+    ("view.browser", "Show or hide the browser", "View"),
+    ("browser.search", "Search in the browser", "View"),
+    ("view.sampleMap", "Show or hide the sample map in the main area", "View"),
     ("selection.copy", "Copy the selected clip", "Edit"),
     ("selection.cut", "Cut the selected clip", "Edit"),
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
@@ -106,7 +114,8 @@ pub fn actions() -> Vec<Action> {
     let projects =
         loopwerk_session::project_commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
     for (id, label, no_params) in session.chain(projects) {
-        if no_params && !all.iter().any(|a| a.id == id) {
+        // Saving goes through the window's own actions, which ask for a name the first time.
+        if no_params && id != "project.save" && !all.iter().any(|a| a.id == id) {
             all.push(Action { id: id.into(), label: label.into(), group: "Commands" });
         }
     }
@@ -119,10 +128,17 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 14] = [
+const DEFAULTS: [(&str, &[&str]); 21] = [
+    ("file.new", &["Ctrl+T"]),
+    ("file.open", &["Ctrl+O"]),
+    ("file.save", &["Ctrl+S"]),
+    ("file.saveAs", &["Ctrl+Shift+S"]),
     ("transport.toggle", &["Space"]),
     ("view.toggle", &["Tab"]),
     ("view.detail", &["Shift+Tab"]),
+    ("view.browser", &["Ctrl+B"]),
+    ("browser.search", &["Ctrl+F"]),
+    ("view.sampleMap", &["Ctrl+Shift+M"]),
     ("settings.open", &["Ctrl+Comma"]),
     ("edit.undo", &["Ctrl+Z"]),
     ("edit.redo", &["Ctrl+Shift+Z", "Ctrl+Y"]),

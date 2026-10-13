@@ -223,11 +223,6 @@ impl AheadReader {
         Some(worker)
     }
 
-    /// Asks for every voice to start again from its first frame.
-    pub(crate) fn rewind(&mut self) {
-        self.move_to(0);
-    }
-
     /// Asks for the voices to continue from arrangement frame `to`; until the worker has moved
     /// them, reads are silence.
     pub(crate) fn move_to(&mut self, to: u64) {

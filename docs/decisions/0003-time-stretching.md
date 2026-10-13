@@ -47,7 +47,11 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
 1. **Stretch modes are part of the model.** Every audio region has a DAW-neutral
    `StretchMode`: `Repitch`, `Rhythmic`, `Tonal`, `Texture`, `Smooth` and `HighQuality`.
    Format importers map their own codes to these; Live's `WarpMode` 4 (Complex) maps to
-   `Smooth`. Codes not yet observed in our corpus map to `Smooth` with a warning.
+   `Smooth`. Codes not yet observed in our corpus map to `Smooth` with a warning. A sample
+   placed from the browser (`clip.addFiles`) whose tempo is known (its metadata, its name, or
+   detection in `media::tempo`) is warped with two markers at the file's tempo and the stretch
+   mode the window's Warp mode setting gives (`Rhythmic` by default); without a tempo it is not
+   warped ([browser spec](../spec/browser.md) › Warping).
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
    stretch voice when the renderer is built: a `loopwerk_stretch::Stretch` plus a playlist that
    says which part of the file plays when and how fast (warp marker segments and loop jumps, at
@@ -92,9 +96,10 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    worker (`StretchWorker`, `crates/engine/src/ahead.rs`) that keeps a lock-free ring (`rtrb`)
    per voice filled 0.5 s ahead; the audio thread only copies frames, asking for them by their
    position in the clip. A worker that falls behind costs silence, counted as underruns, never
-   timing: late frames are dropped. When the transport stops, a lock-free handshake (request,
-   worker paused, rings emptied) lets the worker rewind the voices and fill the rings again
-   before the next start. Without a worker thread (offline rendering) the renderer fills the
+   timing: late frames are dropped. When the transport stops or the play start marker moves, a
+   lock-free handshake (request, worker paused, rings emptied) lets the worker move the voices to
+   the marker and fill the rings again before the next start; a jump while playing moves them the
+   same way, silent until the worker has caught up. Without a worker thread (offline rendering) the renderer fills the
    rings itself just before reading them, through the same voices and rings (rule 4); tests
    check that both give the same samples. Launched clips' voices still run on the audio thread.
 

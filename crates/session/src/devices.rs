@@ -60,8 +60,21 @@ fn unit_name(unit: Unit) -> &'static str {
 
 /// The devices on a track, in order, with every parameter's value for built-in ones.
 pub(crate) fn track_devices(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let channel = channel_param(session, params)?;
-    Ok(Value::Array(channel.devices.iter().enumerate().map(|(index, d)| device_json(index, d)).collect()))
+    let track = track_id(&session.project, params)?;
+    let devices = channel_param(session, params)?.devices.clone();
+    Ok(Value::Array(
+        devices
+            .iter()
+            .enumerate()
+            .map(|(index, d)| {
+                let mut value = device_json(index, d);
+                if matches!(d.kind, DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. }) {
+                    value["plugin"] = plugin_json(session.plugin_report(track, index));
+                }
+                value
+            })
+            .collect(),
+    ))
 }
 
 fn device_json(index: usize, device: &Device) -> Value {
@@ -107,9 +120,37 @@ fn device_index(len: usize, params: &Value) -> Result<usize, CommandError> {
 }
 
 pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let id = params.get("id").and_then(Value::as_str).ok_or("id must be a built-in device id, from devices.list")?;
+    let preset = match params.get("preset") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let path = v.as_str().ok_or("preset must be a preset file's path")?;
+            let voice = match params.get("voice") {
+                None | Some(Value::Null) => 1,
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .filter(|n| *n >= 1)
+                    .ok_or("voice must be a whole number from 1")?,
+            };
+            Some(read_preset(std::path::Path::new(path), voice)?)
+        }
+    };
+    let id = match (params.get("id").and_then(Value::as_str), &preset) {
+        (Some(id), Some(p)) if id != p.device => {
+            return Err(format!("the preset is for {:?}, not {id:?}", p.device).into());
+        }
+        (Some(id), _) => id,
+        (None, Some(p)) => p.device,
+        (None, None) => return Err("id must be a built-in device id, from devices.list".into()),
+    };
     let info = loopwerk_device_registry::info(id)
         .ok_or_else(|| format!("no built-in device {id:?}; devices.list lists them"))?;
+    if info.role == Role::Instrument {
+        let track = track_id(&session.project, params)?;
+        if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
+            return Err("an instrument goes on a MIDI track".into());
+        }
+    }
     let channel = channel_param(session, params)?;
     if channel.devices.len() >= MAX_DEVICES {
         return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
@@ -151,11 +192,23 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         kind: DeviceKind::Builtin(info.id.to_string()),
         enabled: true,
         state: None,
-        params: Vec::new(),
+        params: preset
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.params.iter().map(|(id, value)| DeviceParam::new(*id, *value)).collect()),
         extensions: Extensions::default(),
     };
     channel.devices.insert(position, device);
-    Ok(json!({ "device": position, "id": info.id, "name": info.name }))
+    Ok(json!({ "device": position, "id": info.id, "name": info.name, "preset": preset.map(|p| p.name) }))
+}
+
+/// Reads voice `voice` of the preset file at `path`.
+fn read_preset(path: &std::path::Path, voice: usize) -> Result<loopwerk_device_registry::Preset, CommandError> {
+    let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    if size > loopwerk_device_registry::MAX_PRESET_BYTES as u64 {
+        return Err(format!("{}: a preset file is at most 64 KiB", path.display()).into());
+    }
+    let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    loopwerk_device_registry::preset(&data, voice).map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
 pub(crate) fn remove(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -199,4 +252,107 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     // A playing engine takes this as a message, without a new graph.
     session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
     Ok(json!({ "device": index, "param": param, "value": value }))
+}
+
+/// The key of the plug-in device the `track` and `device` parameters name.
+fn plugin_key(session: &Session, params: &Value) -> Result<u64, CommandError> {
+    let track = track_id(&session.project, params)?;
+    let index = params
+        .get("device")
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("device must be a device index, from 0, as in track.devices")?;
+    crate::plugin_key_at(&session.project, track, index)
+        .ok_or_else(|| format!("device {index} on the track is not a plug-in").into())
+}
+
+/// Adds an installed plug-in from the catalog to a track.
+pub(crate) fn add_plugin(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let name = params.get("plugin").and_then(Value::as_str).ok_or("plugin must be a plug-in name, id or file")?;
+    let env = session.plugins.env().ok_or("no plug-in catalog is open; plugins.scan looks for installed ones")?;
+    let plugin = env
+        .catalog
+        .find(name)
+        .or_else(|| env.catalog.plugins().find(|p| p.spec() == name))
+        .ok_or_else(|| format!("no plug-in {name:?} in the catalog; plugins.list lists them"))?
+        .clone();
+    let instrument = crate::is_instrument(&plugin);
+    if instrument {
+        let track = track_id(&session.project, params)?;
+        if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
+            return Err("an instrument goes on a MIDI track".into());
+        }
+    }
+    let channel = channel_param(session, params)?;
+    if channel.devices.len() >= MAX_DEVICES {
+        return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
+    }
+    let position = match params.get("position") {
+        None if instrument => 0,
+        None => channel.devices.len(),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= channel.devices.len())
+            .ok_or_else(|| format!("position must be from 0 to {}", channel.devices.len()))?,
+    };
+    if instrument && position != 0 {
+        return Err("an instrument goes first in a track's chain (position 0)".into());
+    }
+    let device = Device {
+        name: plugin.name.clone(),
+        kind: crate::rack::device_kind(&plugin),
+        enabled: true,
+        state: None,
+        params: Vec::new(),
+        extensions: Extensions::default(),
+    };
+    channel.devices.insert(position, device);
+    Ok(json!({
+        "device": position,
+        "name": plugin.name,
+        "vendor": plugin.vendor,
+        "format": plugin.format(),
+        "instrument": instrument,
+    }))
+}
+
+/// A plug-in device's state as JSON.
+pub(crate) fn plugin_json(report: Option<crate::PluginReport>) -> Value {
+    let Some(report) = report else { return json!({ "status": "stopped" }) };
+    json!({
+        "status": report.status.name(),
+        "reason": report.status.reason(),
+        "plugin": report.plugin.as_ref().map(|(name, vendor, how)| json!({ "name": name, "vendor": vendor, "found": how })),
+        "instrument": report.instrument,
+        "latency": report.latency,
+        "editor_open": report.editor_open,
+        "state_refused": report.state_refused,
+    })
+}
+
+pub(crate) fn plugin_status(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    Ok(plugin_json(session.plugins.report(key)))
+}
+
+pub(crate) fn open_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    // Over the app's window the editor opens in the background; `device.plugin` says when.
+    Ok(match session.plugins.open_editor(key)? {
+        Some((width, height)) => json!({ "editor_open": true, "width": width, "height": height }),
+        None => json!({ "editor_open": "opening" }),
+    })
+}
+
+pub(crate) fn close_editor(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    session.plugins.close_editor(key)?;
+    Ok(json!({ "editor_open": false }))
+}
+
+pub(crate) fn restart(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    session.plugins.restart(key)?;
+    Ok(json!({ "status": "loading" }))
 }

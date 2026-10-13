@@ -25,8 +25,13 @@ impl AudioData {
 
     /// The stereo sample at `seconds` into the file, linearly interpolated; silence outside it.
     fn stereo_at(&self, seconds: f64) -> (f32, f32) {
+        self.frame_at(seconds * f64::from(self.sample_rate))
+    }
+
+    /// The stereo sample at frame `position` of the file (fractional frames interpolate
+    /// linearly); silence outside it. Mono plays on both sides.
+    pub(crate) fn frame_at(&self, position: f64) -> (f32, f32) {
         let channels = usize::from(self.channels.max(1));
-        let position = seconds * f64::from(self.sample_rate);
         if position.is_nan() || position < 0.0 {
             return (0.0, 0.0);
         }
@@ -84,6 +89,45 @@ impl TimeMap {
     }
 }
 
+/// How loud a clip is near its edges: a short click guard at both ends, times the clip's own
+/// fade-in and fade-out (`docs/spec/arrangement-editing.md` › Fades). All lengths are in frames;
+/// the fades are linear in amplitude and multiply with the guard.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Fades {
+    click: f64,
+    fade_in: f64,
+    fade_out: f64,
+}
+
+/// The click guard at both ends of every audio clip, in seconds.
+pub(crate) const CLICK_GUARD_SECONDS: f64 = 0.002;
+
+impl Fades {
+    /// The fades of `clip` at `frames_per_beat`, fitted to the clip (a malformed project cannot
+    /// make them negative or longer than the clip).
+    pub(crate) fn new(clip: &Clip, frames_per_beat: f64, sample_rate: u32) -> Self {
+        let (fade_in, fade_out) = clip.fitted_fades();
+        let frames = |beats: f64| {
+            let f = beats * frames_per_beat;
+            if f.is_finite() { f.max(0.0) } else { 0.0 }
+        };
+        Self {
+            click: (CLICK_GUARD_SECONDS * f64::from(sample_rate)).max(1.0),
+            fade_in: frames(fade_in),
+            fade_out: frames(fade_out),
+        }
+    }
+
+    /// The gain `since_start` frames after the clip starts and `until_end` frames before it
+    /// ends, 0 … 1.
+    pub(crate) fn gain(&self, since_start: f64, until_end: f64) -> f32 {
+        let guard = (since_start / self.click).min(until_end / self.click);
+        let fade_in = if self.fade_in > 0.0 { since_start / self.fade_in } else { 1.0 };
+        let fade_out = if self.fade_out > 0.0 { until_end / self.fade_out } else { 1.0 };
+        (guard.clamp(0.0, 1.0) * fade_in.clamp(0.0, 1.0) * fade_out.clamp(0.0, 1.0)) as f32
+    }
+}
+
 /// The project timing an audio event is resolved against.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timing {
@@ -107,7 +151,7 @@ pub(crate) struct AudioEvent {
     data: Arc<AudioData>,
     gain_left: f32,
     gain_right: f32,
-    fade_frames: f64,
+    fades: Fades,
     /// Whether the clip follows the beat (warped); an unwarped clip plays at its own speed.
     warped: bool,
     /// Seconds added to the file position: an unwarped clip that was playing when the tempo
@@ -159,10 +203,15 @@ impl AudioEvent {
             data,
             gain_left: gains.0 * gain,
             gain_right: gains.1 * gain,
-            fade_frames: 0.002 * f64::from(sample_rate),
+            fades: Fades::new(clip, frames_per_beat, sample_rate),
             warped: region.warped,
             shift: 0.0,
         })
+    }
+
+    /// The gain envelope at the clip's edges.
+    pub(crate) fn fades(&self) -> Fades {
+        self.fades
     }
 
     pub(crate) fn warped(&self) -> bool {
@@ -194,9 +243,9 @@ impl AudioEvent {
 
     /// The stereo sample at frame `position`, which must be inside `start..end`.
     pub(crate) fn sample(&self, position: u64) -> (f32, f32) {
-        let since_start = (position - self.start) as f64;
-        let until_end = (self.end - position) as f64;
-        let fade = (since_start / self.fade_frames).min(until_end / self.fade_frames).min(1.0) as f32;
+        let since_start = position.saturating_sub(self.start) as f64;
+        let until_end = self.end.saturating_sub(position) as f64;
+        let fade = self.fades.gain(since_start, until_end);
         let seconds = self.map.seconds(self.clip_beat(since_start / self.frames_per_beat)) + self.shift;
         let (left, right) = self.data.stereo_at(seconds);
         (left * self.gain_left * fade, right * self.gain_right * fade)
@@ -210,7 +259,7 @@ impl AudioEvent {
         if !(elapsed_frames >= 0.0 && until_end > 0.0) {
             return (0.0, 0.0);
         }
-        let fade = (elapsed_frames / self.fade_frames).min(until_end / self.fade_frames).min(1.0) as f32;
+        let fade = self.fades.gain(elapsed_frames, until_end);
         let seconds = self.map.seconds(self.clip_beat(elapsed_frames / self.frames_per_beat));
         let (left, right) = self.data.stereo_at(seconds);
         (left * self.gain_left * fade, right * self.gain_right * fade)
@@ -241,6 +290,7 @@ mod tests {
             warp_markers: markers.iter().map(|&(time, audio_time)| WarpMarker { time, audio_time }).collect(),
             gain: 1.0,
             transpose,
+            stream: None,
         }
     }
 
@@ -252,6 +302,8 @@ mod tests {
             offset,
             loop_range: loop_range.map(|(start, end)| LoopRange { start, end }),
             enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
             extensions: Extensions::default(),
         }
     }
@@ -270,6 +322,22 @@ mod tests {
             (1.0, 1.0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn fades_are_fitted_to_the_clip_and_meet_the_click_guard() {
+        // 4 beats of fades on a 2-beat clip are fitted to 1.5 + 0.5 beats, at 100 frames a beat.
+        let c = Clip { fade_in: 3.0, fade_out: 1.0, ..clip(2.0, 0.0, None) };
+        let fades = Fades::new(&c, 100.0, 1000);
+        assert_eq!((fades.fade_in, fades.fade_out), (150.0, 50.0));
+        assert_eq!(fades.click, 2.0);
+        // Half-way into the fade-in; the guard is over after two frames.
+        assert!((fades.gain(75.0, 125.0) - 0.5).abs() < 1e-6);
+        assert!((fades.gain(1.0, 199.0) - 0.5 / 150.0).abs() < 1e-6, "guard and fade multiply");
+        assert_eq!(fades.gain(160.0, 40.0), 0.8);
+        assert_eq!(fades.gain(0.0, 200.0), 0.0);
+        let c = Clip { fade_in: f64::NAN, fade_out: -1.0, ..clip(2.0, 0.0, None) };
+        assert_eq!(Fades::new(&c, 100.0, 1000).gain(100.0, 100.0), 1.0, "bad fades are no fades");
     }
 
     #[test]

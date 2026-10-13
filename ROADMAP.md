@@ -7,10 +7,10 @@ Loopwerk is pre-alpha. Milestones are in order; each one builds on the previous.
 | M0 | **Foundation:** workspace, GPL-3.0-or-later, clean-room rules, DAW-neutral model | done |
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `loopwerk-cli play` | done (verified on Windows) |
-| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP and edits heard while playing work; more commands and a native project format to come |
+| M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Loopwerk's own format (`.locr`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); not in the engine yet |
+| M6 | **Plug-ins:** CLAP hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006); VST3 after, and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `loopwerk-cli plugin run` puts a file through one; `loopwerk-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `loopwerk-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `loopwerk-cli plugin params` lists a plug-in's parameters, and `loopwerk-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
 | M7 | **More formats:** DAWproject import and export | |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Loopwerk's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
 
@@ -29,10 +29,11 @@ the first device.
   the engine, they can later be split into their own repository or built as CLAP plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
 - **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
-  overdrive and the FM synth (the first instrument: the DX7-style engine ported from MSFA, with
-  DX7 voice files) exist and are tested on their own. The engine runs them in chains on tracks:
-  a track's sound goes through its devices before its fader, and an instrument first in the
-  chain plays the track's notes (LOOP-35); `device.*` commands add, remove, switch and set them.
+  overdrive, the compressor, the limiter and the FM synth (the first instrument: the DX7-style
+  engine ported from MSFA, with DX7 voice files) exist and are tested on their own. The engine
+  runs them in chains on tracks: a track's sound goes through its devices before its fader, and
+  an instrument first in the chain plays the track's notes (LOOP-35); `device.*` commands add,
+  remove, switch and set them.
   Chains on group and master channels, and automation, come next.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the parameters;
   then an approximate mapping to an open-source plug-in over CLAP; then a Loopwerk device for the
@@ -88,7 +89,9 @@ placeholder):
 | EQ Three | three-band DJ EQ with kills | own crossovers (Linkwitz-Riley) | DSP done; import planned |
 | Vinyl Distortion | vinyl distortion | own, oversampled | DSP done; import planned |
 | Overdrive | overdrive | own, oversampled | DSP done; import planned |
-| Glue Compressor, Compressor | bus compressor, compressor | own, Airwindows (MIT) for reference | planned |
+| Compressor | compressor: stereo-linked, soft knee, side-chain high-pass, dry/wet | own | DSP done; import planned |
+| Glue Compressor | bus compressor | own, Airwindows (MIT) for reference | planned |
+| Limiter | limiter: brickwall, 1.5 ms lookahead | own | DSP done; import planned |
 | Multiband Dynamics | multiband dynamics, upward and downward | own crossovers and detectors | planned |
 | Delay, Echo | delays | own delay lines | planned |
 | Reverb, Hybrid Reverb | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
@@ -190,7 +193,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   writes a 32-bit float WAV. Both run the same engine code.
 - Built-in devices on a track run in a chain before its fader; MIDI notes play on the track's
   instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
-  master volume and mute apply. `--fm` on `play` and `render` puts the FM synth on every MIDI
+  master volume and mute apply. A group with devices is a bus: its devices run over the sum of
+  its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
   track, with a voice from a DX7 file; `loopwerk-cli fm-synth voices` lists a file's voices.
 
 ### M3 Commands and agents (in progress)
@@ -207,8 +211,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   a new graph is swapped in at an exact frame and playing clips carry on; device parameters go
   as messages, without a new graph
   ([ADR 0005](docs/decisions/0005-edits-while-playing.md)).
-- Still to do: more commands (notes, clips, sends, tracks), a native project format so edits can
-  be saved, MCP resources.
+- Projects are saved in Loopwerk's own format, `.locr` (versioned JSON, plug-in state included,
+  audio referred to by path): `project.save { path?, copy? }`; `.locr` files open in the app,
+  `loopwerk-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
+  [spec](docs/spec/locr-format.md)).
+- Still to do: more commands (notes, clips, sends), MCP resources, asking before closing
+  a project with unsaved changes.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -224,7 +232,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Warped launched clips are time-stretched like arrangement clips, and re-pitched after a tempo
   change.
 - Transport commands (`clip.launch`, `scene.launch`, `track.stop`, `launcher.*`,
-  `transport.play`/`stop`) reach the audio thread through a lock-free queue:
+  `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
   `loopwerk-cli play --launcher` takes them as typed lines, `loopwerk-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
 - Still to do: follow actions, launch modes, per-clip quantisation, reading the global
@@ -245,6 +253,26 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
   vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
 
+### M6 Plug-ins (in progress)
+- CLAP and VST3 plug-ins run in `loopwerk-plugin-host` processes, never in Loopwerk's: by
+  default one process per plug-in file, or per vendor, or one per instance
+  (`plugins.setHosting`); a crash or hang costs that plug-in's sound, not the project
+  ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)).
+- An opened Live Set's plug-ins play in the app: each is found among the installed ones (a VST3
+  version for a VST2 plug-in too) and started with the settings the project saved; instruments
+  play their track's notes, effects process their track. Missing ones are named in the status
+  bar and keep their settings untouched.
+- While an opened project's plug-ins start, a dialog shows how many are ready and which are
+  still loading or could not start; it can be sent to the background, and the project plays
+  meanwhile. A scan finds plug-ins that were missing without opening the project again.
+- Tracks are lined up for the latency of their devices and plug-ins.
+- The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
+  editor, Close editor or Restart; the same commands work from the CLI and MCP. Editors float
+  above Loopwerk's window, owned by it (Windows, X11), and respond at once.
+- Renders (`loopwerk-cli render`, MCP `project_render`) run the same plug-ins.
+- Still to do: plug-ins of one process in one round trip, plug-in parameters as automation,
+  Wayland and macOS editors, VST2 hosting (not decided).
+
 ### M8 UI (started)
 - `loopwerk` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
   stopped on the default output and shows the **Session view**: tracks as columns, return tracks
@@ -255,10 +283,56 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
+  Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
+  marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
+  beginning ([spec](docs/spec/arrangement-editing.md)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
-- A menu bar and a **Settings** page (Options › Settings, Ctrl+,): animations, which side the
-  track headers are on, the renderer (wgpu or OpenGL); saved in `settings.txt`.
+- **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
+  (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
+  as `.locr` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›
+  Save as template writes a copy to the templates folder. The tab and window title mark unsaved
+  changes with a dot.
+- The **browser** (Ctrl+B shows and hides it, left or right of the view): search (Ctrl+F),
+  category filters (All, Samples, MIDI, Instruments, Effects, Presets, Plug-ins), a sidebar of
+  Pinned, Recent (by kind) and the folders the user added (a path, or a folder dropped on the
+  window), a tree with type icons, lengths and colour tags, a preview strip with the waveform,
+  length, tempo and key, and a footer with the tags as filters. Samples and MIDI files preview
+  through the engine (auto-play, or the play button; MIDI through the selected track's
+  instrument), whether the project plays or not. Dragging samples and MIDI files onto a lane,
+  a slot or the empty space after the tracks places them (`clip.addFiles`; one track, or one
+  each with Ctrl; a sample with a known tempo is warped; a Stems file `.stem.mp4` becomes a group
+  of its stems and its muted master, with its mastering compressor and limiter on the group),
+  devices, DX7 presets and plug-ins onto
+  a track or the empty space add them (`device.add`, `track.add`); Enter or a double-click adds
+  to the selected track. The folders are indexed on disk and watched for changes
+  ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
+  [ADR 0012](docs/decisions/0012-file-library.md)).
+- **Missing files**: a project whose audio files cannot be found says so in a bar when it opens
+  (Find…, Later; View › Missing files). The panel lists them with the clips that use them, finds
+  them by name in the browser's folders and the project's folder at once, or in a folder typed or
+  dropped on it (walked in the background), best match first; Apply relinks them in one undo step
+  ([spec](docs/spec/missing-files.md)).
+- The **sample map** (the browser's List | Map switch, or large in the main area): the samples
+  of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
+  toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
+  samples), as a free cloud or snapped to a grid, with the kinds' names over their regions and a
+  legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
+  arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
+  and lists the 16 that sound most alike. Samples are analysed in the background once and kept
+  ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
+- A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
+  left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
+  Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
+  OpenGL); saved in `settings.txt`.
+- **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Loopwerk (Loopwerk
+  Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
+  Dark). Settings › Interface › Theme picks one, changes its colours, renames, duplicates, reads
+  the files again, backs every theme up into a zip and exports a template zip with a README an AI
+  agent can make a theme from; a theme file or backup dropped on the window is added, and a file
+  saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
 - The control bar has tempo, launch quantisation, play, stop and the position; Space plays and
@@ -275,7 +349,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Audio clips show their waveform (peaks computed once when the files are decoded) and their
-  gain, which a drag changes (`clip.setGain`).
+  gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
+- Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades
+  on the grid (Alt for free, double-click removes), the fades are drawn over the waveform, and
+  the engine plays them sample-accurately in renders and playback (`clip.setFades`,
+  [spec](docs/spec/arrangement-editing.md#fades)).
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
@@ -284,8 +362,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
-- A **detail area** under the view (or a column beside it, Settings › Devices) shows the selected
-  clip's properties or the selected track's devices with their parameters; Shift+Tab hides it.
+- A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
+  clip's properties or the selected track's devices with their parameters, and each plug-in's
+  state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
-- Still to do: clip fades, input routing and sends, arm, meters, the browser, device editing
+- Still to do: fades read from Live Sets, input routing and sends, arm, meters, device editing
   and the clip editor in the detail area, installers.

@@ -48,7 +48,8 @@ Layers: `model` (L0) ← `als`, `engine` (L1) ← `session` (L2) ← CLI, MCP, U
 
 ## Amendment: transport commands (2026-10-11)
 
-Launching clips and starting or stopping playback are commands too, of a fourth kind,
+Launching clips, starting or stopping playback and moving where it starts
+(`transport.setPosition`) are commands too, of a fourth kind,
 **transport** (next to read, edit and history). They act on the audio engine attached to the
 session (a `Player`: the renderer's lock-free command queue and its state monitor), never change
 the project and record no undo step. Without an attached engine they return an error that says
@@ -70,6 +71,23 @@ A sixth kind, **plugins**, scans for installed plug-ins and chooses the folders 
 not to a project, so these also run on `Projects`, never change a project and record no undo
 step. Agents over MCP may scan and list but not add or remove folders: a folder decides whose
 code a scan runs.
+
+## Amendment: running plug-ins (2026-10-12)
+
+A seventh kind, **plugin**, acts on one of the project's running plug-ins:
+`device.openEditor`, `device.closeEditor` and `device.restart` ([ADR 0006](0006-plug-in-hosting.md)).
+They run on the session, never change the project and record no undo step. Adding a plug-in
+(`device.addPlugin`) is an edit like `device.add`; `device.plugin` reads where a plug-in device
+stands. `plugins.setHosting` (kind plugins) chooses how a plug-in shares host processes.
+
+An eighth kind, **library**, runs on `Projects` like the plugins kind: the browser's folders,
+search, pins, recent items and colour tags (`library.*`, [ADR 0012](0012-file-library.md)). It
+never changes a project. A successful edit that adds something from the browser (`clip.addFiles`,
+`track.add`, `device.add`, `device.addPlugin`) is recorded among the library's recent items by
+`Projects`, so the CLI, MCP and the window all keep them. Parameters may also be a list of
+texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings.
+The sample map's commands (`soundmap.*`, [ADR 0013](0013-sample-map-analysis.md)) are of the
+library kind too: they read the library's samples and the analysis `Projects` keeps beside it.
 
 ## Amendment: device commands (2026-10-12)
 

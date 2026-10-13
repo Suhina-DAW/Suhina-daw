@@ -17,7 +17,7 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 - Session-style clip launching with quantisation, plus a linear arrangement.
 - Reading `.als` projects you made yourself; later other formats such as DAWproject and `.flp`,
   so projects are not locked to one program.
-- CLAP plug-in hosting, every plug-in sandboxed in its own process.
+- CLAP and VST3 plug-in hosting, sandboxed outside Loopwerk's process: a crashing plug-in never takes the project down.
 - Every action available headlessly: CLI and MCP for automation and agents.
 
 ## Downloads
@@ -30,7 +30,9 @@ How a release is made: [`docs/releasing.md`](docs/releasing.md).
 ## Try it
 
 ```sh
-# Open a Live Set in the desktop app and launch its clips and scenes with the mouse
+# Open a Live Set in the desktop app and launch its clips and scenes with the mouse; the
+# plug-in host is built first, since the app runs plug-ins in it (scan in Settings › Plug-ins)
+cargo build --release -p loopwerk-plugin-host
 cargo run --release -p loopwerk -- path/to/set.als
 
 # Play a Live Set on the default audio device (release builds play heavy sets smoothly)
@@ -77,15 +79,22 @@ With `--launcher` the set starts stopped and Loopwerk reads one command per line
 
 ## Building
 
-On Linux, install the ALSA headers first (`libasound2-dev` on Debian and Ubuntu,
-`alsa-lib-devel` on Fedora).
+Linux builds talk to the sound card through ALSA, so its development files and `pkg-config`
+must be installed before building:
+
+| Distribution family | Packages |
+|---|---|
+| Debian, Ubuntu, Mint | `libasound2-dev pkg-config` |
+| Fedora, RHEL | `alsa-lib-devel pkgconf-pkg-config` |
+| Arch, Manjaro, EndeavourOS | `alsa-lib pkgconf` |
+
+Building the whole workspace also builds `loopwerk-plugin-host`, the program the desktop app
+runs plug-ins in; it has to sit next to `loopwerk`:
 
 ```sh
 cargo build --release
 cargo test --workspace
 ```
-
-Linux needs the ALSA development headers (`libasound2-dev` on Debian and Ubuntu).
 
 ## Documentation
 

@@ -60,7 +60,8 @@ What the law protects decides how close the UI may get (summary, not legal advic
    and never touches the audio thread. UI state (zoom, selection, open panels) is serialisable,
    so agents can read it and take offscreen screenshots.
 6. **Design tokens** (colours, spacing, radii, type sizes) live in one theme module, never
-   hard-coded in widgets, so themes are possible later.
+   hard-coded in widgets. The colours come from the theme in use: the built-in one or a JSON
+   theme file the user picks and edits ([brief](../design/brief.md) › Themes).
 
 ## Consequences
 

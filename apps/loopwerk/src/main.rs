@@ -4,33 +4,38 @@
 // Release builds on Windows start without a console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
+mod recent;
+mod theme_files;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use loopwerk_engine::AudioPool;
-use loopwerk_session::{ProjectId, Session};
+use loopwerk_session::Session;
 use loopwerk_ui::keymap::Keymap;
 use loopwerk_ui::settings::{Graphics, Settings};
 use loopwerk_ui::settings_view::About;
-use loopwerk_ui::{App, OpenAs, Status};
+use loopwerk_ui::themes::FileAction;
+use loopwerk_ui::{App, NewProject, OpenAs, Status};
 
 const USAGE: &str = "\
-usage: loopwerk [<project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
+usage: loopwerk [<project.locr> | <project.als> | --demo] [--renderer wgpu|glow] [--no-animations]
 
-  <project.als>      a Live Set to import and open
+  <project.locr>     a Loopwerk project to open, or a Live Set (.als) to import
   --demo             open a small built-in project
   --renderer         how the window is drawn this time: wgpu or glow (OpenGL); the
                      default is the one chosen in Options > Settings
   --no-animations    turn the interface's animations off this time
-Without a project the window opens empty; drop a .als file on it to open one.
-Settings are kept in settings.txt and the keys in keymap.json, in Loopwerk's folder of the
-user's app data.";
+Without a project the window opens empty; Ctrl+T makes a new one or opens one, and a
+.locr or .als file dropped on it opens.
+Settings are kept in settings.txt, the keys in keymap.json and themes in themes/<name>.json,
+in Loopwerk's folder of the user's app data.";
 
 /// The folder eframe keeps Loopwerk's window state in; the settings file lives beside it.
 const APP_ID: &str = "Loopwerk";
 const SETTINGS_FILE: &str = "settings.txt";
 const KEYMAP_FILE: &str = "keymap.json";
+const THEMES_FOLDER: &str = "themes";
+const RECENT_FILE: &str = "recent.txt";
 
 #[derive(Debug, PartialEq)]
 enum Source {
@@ -70,16 +75,29 @@ fn main() -> ExitCode {
         eframe::Renderer::Glow => Graphics::OpenGl,
         eframe::Renderer::Wgpu => Graphics::Gpu,
     };
-    let mut window = Window { app: App::new(), graphics_now, audio_output: None, pools: HashMap::new() };
+    let mut themes = theme_files::ThemeFiles::new(eframe::storage_dir(APP_ID).map(|d| d.join(THEMES_FOLDER)));
+    let (theme_list, theme_warnings) = themes.read_all();
+    settings_warnings.extend(theme_warnings);
+    let recent = recent::Recent::load(eframe::storage_dir(APP_ID).map(|d| d.join(RECENT_FILE)));
+    let mut window = Window { app: App::new(), graphics_now, audio_output: None, themes, recent };
+    // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
+    let mut library = loopwerk_library::Library::new(eframe::storage_dir(APP_ID));
+    settings_warnings.extend(library.take_warnings());
+    if let Err(e) = library.start() {
+        settings_warnings.push(e);
+    }
+    window.app.set_file_library(library);
+    // The sample map analyses the library's samples in the background (ADR 0013).
+    window.app.projects_mut().start_sound_map();
+    let (projects, templates) = default_folders();
+    window.app.set_default_folders(projects, templates);
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
             let session = Session::new(loopwerk_ui::demo::demo_project());
-            let (session, warnings, output) = with_audio(session, &AudioPool::new());
+            let (session, warnings, output) = with_audio(session);
             window.audio_output = output;
-            if let Some(id) = window.app.open_project(session, &warnings, OpenAs::NewTab) {
-                window.pools.insert(id, AudioPool::new());
-            }
+            window.app.open_project(session, &warnings, OpenAs::NewTab);
         }
         Source::Als(path) => window.open(&path, OpenAs::NewTab),
     }
@@ -102,7 +120,10 @@ fn main() -> ExitCode {
         options,
         Box::new(move |cc| {
             loopwerk_ui::theme::install(&cc.egui_ctx);
+            window.app.set_editor_owner(native_window(cc));
             window.app.set_settings(&cc.egui_ctx, settings);
+            let folder = window.themes.folder_text();
+            window.app.set_themes(&cc.egui_ctx, theme_list, folder);
             window.app.set_keymap(keymap);
             if !animations {
                 App::set_animations(&cc.egui_ctx, false);
@@ -155,8 +176,9 @@ struct Window {
     app: App,
     graphics_now: Graphics,
     audio_output: Option<String>,
-    /// Each open project's decoded audio, kept so a project made active again can play.
-    pools: HashMap<ProjectId, AudioPool>,
+    themes: theme_files::ThemeFiles,
+    /// The projects opened and saved lately, for the project dialog.
+    recent: recent::Recent,
 }
 
 impl eframe::App for Window {
@@ -165,15 +187,24 @@ impl eframe::App for Window {
         if let Some((path, how)) = self.app.take_open_request() {
             self.open(&path, how);
         }
-        for closed in self.app.take_closed() {
-            self.pools.remove(&closed);
+        if let Some(new) = self.app.take_new_request() {
+            self.new_project(new);
         }
+        if let Some(path) = self.app.take_saved_path() {
+            self.remember(&path);
+        }
+        if let Some(folder) = self.app.take_lists_wanted() {
+            self.app.set_project_lists(self.recent.existing(), recent::templates(&folder));
+        }
+        // Each project keeps its decoded audio in its session (ADR 0011).
+        let _closed = self.app.take_closed();
         // Only the active project plays; one made active again gets an output.
         if let Some(id) = self.app.take_player_request() {
-            let opened = match (self.app.projects().get(id), self.pools.get(&id)) {
-                (Some(session), Some(audio)) => Some(loopwerk_output::open_player(session.project(), audio)),
-                _ => None,
-            };
+            let opened = self
+                .app
+                .projects()
+                .get(id)
+                .map(|session| loopwerk_output::open_player(session.project(), session.audio()));
             match opened {
                 Some(Ok((player, device))) => {
                     self.app.attach_player(id, player);
@@ -194,6 +225,7 @@ impl eframe::App for Window {
         {
             self.app.set_status(Status::Error(e));
         }
+        self.sync_themes(ui.ctx());
     }
 }
 
@@ -202,41 +234,170 @@ impl Window {
     /// audio and starts playing it, stopped.
     fn open(&mut self, path: &Path, how: OpenAs) {
         match Session::open(path) {
-            Ok((session, mut warnings)) => {
-                let folder = path.parent().unwrap_or(Path::new("."));
-                let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), folder);
-                warnings.extend(audio_warnings);
-                let (session, output_warnings, output) = with_audio(session, &audio);
-                warnings.extend(output_warnings);
-                self.audio_output = output;
-                if let Some(id) = self.app.open_project(session, &warnings, how) {
-                    self.app.set_waveforms(loopwerk_ui::waveform::from_pool(&audio));
-                    self.pools.insert(id, audio);
-                }
-                for closed in self.app.take_closed() {
-                    self.pools.remove(&closed);
-                }
-                self.share_about();
+            Ok((session, warnings)) => {
+                self.show_session(session, warnings, how);
+                self.remember(path);
             }
             Err(e) => self.app.set_status(Status::Error(e.0)),
         }
     }
 
+    /// Makes a new project, blank or from a template, and opens it in a new tab.
+    fn new_project(&mut self, new: NewProject) {
+        let made = match new {
+            NewProject::Blank => Ok((Session::new(loopwerk_session::blank_project()), Vec::new())),
+            NewProject::Template(path) => Session::from_template(&path),
+        };
+        match made {
+            Ok((session, warnings)) => self.show_session(session, warnings, OpenAs::NewTab),
+            Err(e) => self.app.set_status(Status::Error(e.0)),
+        }
+    }
+
+    /// Decodes a session's audio, starts it playing (stopped) and shows it.
+    fn show_session(&mut self, mut session: Session, mut warnings: Vec<String>, how: OpenAs) {
+        let folder = session.audio_folder().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let (audio, audio_warnings) = loopwerk_media::load_project_audio(session.project(), &folder);
+        warnings.extend(audio_warnings);
+        let waveforms = loopwerk_ui::waveform::from_pool(&audio);
+        session.set_audio(audio);
+        let (session, output_warnings, output) = with_audio(session);
+        warnings.extend(output_warnings);
+        self.audio_output = output;
+        if self.app.open_project(session, &warnings, how).is_some() {
+            self.app.set_waveforms(waveforms);
+        }
+        let _closed = self.app.take_closed();
+        self.share_about();
+    }
+
+    /// Puts a project opened or saved first among the recent ones.
+    fn remember(&mut self, path: &Path) {
+        if let Err(e) = self.recent.add(path) {
+            self.app.set_status(Status::Error(e));
+        }
+        self.app.record_project(path);
+    }
+
+    /// Does what Settings asked of the theme files (write, rename, read again, back up, export
+    /// the template, bring in a dropped file, show the folder) and reads a theme file saved
+    /// elsewhere. While a theme file is in use the folder is looked at every second.
+    fn sync_themes(&mut self, ctx: &eframe::egui::Context) {
+        let mut reload = false;
+        for action in self.app.take_theme_actions() {
+            let done = match action {
+                FileAction::Save { id, theme } => self.themes.write(&id, &theme).map(|()| None),
+                FileAction::Rename { from, to } => self.themes.rename(&from, &to).map(|()| None),
+                FileAction::Reload => {
+                    reload = true;
+                    Ok(None)
+                }
+                FileAction::OpenFolder => self.themes.open_folder().map(|()| None),
+                FileAction::Backup => self.themes.backup().map(|path| Some(saved(&path, "Backed up the themes to"))),
+                FileAction::ExportTemplate => {
+                    self.themes.export_template().map(|path| Some(saved(&path, "Saved the theme template to")))
+                }
+                FileAction::Import(path) => self.import_themes(ctx, &path).map(Some),
+            };
+            match done {
+                Ok(Some(message)) => self.app.set_status(Status::Done(message)),
+                Ok(None) => {}
+                Err(e) => self.app.set_status(Status::Error(e)),
+            }
+        }
+        let (entries, warnings) = if reload {
+            let (entries, warnings) = self.themes.read_all();
+            let count = entries.len();
+            self.app.set_themes(ctx, entries, self.themes.folder_text());
+            if warnings.is_empty() {
+                self.app.set_status(Status::Done(format!("Read {count} theme files")));
+            }
+            (Vec::new(), warnings)
+        } else {
+            self.themes.changed()
+        };
+        for entry in entries {
+            self.app.put_theme(ctx, entry);
+        }
+        if let Some(warning) = warnings.first() {
+            self.app.set_status(Status::Error(warning.clone()));
+        }
+        if !loopwerk_ui::theme::is_built_in(&self.app.settings().theme) {
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
+    }
+
+    /// Brings in a dropped theme file or zip and lists the themes again; a single new theme is
+    /// put in use. Returns what to tell the user.
+    fn import_themes(&mut self, ctx: &eframe::egui::Context, path: &Path) -> Result<String, String> {
+        let (ids, warnings) = self.themes.import(path)?;
+        let (entries, _) = self.themes.read_all();
+        self.app.set_themes(ctx, entries, self.themes.folder_text());
+        if let [id] = ids.as_slice() {
+            self.app.use_theme(ctx, id);
+        }
+        let file = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let added = match ids.len() {
+            0 => format!("{file} has no themes that are not here already"),
+            1 => format!("Added the theme from {file}"),
+            n => format!("Added {n} themes from {file}"),
+        };
+        Ok(match warnings.first() {
+            Some(warning) => format!("{added}; {warning}"),
+            None => added,
+        })
+    }
+
     /// Tells the Settings page what is in use.
     fn share_about(&mut self) {
-        self.app.set_about(About { audio_output: self.audio_output.clone(), graphics_now: Some(self.graphics_now) });
+        self.app.set_about(About {
+            audio_output: self.audio_output.clone(),
+            graphics_now: Some(self.graphics_now),
+            ..Default::default()
+        });
     }
 }
 
-/// Connects the default audio output to `session`; without one the project still opens.
-/// Returns the session, warnings and a description of the output.
-fn with_audio(mut session: Session, audio: &AudioPool) -> (Session, Vec<String>, Option<String>) {
-    match loopwerk_output::open_player(session.project(), audio) {
+/// "<what> <file>", and the file shown in the file manager.
+fn saved(path: &Path, what: &str) -> String {
+    let _shown = theme_files::reveal(path, true);
+    format!("{what} {}", path.display())
+}
+
+/// Where projects are saved and templates kept until the settings say otherwise: `Loopwerk`
+/// in the user's documents folder.
+fn default_folders() -> (PathBuf, PathBuf) {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+    let documents = home.map(|h| h.join("Documents")).unwrap_or_default();
+    let base = documents.join("Loopwerk");
+    (base.join("Projects"), base.join("Templates"))
+}
+
+/// Connects the default audio output to `session`, playing its audio; without one the project
+/// still opens. Returns the session, warnings and a description of the output.
+fn with_audio(mut session: Session) -> (Session, Vec<String>, Option<String>) {
+    match loopwerk_output::open_player(session.project(), session.audio()) {
         Ok((player, device)) => {
             session.attach_player(player);
             (session, Vec::new(), Some(device))
         }
         Err(e) => (session, vec![format!("no audio output: {e}")], None),
+    }
+}
+
+/// The main window's native handle, for plug-in editors to float above it (ADR 0006): a Win32
+/// `HWND` or an X11 window id; `None` elsewhere (Wayland, macOS: their editors float on their
+/// own).
+// An X11 window id is a `c_ulong`: 32 bits on Windows, 64 on Linux, where `u64::from` changes
+// nothing.
+#[allow(clippy::useless_conversion)]
+fn native_window(cc: &eframe::CreationContext<'_>) -> Option<u64> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match cc.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => u64::try_from(handle.hwnd.get()).ok(),
+        RawWindowHandle::Xlib(handle) => Some(u64::from(handle.window)),
+        RawWindowHandle::Xcb(handle) => Some(u64::from(handle.window.get())),
+        _ => None,
     }
 }
 

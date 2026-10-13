@@ -20,6 +20,10 @@ change. An action is one of:
 - any command that needs no parameters (`transport.play`, `edit.undo`, `launcher.stopAll`,
   `projects.next` …), the same commands the CLI and MCP run.
 
+Keys go to the actions, not to moving between buttons: Tab and the arrow keys never move the
+keyboard focus from widget to widget (a button holding it would also make every shortcut wait).
+Only a text field keeps the keys while it is being typed in.
+
 ## Changing keys
 
 Options › Settings › **Shortcuts** lists every action with its keys. **Change** waits for the next
@@ -50,15 +54,20 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 
 | Action | Keys |
 |---|---|
-| Play or stop (`transport.toggle`) | Space |
+| Play or stop (`transport.toggle`; Stop goes back to the play start marker or stays, as Settings › General › Stop says) | Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
+| Show or hide the browser (`view.browser`) | Ctrl+B |
+| Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
+| Search in the browser (`browser.search`; shows it when hidden). In the search field: Up and Down move through the results, Enter adds the selection to the selected track, Escape clears the search and then leaves the field | Ctrl+F |
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
 | Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
 | Duplicate, delete the selected clip (`selection.duplicate`, `.delete`) | Ctrl+D; Delete, Backspace |
 | Group the selected tracks (`selection.group`) | Ctrl+G |
 | Next, previous project (`projects.next`, `projects.previous`) | Ctrl+Tab, Ctrl+Shift+Tab |
+| New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
+| Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
 
 Paste places the copy right after the selected clip, or at the playhead on the selected track; it
 replaces what it covers, like a moved clip ([arrangement editing](spec/arrangement-editing.md)).
