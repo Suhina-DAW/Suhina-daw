@@ -8,6 +8,7 @@ covers:
   - presets/**
   - .github/PULL_REQUEST_TEMPLATE/preset.md
   - .github/ISSUE_TEMPLATE/5-preset.yml
+  - crates/device-registry/src/lib.rs
 ---
 
 # 0014: Stock presets

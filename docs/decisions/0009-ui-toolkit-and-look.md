@@ -3,7 +3,11 @@ description: Why the UI is built with egui, and how close it may get to Live: sa
 read_when: UI toolkit, egui, look and feel, trade dress, design rights, screenshots, how close to Ableton
 type: decision
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
+covers:
+  - apps/suhina/Cargo.toml
+  - crates/ui/Cargo.toml
+  - crates/ui/src/theme.rs
 ---
 
 # 0009: egui for the UI; familiar workflow, Suhina's own look
@@ -21,7 +25,7 @@ Toolkits considered:
 
 | Toolkit | For | Against |
 |---|---|---|
-| **egui** (eframe, wgpu) | Custom drawing is direct; PhotoCraft shows a large professional app built on it; fast iteration; offscreen snapshots for tests and agents; builds for wasm | Immediate mode repaints every frame, so heavy views must cache their geometry |
+| **egui** (eframe) | Custom drawing is direct; PhotoCraft shows a large professional app built on it; fast iteration; offscreen snapshots for tests and agents; builds for wasm | Immediate mode repaints every frame, so heavy views must cache their geometry |
 | iced | Elm architecture, retained mode | Heavy custom canvases are more work; fewer professional apps to learn from |
 | Slint | Declarative, efficient | Own markup language; custom drawing views are less direct |
 | vizia | Built for audio (Meadowlark) | Less mature; Meadowlark is archived |
@@ -37,7 +41,8 @@ What the law protects decides how close the UI may get (summary, not legal advic
 
 ## Decision
 
-1. **The UI is built with egui** on eframe and wgpu.
+1. **The UI is built with egui** on eframe, drawing with glow (OpenGL). wgpu is used only by
+   `egui_kittest`, a development dependency, for snapshot tests.
 2. **Same map, different paint.** The structure and behaviour of each view follow Live as closely
    as useful: where things are, what they do, how they react, which keys do what. The appearance
    is Suhina's own: colours, typography, control shapes, icons, spacing and the visual language
@@ -57,10 +62,11 @@ What the law protects decides how close the UI may get (summary, not legal advic
    now says that.)
 5. **The UI is a thin client of the engine.** Every action is an engine command (AGENTS.md rule 6).
    The UI reads playback position, meters and clip states from snapshots the engine publishes
-   and never touches the audio thread. UI state (zoom, selection, open panels) is serialisable,
-   so agents can read it and take offscreen screenshots.
+   and never touches the audio thread. UI state (zoom, selection, open panels) is to be
+   serialisable, so agents can read it and take offscreen screenshots (an aim, not built yet).
 6. **Design tokens** (colours, spacing, radii, type sizes) live in one theme module, never
-   hard-coded in widgets. The colours come from the theme in use: the built-in one or a JSON
+   hard-coded in widgets (today: the default track palette in `grid.rs` and the sample map's
+   kind colours; to move into `theme.rs`). The colours come from the theme in use: the built-in one or a JSON
    theme file the user picks and edits ([brief](../design/brief.md) › Themes).
 
 ## Consequences
@@ -71,4 +77,5 @@ What the law protects decides how close the UI may get (summary, not legal advic
   checked side by side before release (the brief's "squint test").
 - Heavy views (clip grid with many clips, arrangement, waveforms) need geometry caches keyed on
   project revision; this is part of the UI architecture from the start.
-- UI implementation starts after M3 (commands); specs and the design brief can be written now.
+- UI implementation was planned to start after M3 (commands); it started in M8 alongside M3
+  (#92), on the commands that existed.

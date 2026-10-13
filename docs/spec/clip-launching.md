@@ -3,7 +3,7 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
@@ -76,7 +76,8 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   chain starts with one, like arrangement notes; a launch that replaces a clip, stopping the
   column or stopping the transport releases them (ADR 0004).
 - **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
-  launched audio clip fades in over 2 ms, to avoid clicks. The fade-in and fade-out an
+  launched audio clip fades in over 2 ms, to avoid clicks; one that does not loop also fades out
+  over 2 ms at its end marker. The fade-in and fade-out an
   arrangement clip has ([arrangement editing](arrangement-editing.md) › Fades) do not apply to
   launched clips yet.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
@@ -88,12 +89,14 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   keeps its frame positions for now; a tempo map for the arrangement comes later.
 - **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
-  `transport.play`, `transport.stop`, `transport.setPosition`, `launcher.state`), sent to the
-  audio thread through a
-  lock-free queue and applied at the start of the next audio block. **Suhina:**
+  `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,
+  `launcher.state`), sent to the audio thread through a lock-free queue and applied at the start
+  of the next audio block. **Suhina:**
   `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
   beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)),
-  and the engine's CPU load (`cpu`: percent), which the control bar shows.
+  and the engine's CPU load (`cpu`: percent), which the control bar shows. `transport.stop`
+  with `return: "here"` stops and keeps the position where the transport stopped
+  ([arrangement editing](arrangement-editing.md) › Play position).
 
 ## To observe
 
