@@ -1327,8 +1327,7 @@ fn render_the_clip_waveform() {
     for db in [false, true] {
         let mut app = audio_app();
         app.set_browser_open(false);
-        let mut harness =
-            Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        let mut harness = Harness::builder().with_size(SIZE).wgpu().build_ui_state(|ui, app: &mut App| app.ui(ui), app);
         theme::install(&harness.ctx);
         let ctx = harness.ctx.clone();
         let mut settings = harness.state().settings().clone();
