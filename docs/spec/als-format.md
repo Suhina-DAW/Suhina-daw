@@ -18,7 +18,7 @@ What we have learned about the Live Set format, from Live Sets we authored ourse
 
 - **Observed with:** Live 12.4.6 (`Creator="Ableton Live 12.4.6"`, `MinorVersion="12.0_12402"`,
   `MajorVersion="5"`), Windows.
-- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`36` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio); series 6, files `110`–`135` (Utility).
+- **Corpus:** series 1, files `00`–`20` (MIDI clips, scenes, mixer); series 2, files `30`–`35` (audio clips); series 3, files `40`–`44` (devices, plug-ins); series 4, files `50`–`62` (time signatures, clip markers, deactivation, groups, unwarped audio); series 6, files `110`–`135` (Utility).
 - Every statement marked **(hypothesis)** still needs a corpus file that proves it.
 
 ## Container

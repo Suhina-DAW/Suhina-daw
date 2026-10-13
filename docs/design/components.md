@@ -59,7 +59,7 @@ replaces them.
 ### Motion
 
 Animations are short and only show a change of state; with animations off (Settings ›
-Animations, or `--no-animations` for one run) every value jumps straight to its end.
+Interface › Animations, or `--no-animations` for one run) every value jumps straight to its end.
 
 | What | How |
 |---|---|

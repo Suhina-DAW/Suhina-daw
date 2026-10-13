@@ -356,4 +356,4 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
   discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
-- A system file dialog for adding a folder (ADR 0010 › Not decided yet).
+- A system file dialog for adding a folder (today a path is typed or a folder dropped).
