@@ -385,15 +385,7 @@ impl Projects {
             check_params(id, &[], params)?;
             return Ok(all_commands());
         }
-        if let Some(spec) = PROJECT_COMMANDS
-            .iter()
-            .chain(plugin_commands())
-            .chain(crate::library_commands())
-            .chain(crate::sound_map_commands())
-            .chain(crate::audio_commands())
-            .chain(crate::audio_commands())
-            .find(|c| c.id == id)
-        {
+        if let Some(spec) = projects_commands().find(|c| c.id == id) {
             if project.is_some() {
                 return Err(format!("{id} does not run on one project; it takes no target project").into());
             }
@@ -437,8 +429,8 @@ pub fn all_commands() -> Value {
     Value::Array(projects.chain(commands().iter().map(CommandSpec::describe)).collect())
 }
 
-/// The commands that run on [`Projects`] rather than on one project's session, in the order
-/// [`all_commands`] and [`commands_markdown`] list them.
+/// The commands that run on [`Projects`] rather than on one project's session: the ones
+/// `execute` finds, in the order [`all_commands`] and [`commands_markdown`] list them.
 fn projects_commands() -> impl Iterator<Item = &'static CommandSpec<Projects>> {
     PROJECT_COMMANDS
         .iter()
