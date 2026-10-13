@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Check the [ROADMAP](https://github.com/juhamikael/Loopwerk/blob/main/ROADMAP.md) first; it may already be planned.
+        Check the [ROADMAP](https://github.com/suhina-daw/suhina-daw/blob/main/ROADMAP.md) first; it may already be planned.
         Describe behaviour in your own words. Don't paste text, images, presets or files from another product:
         Suhina is built clean-room (see CONTRIBUTING.md).
   - type: textarea

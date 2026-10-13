@@ -20,10 +20,10 @@
 - [ ] Nothing comes from disassembled, decompiled or leaked material, or from a proprietary
       product's content (samples, presets, artwork, interface text, visual design).
 - [ ] Ported DSP has a GPLv3-compatible licence, keeps its copyright notices and has a row in
-      [`ATTRIBUTION.md`](https://github.com/juhamikael/Loopwerk/blob/main/ATTRIBUTION.md).
+      [`ATTRIBUTION.md`](https://github.com/suhina-daw/suhina-daw/blob/main/ATTRIBUTION.md).
 - [ ] Every commit ends with a `Signed-off-by:` line (`git commit -s`).
 
-**Built like the others** ([ADR 0004](https://github.com/juhamikael/Loopwerk/blob/main/docs/decisions/0004-built-in-devices.md))
+**Built like the others** ([ADR 0004](https://github.com/suhina-daw/suhina-daw/blob/main/docs/decisions/0004-built-in-devices.md))
 - [ ] A crate `devices/<name>` named `suhina-device-<name>`, implementing the `Device` trait,
       added to `device-registry` (so `devices.list`, `device.add` and `device.setParam` reach it
       from the UI, CLI and MCP) and to the workspace.

@@ -285,7 +285,7 @@ impl ClapPlugin {
         .ok_or_else(|| format!("no plug-in {} in {spec:?}", wanted.as_deref().unwrap_or("at all")))?;
 
         let info =
-            HostInfo::new("Suhina", "Suhina", "https://github.com/juhamikael/Loopwerk", env!("CARGO_PKG_VERSION"))
+            HostInfo::new("Suhina", "Suhina", "https://github.com/suhina-daw/suhina-daw", env!("CARGO_PKG_VERSION"))
                 .map_err(|e| e.to_string())?;
         let shared = |_: &()| Shared {
             callback_requested: AtomicBool::new(false),
