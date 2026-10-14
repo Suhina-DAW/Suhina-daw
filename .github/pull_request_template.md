@@ -1,6 +1,8 @@
 ## What and why
 
-<!-- A few lines. Link the issue it closes: "Closes #123". -->
+<!-- A few lines. Link the issue it closes: "Closes #123". One pull request per issue: when the
+     issue already has an open one, push to it or offer your change there instead
+     (CONTRIBUTING.md › Working on an issue). -->
 
 ## Where the knowledge comes from
 
