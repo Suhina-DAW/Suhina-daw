@@ -95,6 +95,11 @@ zip drops the executable bit.
 | opened and pushed by a maintainer | on every push; a newer push cancels a build still running |
 | anyone else's, from a fork or a branch | when a maintainer adds the `test-build` label, of the commit the label was added on |
 
+Only a pull request that changes what goes into the binaries is built: `apps/`, `crates/`,
+`devices/`, `presets/`, `third_party/`, `Cargo.toml`, `Cargo.lock`, `.cargo/` or `test-build.yml`
+itself. One that changes only documentation, scripts, other workflows or agent files has no new
+binary to try.
+
 The build is of the pull request's head merged with `main`, as the event saw it, so a push after
 the label is not what gets built. A push by anyone but a maintainer takes the label off, and the
 new commits are built when a maintainer has read them and adds the label again; the comment on such
