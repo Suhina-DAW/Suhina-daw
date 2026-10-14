@@ -393,9 +393,8 @@ impl Prepared {
     pub fn compute_with_progress(self, progress: &layout::Progress) -> Map {
         let features: Vec<features::Features> = self.items.iter().map(|(_, _, f)| *f).collect();
         let standardised = Standardised::new(&features);
-        let named: Vec<Option<Kind>> =
-            self.items.iter().map(|(path, folder, _)| kinds::kind_of_path(path, folder)).collect();
-        let kinds = standardised.guess_kinds(&named);
+        let named: Vec<Option<(Kind, kinds::Source)>> =
+            self.items.iter().map(|(path, folder, _)| kinds::named_kind(path, folder)).collect();
         let positions = match self.cached {
             Some(positions) => positions,
             None => layout::layout_with_progress(
@@ -404,6 +403,7 @@ impl Prepared {
                 progress,
             ),
         };
+        let kinds = layout::kinds_from_neighbours(&positions, &named);
         let points = self
             .items
             .into_iter()

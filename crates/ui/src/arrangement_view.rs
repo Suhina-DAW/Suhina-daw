@@ -41,7 +41,9 @@ const SOLO: f32 = 18.0;
 const FIXED_FIELD: f32 = 90.0;
 /// Points per beat: the default and the zoom range.
 const DEFAULT_BEAT_WIDTH: f32 = 8.0;
-const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 400.0);
+/// From a whole song on screen to single samples of a short sound: at 4 000 points a beat, a beat
+/// at 120 BPM is a quarter of a second, about three samples a point at 48 kHz.
+const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 4000.0);
 /// Bars of empty timeline after the last clip.
 const TAIL_BARS: f64 = 16.0;
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
@@ -277,6 +279,11 @@ fn ruler_beat(raw: f64, bar_beats: f64, beat_width: f32, free: bool) -> f64 {
 
 /// The grid clips snap to at a zoom level: a sixteenth, a beat or a bar, whichever is at least
 /// a few points wide.
+/// The beat width after zooming by `factor`, within [`BEAT_WIDTH_RANGE`].
+fn zoomed(beat_width: f32, factor: f32) -> f32 {
+    (beat_width * factor).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1)
+}
+
 fn snap(beat_width: f32, bar_beats: f64) -> f64 {
     if beat_width >= 48.0 {
         0.25
@@ -413,7 +420,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         let zoom = ui.input(|i| i.zoom_delta());
         if zoom != 1.0 && time.contains(pointer) {
             let beat = (pointer.x - time.left() + state.scroll.x) / state.beat_width;
-            state.beat_width = (state.beat_width * zoom).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
+            state.beat_width = zoomed(state.beat_width, zoom);
             state.scroll.x = beat * state.beat_width - (pointer.x - time.left());
         }
         let (alt, wheel) = ui.input(|i| (i.modifiers.alt, i.smooth_scroll_delta()));
@@ -1537,6 +1544,19 @@ fn pan_field(painter: &egui::Painter, rect: Rect, pan: f64, hover: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_reaches_ten_times_further_in_than_before_and_stops() {
+        let mut width = DEFAULT_BEAT_WIDTH;
+        for _ in 0..100 {
+            width = zoomed(width, 1.5);
+        }
+        assert_eq!(width, 4000.0);
+        for _ in 0..100 {
+            width = zoomed(width, 1.0 / 1.5);
+        }
+        assert_eq!(width, 1.0);
+    }
 
     #[test]
     fn volume_sits_at_85_percent_for_0_db() {

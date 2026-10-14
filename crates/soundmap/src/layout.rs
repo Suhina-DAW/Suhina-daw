@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use bhtsne::tSNE;
 
 use crate::features::{FEATURE_COUNT, Features, GROUPS};
-use crate::kinds::Kind;
+use crate::kinds::{Kind, Source};
 
 /// Dimensions kept by PCA before t-SNE.
 const PCA_DIMENSIONS: usize = 20;
@@ -19,6 +19,10 @@ const MIN_TSNE_ITEMS: usize = 16;
 /// Neighbours asked when a kind is guessed, and how many of them must agree.
 const GUESS_NEIGHBOURS: usize = 7;
 const GUESS_AGREE: usize = 4;
+/// How many of the neighbours must agree to overrule a kind that came from a folder's name.
+const OVERRULE_AGREE: usize = 5;
+/// Items per cell of the grid the neighbours are looked up in, on average.
+const ITEMS_PER_CELL: usize = 4;
 
 /// How far a layout is, shared between the thread that computes it and the one that shows it.
 /// Clones share the same count.
@@ -140,6 +144,119 @@ impl Standardised {
                 if best.0 >= GUESS_AGREE { (best.1, true) } else { (Kind::Other, false) }
             })
             .collect()
+    }
+}
+
+/// Kinds for every item from the names and the layout (ADR 0013 › Kinds). A kind from the
+/// file's own name stands. A kind from a folder stands unless at least [`OVERRULE_AGREE`] of the
+/// item's [`GUESS_NEIGHBOURS`] nearest file-named neighbours agree on another one; an item with
+/// no kind takes the one at least [`GUESS_AGREE`] of them agree on. Neighbours are found on the
+/// map, where t-SNE keeps similar sounds together, through a grid of cells, so the cost grows
+/// with the number of items rather than its square. Returns the kind per item and whether it was
+/// guessed from the sound.
+pub fn kinds_from_neighbours(positions: &[[f32; 2]], named: &[Option<(Kind, Source)>]) -> Vec<(Kind, bool)> {
+    let from_file = |k: &Option<(Kind, Source)>| matches!(k, Some((_, Source::FileName)));
+    let mut anchors: Vec<usize> = (0..named.len()).filter(|&i| named.get(i).is_some_and(from_file)).collect();
+    if anchors.len() < GUESS_NEIGHBOURS {
+        // Too few file names to go by: the folders' kinds teach as well.
+        anchors = (0..named.len()).filter(|&i| named.get(i).is_some_and(Option::is_some)).collect();
+    }
+    let grid = Cells::new(positions, &anchors);
+    named
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            if let Some((kind, Source::FileName)) = name {
+                return (*kind, false);
+            }
+            let Some(at) = positions.get(i) else { return (Kind::Other, false) };
+            let near = grid.nearest(positions, *at, i, GUESS_NEIGHBOURS);
+            let mut best = (0usize, Kind::Other);
+            for kind in Kind::ALL {
+                let votes =
+                    near.iter().filter(|&&j| named.get(j).and_then(|k| k.map(|(k, _)| k)) == Some(kind)).count();
+                if votes > best.0 {
+                    best = (votes, kind);
+                }
+            }
+            match name {
+                Some((kind, _)) if best.1 != *kind && best.0 >= OVERRULE_AGREE => (best.1, true),
+                Some((kind, _)) => (*kind, false),
+                None if best.0 >= GUESS_AGREE => (best.1, true),
+                None => (Kind::Other, false),
+            }
+        })
+        .collect()
+}
+
+/// Items bucketed by where they are on the map, to find the nearest ones quickly.
+struct Cells {
+    side: usize,
+    cells: Vec<Vec<usize>>,
+}
+
+impl Cells {
+    fn new(positions: &[[f32; 2]], items: &[usize]) -> Self {
+        let side = ((items.len() / ITEMS_PER_CELL).max(1) as f64).sqrt().ceil().clamp(1.0, 1024.0) as usize;
+        let mut cells = vec![Vec::new(); side * side];
+        let grid = Cells { side, cells: Vec::new() };
+        for &i in items {
+            if let Some(p) = positions.get(i)
+                && let Some(cell) = cells.get_mut(grid.index(*p))
+            {
+                cell.push(i);
+            }
+        }
+        Cells { side, cells }
+    }
+
+    fn cell_of(&self, value: f32) -> usize {
+        let v = if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.5 };
+        ((v * self.side as f32) as usize).min(self.side - 1)
+    }
+
+    fn index(&self, p: [f32; 2]) -> usize {
+        self.cell_of(p[1]) * self.side + self.cell_of(p[0])
+    }
+
+    /// The `count` items nearest to `at`, leaving out `skip`: rings of cells around `at` are
+    /// searched until no unsearched cell can hold a nearer item.
+    fn nearest(&self, positions: &[[f32; 2]], at: [f32; 2], skip: usize, count: usize) -> Vec<usize> {
+        let (cx, cy) = (self.cell_of(at[0]) as isize, self.cell_of(at[1]) as isize);
+        let cell = 1.0 / self.side as f32;
+        let mut found: Vec<(f32, usize)> = Vec::new();
+        for ring in 0..self.side as isize {
+            for y in cy - ring..=cy + ring {
+                for x in cx - ring..=cx + ring {
+                    let on_ring = (y - cy).abs() == ring || (x - cx).abs() == ring;
+                    if !on_ring || x < 0 || y < 0 || x >= self.side as isize || y >= self.side as isize {
+                        continue;
+                    }
+                    let Some(items) = self.cells.get(y as usize * self.side + x as usize) else { continue };
+                    for &j in items {
+                        if j == skip {
+                            continue;
+                        }
+                        if let Some(p) = positions.get(j) {
+                            let d = (p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2);
+                            found.push((d, j));
+                        }
+                    }
+                }
+            }
+            // Every cell outside this ring is at least `ring` cells away.
+            let reach = ring as f32 * cell;
+            if found.len() >= count {
+                found.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                found.truncate(count);
+                if found.last().is_some_and(|(d, _)| *d <= reach * reach) {
+                    break;
+                }
+            }
+        }
+        found.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        found.truncate(count);
+        found.into_iter().map(|(_, j)| j).collect()
     }
 }
 
@@ -310,6 +427,79 @@ fn jacobi_eigen(mut a: Vec<Vec<f64>>) -> (Vec<f64>, Vec<Vec<f64>>) {
 
 #[cfg(test)]
 mod tests {
+
+    /// Two groups on the map: kicks on the left, snares on the right.
+    type Named = Option<(Kind, Source)>;
+
+    fn kicks_and_snares() -> (Vec<[f32; 2]>, Vec<Named>) {
+        let mut positions = Vec::new();
+        let mut named = Vec::new();
+        for i in 0..20 {
+            let jitter = i as f32 * 0.002;
+            positions.push([0.1 + jitter, 0.5]);
+            named.push(Some((Kind::Kick, Source::FileName)));
+            positions.push([0.9 - jitter, 0.5]);
+            named.push(Some((Kind::Snare, Source::FileName)));
+        }
+        (positions, named)
+    }
+
+    #[test]
+    fn unnamed_items_take_the_kind_of_their_neighbours_on_the_map() {
+        let (mut positions, mut named) = kicks_and_snares();
+        positions.extend([[0.12, 0.5], [0.88, 0.5], [0.5, 0.5]]);
+        named.extend([None, None, None]);
+        let kinds = kinds_from_neighbours(&positions, &named);
+        let n = kinds.len();
+        assert_eq!(kinds[n - 3], (Kind::Kick, true));
+        assert_eq!(kinds[n - 2], (Kind::Snare, true));
+        // Halfway, the neighbours are split: no kind is guessed.
+        assert_eq!(kinds[n - 1].1, kinds[n - 1].0 != Kind::Other);
+        // Names from the file stand.
+        assert_eq!(kinds[0], (Kind::Kick, false));
+    }
+
+    #[test]
+    fn a_folders_kind_gives_way_to_a_clear_sound_but_a_file_name_does_not() {
+        let (mut positions, mut named) = kicks_and_snares();
+        // In a folder called "Bass", but it sits among the kicks.
+        positions.push([0.11, 0.5]);
+        named.push(Some((Kind::Bass, Source::Folder)));
+        // Named "Bass" in its own file name, among the kicks too.
+        positions.push([0.11, 0.51]);
+        named.push(Some((Kind::Bass, Source::FileName)));
+        let kinds = kinds_from_neighbours(&positions, &named);
+        let n = kinds.len();
+        assert_eq!(kinds[n - 2], (Kind::Kick, true));
+        assert_eq!(kinds[n - 1], (Kind::Bass, false));
+    }
+
+    #[test]
+    fn kinds_of_many_items_are_found_quickly() {
+        let n = 150_000;
+        let mut state = 9u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let positions: Vec<[f32; 2]> = (0..n).map(|_| [next(), next()]).collect();
+        let named: Vec<Option<(Kind, Source)>> = (0..n)
+            .map(|i| match i % 3 {
+                0 => Some((Kind::Kick, Source::FileName)),
+                1 => Some((Kind::Hat, Source::Folder)),
+                _ => None,
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let kinds = kinds_from_neighbours(&positions, &named);
+        assert_eq!(kinds.len(), n);
+        // Brute force took minutes for this many; the grid takes well under a few seconds even
+        // in a debug build.
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+    }
+
     use super::*;
 
     /// Items in three tight clusters far apart in feature space.

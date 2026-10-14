@@ -168,15 +168,8 @@ impl Panel {
         if self.shown.as_ref() == Some(&key) {
             return;
         }
-        if prepared.is_laid_out() {
-            let map = prepared.compute();
-            self.grid_aspect = self.view.aspect();
-            self.grid = Some(map.grid(self.grid_aspect));
-            self.map = Some(map);
-            self.shown = Some(key);
-            self.flags_key = None;
-            return;
-        }
+        // Even a kept layout is finished on a thread of its own: finding the kinds and the grid of
+        // a large library takes seconds, which the window must not wait for.
         let (sender, receiver) = channel();
         let ctx = ui.ctx().clone();
         let aspect = self.view.aspect();
@@ -339,11 +332,7 @@ impl Panel {
         let fraction = job.progress.fraction();
         Some(Busy {
             title: "Arranging the map".into(),
-            detail: if fraction > 0.0 {
-                format!("{} %", percent(fraction))
-            } else {
-                "Finding the samples that sound alike".into()
-            },
+            detail: if fraction > 0.0 { format!("{} %", percent(fraction)) } else { "Getting the map ready".into() },
             fraction,
         })
     }
@@ -371,6 +360,7 @@ impl Panel {
         self.fit_grid(ui);
         self.update_points(state, projects, revision);
         self.view.preview_on_hover = settings.map_hover_preview;
+        self.view.dot_size = settings.map_dot_size as f32 / 100.0;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
         let busy = self.busy(ui.input(|i| i.time));
@@ -490,6 +480,10 @@ impl Panel {
             }
             MapEvent::Layout(layout) => {
                 settings.map_grid = layout == Layout::Grid;
+                return true;
+            }
+            MapEvent::DotSize(percent) => {
+                settings.map_dot_size = percent;
                 return true;
             }
             MapEvent::ToggleLarge => {

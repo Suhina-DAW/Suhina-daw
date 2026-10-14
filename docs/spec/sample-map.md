@@ -114,7 +114,7 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
 - While samples are left to analyse, a card in the middle of the map says **Analysing samples**,
   with a bar and "6 760 of 14 000"; once they are all analysed and a layout takes longer than a
   moment, it says **Arranging the map**, with a bar and the share of the layout's iterations done
-  ("Finding the samples that sound alike" before the first). The card is only drawn: the map
+  ("Getting the map ready" before the first, and for a layout already kept). The card is only drawn: the map
   under it, its buttons and the rest of the window keep working.
 - When the status does not fit between the **Cloud | Grid** switch and the buttons, it is cut
   short with "…"; its tooltip has all of it.
@@ -197,7 +197,7 @@ change, not every frame.
 
 Every item has a kind. The kinds and the words in names that give them:
 
-| Kind | Words (whole words in the file name or its folders, any case) |
+| Kind | Words (whole words in the file name or its two nearest folders, any case) |
 |---|---|
 | Kick | kick, kik, kck, bd, bassdrum, bass drum |
 | Snare | snare, snr, sd |
@@ -210,7 +210,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Crash | crash |
 | Ride | ride |
 | Cymbal | cymbal, cym, china, splash |
-| Percussion | perc, shaker, shk, tamb, tambourine, conga, bongo, cowbell, clave, block, triangle |
+| Percussion | perc, percussion, shaker, shk, tamb, tambourine, conga, bongo, cowbell, clave, block, triangle |
 | Bass | 808, bass, sub |
 | Tonal | stab, chord, pluck, keys, synth, lead, pad |
 | Vocal | vox, vocal, voice, chant |
@@ -221,12 +221,26 @@ Every item has a kind. The kinds and the words in names that give them:
   digits (`KickHard_02` → kick, hard, 02); a word with a trailing *s* also counts as the word
   without it (`Kicks`, `Hats`) when what is left has at least three letters and the word is not
   itself in the table. Two words in a row (`closed hat`, `bass drum`) count before one word
-  alone. The file name is read first, then its folders from the
-  nearest up to the library folder; the first word that names a kind wins, and a more specific
-  kind (Closed hat) wins over a general one (Hat) in the same name.
-- **Guessed kinds.** An item whose name gives no kind is given the kind most of its 7 nearest
-  neighbours (by features) have, when at least 4 of them agree; otherwise Other. A guessed
-  kind is drawn a little paler, and the item's tooltip says "guessed".
+  alone. These words also count at the start of a longer word (`Kickdrum`, `Snareroll`,
+  `Bassline`): kick, snare, clap, hihat, crash, cymbal, shaker, conga, bongo, cowbell, bass,
+  synth, chord, pluck, vocal, voice, riser, sweep, impact.
+- **The most specific kind in a name wins**, wherever it is in the name: a drum (kick, snare,
+  clap, closed or open hat, rim, tom, crash, ride) over Hat and Cymbal, those over Percussion,
+  then Vocal, Bass, Tonal and Effect (`808 Kick` is a kick, `Snare FX` a snare, `Vocal Chop FX`
+  a vocal). Between two equally specific kinds, the first in the name wins.
+- **The file name is read first, then its two nearest folders** below the library folder; a
+  folder further up is usually a pack's or a collection's name, not a kind. In a folder's name,
+  "bass" next to a word of a style of music (house, music, future, drum, dnb, uk, and, n,
+  jungle, trap: `Bass House Vol 2`, `Drum and Bass`) names no kind.
+- **Kinds from the sound.** The other items are placed by their neighbours on the map, where
+  similar sounds lie together: the 7 nearest items whose own file name gives a kind (or, when
+  fewer than 7 have one, the nearest items with any named kind). An item whose name gives no
+  kind takes the kind at least 4 of them agree on, otherwise Other. A kind from a folder's name
+  stands unless at least 5 of them agree on another kind: a kick in a folder called "Bass" is a
+  kick. A kind from the file's own name always stands. A kind from the sound is drawn a little
+  paler, and the item's tooltip says "guessed". The neighbours are found through a grid of
+  cells over the map, so the time grows with the number of items, not its square (150 000
+  items: well under a second).
 - Each kind has a colour from Suhina's own palette (the design brief's track colours, extended),
   chosen so that neighbouring kinds (kick and bass, snare and clap, the hats) are told apart.
 - **Labels.** Each cluster of a kind is named over its region, without overlapping another
@@ -237,6 +251,10 @@ Every item has a kind. The kinds and the words in names that give them:
 ## Points
 
 - A point is a dot (cloud) or a filled cell (grid) in its kind's colour.
+- **Size** in the map's top bar (25 to 400 %, kept) makes the dots smaller or larger; their
+  places do not change, so smaller dots stand further apart. In the density view it sets how far
+  each point is spread: below 75 % not at all, so neighbouring points stand apart, and further
+  the larger the size.
 - **In use:** items used by a clip of the active project are drawn larger with a ring.
 - **Selected:** items selected in the browser have a light outline; the map and the list share
   one selection.

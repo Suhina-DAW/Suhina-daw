@@ -90,6 +90,8 @@ pub enum MapEvent {
     ShowInFolder(usize),
     /// The layout switch changed.
     Layout(Layout),
+    /// The point size was changed, in percent.
+    DotSize(u32),
     /// The large-view button.
     ToggleLarge,
     /// The button that moves the map into a window of its own, or back into the browser.
@@ -115,6 +117,9 @@ pub struct MapView {
     pressed: Option<usize>,
     /// Points are being dragged out of the map: no hover, preview or pan until the drop.
     dragging_items: bool,
+    /// The points' size as a share of their size at first (Size in the top bar). Positions do
+    /// not change with it, so smaller points stand further apart.
+    pub dot_size: f32,
     /// Kinds the legend shows; the others are dimmed. Empty: all.
     pub legend: HashSet<Kind>,
     /// Shift-drag rectangle, from where it started.
@@ -183,6 +188,7 @@ struct DensityKey {
     centre: [f32; 2],
     legend: Vec<Kind>,
     similar: Option<(usize, Vec<usize>)>,
+    spread: usize,
 }
 
 /// What to do with the density raster this frame.
@@ -228,6 +234,7 @@ impl Default for MapView {
             previewed: None,
             pressed: None,
             dragging_items: false,
+            dot_size: 1.0,
             legend: HashSet::new(),
             rubber_band: None,
             similar: None,
@@ -377,6 +384,17 @@ fn step_similar(of: usize, items: &[usize], from: Option<usize>, down: bool) -> 
         (Some(at), false) => at.checked_sub(1).and_then(list),
         (None, true) => items.first().copied(),
         (None, false) => None,
+    }
+}
+
+/// How many times the density kernel is applied for a point size: none for small points, so
+/// neighbours stand apart; more for large ones, for soft regions. Once at the size at first.
+fn density_spread(dot_size: f32) -> usize {
+    match dot_size {
+        s if s < 0.75 => 0,
+        s if s < 1.5 => 1,
+        s if s < 2.5 => 2,
+        _ => 3,
     }
 }
 
@@ -557,6 +575,19 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
         if ui.button("+").on_hover_text("Zoom in").clicked() {
             view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
         }
+        let mut percent = (view.dot_size * 100.0).round() as u32;
+        let (low, high) = crate::settings::MAP_DOT_SIZES;
+        let size = ui
+            .add_sized(
+                Vec2::new(48.0, ui.spacing().interact_size.y),
+                egui::DragValue::new(&mut percent).range(low..=high).speed(2.0).suffix(" %"),
+            )
+            .on_hover_text("Point size: drag or type. The points stay where they are, so smaller ones stand apart");
+        if size.changed() {
+            view.dot_size = percent as f32 / 100.0;
+            events.push(MapEvent::DotSize(percent));
+        }
+        ui.label(egui::RichText::new("Size").color(theme::text_secondary()).size(theme::TEXT_SMALL));
         // The status takes the room left between the switch and the buttons, cut short with
         // "…" when it does not fit; the whole of it is in its tooltip.
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -831,6 +862,7 @@ fn draw_points(
             centre: view.centre,
             legend: kinds,
             similar: view.similar.clone(),
+            spread: density_spread(view.dot_size),
         };
         let now = painter.ctx().input(|i| i.time);
         if view.resized.0 != area {
@@ -840,7 +872,7 @@ fn draw_points(
         match density_plan(drawn, &key, area, view.resized.1, now) {
             DensityPlan::Build => {
                 let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
-                let image = crowd::density(screen, colour, area);
+                let image = crowd::density(screen, colour, area, key.spread);
                 let texture = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
                 view.cache.density = Some(Density { key, area, transform, texture });
             }
@@ -858,6 +890,7 @@ fn draw_points(
         }
     }
     let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
+    let radius = (radius * view.dot_size).clamp(0.75, 24.0);
     let cell = if crowded { 0.0 } else { cell };
     // Dimmed points first, so the others are drawn over them.
     for pass in [true, false] {
@@ -1036,7 +1069,8 @@ mod tests {
 
     #[test]
     fn the_density_waits_for_a_resize_to_settle_but_not_for_a_change_of_content() {
-        let key = DensityKey { points: None, zoom: 1.0, centre: [0.5, 0.5], legend: Vec::new(), similar: None };
+        let key =
+            DensityKey { points: None, zoom: 1.0, centre: [0.5, 0.5], legend: Vec::new(), similar: None, spread: 1 };
         let small = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
         let large = Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 300.0));
         assert_eq!(density_plan(None, &key, small, 0.0, 0.0), DensityPlan::Build, "nothing drawn yet");

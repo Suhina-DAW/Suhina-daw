@@ -83,9 +83,13 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
 6. **Neighbours:** "similar items" is a linear scan over the standardised features (under 2 ms
    for 50 000 items); no tree is needed at these sizes. Finding the point under the pointer is
    the view's job.
-7. **Kinds** come from words in names (the spec's table). An item without one takes the kind
-   most of its 7 nearest neighbours have, when 4 or more agree. No trained model in this
-   version.
+7. **Kinds** come from words in names (the spec's table): the file name, then its two nearest
+   folders, the most specific kind in a name winning. The rest come from the 7 nearest items on
+   the map whose file name gives a kind: an item without a kind takes the one 4 or more agree on,
+   and a kind from a folder's name gives way when 5 or more agree on another. Neighbours are
+   looked up on the 2D layout through a grid of cells rather than in feature space item by item,
+   which took minutes for 150 000 items; t-SNE keeps local neighbourhoods, which is what the vote
+   needs. No trained model in this version.
 8. **Cache** in `<settings>/library/features-<hash>.bin` beside the library's index, one file
    per folder: a version header with the feature version, then per file its path below the
    folder, size, modification time and either its length in seconds and its features (32-bit

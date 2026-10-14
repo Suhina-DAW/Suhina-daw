@@ -183,8 +183,15 @@ pub(crate) fn place_labels(labels: &[(Pos2, Vec2)], area: Rect) -> Vec<Option<Re
 /// clusters read as soft regions rather than blocks. A texel is coloured by the mix of the kinds'
 /// colours there, and more opaque the more points are near it (the logarithm, against the densest
 /// texel). `colour(i)` is point `i`'s colour, or `None` when it is dimmed: dimmed points only
-/// show as faint grey under the others. Drawn with linear filtering.
-pub(crate) fn density(screen: &[Pos2], colour: impl Fn(usize) -> Option<Color32>, rect: Rect) -> ColorImage {
+/// show as faint grey under the others. `spread` is how many times the kernel is applied: 0
+/// keeps each point to its own texel, so neighbours stand apart; more makes softer regions.
+/// Drawn with linear filtering.
+pub(crate) fn density(
+    screen: &[Pos2],
+    colour: impl Fn(usize) -> Option<Color32>,
+    rect: Rect,
+    spread: usize,
+) -> ColorImage {
     let width = ((rect.width() / BIN).ceil().max(1.0) as usize).min(4096);
     let height = ((rect.height() / BIN).ceil().max(1.0) as usize).min(4096);
     // Per texel: count, red, green and blue sums, dimmed count.
@@ -206,7 +213,9 @@ pub(crate) fn density(screen: &[Pos2], colour: impl Fn(usize) -> Option<Color32>
             None => texel[4] += 1.0,
         }
     }
-    let texels = blur(&blur(&texels, width, height, 1, width), width, height, width, height);
+    for _ in 0..spread {
+        texels = blur(&blur(&texels, width, height, 1, width), width, height, width, height);
+    }
     let densest = texels.iter().map(|t| t[0]).fold(0.0f32, f32::max).max(1e-6).ln_1p();
     let dimmest = texels.iter().map(|t| t[4]).fold(0.0f32, f32::max).max(1e-6).ln_1p();
     let grey = crate::theme::text_hint();
@@ -354,7 +363,7 @@ mod tests {
             1 => Some(blue),
             _ => None,
         };
-        let image = density(&screen, colour, rect);
+        let image = density(&screen, colour, rect, 1);
         assert_eq!(image.size, [20, 1]);
         let mixed = image.pixels[0].to_srgba_unmultiplied();
         assert!(mixed[0].abs_diff(100) <= 1 && mixed[2].abs_diff(100) <= 1, "{mixed:?}");
@@ -365,6 +374,24 @@ mod tests {
         assert_eq!(image.pixels[3], Color32::TRANSPARENT);
         assert!(image.pixels[10].a() > 0 && image.pixels[10].a() < 64, "a dimmed point is faint");
         assert_eq!(image.pixels[19], Color32::TRANSPARENT);
+    }
+
+    /// Smaller points spread less: with no spread, two points two texels apart keep a gap
+    /// between them; with more, the gap fills in.
+    #[test]
+    fn a_smaller_spread_keeps_neighbours_apart() {
+        // Ten texels a side; two points on row 5, in columns 0 and 2.
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(30.0, 30.0));
+        let screen = [Pos2::new(1.0, 16.0), Pos2::new(7.0, 16.0)];
+        let colour = |_| Some(Color32::from_rgb(200, 0, 0));
+        let at = |image: &ColorImage, column: usize| image.pixels[5 * 10 + column];
+        let sharp = density(&screen, colour, rect, 0);
+        assert!(at(&sharp, 0).a() > 0 && at(&sharp, 2).a() > 0);
+        assert_eq!(at(&sharp, 1), Color32::TRANSPARENT);
+        let soft = density(&screen, colour, rect, 2);
+        assert!(at(&soft, 1).a() > 0);
+        // A wider spread reaches further: two texels past a point it is stronger.
+        assert!(at(&soft, 4).a() > at(&density(&screen, colour, rect, 1), 4).a());
     }
 
     #[test]
