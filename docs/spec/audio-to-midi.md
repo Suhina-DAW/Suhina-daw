@@ -3,7 +3,7 @@ description: How slicing audio to a MIDI track and converting drums, bass, melod
 read_when: slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track
 type: spec
 status: planned
-last_verified: 2026-10-11
+last_verified: 2026-10-14
 ---
 
 # Audio to MIDI
@@ -103,6 +103,27 @@ For all four:
   is not placed there. *Cancel* drops nothing. **(hypothesis** for Live; Suhina does this.**)**
 - Every conversion is a command (`clip.sliceToMidi`, `clip.convertToMidi` with
   `material: drums | bass | melody | chords`), runs off the audio thread, and is one undo step.
+
+### How the detectors work (Suhina)
+
+Planned, not built; the ADR that comes before the detectors decides the details.
+
+- **Slicing** needs an onset detector of our own (for *Transient*), and the sampler and drum
+  sampler devices.
+- **Drums:** onsets classified into kick, snare and hi-hat by their spectrum; more classes
+  (toms, cymbals) later, with a small model.
+- **Bass:** pitch tracking limited to the low range, note starts taken from transients.
+- **Melody:** pitch tracking of our own (pYIN-style) plus note segmentation.
+- **Chords:** pitch classes (chroma) matched against chord templates and smoothed over time.
+- **Full polyphonic transcription**, if ever: candidate Spotify's Basic Pitch (Apache-2.0) run in
+  pure Rust through `tract`, its licence and model weights checked first.
+- **Stem separation:** candidate Demucs (MIT), its model weights checked first
+  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
+
+### Tests
+
+Synthetic audio with known notes, rendered by the engine itself, so a result can be compared
+note by note.
 
 For comparison, Live offers three: *Harmony* (several notes at once), *Melody* and *Drums*;
 which keys its drum classes land on is in its manual. **(hypothesis)**

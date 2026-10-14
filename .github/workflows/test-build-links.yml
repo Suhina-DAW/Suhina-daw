@@ -1,0 +1,145 @@
+name: Test build links
+
+# The trusted half of test-build.yml: it runs from main and never checks out or runs a pull
+# request's code. It links each finished test build from its pull request in one comment that each
+# new build updates, and takes the `test-build` label off a pull request when someone other than a
+# maintainer pushes to it, so the new commits wait for review before they are built.
+#
+# test-build.yml from a fork runs as the fork has it, so a build is linked only when a maintainer
+# started its run: their own push, or the label they added. See docs/releasing.md › Test builds.
+
+on:
+  workflow_run:
+    workflows: ["Test build"]
+    types: [completed]
+  pull_request_target:
+    types: [synchronize]
+
+permissions: {}
+
+jobs:
+  link:
+    name: link the build
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // The maintainers are listed here and in test-build.yml.
+            const MAINTAINERS = ['juhamikael'];
+            const MARKER = '<!-- suhina-test-build -->';
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+
+            const actor = run.triggering_actor && run.triggering_actor.login;
+            if (!MAINTAINERS.includes(actor)) {
+              core.info(`Run ${run.id} was started by ${actor}, not a maintainer: nothing to link.`);
+              return;
+            }
+            const { data: { jobs } } = await github.rest.actions.listJobsForWorkflowRun({
+              owner, repo, run_id: run.id,
+            });
+            const builds = jobs.filter((job) => job.name.startsWith('test build ('));
+            const ran = builds.filter((job) => !['skipped', 'cancelled'].includes(job.conclusion));
+            if (ran.length === 0) {
+              core.info(`Run ${run.id} built nothing.`);
+              return;
+            }
+
+            // A run from a fork lists no pull request, so it is found by its head branch.
+            let number = run.pull_requests.length ? run.pull_requests[0].number : null;
+            if (number === null) {
+              const { data } = await github.rest.pulls.list({
+                owner, repo, state: 'open',
+                head: `${run.head_repository.owner.login}:${run.head_branch}`,
+              });
+              if (data.length !== 1) {
+                core.info(`No single open pull request for ${run.head_repository.full_name}:${run.head_branch}.`);
+                return;
+              }
+              number = data[0].number;
+            }
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            const commit = run.head_sha.slice(0, 7);
+
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: run.id, per_page: 100,
+            });
+            const PLATFORMS = [
+              ['windows-x86_64', 'Windows x86-64', 'unzip and run `suhina.exe`'],
+              ['macos-universal', 'macOS 11+, Apple silicon and Intel', 'unzip, then `tar -xzf` the `.tar.gz`'],
+              ['linux-x86_64', 'Linux x86-64, needs libasound2', 'unzip, then `tar -xzf` the `.tar.gz`'],
+            ];
+            const rows = PLATFORMS.map(([platform, label, how]) => {
+              const job = builds.find((j) => j.name === `test build (${platform})`);
+              const artifact = artifacts.find(
+                (a) => a.name.startsWith('suhina-pr') && a.name.endsWith(`-${platform}`),
+              );
+              if (job && job.conclusion === 'success' && artifact) {
+                const url = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
+                const size = (artifact.size_in_bytes / 1048576).toFixed(0);
+                return `| ${label} | [${artifact.name}](${url}) (${size} MB) | ${how} |`;
+              }
+              const state = job ? (job.conclusion || job.status) : 'not built';
+              return `| ${label} | ${state}${job ? ` ([log](${job.html_url}))` : ''} | |`;
+            });
+            const expires = artifacts.length
+              ? artifacts.map((a) => a.expires_at).sort()[0].slice(0, 10)
+              : null;
+            const body = [
+              MARKER,
+              '### Test build',
+              '',
+              `Commit \`${commit}\` merged with main${expires ? `, kept until ${expires}` : ''}. [The run](${run.html_url}).`,
+              '',
+              '| Platform | Download | Then |',
+              '|---|---|---|',
+              ...rows,
+              '',
+              'Downloading needs a GitHub sign-in. The builds are unsigned: SmartScreen (More info › Run anyway) and Gatekeeper (right-click › Open) warn about them.',
+            ];
+            if (!MAINTAINERS.includes(pr.user.login)) {
+              body.push(
+                '',
+                `> **A contributor's build.** A maintainer added \`test-build\` after reading \`${commit}\`; later pushes are not built until the label is added again. Read the diff before you run it.`,
+              );
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            const previous = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.startsWith(MARKER),
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: previous.id, body: body.join('\n'),
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: number, body: body.join('\n'),
+              });
+            }
+            core.info(`Linked run ${run.id} from #${number}.`);
+
+  unlabel:
+    name: take the label off new commits
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      contains(github.event.pull_request.labels.*.name, 'test-build') &&
+      !contains(fromJSON('["juhamikael"]'), github.event.sender.login)
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Remove the test-build label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label test-build

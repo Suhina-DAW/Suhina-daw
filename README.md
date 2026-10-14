@@ -1,9 +1,21 @@
 # Suhina
 <img width="12525" height="3663" alt="suhina-logo" src="https://github.com/user-attachments/assets/7efa72b4-fba5-42f3-9503-0ea9f4e864f6" />
 
+<p align="center">
+  <a href="https://discord.com/invite/e5JAZYMU"><img alt="Discord" src="https://img.shields.io/discord/1558859596783689758?label=Discord&logo=discord&logoColor=white&color=5865F2"></a>
+</p>
+
 An open-source, clip-launching DAW in pure Rust, comparable in workflow to Ableton Live.
 
 Suhina was called Loopwerk until October 2026; settings kept under the old name carry over on the first start. <!-- rename_suhina: keep -->
+
+<a href="docs/research/parity-live-12-by-area.png">
+  <img width="700" alt="Parity by area: the share of each area of a reference DAW's manual that Suhina covers today" src="docs/research/parity-live-12-by-area.png">
+</a>
+
+> How much of that workflow exists today, measured chapter by chapter against a reference DAW's
+> manual: [the report](docs/research/parity-live-12.md), [the order the gap gets closed in](docs/decisions/0016-parity-target.md).
+> Rebuilt on `main` whenever the numbers change.
 
 > **Status:** pre-alpha. Suhina opens Live Sets, plays and renders them (audio clips with
 > real-time time-stretching, MIDI through the built-in FM synth, sandboxed CLAP and VST3 plug-ins,
@@ -28,10 +40,14 @@ products; see [`CONTRIBUTING.md`](CONTRIBUTING.md) › Clean-room.
 
 ## Downloads
 
-Tagged versions build the headless command-line tool `suhina-cli` and the plug-in host
-`suhina-plugin-host` for Linux (x86_64), Windows (x64) and macOS (universal) and attach them to a
-GitHub Release. The host is the process plug-ins run in: keep it next to `suhina-cli`, which needs
-it to play or render a project with plug-ins. The binaries are not signed yet,
+To try the current state, download the **nightly**: a build of `main` made every night, not a
+release, so expect unfinished parts and bugs
+([nightly downloads](https://github.com/suhina-daw/suhina-daw/releases/tag/nightly)).
+It and tagged versions hold the desktop app `suhina`, the command-line tool `suhina-cli` and the
+plug-in host `suhina-plugin-host`, for Linux (x86_64), Windows (x64) and macOS (universal). The
+host is the process plug-ins run in: keep the three in one folder. Tell us what works and what breaks
+on [Discord](https://discord.com/invite/e5JAZYMU) or in the
+[issues](https://github.com/suhina-daw/suhina-daw/issues). The binaries are not signed yet,
 so macOS and Windows warn before running them. On Linux they need the ALSA library (`libasound2`).
 How a release is made: [`docs/releasing.md`](docs/releasing.md).
 
@@ -128,6 +144,30 @@ build at them (`CPAL_ASIO_DIR`); nothing is downloaded. The SDK is GPL-3.0 only,
 `asio` is distributed under the GPL-3.0; Suhina's own code stays GPL-3.0-or-later. "ASIO" is a
 trademark of Steinberg Media Technologies GmbH.
 
+## Contributing
+
+Everything that is planned or being worked on is on the board,
+[**Suhina** (GitHub project)](https://github.com/orgs/suhina-daw/projects/1), and every item there
+is an [issue](https://github.com/suhina-daw/suhina-daw/issues) in this repository. To start:
+
+1. **Read the rules once:** [`CONTRIBUTING.md`](CONTRIBUTING.md) (clean-room, licences, sign-off)
+   and [`AGENTS.md`](AGENTS.md) (golden rules, crate map, what to run before you finish). They
+   apply to people and to AI agents alike.
+2. **Pick an issue** on the board in *Backlog* or *Ready* with no open pull request for it; the
+   [`good first issue`](https://github.com/suhina-daw/suhina-daw/labels/good%20first%20issue) and
+   [`help wanted`](https://github.com/suhina-daw/suhina-daw/labels/help%20wanted) labels mark good
+   places to begin. Say in the issue that you take it, with a short plan.
+3. **Find the documents for it** in [`docs/INDEX.md`](docs/INDEX.md), by what you are about to do
+   or by the code you change, and read [`docs/architecture.md`](docs/architecture.md) to see where
+   the code goes.
+4. **Build and test** as [Building](#building) shows; before the pull request run `cargo fmt --all`,
+   `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and
+   `python scripts/docs.py check`.
+5. **Open a pull request** that says `Closes #<issue>` and fills in the template.
+
+Something missing or a bug? Open an issue with one of the forms, or ask on
+[Discord](https://discord.com/invite/e5JAZYMU).
+
 ## Documentation
 
 | | |
@@ -144,10 +184,6 @@ trademark of Steinberg Media Technologies GmbH.
 | [`docs/mcp.md`](docs/mcp.md) | The MCP server: tools, file roots, errors |
 | [`docs/shortcuts.md`](docs/shortcuts.md) | Keyboard shortcuts in the desktop app, and how to change them |
 | [`docs/releasing.md`](docs/releasing.md) | How a release is built and published |
-
-## Community
-
-- Discord: <https://discord.gg/ccQWu8rRcf>
 
 ## License
 

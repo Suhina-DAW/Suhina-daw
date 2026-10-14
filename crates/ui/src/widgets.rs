@@ -11,6 +11,13 @@ use serde_json::Value;
 
 use crate::{motion, theme};
 
+/// Where the pointer is, when it is over `rect` and no layer is on top of `ui`'s there (a
+/// dialog, a menu, a tooltip): what a view that reads the wheel, a pinch or a press itself may
+/// act on, so they reach only the dialog while one is open.
+pub fn pointer_over(ui: &Ui, rect: Rect) -> Option<Pos2> {
+    if ui.rect_contains_pointer(rect) { ui.ctx().pointer_hover_pos() } else { None }
+}
+
 /// A command for the session to run, made by a view: the same ids the CLI and MCP use.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Action {

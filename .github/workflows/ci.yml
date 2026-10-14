@@ -1,9 +1,8 @@
 name: CI
 
-# Pull requests and main run on Linux only, to keep Actions minutes down while the repository is
-# private (Windows minutes count double, macOS ten times). Windows and macOS run when started by
-# hand (Actions > CI > Run workflow, "all platforms"), and the release workflow builds and checks
-# all three for every tag.
+# Pull requests and main run on Linux only, which keeps every change's check fast. Windows and
+# macOS run when started by hand (Actions > CI > Run workflow, "all platforms"), and the release
+# workflow builds and checks all three for every tag and for the nightly.
 on:
   push:
     branches: [main]
@@ -62,10 +61,39 @@ jobs:
       # docs/INDEX.md and docs/commands.md are generated on main (docs-generated.yml), not checked here.
       - name: Front matter and covered paths
         run: python3 scripts/docs.py check
+      - name: Script tests (release notes)
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      # The claim bot writes to the project board, so a wrong branch would not fail anything else:
+      # its commands are run here against mocked API clients, on the runner's Node.js.
+      - name: The claim bot's commands answer as intended
+        run: python3 scripts/claim_bot_test.py
       # Warnings only: documents that describe code this pull request changes, left unchanged.
       - name: Documents that describe the changed code
         if: github.event_name == 'pull_request'
         run: python3 scripts/docs.py impact HEAD^1
+      # docs/INDEX.md and docs/commands.md are generated on main (docs-generated.yml). A pull
+      # request that edits one of them would have the edit overwritten on the next merge, silently,
+      # so it is refused here instead and sent to the source of the file. The parity report is not
+      # in this list: it is a normal document (see the step below).
+      - name: Generated files are not edited by hand
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: HEAD^1
+        run: |
+          edited=$(git diff --name-only "$BASE" HEAD -- docs/INDEX.md docs/commands.md || true)
+          if [ -z "$edited" ]; then
+            echo "No generated file is touched."
+            exit 0
+          fi
+          echo "::error::These files are generated on main and an edit here would be overwritten:"
+          printf '%s\n' "$edited"
+          echo "::error::Edit their source instead: the command registry for docs/commands.md, the documents' front matter for docs/INDEX.md."
+          exit 1
+      # The parity report is editable markdown whose marked parts are written by
+      # scripts/parity/update_report.py from score.py and devices.json. Changing those numbers
+      # without regenerating the marked parts fails here, in the pull request that changed them.
+      - name: The parity report's marked parts are current
+        run: python3 scripts/parity/update_report.py --check
       - name: No hidden or bidirectional Unicode characters
         run: |
           if git grep -nIP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' -- . ':!*.lock'; then

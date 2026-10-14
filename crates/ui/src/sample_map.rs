@@ -1019,6 +1019,53 @@ mod tests {
             harness.state().1
         );
     }
+
+    /// The wheel and pinch zoom the map, but not through a dialog over it (#232).
+    #[test]
+    fn the_wheel_zooms_only_when_no_dialog_is_on_top() {
+        use egui_kittest::Harness;
+        let points: Vec<MapPoint> =
+            (0..20).map(|i| point((i % 5) as f32 / 4.0, (i / 5) as f32 / 3.0, Kind::Kick)).collect();
+        let size = egui::vec2(400.0, 340.0);
+        // The view, and whether a dialog covers it.
+        let state = (MapView::default(), false);
+        let mut harness = Harness::builder().with_size(size).build_ui_state(
+            |ui, (view, dialog): &mut (MapView, bool)| {
+                show(ui, view, &points, None, "20 samples", &[], &mut Vec::new());
+                if *dialog {
+                    egui::Area::new(egui::Id::new("dialog")).order(egui::Order::Foreground).fixed_pos(Pos2::ZERO).show(
+                        ui.ctx(),
+                        |ui| {
+                            ui.set_min_size(size);
+                            let _ = ui.interact(Rect::from_min_size(Pos2::ZERO, size), ui.id(), Sense::click());
+                        },
+                    );
+                }
+            },
+            state,
+        );
+        harness.run();
+        let wheel = |harness: &mut Harness<'_, (MapView, bool)>| {
+            let at = harness.state().0.area.center();
+            harness.hover_at(at);
+            harness.run();
+            harness.input_mut().events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, 120.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.input_mut().events.push(egui::Event::Zoom(1.5));
+            harness.run();
+            harness.state().0.zoom
+        };
+        harness.state_mut().1 = true;
+        harness.run();
+        assert_eq!(wheel(&mut harness), 1.0, "the dialog takes the wheel");
+        harness.state_mut().1 = false;
+        harness.run();
+        assert!(wheel(&mut harness) > 1.0, "without it the map zooms");
+    }
 }
 
 #[cfg(test)]

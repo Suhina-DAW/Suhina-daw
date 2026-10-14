@@ -1,0 +1,387 @@
+name: Claim
+
+# `/claim`, `/unclaim`, `/hold` and `/ready` move an issue's card on the Suhina project board, so
+# that taking a task (CONTRIBUTING.md › Working on an issue) needs no maintainer in the loop: a
+# claim lives in the project's Status field, and someone from outside the organization cannot write
+# it. The bot also makes the checks a claimer would otherwise make by hand — an open pull request
+# that closes the issue, a status that says someone is already on it, a status that says the work is
+# not to be started — and refuses the claim for them, saying which one it found.
+#
+# It needs the repository secret `PROJECT_TOKEN`, because the workflow's `GITHUB_TOKEN` cannot
+# reach a project owned by the organization. docs/claim-bot.md says how to make one, which
+# scopes it needs and what happens when it expires.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  claim:
+    # A pull request comment is not an issue claim, a closed issue keeps no claim, and the bot's
+    # own comments must never start another round. Only a comment that starts with `/` can be a
+    # command: other comments start no run, so they never take a command's place in the queue below
+    # (GitHub keeps one pending run per group and cancels the one before it).
+    if: >-
+      startsWith(github.event.comment.body, '/') &&
+      !github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.user.type != 'Bot'
+    # The board's Status is one value: two commands at the same moment would race for it.
+    concurrency: claim-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        env:
+          PROJECT_OWNER: suhina-daw
+          PROJECT_NUMBER: "1"
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        with:
+          script: |
+            const owner = process.env.PROJECT_OWNER;
+            const projectNumber = Number(process.env.PROJECT_NUMBER);
+            const projectToken = process.env.PROJECT_TOKEN;
+
+            // The board's own words, and the only place they are written down. The Suhina project
+            // has Backlog, Ready, In progress, In review and Done, plus the gate this bot writes: a
+            // card is free when its Status says so, `Do not start yet` is a deliberate gate rather
+            // than a claim, `In progress` and `In review` mean someone is on it, and every other
+            // value is not open to start. Comparisons ignore case, so a board that spells a status
+            // "In Progress" still works.
+            const FREE = ["Backlog", "Ready"];
+            const NOT_READY = ["Do not start yet"];
+            const WORKING = ["In progress", "In review"];
+            const CLAIMED = "In progress";
+            // Where a released card goes, so that it can be taken again.
+            const RELEASED = "Ready";
+
+            const issue = context.payload.issue;
+            // Assignees and labels are read again rather than taken from the event, which is as old
+            // as the comment: a `/unclaim` queued behind the same person's `/claim` must see the claim.
+            let current = issue;
+            try {
+              current = (await github.rest.issues.get({ ...context.repo, issue_number: issue.number })).data;
+            } catch (error) {
+              core.warning(`Could not read the issue again: ${error.message}`);
+            }
+            const comment = context.payload.comment;
+            const actor = comment.user.login;
+            // GitHub's own word for someone who may move a card: the owner, an organization member
+            // or a collaborator. An outside contributor cannot write the project field at all,
+            // which is half the reason this bot exists.
+            const maintainer = ["OWNER", "MEMBER", "COLLABORATOR"].includes(
+              comment.author_association,
+            );
+
+            const body = (comment.body || "").trim();
+            const head = body.split("\n")[0].trim().match(/^\/(claim|unclaim|hold|ready)\b/i);
+            if (!head) return;
+            const command = head[1].toLowerCase();
+            // Everything after the command: the plan of a `/claim`, or why a `/hold` holds.
+            const argument = body.replace(/^\/[a-z]+\b/i, "").replace(/\s+/g, " ").trim();
+
+            const slug = `${context.repo.owner}/${context.repo.repo}`;
+            const boardUrl = `${context.serverUrl}/orgs/${owner}/projects/${projectNumber}`;
+            const firstIssues =
+              `${context.serverUrl}/${slug}/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22`;
+            const say = (text) =>
+              github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue.number,
+                body: text,
+              });
+
+            if (!projectToken) {
+              // No secret, no card movement. Say so rather than leaving the claimer guessing: the
+              // comment itself is still the claim (CONTRIBUTING.md › Working on an issue).
+              core.warning("PROJECT_TOKEN is not set; see docs/claim-bot.md.");
+              return say(
+                `Command noted, @${actor} — but the board has no \`PROJECT_TOKEN\` secret, so a ` +
+                  `maintainer has to move this card by hand: ${boardUrl}`,
+              );
+            }
+
+            const project = getOctokit(projectToken);
+
+            // The Status field, its options, and this issue's card on the board, in one round trip.
+            try {
+              const board = await project.graphql(
+                `query ($issue: ID!, $owner: String!, $number: Int!) {
+                   organization(login: $owner) {
+                     projectV2(number: $number) {
+                       id
+                       field(name: "Status") {
+                         ... on ProjectV2SingleSelectField { id options { id name } }
+                       }
+                     }
+                   }
+                   node(id: $issue) {
+                     ... on Issue {
+                       projectItems(first: 20) {
+                         nodes {
+                           id
+                           project { id }
+                           fieldValueByName(name: "Status") {
+                             ... on ProjectV2ItemFieldSingleSelectValue { name }
+                           }
+                         }
+                       }
+                     }
+                   }
+                 }`,
+                { issue: issue.node_id, owner, number: projectNumber },
+              );
+
+              const projectV2 = board.organization && board.organization.projectV2;
+              const field = projectV2 && projectV2.field;
+              if (!projectV2 || !field) {
+                core.setFailed(`No project ${owner}/${projectNumber} with a Status field is visible to PROJECT_TOKEN.`);
+                return say(
+                  `@${actor}, the claim bot cannot see the board (its token may have expired) — ` +
+                    `a maintainer has to move this card by hand: ${boardUrl}`,
+                );
+              }
+
+              const same = (a, b) => typeof a === "string" && a.toLowerCase() === b.toLowerCase();
+              const optionId = (name) => {
+                const found = (field.options || []).find((option) => same(option.name, name));
+                return found ? found.id : null;
+              };
+              const isFree = (name) => FREE.some((free) => same(name, free));
+              const isNotReady = (name) => NOT_READY.some((held) => same(name, held));
+              const isWorking = (name) => WORKING.some((working) => same(name, working));
+              const item =
+                ((board.node && board.node.projectItems && board.node.projectItems.nodes) || []).find(
+                  (node) => node.project.id === projectV2.id,
+                ) || null;
+              const status =
+                (item && item.fieldValueByName && item.fieldValueByName.name) || null;
+              const assignees = (current.assignees || []).map((user) => user.login);
+              const mentions = assignees.map((login) => `@${login}`).join(", ");
+
+              const setStatus = (itemId, name) =>
+                project.graphql(
+                  `mutation ($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                     updateProjectV2ItemFieldValue(input: {
+                       projectId: $project, itemId: $item, fieldId: $field,
+                       value: { singleSelectOptionId: $option }
+                     }) { projectV2Item { id } }
+                   }`,
+                  { project: projectV2.id, item: itemId, field: field.id, option: optionId(name) },
+                );
+
+              // Every command that moves a card needs one, and an issue that was never put on the
+              // board gets a card now rather than a refusal.
+              const ensureItem = async () => {
+                if (item && item.id) return item.id;
+                const added = await project.graphql(
+                  `mutation ($project: ID!, $content: ID!) {
+                     addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+                       item { id }
+                     }
+                   }`,
+                  { project: projectV2.id, content: issue.node_id },
+                );
+                return added.addProjectV2ItemById.item.id;
+              };
+
+              // A renamed or missing option is worth naming: the comment then carries its own fix.
+              const requireOption = async (name) => {
+                if (optionId(name)) return true;
+                const names = (field.options || []).map((option) => option.name).join(", ");
+                core.setFailed(`The board's Status field has no option called ${name}; it has: ${names}`);
+                await say(
+                  `@${actor}, the board's Status field has no **${name}** option (it has: ${names}), ` +
+                    `so a maintainer has to move this card by hand: ${boardUrl}`,
+                );
+                return false;
+              };
+
+              // The reason a maintainer gave with `/hold`, so a refusal can quote the gate instead
+              // of only naming it. Only a maintainer's `/hold` counts: anyone else's was refused, and
+              // quoting it would let anyone make the bot repeat their words. Every page is read, so the
+              // newest hold wins on a long thread, and `@` is dropped so a quote pings nobody.
+              const holdReason = async () => {
+                try {
+                  const comments = await github.paginate(github.rest.issues.listComments, {
+                    ...context.repo,
+                    issue_number: issue.number,
+                    per_page: 100,
+                  });
+                  const held = comments
+                    .filter((entry) => ["OWNER", "MEMBER", "COLLABORATOR"].includes(entry.author_association))
+                    .filter((entry) => /^\/hold\b/i.test((entry.body || "").trim()))
+                    .pop();
+                  if (!held) return "";
+                  const why = (held.body || "")
+                    .replace(/^\/[a-z]+\b/i, "")
+                    .replace(/@/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  if (!why) return "";
+                  return `“${why.length > 200 ? `${why.slice(0, 197)}…` : why}”`;
+                } catch (error) {
+                  core.warning(`Could not read the hold reason: ${error.message}`);
+                  return "";
+                }
+              };
+
+              if (command === "hold" || command === "ready") {
+                if (!maintainer) {
+                  return say(`Only a maintainer can hold or release an issue, @${actor}.`);
+                }
+                if (command === "hold" && !argument) {
+                  return say(
+                    "Write the reason after the command, like `/hold waiting for ADR 0003`, so that " +
+                      "the issue itself says why it is gated — the card only carries the instruction.",
+                  );
+                }
+                const target = command === "hold" ? NOT_READY[0] : RELEASED;
+                if (!(await requireOption(target))) return;
+                await setStatus(await ensureItem(), target);
+                return say(
+                  command === "hold"
+                    ? `Held: the card is **${target}** on the [board](${boardUrl}). The reason above ` +
+                        `is the one the next person reads, so thank you for writing it down.`
+                    : `Released: the card is **${RELEASED}** on the [board](${boardUrl}), so anyone ` +
+                        `may claim it again.`,
+                );
+              }
+
+              if (command === "unclaim") {
+                if (!maintainer && !assignees.includes(actor)) {
+                  return say(
+                    `Only the person who claimed this (${mentions || "nobody yet"}) or a maintainer ` +
+                      `can release it.`,
+                  );
+                }
+                // A maintainer releases whoever claimed it; anyone else releases only themselves.
+                const leaving = maintainer ? assignees : [actor];
+                // Only a claim goes back to Ready. A held card stays held and a card in review stays
+                // in review: unclaiming must not open what a maintainer gated or what waits for review.
+                const claimed = item && same(status, CLAIMED);
+                if (!claimed && leaving.length === 0) {
+                  return say(`@${actor}, this issue is already free.`);
+                }
+                if (claimed) {
+                  if (!(await requireOption(RELEASED))) return;
+                  await setStatus(item.id, RELEASED);
+                }
+                if (leaving.length > 0) {
+                  try {
+                    await github.rest.issues.removeAssignees({
+                      ...context.repo,
+                      issue_number: issue.number,
+                      assignees: leaving,
+                    });
+                  } catch (error) {
+                    // The card is the signal that matters; a failed unassign is worth a warning only.
+                    core.warning(`Could not unassign ${leaving.join(", ")}: ${error.message}`);
+                  }
+                }
+                if (claimed) {
+                  return say(
+                    `Released by @${actor}: back to **${RELEASED}** on the [board](${boardUrl}). ` +
+                      `Thank you for saying so: that is exactly the signal the next person needs.`,
+                  );
+                }
+                return say(
+                  `Unassigned by @${actor}. The card stays **${status || "without a status"}** on the ` +
+                    `[board](${boardUrl}); only a claim in **${CLAIMED}** goes back to **${RELEASED}**.`,
+                );
+              }
+
+              if ((current.labels || []).some((label) => label.name === "epic")) {
+                return say(
+                  "An `epic` is a container for other issues, not a task to claim: claim one of its issues instead.",
+                );
+              }
+
+              if (item && isNotReady(status)) {
+                const reason = await holdReason();
+                return say(
+                  `This is held — the card says **${status}**${reason ? `: ${reason}` : ""}. Please ` +
+                    `take another one; the [good first issues](${firstIssues}) are a good start. ` +
+                    `If the reason is not clear, ask in this issue rather than starting.`,
+                );
+              }
+
+              // A card without a Status yet is free, as it is for `/unclaim`.
+              if (item && status !== null && !isFree(status)) {
+                if (same(status, CLAIMED) && assignees.length === 1 && assignees[0] === actor) {
+                  return say(`@${actor}, this one is already yours.`);
+                }
+                const who = mentions ? ` (${mentions})` : "";
+                const state = isWorking(status)
+                  ? `already **${status}**${who}, so someone is on it`
+                  : `**${status}**${who}, which is not open to start`;
+                return say(
+                  `This is ${state}. Please take another one — the [good first issues](${firstIssues}) ` +
+                    `are a good start. If that work has stalled, offer in its pull request to take it ` +
+                    `over rather than opening a second one.`,
+                );
+              }
+
+              // A pull request that closes the issue has taken it, whatever the board says. This is a
+              // courtesy check, not the gate: the board decides, so a failure here must not stop a
+              // legitimate claim.
+              try {
+                const linked = await project.graphql(
+                  `query ($issue: ID!) {
+                     node(id: $issue) {
+                       ... on Issue {
+                         closedByPullRequestsReferences(first: 10, includeClosedPrs: false) {
+                           nodes { number title url }
+                         }
+                       }
+                     }
+                   }`,
+                  { issue: issue.node_id },
+                );
+                const open =
+                  (linked.node &&
+                    linked.node.closedByPullRequestsReferences &&
+                    linked.node.closedByPullRequestsReferences.nodes) ||
+                  [];
+                if (open.length > 0) {
+                  const list = open.map((pr) => `- #${pr.number} ${pr.title}`).join("\n");
+                  return say(
+                    `There is already a pull request for this, so it is taken:\n\n${list}\n\n` +
+                      `If it has stalled, offer there to take the work over instead of opening a second one.`,
+                  );
+                }
+              } catch (error) {
+                core.warning(`Could not look for linked pull requests: ${error.message}`);
+              }
+
+              if (!(await requireOption(CLAIMED))) return;
+              await setStatus(await ensureItem(), CLAIMED);
+
+              // Assigning is the second signal next to the card, and it can fail on its own (a user
+              // who may not be assigned); the claim stands either way.
+              try {
+                await github.rest.issues.addAssignees({
+                  ...context.repo,
+                  issue_number: issue.number,
+                  assignees: [actor],
+                });
+              } catch (error) {
+                core.warning(`Could not assign @${actor}: ${error.message}`);
+              }
+
+              return say(
+                `Claimed by @${actor}: **${CLAIMED}** on the [board](${boardUrl}).\n\n` +
+                  `Please keep that true: comment \`/unclaim\` if you stop, and write ` +
+                  `\`Closes #${issue.number}\` in your pull request when it is ready. A plan in a ` +
+                  `comment — what you will change, and roughly when — helps whoever reviews it.`,
+              );
+            } catch (error) {
+              // A token that expired, or a query the schema no longer answers, must not leave the
+              // claimer in silence: the comment is still the claim, so say what happened.
+              core.setFailed(`The claim bot failed: ${error.message}`);
+              await say(
+                `@${actor}, the claim bot could not do its job: ${error.message}. Your ` +
+                  `comment still claims this issue, and a maintainer will move the card.`,
+              );
+            }

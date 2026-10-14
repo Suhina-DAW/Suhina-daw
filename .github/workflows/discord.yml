@@ -1,0 +1,54 @@
+name: Discord
+
+# Posts pull requests and issues to the Discord events channel, and releases published by a
+# person to the releases channel (scripts/discord_post.py says which events and how). The
+# nightly is posted by release.yml; it is created with the workflow token, which starts no other
+# workflow, so it never reaches this one. See docs/releasing.md › Discord.
+#
+# Secrets: DISCORD_WEBHOOK_EVENTS and DISCORD_WEBHOOK_RELEASES, each a channel's webhook URL
+# (Discord: channel settings > Integrations > Webhooks). A channel without its secret gets nothing.
+#
+# pull_request_target, so pull requests from forks are posted too: it runs the workflow and the
+# script from the base branch with the secrets, and never checks out or runs the pull request's
+# code. The event's text reaches the script only as JSON data.
+on:
+  pull_request_target:
+    types: [opened, closed, reopened]
+  issues:
+    types: [opened, closed, reopened]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      # The base branch, for the script; never the pull request's head.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Post to Discord
+        env:
+          EVENTS: ${{ secrets.DISCORD_WEBHOOK_EVENTS }}
+          RELEASES: ${{ secrets.DISCORD_WEBHOOK_RELEASES }}
+        run: |
+          post=$(python3 scripts/discord_post.py "$GITHUB_EVENT_NAME" "$GITHUB_EVENT_PATH")
+          if [ -z "$post" ]; then
+            echo "Not posted: $GITHUB_EVENT_NAME."
+            exit 0
+          fi
+          channel=${post%% *}
+          case "$channel" in
+            events) webhook=$EVENTS ;;
+            releases) webhook=$RELEASES ;;
+            *) echo "::error::unknown channel $channel"; exit 1 ;;
+          esac
+          if [ -z "$webhook" ]; then
+            echo "No webhook secret for the $channel channel; nothing posted."
+            exit 0
+          fi
+          echo "${post#* }"
+          echo "${post#* }" | curl -fsS -H "Content-Type: application/json" -d @- "$webhook"

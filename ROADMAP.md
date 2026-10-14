@@ -1,6 +1,7 @@
 # Roadmap
 
-Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
+Suhina is pre-alpha. Milestones are in order; each one builds on the previous. Linux is the
+primary platform; Windows and macOS are supported.
 
 | | Milestone | Status |
 |---|---|---|
@@ -10,9 +11,33 @@ Suhina is pre-alpha. Milestones are in order; each one builds on the previous.
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 effects load, process, keep state and survive crashes in their own process; installed plug-ins are found in seconds to minutes; `suhina-cli plugin run` puts a file through one; `suhina-cli plugins check` finds the installed plug-in for each in a project, VST3 versions for VST2 ones included, and `suhina-cli plugin run-device` runs one with the settings the project saved, an instrument playing its track's notes, `suhina-cli plugin params` lists a plug-in's parameters, and `suhina-cli plugin edit` opens its editor (Windows, Linux X11); in the engine: imported plug-in effects and instruments play in the app and in renders, with latency compensation, a crashed one leaves the project playing |
-| M7 | **More formats:** DAWproject import and export | |
-| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | started |
+| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
+| M7 | **More formats:** DAWproject import and export | not started |
+| M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | in progress: Session and Arrangement views, browser, sample map, settings, themes and a nightly build work; installers and signed builds to come ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)) |
+
+How far this is from a full clip-launching DAW, and the order the gap is built in: the
+[parity report](docs/research/parity-live-12.md) and
+[ADR 0016](docs/decisions/0016-parity-target.md) (proposed).
+
+## Next (order proposed in ADR 0016)
+
+The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-target.md) proposes
+(its build order has the reasons and sizes):
+
+1. **MIDI note editing:** the piano roll in the detail area and note commands (add, move, resize,
+   velocity, deactivate), quantise ([#200](https://github.com/suhina-daw/suhina-daw/issues/200),
+   [spec](docs/spec/ui-clip-editor.md)).
+2. **Automation:** device, plug-in and mixer parameters first, then tempo
+   ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
+3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
+4. **Sends, returns, cue and level meters:** return tracks are shown but play nothing yet.
+5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
+   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
+6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
+7. **Follow actions, launch modes, legato and per-clip quantisation** (the rest of M4).
+
+Finishing what is in flight (M3's commands, M6's automation and editors, M7, M8's installers and
+detail area) goes alongside this list, not after it.
 
 ## Built-in effects and instruments
 
@@ -25,28 +50,22 @@ its copyright notices kept and credited in [`ATTRIBUTION.md`](ATTRIBUTION.md).
   LFOs, shapers, oversampling; later oscillators, envelopes, delay lines, convolution; no engine
   or model dependency), `device-api` (the device trait, parameter descriptions, state) and one
   crate per device under `devices/`. Every parameter is set through a command
-  (`device.setParam`), from the UI, CLI and MCP alike; automation comes later. Because devices
-  do not depend on the engine, they can later be split into their own repository or built as CLAP
-  plug-ins.
+  (`device.setParam`), from the UI, CLI and MCP alike. Because devices do not depend on the
+  engine, they can later be split into their own repository or built as CLAP plug-ins.
   The interface is [ADR 0004](docs/decisions/0004-built-in-devices.md).
-- **Status:** `dsp`, `device-api`, the utility, the auto-pan, the DJ EQ, the vinyl distortion, the
-  overdrive, the compressor, the limiter and the FM synth (the first instrument: the DX7-style
-  engine ported from MSFA, with DX7 voice files) exist and are tested on their own. The engine
-  runs them in chains on tracks: a track's sound goes through its devices before its fader, and
-  an instrument first in the chain plays the track's notes; `device.*` commands add,
-  remove, switch and set them.
-  A group with devices is a bus (ADR 0004 › 10). Chains on return and master channels, sends
-  into chains, and automation come next.
+- **Status:** the table below. The engine runs them in chains on tracks and on group buses
+  (ADR 0004 › 10), through the `device.*` commands. Chains on return and master channels, and
+  grouping devices inside a chain ([#147](https://github.com/suhina-daw/suhina-daw/issues/147)),
+  are still to do.
 - **Importing devices from Live Sets, in three levels:** a placeholder that keeps the device's
   type, name and on/off state (its parameters are not kept yet);
   then an approximate mapping to an open-source plug-in over CLAP; then a Suhina device for the
   most used ones. Which stored device lands in which Suhina device, and how each mapping is learnt
-  and tested: [`docs/spec/device-import.md`](docs/spec/device-import.md).
-- **Order:** utility (gain, width, mono, phase) and auto-pan first, to prove the device system;
-  then three small devices users have asked for: a three-band DJ EQ with kills, vinyl distortion
-  (tracing, pinch, crackle) and a pedal-style overdrive; then bus compressor, multiband dynamics with upward and downward compression, delays,
-  algorithmic and convolution reverb, multi-stage saturation; then an FM synth (DSP core ported
-  from Dexed/MSFA) and a wavetable synth (from Vital, under its own name).
+  and tested: [`docs/spec/device-import.md`](docs/spec/device-import.md). The sampler and drum
+  sampler as import targets: [#101](https://github.com/suhina-daw/suhina-daw/issues/101).
+- **Order:** EQ and filter first, then bus compressor, delays and reverb; multiband dynamics,
+  saturation, the sampler and drum sampler later
+  ([ADR 0016](docs/decisions/0016-parity-target.md)).
 
 ### The devices
 
@@ -68,7 +87,7 @@ exists in `devices/`, passes its tests and runs in track chains.
 | algorithmic and convolution reverb | Dragonfly Reverb (GPL-3.0), own convolution | planned |
 | multi-stage saturation | own, oversampled | planned |
 | EQ, filter | own (`dsp` filters) | planned |
-| FM synth | MSFA (Apache-2.0) via Dexed | DX7-style engine done; more algorithms, waveforms and a filter planned |
+| FM synth | MSFA (Apache-2.0) via Dexed | DX7-style engine (32 algorithms) done; more waveforms and a filter planned |
 | wavetable synth | Vital (GPL-3.0), under its own name | planned |
 | subtractive synth | own, Surge XT (GPL-3.0) for reference | planned |
 | sampler, drum sampler | own | planned |
@@ -77,55 +96,24 @@ exists in `devices/`, passes its tests and runs in track chains.
 ## Audio to MIDI
 
 Turning audio into something playable from MIDI, offline (not on the audio thread), each as a
-command with undo. Behaviour: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-midi.md).
+command with undo. Behaviour, detectors and tests: [`docs/spec/audio-to-midi.md`](docs/spec/audio-to-midi.md).
 
-- **Slice to a new MIDI track.** Cut an audio clip into slices (at warp markers, transients,
-  bars or a note grid), put each slice on its own pad of a sampler or drum sampler on a new MIDI
-  track, and write a MIDI clip that plays the slices back in their original rhythm, warped
-  timing kept if asked. Needs the sampler and drum sampler devices and an onset detector of our
-  own. Slicing presets are our own.
-- **Convert to a new MIDI track:** four narrow detectors instead of one that tries to write
-  every note of a mix, since each narrow task is far more reliable.
-  - *Drums:* onsets classified into kick, snare and hi-hat by their spectrum, written as notes
-    of a drum sampler; more classes (toms, cymbals) later with a small model.
-  - *Bass:* one note at a time in the low register (about 30–300 Hz); pitch tracking limited to
-    that range, note starts taken from transients.
-  - *Melody:* one note at a time across the whole range; pitch tracking (own, pYIN-style) plus
-    note segmentation.
-  - *Chords:* chord names rather than every note: pitch classes (chroma) matched against chord
-    templates and smoothed over time, then written as a voicing; the bass detector gives the
-    inversion.
-  - Full polyphonic transcription (every note of a piano part) comes later, if at all. Candidate:
-    Spotify's Basic Pitch (Apache-2.0) run in pure Rust through `tract`, licence and model
-    weights checked first.
-- **Using what the project knows:** every detector snaps to the project's tempo and warp grid,
-  and chords and pitches can be held to the project's key, so results need less cleaning up.
-- **Stem separation first:** separating a full mix into drums, bass and the rest before
-  detecting is the largest single gain in quality. Candidate: Demucs (MIT), model weights
-  checked first. Also offered on its own, as separating stems to new audio tracks.
-- **Dropping audio onto a MIDI track** asks which conversion to run (drums, bass, melody,
-  chords), and writes the result where the audio was dropped.
-- **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass, melody and chords, then stem separation. An ADR comes
-  before the detectors.
-- **Tests:** synthetic audio with known notes (rendered by the engine itself), so the result
-  can be compared note by note.
-
-## Before the repository goes public
-
-- Clean-room documentation matches how the design was actually made, and `CONTRIBUTING.md`
-  allows familiar workflow and region structure while forbidding copied visual design.
-- Reference mockups redrawn from the design brief alone.
-- Contributor process: DCO sign-off, a pull request template with a clean-room confirmation, CI
-  running fmt, clippy and tests, and a channel for reporting IP concerns.
-- Public descriptions name other DAWs only to describe workflow or file compatibility.
+- **Goals:** slice an audio clip to a new MIDI track (one slice per pad of a sampler or drum
+  sampler); convert drums, bass, melody and chords to MIDI with four narrow detectors rather than
+  one that writes every note of a mix; snap results to the project's tempo, warp grid and key.
+- **Stem separation** before detecting is the largest single gain in quality, and is also offered
+  on its own, as separating stems to new audio tracks
+  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
+- **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass,
+  melody and chords, then stem separation. An ADR comes before the detectors.
 
 ## Later, not ordered
 
-FL Studio projects (`.flp`), automation, sends and returns in the mix (groups and the master
-already apply volume and mute), MIDI controllers and Push (from Ableton's published Push interface
-docs), devices of an imported project that Suhina cannot run kept as placeholders and copied along
-with the project ([device import](docs/spec/device-import.md)), bridging Windows
-plug-ins.
+FL Studio projects (`.flp`), MIDI controllers and remote mapping (hardware controllers: scope in
+[ADR 0016](docs/decisions/0016-parity-target.md)), nested groups
+([#209](https://github.com/suhina-daw/suhina-daw/issues/209)), devices of an imported project that
+Suhina cannot run kept as placeholders and copied along with the project
+([device import](docs/spec/device-import.md)), bridging Windows plug-ins.
 
 **Patch devices:** devices built by the community as Pure Data patches, with access to
 commands; plugdata is expected to load as an ordinary CLAP or VST3 plug-in now that hosting works,
@@ -134,15 +122,21 @@ but has not been tried yet ([ADR 0008](docs/decisions/0008-patch-devices.md), pr
 **ARA** after VST3 hosting works in the sandbox: Arrangement first, since looping, quantised
 Session clips do not fit ARA's linear timeline; Session view later. ADR before implementation.
 
-Linux is the primary platform; Windows and macOS are supported.
-
 ## What works now
 
 ### M0 Foundation
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
   Windows and macOS when started by hand and in every release build.
+- A nightly build of `main` for Linux, Windows and macOS, with the desktop app, the CLI and the
+  plug-in host, published every night as the `nightly` release
+  ([`docs/releasing.md`](docs/releasing.md#nightly)).
 - Clean-room rules for people and agents ([`CONTRIBUTING.md`](CONTRIBUTING.md)) and the agent
   guide ([`AGENTS.md`](AGENTS.md)): no panics, no `unsafe` outside the two plug-in hosting crates, real-time safety, sandboxed plug-ins.
+- Contributor process: DCO sign-off, a pull request template with a clean-room confirmation and a
+  hand test, CI running fmt, clippy and tests, and a channel for reporting IP concerns.
+- `docs/INDEX.md` and `docs/commands.md` are generated on `main` after every merge; issue forms
+  for bugs, plug-in problems, features, presets and new devices set area and platform labels;
+  release notes come from git, and the nightly and releases are announced on Discord.
 - DAW-neutral project model: tracks and mixer channels apart, a pool of clip contents placed by
   clips, so per-track clips and shared patterns both fit
   ([ADR 0001](docs/decisions/0001-daw-neutral-model.md)).
@@ -151,19 +145,21 @@ Linux is the primary platform; Windows and macOS are supported.
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
-- MIDI, audio, group and return tracks; volume, pan, track on/off, sends, routing into groups
+- MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read and kept; not
+  played yet), routing into groups
 - scenes, session clip slots and arrangement clips
 - MIDI clips with notes (velocity, release velocity, deactivated notes), start and end markers,
   loop, deactivated clips
 - audio clips: file reference, warp on/off, warp markers, warp mode, clip gain, transpose
-- device chains: VST2 and VST3 plug-ins with their id and state kept; Live's Utility as
-  Suhina's utility with its settings; Live's other devices as placeholders
+- device chains: VST2 and VST3 plug-ins with their id and state kept; the format's own devices:
+  those Suhina has a counterpart for with their settings, the rest as placeholders
   ([device import](docs/spec/device-import.md))
 - anything not understood yet is skipped with a warning; the project still opens
 
 ### M2 Playing
-- `suhina-cli play` plays a set, or one launcher scene, on the default audio device; `render`
-  writes a 32-bit float WAV. Both run the same engine code.
+- `suhina-cli play` plays a set, or one launcher scene, on the default output or the one chosen
+  (`--host`, `--device`, `--buffer`, `--exclusive`; WASAPI exclusive, ASIO with the `asio`
+  feature); `render` writes a 32-bit float WAV. Both run the same engine code.
 - Built-in effects and instruments on a track run in a chain before its fader; MIDI notes play
   on the track's instrument when the chain starts with one (the FM synth), otherwise as sine tones. Group and
   master volume and mute apply. A group with devices is a bus: its devices run over the sum of
@@ -189,7 +185,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/suhina-format.md)).
-- Still to do: more commands (notes, clips, sends), MCP resources.
+- Still to do: more commands (notes, [#200](https://github.com/suhina-daw/suhina-daw/issues/200);
+  clips; sends), MCP resources.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -208,14 +205,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
   `suhina-cli play --launcher` takes them as typed lines, `suhina-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
-- Still to do: follow actions, launch modes, per-clip quantisation, reading the global
+- Still to do: follow actions, launch modes, per-clip quantisation, fades on launched clips
+  ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.
 
 ### M5 Audio (done)
 - Audio files (WAV, AIFF, FLAC, MP3, Ogg Vorbis) are decoded in parallel when a set opens.
-- Audio clips play with clip gain, transpose, loops and fades; on warped clips transpose changes
-  the pitch only.
+- Audio clips play with clip gain, transpose, loops and, on the arrangement, fades (launched
+  clips: [#104](https://github.com/suhina-daw/suhina-daw/issues/104)); on warped clips transpose
+  changes the pitch only.
 - Warped clips are **time-stretched in real time** along their warp markers and keep their
   pitch, with our pure-Rust port of Signalsmith Stretch
   ([ADR 0003](docs/decisions/0003-time-stretching.md)). An 80 s set with 58 warped clips opens
@@ -224,13 +223,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Arrangement clips are stretched 0.5 s ahead on a worker thread; the audio thread only copies
   their frames (3 % of one core on the same set, 99 % of blocks within 1.3 ms of their 10.7 ms).
 - Later, not needed for M5: launched clips stretched ahead too; formant shifting for transposed
-  vocals; Rubber Band for the `HighQuality` mode if a listening test shows it is worth it.
+  vocals. Warp modes other than re-pitch share one stretcher today; separate algorithms per mode,
+  and Rubber Band for a high-quality mode if a listening test shows it is worth it.
 
 ### M6 Plug-ins (in progress)
 - CLAP and VST3 plug-ins run in `suhina-plugin-host` processes, never in Suhina's: by
   default one process per plug-in file, or per vendor, or one per instance
   (`plugins.setHosting`); a crash or hang costs that plug-in's sound, not the project
-  ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)).
+  ([ADR 0006](docs/decisions/0006-plug-in-hosting.md)). The host runs on Linux, Windows and
+  macOS (editors on macOS still to come).
 - An opened Live Set's plug-ins play in the app: each is found among the installed ones (a VST3
   version for a VST2 plug-in too) and started with the settings the project saved; instruments
   play their track's notes, effects process their track. Missing ones are named in the status
@@ -249,15 +250,24 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - The plug-ins of different tracks run at the same time (one block out to every host, then
   every answer collected), the engine renders ahead of the audio device in blocks of its own,
   and host audio threads run at real-time priority: a project with 25 plug-ins plays without a
-  late block. The device panel says when a plug-in does fall behind ("N% of blocks late").
-- Still to do: plug-ins of one process in one round trip, plug-in parameters as automation,
-  Wayland and macOS editors, VST2 hosting (not decided).
+  late block. The device panel says when a plug-in does fall behind ("N% of blocks late"; a
+  block a busy host refuses counts once, and a restarted plug-in reads as running at once).
+- Still to do: plug-ins of one process in one round trip
+  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), plug-in parameters as automation
+  ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)), latency a plug-in changes while
+  it runs ([#110](https://github.com/suhina-daw/suhina-daw/issues/110)), waiting for each chain's
+  plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), real-time
+  priority through MMCSS and rtkit ([#150](https://github.com/suhina-daw/suhina-daw/issues/150)),
+  checking an imported Live Set with real plug-ins
+  ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and macOS editors, VST2
+  hosting (not decided).
 
-### M8 UI (started)
+### M8 UI (in progress)
 - `suhina` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
-  stopped on the default output and shows the **Session view**: tracks as columns, return tracks
-  beside the scene column, clip slots with their state (stopped, queued, playing with progress),
-  scene launch, stop buttons, and a mixer strip with pan, volume and track on/off
+  stopped on the output chosen in Settings › Audio and shows the **Session view**: tracks as
+  columns, return tracks beside the scene column, clip slots with their state (stopped, queued,
+  playing with progress), scene launch, stop buttons, and a mixer strip with pan, volume and
+  track on/off
   ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md), [spec](docs/spec/ui-session-view.md)).
 - The **Arrangement view** (Tab switches): bar ruler, one lane per track with its clips and their
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
@@ -298,12 +308,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
   toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
-  samples), as a free cloud or snapped to a grid, with the kinds' names over their regions and a
+  samples), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
+  takes `aspect`), with the kinds' names over their regions and a
   legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
   arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
-  and lists the 16 that sound most alike. Samples are analysed in the background once and kept
+  and lists the 16 that sound most alike, and with it on, Up and Down step through that list.
+  It stays readable with up to 200 000 samples: a density view when points crowd, and labels per
+  cluster that never overlap. Samples are analysed in the background once and kept
   ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
-- A menu bar and a **Settings** page (Options › Settings, Ctrl+,) with its pages listed down the
+- A menu bar and a **Settings** dialog over the window (Options › Settings, Ctrl+,; Escape closes
+  it) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
@@ -311,7 +325,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
   ([spec](docs/spec/window-zoom.md)).
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
-  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`). Nine come with Suhina (Suhina
+  (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`); track colours and the sample map's
+  kind colours are theme tokens too (`track.1`–`track.8`, `kind.*`). Nine come with Suhina (Suhina
   Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
   Dark). Settings › Interface › Theme picks one, changes its colours, renames, duplicates, reads
   the files again, backs every theme up into a zip and exports a template zip with a README an AI
@@ -338,8 +353,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
   lanes in tall clips; the samples with dots when zoomed in past one sample per pixel; a linear
   or dB scale (Settings › Interface › Arrangement).
-- Audio clips show their waveform (peaks computed once when the files are decoded) and their
-  gain, which a drag changes (`clip.setGain`); the waveform follows the gain while it is dragged.
+- Audio clips show their gain, which a drag changes (`clip.setGain`); the waveform follows it
+  while it is dragged.
 - Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades
   on the grid (Alt for free, double-click removes), a right-click on a handle picks the shape
   (linear, equal power, fast, slow, S-curve) and a round handle on the fade bends its curve, the
@@ -354,8 +369,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   mode (off by default), and what plays now with its measured latency and underruns. A change
   reopens the output with the transport where it was and the plug-ins running; the engine
   renders in blocks of the buffer size, so the plug-ins' deadline follows it. A device that is
-  gone at start plays the default output, with a notice. `suhina-cli play` takes the same
-  choice (`--host`, `--device`, `--buffer`, `--exclusive`).
+  gone at start plays the default output, with a notice. Still to do: keeping the play marker
+  and launched clips across a reopen ([#178](https://github.com/suhina-daw/suhina-daw/issues/178)),
+  going back to the chosen device when it returns
+  ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)), the ASIO driver's control panel
+  ([#176](https://github.com/suhina-daw/suhina-daw/issues/176)).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
@@ -364,6 +382,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
-  Changing devices from it follows the device commands (#73).
-- Still to do: fades read from Live Sets, input routing and sends, arm, level meters, device
-  editing and the clip editor in the detail area, installers.
+  Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
+- Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
+  input routing and sends, arm, level meters, device editing
+  ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the clip editor
+  ([#200](https://github.com/suhina-daw/suhina-daw/issues/200)) in the detail area, installers and
+  signed builds ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)).

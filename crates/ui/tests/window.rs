@@ -1547,3 +1547,34 @@ fn settings_open_as_a_dialog_over_the_view_and_escape_closes_them() {
     harness.run();
     assert!(!harness.state().settings_open());
 }
+
+/// The wheel and pinch over an open dialog reach only the dialog: the view behind it keeps its
+/// scroll and zoom (#232).
+#[test]
+fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
+    let mut harness = arrangement_app();
+    let clip = |h: &Harness<'static, App>| h.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    let before = clip(&harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.state().settings_open());
+    // Over the dialog's backdrop, where the clip is, and over the dialog itself.
+    for at in [before.center(), egui::pos2(SIZE.0 / 2.0, SIZE.1 / 2.0)] {
+        harness.hover_at(at);
+        harness.run();
+        for modifiers in [Modifiers::NONE, Modifiers::COMMAND, Modifiers::ALT] {
+            harness.input_mut().events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(-120.0, -120.0),
+                phase: egui::TouchPhase::Move,
+                modifiers,
+            });
+            harness.input_mut().events.push(egui::Event::Zoom(1.5));
+            harness.run();
+        }
+    }
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().settings_open());
+    assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}

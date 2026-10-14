@@ -34,11 +34,12 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md) | decision | current | file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed | How the browser's folders are indexed, kept on disk and kept up to date (start-up check, file-system watching, polling), and the limits that protect it from hostile folders |
 | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md) | decision | current | sample map, soundmap crate, audio features, MFCC, spectral centroid, t-SNE, bhtsne, PCA, UMAP, grid layout, RasterFairy, nearest neighbours, feature cache | How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (a linear scan), caches the results, and which crates it uses |
 | [0014: Stock presets](decisions/0014-stock-presets.md) | decision | current | preset, stock preset, factory preset, preset contribution, CC0, presets folder, preset format, preset licence, DX7 bank | Presets that ship with Suhina for its built-in effects and instruments - where they live, their licence (CC0), what a contribution needs, and the proposed file format |
+| [0016: Parity target: what Suhina compares itself to, and what it leaves out](decisions/0016-parity-target.md) | decision | draft | parity, feature comparison, how far are we from Live, scope of the project, what Suhina does not aim at, milestone for recording, automation, MIDI editing, MIDI effects, devices | What Suhina measures itself against in another DAW, what it deliberately leaves out, and how the parity measurement is kept honest and free of the manual's content |
 | [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Suhina's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
 | [Components](design/components.md) | spec | draft | widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout | Measurements, states and tokens of every UI component, from the minimal v3 mockups |
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices |
-| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker) |
+| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker) |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
 | [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
@@ -51,10 +52,13 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [The .suhina project file](spec/suhina-format.md) | spec | current | .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state | The layout of Suhina's own project file (.suhina; .locr from before still read), field by field, with what a reader accepts |
 | [UI: clip editor (MIDI)](spec/ui-clip-editor.md) | spec | planned | piano roll, clip editor, velocity lane, zoom, detail area height, note editing | Functional spec of the MIDI clip editor: resizable detail area, zoom, regions and editing |
 | [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
+| [Waveforms](spec/waveforms.md) | spec | current | waveform, peaks, RMS, waveform drawing, zoom, samples, stereo lanes, dB scale, clip waveform, preview waveform, sample map tooltip, frame budget | How waveforms are computed and drawn in clips, the browser's preview and the sample map's tooltips: peak levels with RMS, lanes per channel, the shape, samples close up, the dB scale, the frame budget |
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
-| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow | How versions are numbered and release builds for Linux, Windows and macOS are made |
+| [The claim bot](claim-bot.md) | howto | current | claim, /claim, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue | How the claim bot moves an issue's card on the project board, holds work, and is set up |
+| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, test build, pull request build, try a pull request, Discord announcement, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
+| [parity-live-12](research/parity-live-12.md) | plan | draft | Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap. | How much of Ableton Live 12's documented functionality Suhina has today, chapter by chapter, measured against the Live 12 reference manual; contains no content from the manual. |
 
 ## Code and its documents
 
@@ -64,7 +68,11 @@ Change this code, and check these documents.
 |---|---|
 | `.github/ISSUE_TEMPLATE/5-preset.yml` | [0014: Stock presets](decisions/0014-stock-presets.md) |
 | `.github/PULL_REQUEST_TEMPLATE/preset.md` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `.github/workflows/claim.yml` | [The claim bot](claim-bot.md) |
+| `.github/workflows/discord.yml` | [Releasing](releasing.md) |
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
+| `.github/workflows/test-build-links.yml` | [Releasing](releasing.md) |
+| `.github/workflows/test-build.yml` | [Releasing](releasing.md) |
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/suhina-cli/src/main.rs` | [MCP server](mcp.md) |
 | `apps/suhina-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
@@ -88,7 +96,7 @@ Change this code, and check these documents.
 | `crates/engine/src/ahead.rs` | [Architecture](architecture.md), [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/audio.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/engine/src/buses.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
-| `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md), [MCP server](mcp.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/launcher.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
@@ -114,7 +122,7 @@ Change this code, and check these documents.
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugins/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/project-file` | [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md) |
-| `crates/project-file/src/lib.rs` | [The .suhina project file](spec/suhina-format.md) |
+| `crates/project-file/src/lib.rs` | [Arrangement editing](spec/arrangement-editing.md), [The .suhina project file](spec/suhina-format.md) |
 | `crates/session/src/audio.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [MCP server](mcp.md) |
 | `crates/session/src/blank.rs` | [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md) |
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
@@ -148,6 +156,7 @@ Change this code, and check these documents.
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/project_dialog.rs` | [Components](design/components.md) |
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
+| `crates/ui/src/sample_map_crowd.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Window zoom](spec/window-zoom.md) |
@@ -155,12 +164,18 @@ Change this code, and check these documents.
 | `crates/ui/src/theme.rs` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md), [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/ui/src/waveform.rs` | [Components](design/components.md) |
+| `crates/ui/src/waveform.rs` | [Components](design/components.md), [Waveforms](spec/waveforms.md) |
+| `crates/ui/src/waveform/tests.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/tests/waveforms.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/themes/**` | [Design brief](design/brief.md) |
 | `devices/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `devices/*/Cargo.toml` | [Architecture](architecture.md) |
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |
 | `presets/**` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `scripts/claim_bot_test.py` | [The claim bot](claim-bot.md) |
+| `scripts/discord_post.py` | [Releasing](releasing.md) |
+| `scripts/parity/**` | [parity-live-12](research/parity-live-12.md) |
+| `scripts/release_notes.py` | [Releasing](releasing.md) |
 | `scripts/stems-fixture.py` | [Stems files](spec/stems-format.md) |
 | `scripts/test-signal.py` | [Making the `.als` test corpus](spec/als-corpus.md) |

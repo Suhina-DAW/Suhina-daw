@@ -220,7 +220,7 @@ double-click to reset (typing a value is planned).
 
 Options › Settings (Ctrl+,) opens a dialog over the window until it is closed (Close, Escape or
 Ctrl+, again): the view stays behind it, dimmed with `window.background` at 60 % and taking no
-clicks; embedded plug-in editors hide while it shows. The dialog is at most 772 × 720 px (6 px
+clicks, wheel or pinch (they reach only the dialog, as with every dialog over the window); embedded plug-in editors hide while it shows. The dialog is at most 772 × 720 px (6 px
 less than the window on each side when that is smaller), `window.background` with a 1 px
 `border.strong` border. Inside, a centred block at most 724 px wide: the title "Settings" in 13 px
 with a 52 px Close button on the right; under it the list of pages (140 px), 24 px of space, and
