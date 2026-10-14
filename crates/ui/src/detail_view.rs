@@ -20,6 +20,7 @@ use crate::widgets::{self, Action};
 pub const DEVICE_WIDTH: f32 = 220.0;
 pub const STACK_WIDTH: f32 = 260.0;
 const PARAM_ROW: f32 = 16.0;
+const NODE_ROW: f32 = 22.0;
 /// Width of the clip's properties beside the chain, and of a property's label.
 const CLIP_WIDTH: f32 = 196.0;
 const LABEL_WIDTH: f32 = 52.0;
@@ -55,8 +56,24 @@ pub struct DeviceBox {
     pub enabled: bool,
     /// Parameter ids and values as text.
     pub params: Vec<(String, String)>,
+    pub graph: Option<GraphBox>,
     /// For a plug-in: where it stands, while the project plays.
     pub plugin: Option<PluginBox>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBox {
+    pub nodes: Vec<String>,
+    pub parameters: Vec<GraphParameter>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphParameter {
+    pub id: String,
+    pub name: String,
+    pub min: f64,
+    pub max: f64,
+    pub value: f64,
 }
 
 /// Where a plug-in device's plug-in stands, as its panel shows it.
@@ -242,6 +259,7 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     name: d.name.clone(),
                     kind: match &d.kind {
                         DeviceKind::Builtin(_) => "Suhina".into(),
+                        DeviceKind::Sd => "AudioEffect".into(),
                         DeviceKind::Clap { .. } => "CLAP".into(),
                         DeviceKind::Vst3 { .. } => "VST3".into(),
                         DeviceKind::Vst2 { .. } => "VST2".into(),
@@ -249,6 +267,41 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     },
                     enabled: d.enabled,
                     params: d.params.iter().map(|p| (p.id.clone(), format_value(p.value))).collect(),
+                    graph: match (&d.kind, d.state.as_deref()) {
+                        (DeviceKind::Sd, Some(state)) => std::str::from_utf8(state)
+                            .ok()
+                            .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+                            .map(|graph| GraphBox {
+                                nodes: graph
+                                    .ordered_nodes()
+                                    .iter()
+                                    .filter(|node| node.visible)
+                                    .map(|node| match &node.kind {
+                                        suhina_device_sdk::NodeKind::AudioInput => "Audio Input".into(),
+                                        suhina_device_sdk::NodeKind::Gain { .. } => "Gain".into(),
+                                        suhina_device_sdk::NodeKind::AudioOutput => "Audio Output".into(),
+                                    })
+                                    .collect(),
+                                parameters: graph
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| GraphParameter {
+                                        id: parameter.id.clone(),
+                                        name: parameter.name.clone(),
+                                        min: parameter.min,
+                                        max: parameter.max,
+                                        value: d
+                                            .params
+                                            .iter()
+                                            .find(|value| value.id == parameter.id)
+                                            .map_or(parameter.default, |value| {
+                                                value.value.clamp(parameter.min, parameter.max)
+                                            }),
+                                    })
+                                    .collect(),
+                            }),
+                        _ => None,
+                    },
                     plugin: matches!(
                         d.kind,
                         DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. }
@@ -291,7 +344,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places:
 
 /// A chain's devices side by side in `area`; one with an embedded editor is as wide as it.
 fn chain_row(
-    ui: &Ui,
+    ui: &mut Ui,
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
@@ -313,7 +366,7 @@ fn chain_row(
             break;
         }
         name_for_readers(ui, rect.intersect(area), device);
-        device_panel(&painter.with_clip_rect(area), rect, device);
+        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
@@ -343,7 +396,7 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
 /// A chain's devices one under another in `area`; one with an embedded editor is as tall as
 /// it needs (the editor is cut off at the column's right edge when it is wider).
 fn chain_stack(
-    ui: &Ui,
+    ui: &mut Ui,
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
@@ -362,7 +415,11 @@ fn chain_stack(
             if device.plugin.is_some() { 2.0 + BUTTON_HEIGHT / PARAM_ROW } else { device.params.len().max(1) as f32 };
         let height = match editor {
             Some(editor) => EDITOR_TOP + editor.y + PAD,
-            None => ROW + PAD * 2.0 + rows * PARAM_ROW,
+            None => {
+                ROW + PAD * 2.0
+                    + rows * PARAM_ROW
+                    + device.graph.as_ref().map_or(0.0, |graph| graph.nodes.len() as f32 * NODE_ROW)
+            }
         };
         let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
         y = rect.bottom() + 1.0;
@@ -370,7 +427,7 @@ fn chain_stack(
             break;
         }
         name_for_readers(ui, rect.intersect(area), device);
-        device_panel(&painter.with_clip_rect(area), rect, device);
+        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
@@ -453,7 +510,14 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
 }
 
 /// One device: a header with its on switch and name, then its parameters, one per row.
-fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
+fn device_panel(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    track: TrackId,
+    device: &DeviceBox,
+    actions: &mut Vec<Action>,
+) {
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
     painter.rect_filled(header, 0.0, theme::control_background());
@@ -467,14 +531,18 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         painter.rect_stroke(switch, 0.0, theme::hairline(theme::text_hint()), egui::StrokeKind::Inside);
     }
     let name_color = if device.enabled { theme::text_primary() } else { theme::text_hint() };
+    let kind_width = widgets::text_width(ui, &device.kind, theme::ui_font(theme::TEXT_TINY));
     let name = Rect::from_min_max(
         Pos2::new(switch.right() + PAD, header.top()),
-        Pos2::new(header.right() - PAD, header.bottom()),
+        Pos2::new((header.right() - PAD * 2.0 - kind_width).max(switch.right() + PAD), header.bottom()),
     );
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &device.name, theme::ui_font(theme::TEXT), name_color);
     widgets::text_in(
         painter,
-        name,
+        Rect::from_min_max(
+            Pos2::new(header.right() - PAD - kind_width, header.top()),
+            Pos2::new(header.right() - PAD, header.bottom()),
+        ),
         Align2::RIGHT_CENTER,
         &device.kind,
         theme::ui_font(theme::TEXT_TINY),
@@ -501,7 +569,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         );
         return;
     }
-    if device.params.is_empty() {
+    if device.params.is_empty() && device.graph.is_none() {
         let text = if device.kind.starts_with("Not supported") {
             "Kept so the chain keeps its shape"
         } else {
@@ -515,6 +583,88 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             theme::ui_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
+        return;
+    }
+    let mut row_top = body.top();
+    if let Some(graph) = &device.graph {
+        for (index, node) in graph.nodes.iter().enumerate() {
+            let row = Rect::from_min_size(Pos2::new(body.left(), row_top), Vec2::new(body.width(), NODE_ROW));
+            if row.bottom() > body.bottom() + 0.5 {
+                break;
+            }
+            let node_rect = Rect::from_min_size(row.min, Vec2::new((row.width() - PAD) * 0.78, NODE_ROW - PAD));
+            painter.rect_filled(node_rect, 1.0, theme::control_background());
+            widgets::text_in(
+                painter,
+                node_rect.shrink(PAD / 2.0),
+                Align2::CENTER_CENTER,
+                node,
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_secondary(),
+            );
+            if index + 1 < graph.nodes.len() {
+                widgets::text_in(
+                    painter,
+                    Rect::from_min_size(Pos2::new(node_rect.right(), row.top()), Vec2::new(PAD, NODE_ROW)),
+                    Align2::CENTER_CENTER,
+                    "›",
+                    theme::ui_font(theme::TEXT),
+                    theme::text_hint(),
+                );
+            }
+            row_top += NODE_ROW;
+        }
+        for parameter in &graph.parameters {
+            let row = Rect::from_min_size(Pos2::new(body.left(), row_top), Vec2::new(body.width(), PARAM_ROW));
+            if row.bottom() > body.bottom() + 0.5 {
+                break;
+            }
+            let name_rect = Rect::from_min_size(row.min, Vec2::new(row.width() * 0.34, row.height()));
+            widgets::text_in(
+                painter,
+                name_rect,
+                Align2::LEFT_CENTER,
+                &parameter.name,
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_secondary(),
+            );
+            let value_width = 34.0;
+            let slider_rect = Rect::from_min_max(
+                Pos2::new(name_rect.right(), row.top()),
+                Pos2::new(row.right() - value_width - PAD / 2.0, row.bottom()),
+            );
+            let mut value = parameter.value;
+            let response = (parameter.min < parameter.max).then(|| {
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(slider_rect)
+                        .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                    |ui| {
+                        ui.spacing_mut().slider_width = slider_rect.width();
+                        ui.add(egui::Slider::new(&mut value, parameter.min..=parameter.max).show_value(false))
+                    },
+                )
+                .inner
+            });
+            widgets::text_in(
+                painter,
+                Rect::from_min_max(Pos2::new(slider_rect.right() + PAD / 2.0, row.top()), row.max),
+                Align2::RIGHT_CENTER,
+                &format_value(value),
+                theme::mono_font(theme::TEXT_TINY),
+                theme::text_value(),
+            );
+            if response.as_ref().is_some_and(|response| response.changed() || response.drag_stopped()) {
+                let continuous = response.as_ref().is_some_and(|response| {
+                    (response.drag_started() || response.dragged()) && !response.drag_stopped()
+                });
+                actions.push(Action::new(
+                    "device.setParam",
+                    json!({ "track": track.0, "device": device.index, "param": parameter.id, "value": value, "continuous": continuous }),
+                ));
+            }
+            row_top += PARAM_ROW;
+        }
         return;
     }
     for (index, (id, value)) in device.params.iter().enumerate() {
@@ -640,6 +790,41 @@ mod tests {
         let Detail::Clip(_, with_clip) = build(&project, None, Some((TrackId(1), 0))) else { panic!() };
         assert_eq!(with_clip, chain);
         assert_eq!(build(&project, None, None), Detail::Nothing);
+    }
+
+    #[test]
+    fn an_audio_effect_shows_its_label_and_only_visible_nodes() {
+        let mut graph = suhina_device_sdk::DeviceGraph::new(
+            "org.example.gain",
+            "Example Gain",
+            suhina_device_sdk::DeviceRole::Effect,
+        );
+        graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 1.0));
+        graph.nodes = vec![
+            suhina_device_sdk::Node::audio_input("in"),
+            suhina_device_sdk::Node::gain("gain", "gain"),
+            suhina_device_sdk::Node::audio_output("out"),
+        ];
+        graph.nodes[0].visible = false;
+        graph.nodes[2].visible = false;
+        graph.connections =
+            vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+        let mut project = demo_project();
+        project.channels[0].devices.push(Device {
+            name: "Example Gain".into(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: graph.to_sd().ok().map(String::into_bytes),
+            params: Vec::new(),
+            extensions: Extensions::default(),
+        });
+        let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
+        assert_eq!(chain.devices[0].kind, "AudioEffect");
+        assert_eq!(
+            chain.devices[0].graph.as_ref().map(|graph| graph.nodes.as_slice()),
+            Some(["Gain".into()].as_slice())
+        );
+        assert_eq!(chain.devices[0].graph.as_ref().map(|graph| graph.parameters.len()), Some(1));
     }
 
     fn report(status: PluginStatus, editor_open: bool) -> PluginReport {

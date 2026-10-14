@@ -63,7 +63,7 @@ fn icon_color(kind: ItemKind) -> Color32 {
         ItemKind::Midi => theme::track_color_2(),
         ItemKind::Sample => theme::track_color_3(),
         ItemKind::Instrument | ItemKind::Preset => theme::track_color_4(),
-        ItemKind::Effect => theme::track_color_1(),
+        ItemKind::Effect | ItemKind::AudioEffect => theme::track_color_1(),
         ItemKind::Folder | ItemKind::Heading | ItemKind::Project => theme::text_secondary(),
     }
 }
@@ -90,7 +90,7 @@ fn icon(painter: &egui::Painter, rect: Rect, kind: ItemKind, color: Color32) {
             painter.line_segment([c + Vec2::new(0.5, 2.5), c + Vec2::new(0.5, -4.5)], stroke);
             painter.line_segment([c + Vec2::new(0.5, -4.5), c + Vec2::new(3.5, -3.0)], stroke);
         }
-        ItemKind::Instrument | ItemKind::Effect => {
+        ItemKind::Instrument | ItemKind::Effect | ItemKind::AudioEffect => {
             let body = Rect::from_center_size(c, Vec2::splat(9.0));
             painter.rect_stroke(body, 0.0, stroke, egui::StrokeKind::Inside);
             painter.circle_stroke(c, 2.0, stroke);
@@ -583,6 +583,7 @@ fn results_view(
             }
             ItemKind::Instrument if row.item.plugin => Some("plug-in".into()),
             ItemKind::Effect if row.item.plugin => Some("plug-in".into()),
+            ItemKind::AudioEffect => Some("AudioEffect".into()),
             _ => None,
         }
         .or_else(|| row.context.clone())

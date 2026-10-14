@@ -20,6 +20,7 @@ pub enum ItemKind {
     Project,
     Instrument,
     Effect,
+    AudioEffect,
     /// A heading in the tree (Instruments, Plug-ins, a vendor).
     Heading,
 }
@@ -32,7 +33,7 @@ impl ItemKind {
 
     /// Whether it becomes a device on a track.
     pub fn is_device(self) -> bool {
-        matches!(self, Self::Instrument | Self::Effect | Self::Preset)
+        matches!(self, Self::Instrument | Self::Effect | Self::AudioEffect | Self::Preset)
     }
 }
 
@@ -184,8 +185,13 @@ pub fn plan(
                 "device.add"
             }
             (Item::File(path), _) => {
-                params["preset"] = json!(path.display().to_string());
-                "device.add"
+                if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sd")) {
+                    params["path"] = json!(path.display().to_string());
+                    "device.addSd"
+                } else {
+                    params["preset"] = json!(path.display().to_string());
+                    "device.add"
+                }
             }
             (Item::Device(id), _) => {
                 params["id"] = json!(id);
@@ -205,7 +211,9 @@ pub fn plan(
             DropTarget::NewTracks { .. } => {
                 // A new track with the device: `track.add` takes the same names.
                 let mut add = json!({});
-                if let Some(preset) = params.get("preset") {
+                if let Some(path) = params.get("path") {
+                    add["sd"] = path.clone();
+                } else if let Some(preset) = params.get("preset") {
                     add["preset"] = preset.clone();
                     if let Some(voice) = params.get("voice") {
                         add["voice"] = voice.clone();
@@ -214,7 +222,8 @@ pub fn plan(
                     add["device"] = id.clone();
                 }
                 commands.push(("track.add", add));
-                let kind = if device.kind == ItemKind::Effect { "audio" } else { "MIDI" };
+                let kind =
+                    if matches!(device.kind, ItemKind::Effect | ItemKind::AudioEffect) { "audio" } else { "MIDI" };
                 label.push(format!("New {kind} track with {}", device.name));
             }
         }
@@ -290,6 +299,9 @@ mod tests {
         let ids: Vec<&str> = on_track.commands.iter().map(|(id, _)| *id).collect();
         assert_eq!(ids, ["device.add", "device.addPlugin", "device.add"]);
         assert_eq!(on_track.commands[2].1["voice"], 5);
+        let sd = item("C:/effects/gain.sd", ItemKind::AudioEffect);
+        let sd_plan = plan(&[sd], DropTarget::Track(TrackId(2)), false, "rhythmic", false, &name).unwrap();
+        assert_eq!(sd_plan.commands, vec![("device.addSd", json!({ "path": "C:/effects/gain.sd", "track": 2 }))]);
         let new =
             plan(&[synth], DropTarget::NewTracks { beat: Some(0.0), scene: None }, false, "rhythmic", false, &name)
                 .unwrap();

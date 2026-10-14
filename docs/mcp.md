@@ -89,7 +89,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
-- **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
+- **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?, sd?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new
   tracks (a Stems file as a group of its master, muted, and its stems, with its mastering on the
@@ -127,10 +127,12 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
-  `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
+  `device.add`, `device.addSd {track, path, position?}`, `device.remove`, `device.setEnabled` and `device.setParam` (through
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
-  follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file. Renders and
+  follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file.
+  `device.addSd` validates and embeds a linear effect graph in the project; its supported nodes
+  render in both real-time playback and offline rendering. Renders and
   the playing engine run the chains.
 
 - **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)

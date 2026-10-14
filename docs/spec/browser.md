@@ -1,9 +1,9 @@
 ---
 description: How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags
-read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
+read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, .sd, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -34,7 +34,7 @@ project.
 
 ## Terms
 
-- **Item:** anything the browser lists. A *file* (sample, MIDI file, preset, project), a *built-in
+- **Item:** anything the browser lists. A *file* (sample, MIDI file, preset, project, .sd AudioEffect), a *built-in
   device* (an instrument or an effect) or an installed *plug-in*. An item is named by a key: a
   file by its absolute path, a voice in a preset bank by `<path>#<n>` (1–32), a built-in effect or instrument
   by `device:<id>`, a plug-in by `plugin:<spec>` (the spec `plugins.list` gives).
@@ -53,6 +53,7 @@ project.
 | MIDI file | `.mid` `.midi` | MIDI |
 | Preset | `.syx` (DX7 voice data: one voice, or a bank of 32; [spec](dx7-voice-format.md)) | Presets |
 | Project | `.suhina`, `.locr` (saved before October 2026), `.als` | All only |
+| Device effect | `.sd` (data-only Suhina graph) | All, Effects |
 
 Other files are not listed. Extensions are matched without regard to case.
 
@@ -105,7 +106,7 @@ recent group's items (a flat list).
 
 **The category filter** narrows what the tree shows: Samples, MIDI and Presets show files of
 that kind and the folders that hold any (by the index; a folder not indexed yet is shown);
-Instruments and Effects show only those built-in effects and instruments, and plug-ins with that role
+Instruments and Effects show only those built-in effects and instruments, `.sd` AudioEffects, and plug-ins with that role
 (a plug-in with the *instrument* feature counts as an instrument); Plug-ins shows only
 plug-ins. All shows everything.
 

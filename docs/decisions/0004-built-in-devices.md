@@ -127,6 +127,11 @@ decision 9.
    other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
    tracks routed through it, with no buffer of its own.
 
+11. **Data-only community effects** use the separate `suhina-device-sdk` and `.sd` format
+    ([ADR 0018](0018-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
+    only supported node data; the engine prepares them off-thread and runs them in the same
+    real-time-safe chain. Their parameter declarations generate UI controls.
+
 ## Not decided yet
 
 - **Automation lanes** for device parameters (LOOP-39).

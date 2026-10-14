@@ -80,12 +80,22 @@ pub(crate) fn track_devices(session: &mut Session, params: &Value) -> Result<Val
 fn device_json(index: usize, device: &Device) -> Value {
     let (kind, id) = match &device.kind {
         DeviceKind::Builtin(id) => ("builtin", Some(id.clone())),
+        DeviceKind::Sd => ("sd", None),
         DeviceKind::Clap { id } => ("clap", Some(id.clone())),
         DeviceKind::Vst3 { id } => ("vst3", Some(id.clone())),
         DeviceKind::Vst2 { id } => ("vst2", Some(id.to_string())),
         _ => ("other", None),
     };
     let info = id.as_deref().filter(|_| kind == "builtin").and_then(suhina_device_registry::info);
+    let graph = (kind == "sd")
+        .then(|| {
+            device
+                .state
+                .as_deref()
+                .and_then(|state| std::str::from_utf8(state).ok())
+                .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+        })
+        .flatten();
     let params = info.map(|info| {
         info.params
             .iter()
@@ -94,7 +104,10 @@ fn device_json(index: usize, device: &Device) -> Value {
                 json!({ "id": p.id, "value": value })
             })
             .collect::<Vec<_>>()
-    });
+    }).or_else(|| graph.as_ref().map(|graph| graph.parameters.iter().map(|p| {
+        let value = device.params.iter().find(|stored| stored.id == p.id).map_or(p.default, |stored| stored.value.clamp(p.min, p.max));
+        json!({ "id": p.id, "name": p.name, "value": value, "min": p.min, "max": p.max, "control": "slider" })
+    }).collect::<Vec<_>>()));
     json!({
         "index": index,
         "name": device.name,
@@ -103,6 +116,14 @@ fn device_json(index: usize, device: &Device) -> Value {
         "enabled": device.enabled,
         "known": kind != "builtin" || info.is_some(),
         "params": params,
+        "nodes": graph.as_ref().map(|graph| graph.ordered_nodes().iter().filter(|node| node.visible).map(|node| {
+            let kind = match node.kind {
+                suhina_device_sdk::NodeKind::AudioInput => "Audio Input",
+                suhina_device_sdk::NodeKind::Gain { .. } => "Gain",
+                suhina_device_sdk::NodeKind::AudioOutput => "Audio Output",
+            };
+            json!({ "id": node.id, "kind": kind })
+        }).collect::<Vec<_>>()),
     })
 }
 
@@ -201,6 +222,39 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
     Ok(json!({ "device": position, "id": info.id, "name": info.name, "preset": preset.map(|p| p.name) }))
 }
 
+pub(crate) fn add_sd(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("path must be a .sd file path")?;
+    let graph = suhina_device_sdk::DeviceGraph::read_file(std::path::Path::new(path)).map_err(|e| e.to_string())?;
+    if graph.role != suhina_device_sdk::DeviceRole::Effect {
+        return Err("only effect .sd files can be added to tracks yet".into());
+    }
+    let channel = channel_param(session, params)?;
+    if channel.devices.len() >= MAX_DEVICES {
+        return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
+    }
+    let position = match params.get("position") {
+        None => channel.devices.len(),
+        Some(value) => value
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= channel.devices.len())
+            .ok_or_else(|| format!("position must be from 0 to {}", channel.devices.len()))?,
+    };
+    let values: Vec<DeviceParam> =
+        graph.parameters.iter().map(|parameter| DeviceParam::new(parameter.id.clone(), parameter.default)).collect();
+    let state = graph.to_sd().map_err(|e| e.to_string())?.into_bytes();
+    let device = Device {
+        name: graph.name.clone(),
+        kind: DeviceKind::Sd,
+        enabled: true,
+        state: Some(state),
+        params: values,
+        extensions: Extensions::default(),
+    };
+    channel.devices.insert(position, device);
+    Ok(json!({ "device": position, "id": graph.id, "name": graph.name, "kind": "sd" }))
+}
+
 /// Reads voice `voice` of the preset file at `path`.
 fn read_preset(path: &std::path::Path, voice: usize) -> Result<suhina_device_registry::Preset, CommandError> {
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
@@ -234,16 +288,34 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     let channel = channel_param(session, params)?;
     let index = device_index(channel.devices.len(), params)?;
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
-    let DeviceKind::Builtin(id) = &device.kind else {
-        return Err("only built-in effects and instruments have parameters here; plug-in parameters come later".into());
+    let (param_index, value) = match &device.kind {
+        DeviceKind::Builtin(id) => {
+            let info =
+                suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
+            let index = info
+                .param_index(param)
+                .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
+            let spec = info.params.get(index).ok_or("the parameter is missing")?;
+            (index, spec.clamp(value))
+        }
+        DeviceKind::Sd => {
+            let bytes = device.state.as_deref().ok_or("the .sd graph is missing")?;
+            let text = std::str::from_utf8(bytes).map_err(|_| "the .sd graph is invalid UTF-8")?;
+            let graph = suhina_device_sdk::DeviceGraph::from_sd(text).map_err(|e| e.to_string())?;
+            let (index, parameter) = graph
+                .parameters
+                .iter()
+                .enumerate()
+                .find(|(_, p)| p.id == param)
+                .ok_or_else(|| format!("{} has no parameter {param:?}", graph.name))?;
+            (index, value.clamp(parameter.min, parameter.max))
+        }
+        _ => {
+            return Err(
+                "only Suhina effects and instruments have parameters here; plug-in parameters come later".into()
+            );
+        }
     };
-    let info = suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
-    let param_index = info
-        .param_index(param)
-        .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
-    let spec = info.params.get(param_index).ok_or("the parameter is missing")?;
-    // Stored as the device will use it: limited to its range, whole for toggles and choices.
-    let value = spec.clamp(value);
     match device.params.iter_mut().find(|p| p.id == param) {
         Some(stored) => stored.value = value,
         None => device.params.push(DeviceParam::new(param, value)),

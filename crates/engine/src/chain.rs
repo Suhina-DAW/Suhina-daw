@@ -36,6 +36,7 @@ pub(crate) const CHAIN_INPUT_GAIN: f32 = 0.25;
 /// One device of a chain: built in, or a plug-in in a host process.
 pub(crate) enum Slot {
     Device(Box<dyn Device>),
+    Sd(suhina_device_sdk::PreparedEffect),
     Plugin(PluginSlot),
 }
 
@@ -111,6 +112,37 @@ impl Chain {
         for (position, stored) in channel.devices.iter().enumerate() {
             let id = match &stored.kind {
                 DeviceKind::Builtin(id) if stored.enabled => id,
+                DeviceKind::Sd => {
+                    let Some(bytes) = stored.state.as_deref() else { continue };
+                    let Ok(text) = std::str::from_utf8(bytes) else { continue };
+                    let Ok(graph) = suhina_device_sdk::DeviceGraph::from_sd(text) else { continue };
+                    if !stored.enabled || graph.role != suhina_device_sdk::DeviceRole::Effect {
+                        continue;
+                    }
+                    let Ok(mut effect) = graph.compile() else { continue };
+                    let values: Vec<f64> = graph
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            stored
+                                .params
+                                .iter()
+                                .find(|value| value.id == parameter.id)
+                                .map_or(parameter.default, |value| value.value.clamp(parameter.min, parameter.max))
+                        })
+                        .collect();
+                    for (index, value) in values.iter().copied().enumerate() {
+                        effect.set_parameter(index, value);
+                    }
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    use std::hash::{Hash, Hasher};
+                    bytes.hash(&mut hasher);
+                    slots.push(Slot::Sd(effect));
+                    positions.push(position);
+                    ids.push(format!("sd:{}:{:016x}", graph.id, hasher.finish()));
+                    params.push(values);
+                    continue;
+                }
                 DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. } => {
                     let Some(key) =
                         keys.iter().find(|d| d.channel == channel.id && d.position == position).map(|d| d.key)
@@ -160,6 +192,7 @@ impl Chain {
         let instrument = match slots.first() {
             Some(Slot::Device(device)) => device.info().role == Role::Instrument,
             Some(Slot::Plugin(slot)) => slot.instrument,
+            Some(Slot::Sd(_)) => false,
             None => false,
         };
         (!slots.is_empty()).then(|| Self {
@@ -267,6 +300,11 @@ impl Chain {
                         device.event(event);
                     }
                     process(device, buffer, at_done, to, context);
+                }
+                Slot::Sd(effect) => {
+                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
+                        effect.process(span);
+                    }
                 }
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
@@ -410,6 +448,11 @@ impl Chain {
                     }
                     process(device, buffer, at_done, to, context);
                 }
+                Slot::Sd(effect) => {
+                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
+                        effect.process(span);
+                    }
+                }
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
@@ -447,6 +490,11 @@ impl Chain {
             if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
                 *slot = device.param(param).unwrap_or(value);
             }
+        } else if let Some(Slot::Sd(effect)) = self.slots.get_mut(index) {
+            effect.set_parameter(param, value);
+            if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
+                *slot = value;
+            }
         }
     }
 
@@ -465,6 +513,11 @@ impl Chain {
                         device.set_param(index, value);
                     }
                 }
+                (Slot::Sd(effect), _) => {
+                    for (index, &value) in values.iter().enumerate() {
+                        effect.set_parameter(index, value);
+                    }
+                }
                 (Slot::Plugin(running), Slot::Plugin(fresh)) => {
                     running.enabled = fresh.enabled;
                     running.instrument = fresh.instrument;
@@ -474,7 +527,7 @@ impl Chain {
                         std::mem::swap(&mut running.processor, &mut fresh.processor);
                     }
                 }
-                (Slot::Plugin(_), Slot::Device(_)) => {}
+                (Slot::Plugin(_), _) => {}
             }
         }
         self.held = old.held;
@@ -488,6 +541,7 @@ impl Chain {
         self.slots.iter_mut().filter_map(|slot| match slot {
             Slot::Plugin(plugin) => Some(plugin),
             Slot::Device(_) => None,
+            Slot::Sd(_) => None,
         })
     }
 

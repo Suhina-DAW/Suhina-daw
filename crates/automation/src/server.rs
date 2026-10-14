@@ -501,7 +501,12 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&P
                 params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));
             }
         }
-        "device.add" | "track.add" => confine_file(workspace, &mut params, "preset")?,
+        "device.add" => confine_file(workspace, &mut params, "preset")?,
+        "track.add" => {
+            confine_file(workspace, &mut params, "preset")?;
+            confine_file(workspace, &mut params, "sd")?;
+        }
+        "device.addSd" => confine_file(workspace, &mut params, "path")?,
         "library.list" => {
             let folder = params.get("folder").and_then(Value::as_str).ok_or("folder must be a text")?;
             params["folder"] = json!(display_path(&workspace.readable_folder(folder)?));

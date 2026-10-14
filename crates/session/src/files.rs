@@ -184,10 +184,12 @@ fn flag(params: &Value, name: &str) -> Result<bool, CommandError> {
 pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let device = text(params, "device")?;
     let preset = text(params, "preset")?;
+    let sd = text(params, "sd")?;
     // What the device is decides the kind when none is given.
-    let device_role = match (device, preset) {
-        (_, Some(_)) => Some(Role::Instrument),
-        (Some(id), None) => {
+    let device_role = match (device, preset, sd) {
+        (_, Some(_), _) => Some(Role::Instrument),
+        (_, _, Some(_)) => Some(Role::Effect),
+        (Some(id), None, None) => {
             match suhina_device_registry::info(id) {
                 Some(info) => Some(info.role),
                 None => {
@@ -203,7 +205,7 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
                 }
             }
         }
-        (None, None) => None,
+        (None, None, None) => None,
     };
     let kind = match text(params, "kind")? {
         Some(k) => TrackKind::parse(k).ok_or("kind must be audio or midi")?,
@@ -222,19 +224,19 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
     };
     let name = match text(params, "name")? {
         Some(n) => n.to_string(),
-        None => match (device, preset) {
-            (_, Some(path)) => file_stem(Path::new(path)),
-            (Some(id), None) => suhina_device_registry::info(id).map_or_else(
+        None => match (device, preset, sd) {
+            (_, Some(path), _) | (_, _, Some(path)) => file_stem(Path::new(path)),
+            (Some(id), None, None) => suhina_device_registry::info(id).map_or_else(
                 || session.plugins.env().and_then(|e| e.catalog.find(id).map(|p| p.name.clone())).unwrap_or_default(),
                 |i| i.name.to_string(),
             ),
-            (None, None) => numbered_name(&session.project, kind),
+            (None, None, None) => numbered_name(&session.project, kind),
         },
     };
     let name = if name.trim().is_empty() { numbered_name(&session.project, kind) } else { name };
     let track = insert_track(&mut session.project, kind, &name, after)?;
     let mut added = Value::Null;
-    if device.is_some() || preset.is_some() {
+    if device.is_some() || preset.is_some() || sd.is_some() {
         let mut device_params = json!({ "track": track.0 });
         if let Some(path) = preset {
             device_params["preset"] = json!(path);
@@ -242,12 +244,16 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
                 device_params["voice"] = voice.clone();
             }
         }
-        added = match device {
-            Some(id) if suhina_device_registry::info(id).is_some() => {
+        if let Some(path) = sd {
+            device_params["path"] = json!(path);
+        }
+        added = match (device, sd) {
+            (_, Some(_)) => crate::devices::add_sd(session, &device_params)?,
+            (Some(id), None) if suhina_device_registry::info(id).is_some() => {
                 device_params["id"] = json!(id);
                 crate::devices::add(session, &device_params)?
             }
-            Some(id) if preset.is_none() => {
+            (Some(id), None) if preset.is_none() => {
                 device_params["plugin"] = json!(id);
                 crate::devices::add_plugin(session, &device_params)?
             }
@@ -627,6 +633,7 @@ fn read_sources(
         Some(FileKind::Stems) => Err("a Stems file becomes a group of tracks".into()),
         Some(FileKind::Preset) => Err("a preset goes on a track as a device".into()),
         Some(FileKind::Project) => Err("a project is opened, not placed".into()),
+        Some(FileKind::Effect) => Err("an .sd AudioEffect goes on a track as a device".into()),
         None => Err("not a sample or a MIDI file".into()),
     }
 }

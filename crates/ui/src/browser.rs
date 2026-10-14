@@ -274,6 +274,7 @@ fn item_kind(found: &Found) -> ItemKind {
         "project" => ItemKind::Project,
         "instrument" => ItemKind::Instrument,
         "effect" => ItemKind::Effect,
+        "audio_effect" => ItemKind::AudioEffect,
         _ => ItemKind::Heading,
     }
 }
@@ -284,6 +285,7 @@ fn file_kind_item(kind: FileKind) -> ItemKind {
         FileKind::Midi => ItemKind::Midi,
         FileKind::Preset => ItemKind::Preset,
         FileKind::Project => ItemKind::Project,
+        FileKind::Effect => ItemKind::AudioEffect,
     }
 }
 

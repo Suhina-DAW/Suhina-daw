@@ -187,6 +187,8 @@ pub struct Session {
     clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
+    /// Parameter whose live drag has already recorded its single undo snapshot.
+    param_gesture: Option<(suhina_model::TrackId, usize, usize)>,
     /// The project's plug-ins, running while it plays (ADR 0006).
     pub(crate) plugins: rack::Rack,
     /// The project's decoded audio, by the key its regions name (ADR 0011).
@@ -213,6 +215,7 @@ impl Session {
             player: None,
             clipboard: None,
             param_edit: None,
+            param_gesture: None,
             plugins: rack::Rack::default(),
             audio: suhina_engine::AudioPool::new(),
             audio_changed: false,
@@ -547,6 +550,11 @@ impl Session {
     /// does not validate, the project is restored and an error is returned.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value, CommandError> {
         let spec = commands().iter().find(|c| c.id == id).ok_or_else(|| unknown_command(id))?;
+        let continuous_param_edit =
+            id == "device.setParam" && params.get("continuous").and_then(Value::as_bool) == Some(true);
+        if (spec.kind == CommandKind::Edit && !continuous_param_edit) || spec.kind == CommandKind::History {
+            self.param_gesture = None;
+        }
         if !(params.is_object() || params.is_null()) {
             return Err(format!("{id}: parameters must be a JSON object").into());
         }
@@ -579,10 +587,16 @@ impl Session {
                 match result {
                     Ok(value) => {
                         if self.project != before {
-                            self.push_undo(before);
+                            self.changes = self.changes.wrapping_add(1);
+                            let change = self.param_edit.take();
+                            let gesture = change.map(|change| (change.track, change.device, change.param));
+                            if !continuous_param_edit || self.param_gesture != gesture {
+                                self.push_undo(before);
+                            }
+                            self.param_gesture = continuous_param_edit.then_some(gesture).flatten();
                             // A parameter change goes to the engine as a message; anything else,
                             // or a message that cannot be sent, as a new graph.
-                            let sent = match (self.param_edit.take(), self.player.as_mut()) {
+                            let sent = match (change, self.player.as_mut()) {
                                 (Some(change), Some(player)) => player.set_device_param(change).is_ok(),
                                 _ => false,
                             };
@@ -615,7 +629,6 @@ impl Session {
     }
 
     fn push_undo(&mut self, before: Project) {
-        self.changes = self.changes.wrapping_add(1);
         if self.undo.len() >= MAX_UNDO {
             self.undo.remove(0);
         }

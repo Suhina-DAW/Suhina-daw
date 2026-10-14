@@ -547,6 +547,17 @@ static COMMANDS: &[CommandSpec] = &[
         run: devices::add,
     },
     CommandSpec {
+        id: "device.addSd",
+        label: "Load a data-only .sd AudioEffect and add it to a track",
+        params: &[
+            TRACK,
+            param("path", ParamType::Text, "path to a validated .sd AudioEffect graph"),
+            optional("position", ParamType::Integer, "where in the chain, from 0 (default: last)"),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::add_sd,
+    },
+    CommandSpec {
         id: "track.add",
         label: "Add an audio or MIDI track with its mixer channel, clip slots and arrangement lane, optionally with a device (an instrument makes a MIDI track, an effect an audio track)",
         params: &[
@@ -563,6 +574,7 @@ static COMMANDS: &[CommandSpec] = &[
                 "the id of a built-in effect or instrument, from devices.list, or a plug-in from plugins.list",
             ),
             optional("preset", ParamType::Text, "a preset file for the device (DX7 voice data for the FM synth)"),
+            optional("sd", ParamType::Text, "a data-only .sd AudioEffect graph to add to the new audio track"),
             optional("voice", ParamType::Integer, "which voice of a preset bank, from 1"),
         ],
         kind: CommandKind::Edit,
@@ -660,6 +672,11 @@ static COMMANDS: &[CommandSpec] = &[
                 "value",
                 ParamType::Number,
                 "value in the parameter's unit (dB, Hz, 0..1 for percentages, option index for choices)",
+            ),
+            optional(
+                "continuous",
+                ParamType::Bool,
+                "true while a UI control is being dragged; updates share one undo step",
             ),
         ],
         kind: CommandKind::Edit,

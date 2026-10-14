@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
@@ -104,10 +104,14 @@ streams through the `AudioSystem` trait it implements and the front end hands to
 ## Amendment: device commands (2026-10-12)
 
 Devices on tracks are edited with ordinary **edit** commands, one undo step each:
-`device.add`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
+`device.add`, `device.addSd`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
 `track.devices` read. A device is addressed by its track and its index in the track's chain
 (`device`, from 0, as `track.devices` lists them), and a parameter by its stable id
 ([ADR 0004](0004-built-in-devices.md)). Agents may run all of them.
+
+`device.setParam` accepts `continuous: true` during a slider drag to share one undo snapshot
+across updates of the same parameter. A final call without that flag ends the gesture. Every
+effective update still marks the project changed, including updates after saving mid-gesture.
 
 ## Consequences
 

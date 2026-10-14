@@ -41,6 +41,10 @@ detail area) goes alongside this list, not after it.
 
 ## Built-in effects and instruments
 
+The separate Rust SDK can create data-only linear `.sd` effects from supported nodes. They can
+be dropped onto tracks, are embedded in projects, render in real-time and offline, and expose
+their parameters and signal flow in the device detail panel ([ADR 0018](docs/decisions/0018-device-graph-files.md)).
+
 Instruments and effects that ship with Suhina. They run inside the engine (rule 5 covers
 third-party plug-ins only), so they follow the real-time and never-crash rules like the engine
 itself. Written in Rust; DSP from GPL-compatible open-source projects may be ported (rule 9) with

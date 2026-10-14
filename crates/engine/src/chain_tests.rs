@@ -137,6 +137,28 @@ fn an_effect_on_a_track_processes_its_sound_before_the_fader() {
 }
 
 #[test]
+fn an_sd_gain_graph_runs_in_the_offline_device_chain() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.gain", "Test Gain", suhina_device_sdk::DeviceRole::Effect);
+    graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 0.5));
+    graph.nodes = vec![
+        suhina_device_sdk::Node::audio_input("in"),
+        suhina_device_sdk::Node::gain("gain", "gain"),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+    let mut effect = device("sd", &[]);
+    effect.kind = DeviceKind::Sd;
+    effect.state = graph.to_sd().ok().map(String::into_bytes);
+    let notes = vec![note(0.0, 1.0, 69)];
+    let plain = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let processed = render_offline(&project(notes, 1.0, vec![device("fm-synth", &[]), effect]), SR, 512).unwrap();
+    let half: Vec<f32> = plain.iter().map(|sample| sample * 0.5).collect();
+    assert!(max_diff(&processed[..plain.len()], &half) < 1e-5);
+}
+
+#[test]
 fn unknown_and_disabled_devices_pass_the_sound_through() {
     let notes = vec![note(0.0, 1.0, 60)];
     let plain = render_offline(&project(notes.clone(), 1.0, vec![]), SR, 512).unwrap();

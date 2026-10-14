@@ -84,6 +84,55 @@ fn devices_are_added_set_switched_and_removed_with_undo() {
 }
 
 #[test]
+fn continuous_parameter_updates_share_one_undo_step() {
+    let mut session = Session::new(project());
+    run(&mut session, "device.add", json!({ "track": 1, "id": "utility" })).unwrap();
+    for value in [1.0, 2.0, 3.0] {
+        run(
+            &mut session,
+            "device.setParam",
+            json!({ "track": 1, "device": 0, "param": "gain", "value": value, "continuous": true }),
+        )
+        .unwrap();
+    }
+    run(&mut session, "device.setParam", json!({ "track": 1, "device": 0, "param": "gain", "value": 3.0 })).unwrap();
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().channels[0].devices[0].params.is_empty());
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().channels[0].devices.is_empty());
+}
+
+#[test]
+fn saving_during_a_parameter_gesture_keeps_later_updates_dirty() {
+    let mut session = Session::new(project());
+    run(&mut session, "device.add", json!({ "track": 1, "id": "utility" })).unwrap();
+    let path = std::env::temp_dir().join(format!("suhina-param-gesture-{}.suhina", std::process::id()));
+    for value in [1.0, 2.0, 3.0] {
+        run(
+            &mut session,
+            "device.setParam",
+            json!({ "track": 1, "device": 0, "param": "gain", "value": value, "continuous": true }),
+        )
+        .unwrap();
+        assert!(session.has_unsaved_changes());
+        if value < 3.0 {
+            run(&mut session, "project.save", json!({ "path": path })).unwrap();
+            assert!(!session.has_unsaved_changes());
+        }
+    }
+    run(&mut session, "device.setParam", json!({ "track": 1, "device": 0, "param": "gain", "value": 3.0 })).unwrap();
+    assert!(session.has_unsaved_changes());
+    let (saved, _) = Session::open(&path).unwrap();
+    assert_eq!(saved.project().channels[0].devices[0].params[0].value, 2.0);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().channels[0].devices[0].params.is_empty());
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].devices[0].params[0].value, 3.0);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn bad_device_edits_are_refused_and_change_nothing() {
     let mut session = Session::new(project());
     run(&mut session, "device.add", json!({ "track": 1, "id": "fm-synth" })).unwrap();
@@ -106,6 +155,46 @@ fn bad_device_edits_are_refused_and_change_nothing() {
     // One undo step for the one good edit.
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert!(run(&mut session, "edit.undo", json!({})).is_err());
+}
+
+#[test]
+fn sd_effects_load_into_tracks_and_expose_their_parameters() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("org.example.sd-gain", "SDK Gain", suhina_device_sdk::DeviceRole::Effect);
+    graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Output", (0.0, 2.0), 1.0));
+    graph.nodes = vec![
+        suhina_device_sdk::Node::audio_input("input"),
+        suhina_device_sdk::Node::gain("gain", "gain"),
+        suhina_device_sdk::Node::audio_output("output"),
+    ];
+    graph.nodes[1].visible = false;
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("input", "gain"), suhina_device_sdk::Connection::new("gain", "output")];
+    let path = std::env::temp_dir().join(format!("suhina-test-{}-gain.sd", std::process::id()));
+    std::fs::write(&path, graph.to_sd().unwrap_or_default()).unwrap_or_else(|e| panic!("{e}"));
+    let mut session = Session::new(project());
+    let added = run(&mut session, "device.addSd", json!({ "track": 1, "path": path })).unwrap();
+    assert_eq!(added["name"], "SDK Gain");
+    assert_eq!(session.project().channels[0].devices[0].kind, DeviceKind::Sd);
+    let listed = run(&mut session, "track.devices", json!({ "track": 1 })).unwrap();
+    assert_eq!(listed[0]["params"][0]["name"], "Output");
+    assert_eq!(listed[0]["nodes"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        run(
+            &mut session,
+            "device.setParam",
+            json!({
+                "track": 1, "device": 0, "param": "gain", "value": 0.25
+            })
+        )
+        .unwrap()["value"],
+        0.25
+    );
+    assert_eq!(session.project().channels[0].devices[0].params[0].value, 0.25);
+    let created = run(&mut session, "track.add", json!({ "sd": path.display().to_string() })).unwrap();
+    assert_eq!(created["kind"], "audio");
+    assert_eq!(created["device"]["kind"], "sd");
+    let _ = std::fs::remove_file(path);
 }
 
 /// A catalog with one installed effect and one instrument, as a scan would have found them.

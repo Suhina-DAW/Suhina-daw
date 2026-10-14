@@ -272,11 +272,19 @@ impl Category {
     /// The kinds of file it shows (none for the device categories).
     pub fn file_kinds(self) -> &'static [FileKind] {
         match self {
-            Self::All => &[FileKind::Sample, FileKind::Stems, FileKind::Midi, FileKind::Preset, FileKind::Project],
+            Self::All => &[
+                FileKind::Sample,
+                FileKind::Stems,
+                FileKind::Midi,
+                FileKind::Preset,
+                FileKind::Project,
+                FileKind::Effect,
+            ],
             Self::Samples => &[FileKind::Sample, FileKind::Stems],
             Self::Midi => &[FileKind::Midi],
             Self::Presets => &[FileKind::Preset],
-            Self::Instruments | Self::Effects | Self::Plugins => &[],
+            Self::Effects => &[FileKind::Effect],
+            Self::Instruments | Self::Plugins => &[],
         }
     }
 }
@@ -286,7 +294,7 @@ impl Category {
 pub struct Found {
     pub item: Item,
     pub name: String,
-    /// `sample`, `midi`, `preset`, `project`, `instrument`, `effect`.
+    /// `sample`, `midi`, `preset`, `project`, `instrument`, `effect`, or `audio_effect`.
     pub kind: &'static str,
     /// For a plug-in: its format and vendor.
     pub detail: Option<String>,
@@ -310,6 +318,10 @@ impl Found {
     }
 }
 
+fn file_kind_name(kind: FileKind) -> &'static str {
+    if kind == FileKind::Effect { "audio_effect" } else { kind.name() }
+}
+
 /// What an item key is, for a search over pins or recent items.
 fn describe(projects: &mut Projects, item: Item) -> Option<Found> {
     match &item {
@@ -319,7 +331,7 @@ fn describe(projects: &mut Projects, item: Item) -> Option<Found> {
             if let Item::Voice(_, voice) = &item {
                 name = format!("{name} #{voice}");
             }
-            Some(Found { name, kind: kind.name(), detail: None, plugin: false, folder: None, item })
+            Some(Found { name, kind: file_kind_name(kind), detail: None, plugin: false, folder: None, item })
         }
         Item::Device(id) => {
             let info = suhina_device_registry::info(id)?;
@@ -343,7 +355,7 @@ fn fits(found: &Found, category: Category) -> bool {
         Category::Midi => found.kind == "midi",
         Category::Presets => found.kind == "preset",
         Category::Instruments => found.kind == "instrument",
-        Category::Effects => found.kind == "effect",
+        Category::Effects => matches!(found.kind, "effect" | "audio_effect"),
         Category::Plugins => found.plugin,
     }
 }
@@ -443,7 +455,7 @@ pub fn search_items(
                 rank,
                 Found {
                     name: file.name().to_string(),
-                    kind: file.kind.name(),
+                    kind: file_kind_name(file.kind),
                     detail: None,
                     plugin: false,
                     folder: Some(file.folder.clone()),
@@ -531,7 +543,7 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
     let kind = item.file_kind().ok_or_else(|| format!("{}: not a file the browser lists", path.display()))?;
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut out = json!({ "kind": kind.name(), "name": name, "size": size });
+    let mut out = json!({ "kind": file_kind_name(kind), "name": name, "size": size });
     match kind {
         FileKind::Sample | FileKind::Stems => {
             let info = suhina_media::info::sample_info(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -585,6 +597,12 @@ pub fn file_info(path: &Path, item: &Item) -> Result<Value, CommandError> {
             }
         }
         FileKind::Project => {}
+        FileKind::Effect => {
+            let graph =
+                suhina_device_sdk::DeviceGraph::read_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            out["id"] = json!(graph.id);
+            out["role"] = json!("audio_effect");
+        }
     }
     Ok(out)
 }
@@ -707,7 +725,9 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
             }
         }
         "device.add" | "track.add" => {
-            if params.get("preset").is_some_and(|p| !p.is_null()) {
+            if let Some(path) = params.get("sd").and_then(Value::as_str) {
+                record(Group::Effects, path.to_string());
+            } else if params.get("preset").is_some_and(|p| !p.is_null()) {
                 preset(&mut record, params);
             } else if let Some(id) = params.get("id").or_else(|| params.get("device")).and_then(Value::as_str) {
                 if suhina_device_registry::info(id).is_some() {
@@ -715,6 +735,11 @@ pub(crate) fn record_use(library: &mut Library, id: &str, params: &Value, result
                 } else if id == params.get("device").and_then(Value::as_str).unwrap_or("") {
                     record(Group::Plugins, format!("plugin:{id}"));
                 }
+            }
+        }
+        "device.addSd" => {
+            if let Some(path) = params.get("path").and_then(Value::as_str) {
+                record(Group::Effects, path.to_string());
             }
         }
         "device.addPlugin" => {

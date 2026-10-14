@@ -9,6 +9,7 @@ rust-version.workspace = true
 suhina-model.workspace = true
 suhina-stretch.workspace = true
 suhina-device-api.workspace = true
+suhina-device-sdk.workspace = true
 suhina-device-registry.workspace = true
 rtrb.workspace = true
 

@@ -4141,6 +4141,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "suhina-device-sdk"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "suhina-device-utility"
 version = "0.0.1"
 dependencies = [
@@ -4167,6 +4175,7 @@ dependencies = [
  "rtrb",
  "suhina-device-api",
  "suhina-device-registry",
+ "suhina-device-sdk",
  "suhina-model",
  "suhina-stretch",
 ]
@@ -4273,6 +4282,7 @@ dependencies = [
  "suhina-device-api",
  "suhina-device-fm-synth",
  "suhina-device-registry",
+ "suhina-device-sdk",
  "suhina-engine",
  "suhina-library",
  "suhina-media",
@@ -4310,6 +4320,7 @@ dependencies = [
  "serde_json",
  "suhina-device-api",
  "suhina-device-registry",
+ "suhina-device-sdk",
  "suhina-engine",
  "suhina-library",
  "suhina-media",

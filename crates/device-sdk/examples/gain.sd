@@ -1,0 +1,47 @@
+{
+  "format": "suhina-device",
+  "version": 1,
+  "device": {
+    "id": "org.example.gain",
+    "name": "Example Gain",
+    "role": "effect",
+    "parameters": [
+      {
+        "id": "gain",
+        "name": "Gain",
+        "min": 0.0,
+        "max": 2.0,
+        "default": 1.0,
+        "control": "slider"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "in",
+      "visible": false,
+      "kind": "audio_input"
+    },
+    {
+      "id": "gain",
+      "visible": false,
+      "kind": "gain",
+      "parameter": "gain"
+    },
+    {
+      "id": "out",
+      "visible": false,
+      "kind": "audio_output"
+    }
+  ],
+  "connections": [
+    {
+      "from": "in",
+      "to": "gain"
+    },
+    {
+      "from": "gain",
+      "to": "out"
+    }
+  ]
+}

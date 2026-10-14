@@ -83,6 +83,7 @@ crates/
   ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command
   dsp      L0 signal-processing blocks for built-in effects and instruments: smoothing, filters, crossovers, LFOs, shapers, oversampling (ADR 0004)
   device-api L0 the Device trait, parameter descriptions, contract tests every device runs
+  device-sdk L0 builds and validates data-only `.sd` effect graphs, compiles supported nodes for real-time execution
   device-registry L1 every built-in effect or instrument by its stable id: makes and lists them (ADR 0004)
   ipc      L0 audio blocks to a plug-in host process: shared memory, block sync with a deadline (ADR 0006; may use unsafe)
   plugins  L1 the engine's side of plug-in hosting: start a host process, control protocol, health, state, restart; scanning; offline runs
