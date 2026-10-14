@@ -24,6 +24,7 @@ pub mod session_view;
 pub mod settings;
 pub mod settings_view;
 pub mod splash;
+pub mod start_panel;
 pub mod theme;
 pub mod themes;
 pub mod timeline;

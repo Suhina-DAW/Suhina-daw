@@ -230,6 +230,11 @@ impl eframe::App for Window {
         if let Some(path) = self.app.take_saved_path() {
             self.remember(&path);
         }
+        if let Some(path) = self.app.take_forget_request()
+            && let Err(e) = self.recent.remove(&path)
+        {
+            self.app.set_status(Status::Error(e));
+        }
         if let Some(folder) = self.app.take_lists_wanted() {
             self.app.set_project_lists(self.recent.existing(), recent::templates(&folder));
         }

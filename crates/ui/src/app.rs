@@ -24,6 +24,7 @@ use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePr
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{AtStart, DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
+use crate::start_panel::{self, AudioSummary, StartChoice, StartState};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
 use crate::timeline::Timeline;
@@ -192,8 +193,14 @@ pub struct App {
     /// The project dialog (File › New or open) while it shows, and what it lists.
     project_dialog: Option<DialogState>,
     project_lists: Lists,
-    /// The dialog opened and its lists should be read again, by the app.
+    /// The dialog or the start panel opened and their lists should be read again, by the app.
     lists_wanted: bool,
+    /// The start panel, shown while no project is open.
+    start: StartState,
+    /// The start panel's lists were asked for since it last appeared.
+    start_lists: bool,
+    /// A project the user took off the recent list, for the app to forget.
+    forget_request: Option<PathBuf>,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
     new_request: Option<NewProject>,
@@ -266,6 +273,9 @@ impl App {
             project_dialog: None,
             project_lists: Lists::default(),
             lists_wanted: false,
+            start: StartState::default(),
+            start_lists: false,
+            forget_request: None,
             save_prompt: None,
             new_request: None,
             saved_path: None,
@@ -622,13 +632,13 @@ impl App {
     }
 
     /// Opens what Settings › General › At start says, for Suhina started without a project:
-    /// the New or open dialog, or asks for a new project, one from the start template, or the
-    /// project opened last (`last`), which the app takes up as it does the user's own requests
+    /// the start panel, or asks for a new project, one from the start template, or the project
+    /// opened last (`last`), which the app takes up as it does the user's own requests
     /// ([`App::take_new_request`], [`App::take_open_request`]). A template or last project that
-    /// is not there shows the dialog, with a hint saying why.
+    /// is not there leaves the start panel, with a hint saying why.
     pub fn open_at_start(&mut self, last: Option<PathBuf>) {
         let missing = match self.settings.at_start {
-            AtStart::Dialog => None,
+            AtStart::Panel => None,
             AtStart::Blank => {
                 self.new_request = Some(NewProject::Blank);
                 return;
@@ -649,9 +659,51 @@ impl App {
                 None => Some("No project was opened before; choose one to start".into()),
             },
         };
-        self.open_project_dialog(false);
+        self.lists_wanted = true;
         if let Some(hint) = missing {
             self.set_status(Status::Hint(hint));
+        }
+    }
+
+    /// The start panel, in the view's place while no project is open; its lists are read again
+    /// each time it appears.
+    fn start_panel(&mut self, ui: &mut Ui) {
+        if !std::mem::replace(&mut self.start_lists, true) {
+            self.lists_wanted = true;
+        }
+        let (rate, buffer) = (self.settings.audio_sample_rate, self.settings.audio_buffer);
+        let audio = AudioSummary {
+            device: if self.settings.audio_device.is_empty() {
+                "Default".to_string()
+            } else {
+                self.settings.audio_device.clone()
+            },
+            sample_rate: if rate > 0 { format!("{rate} Hz") } else { "Default".to_string() },
+            buffer: if buffer > 0 { format!("{buffer} samples") } else { "Default".to_string() },
+        };
+        let area = ui.max_rect();
+        let now = std::time::SystemTime::now();
+        let version = env!("CARGO_PKG_VERSION");
+        match start_panel::show(ui, area, &mut self.start, &self.project_lists, &audio, version, now) {
+            Some(StartChoice::NewBlank) => self.new_request = Some(NewProject::Blank),
+            Some(StartChoice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
+            Some(StartChoice::Open(path)) => self.request_open(path),
+            Some(StartChoice::OpenDialog) => self.open_project_dialog(true),
+            Some(StartChoice::AudioSettings) => {
+                self.page.page = settings_view::Page::Audio;
+                self.settings_open = true;
+            }
+            Some(StartChoice::Forget(path)) => {
+                let lists = &mut self.project_lists;
+                if let Some(index) = lists.recent.iter().position(|p| *p == path) {
+                    lists.recent.remove(index);
+                    if index < lists.saved.len() {
+                        lists.saved.remove(index);
+                    }
+                }
+                self.forget_request = Some(path);
+            }
+            None => {}
         }
     }
 
@@ -676,10 +728,21 @@ impl App {
         std::mem::take(&mut self.lists_wanted).then(|| self.templates_folder())
     }
 
-    /// The recent projects and the templates the project dialog lists.
+    /// The recent projects and the templates the project dialog and the start panel list.
     pub fn set_project_lists(&mut self, recent: Vec<PathBuf>, templates: Vec<PathBuf>) {
+        let saved = recent.iter().map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()).collect();
         self.project_lists =
-            Lists { recent, templates, templates_folder: self.templates_folder().display().to_string() };
+            Lists { recent, saved, templates, templates_folder: self.templates_folder().display().to_string() };
+    }
+
+    /// Whether the start panel shows: no project is open.
+    pub fn start_panel_open(&self) -> bool {
+        self.projects.active().is_none()
+    }
+
+    /// A project the user took off the recent list on the start panel, for the app to forget.
+    pub fn take_forget_request(&mut self) -> Option<PathBuf> {
+        self.forget_request.take()
     }
 
     /// A new project the user asked for, for the app to make and open in a new tab.
@@ -937,6 +1000,10 @@ impl App {
 
     /// Draws the window into `ui` and runs what the user asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
+        if self.projects.active().is_some() {
+            // The start panel reads its lists again when it next appears.
+            self.start_lists = false;
+        }
         let window = ui.max_rect();
         let mut actions = Vec::new();
         self.follow_active();
@@ -1049,7 +1116,7 @@ impl App {
                             }
                         }
                     }
-                    (None, _) => empty(ui),
+                    (None, _) => self.start_panel(ui),
                 });
             }
             drop_overlay(ui, view_area);
@@ -2596,21 +2663,6 @@ fn drop_overlay(ui: &Ui, area: Rect) {
     // A file whose name is not known yet counts as both; a project is the likelier.
     let what = if themes && !project { "Drop to add the themes" } else { "Drop to open" };
     painter.text(area.center(), Align2::CENTER_CENTER, what, theme::ui_font(theme::TEXT + 2.0), text);
-}
-
-/// The window with no project open.
-fn empty(ui: &mut Ui) {
-    let area = ui.available_rect_before_wrap();
-    ui.allocate_rect(area, Sense::hover());
-    let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::window_background());
-    painter.text(
-        area.center(),
-        Align2::CENTER_CENTER,
-        "Drop a Live Set (.als) here to open it",
-        theme::ui_font(theme::TEXT),
-        theme::text_hint(),
-    );
 }
 
 /// What the status bar says after a command ran, or nothing for silent ones.

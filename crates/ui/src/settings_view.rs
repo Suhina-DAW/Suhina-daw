@@ -280,10 +280,10 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 &painter,
                 r,
                 "At start",
-                "With no project given: the dialog, a new one, one from a template, or the last",
+                "With no project given: the start panel, a new one, one from a template, or the last",
             );
             let options = [
-                ("Dialog", AtStart::Dialog),
+                ("Panel", AtStart::Panel),
                 ("New", AtStart::Blank),
                 ("Template", AtStart::Template),
                 ("Last", AtStart::Last),

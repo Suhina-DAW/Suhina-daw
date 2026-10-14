@@ -1592,11 +1592,13 @@ fn at_start(choice: suhina_ui::settings::AtStart) -> suhina_ui::settings::Settin
 }
 
 #[test]
-fn at_start_the_dialog_shows_unless_the_settings_say_otherwise() {
+fn at_start_the_start_panel_shows_unless_the_settings_say_otherwise() {
     use suhina_ui::settings::AtStart;
-    let mut harness = started(at_start(AtStart::Dialog), None);
-    assert!(harness.state().project_dialog_open());
-    assert!(harness.query_by_label("New blank project").is_some(), "the New or open dialog shows");
+    let mut harness = started(at_start(AtStart::Panel), None);
+    assert!(!harness.state().project_dialog_open());
+    assert!(harness.state().start_panel_open());
+    assert!(harness.query_by_label("New project").is_some(), "the start panel shows");
+    assert!(harness.state_mut().take_lists_wanted().is_some(), "and asks for its lists");
     assert_eq!(harness.state_mut().take_new_request(), None);
 
     let mut harness = started(at_start(AtStart::Blank), None);
@@ -1605,7 +1607,7 @@ fn at_start_the_dialog_shows_unless_the_settings_say_otherwise() {
 }
 
 #[test]
-fn at_start_a_new_project_comes_from_the_start_template_or_the_dialog_says_why_not() {
+fn at_start_a_new_project_comes_from_the_start_template_or_the_panel_says_why_not() {
     use suhina_ui::settings::AtStart;
     let folder = std::env::temp_dir().join(format!("suhina-at-start-{}", std::process::id()));
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
@@ -1622,7 +1624,8 @@ fn at_start_a_new_project_comes_from_the_start_template_or_the_dialog_says_why_n
     }
     settings.start_template = "Gone.suhina".into();
     let mut harness = started(settings.clone(), None);
-    assert!(harness.state().project_dialog_open());
+    assert!(!harness.state().project_dialog_open());
+    assert!(harness.query_by_label("New project").is_some(), "the start panel shows");
     assert_eq!(harness.state_mut().take_new_request(), None);
     assert!(
         matches!(harness.state().status(), Status::Hint(h) if h.contains("not there")),
@@ -1631,13 +1634,13 @@ fn at_start_a_new_project_comes_from_the_start_template_or_the_dialog_says_why_n
     );
     settings.start_template = String::new();
     let harness = started(settings, None);
-    assert!(harness.state().project_dialog_open());
+    assert!(harness.query_by_label("New project").is_some());
     assert!(matches!(harness.state().status(), Status::Hint(h) if h.contains("No template")));
     let _ = std::fs::remove_dir_all(&folder);
 }
 
 #[test]
-fn at_start_the_last_project_opens_or_the_dialog_says_there_is_none() {
+fn at_start_the_last_project_opens_or_the_panel_says_there_is_none() {
     use suhina_ui::settings::AtStart;
     let last = std::path::PathBuf::from("/songs/Last night.suhina");
     let mut harness = started(at_start(AtStart::Last), Some(last.clone()));
@@ -1645,7 +1648,7 @@ fn at_start_the_last_project_opens_or_the_dialog_says_there_is_none() {
     assert_eq!(harness.state_mut().take_open_request(), Some((last, OpenAs::NewTab)));
 
     let mut harness = started(at_start(AtStart::Last), None);
-    assert!(harness.state().project_dialog_open());
+    assert!(harness.query_by_label("New project").is_some());
     assert_eq!(harness.state_mut().take_open_request(), None);
     assert!(matches!(harness.state().status(), Status::Hint(h) if h.contains("No project was opened before")));
 }
@@ -1666,4 +1669,83 @@ fn at_start_is_chosen_in_settings_and_template_asks_for_the_template() {
     assert_eq!(harness.state().settings().at_start, AtStart::Last);
     let saved = harness.state_mut().take_changed_settings().map(|s| s.to_text()).unwrap_or_default();
     assert!(saved.contains("at_start = last"), "{saved}");
+}
+
+#[test]
+fn the_start_panel_opens_recent_projects_forgets_them_and_comes_back_when_the_last_project_closes() {
+    let night = std::path::PathBuf::from("/songs/Night drive.suhina");
+    let morning = std::path::PathBuf::from("/songs/Morning.suhina");
+    let mut app = App::new();
+    app.set_project_lists(vec![night.clone(), morning.clone()], Vec::new());
+    let mut harness = window(app);
+    assert!(harness.state().start_panel_open());
+    harness.get_by_label("Open Night drive").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_open_request(), Some((night, OpenAs::NewTab)));
+
+    harness.get_by_label("Open Morning").click_secondary();
+    harness.run();
+    harness.get_by_label("Remove from list").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_forget_request(), Some(morning));
+    assert!(harness.query_by_label("Open Morning").is_none(), "it is gone from the panel at once");
+
+    harness.get_by_label("Audio settings").click();
+    // The Audio page repaints while it shows, for its live figures.
+    harness.run_steps(2);
+    assert!(harness.state().settings_open());
+    harness.key_press(Key::Escape);
+    harness.run_steps(2);
+    assert!(!harness.state().settings_open());
+
+    harness.get_by_label("New project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
+
+    // With a project open the panel is gone; when the last one closes it is back, with its lists
+    // read again.
+    let _ = harness.state_mut().take_lists_wanted();
+    harness.state_mut().set_session(Session::new(demo_project()), &[]);
+    harness.run();
+    assert!(harness.query_by_label("New project").is_none());
+    harness.get_by_label("Projects").click();
+    harness.run();
+    harness.get_by_label("Close project").click();
+    harness.run();
+    if let Some(dont) = harness.query_by_label("Don't save the changes") {
+        dont.click();
+        harness.run();
+    }
+    assert!(harness.state().start_panel_open());
+    assert!(harness.query_by_label("New project").is_some());
+    assert!(harness.state_mut().take_lists_wanted().is_some());
+}
+
+/// Renders the start panel to `target/ui-snapshots/start-panel.png`. Needs a GPU adapter:
+/// `cargo test -p suhina-ui -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_start_panel() {
+    let mut app = App::new();
+    app.set_project_lists(
+        vec![
+            "C:/Music/Suhina/Projects/Night drive.suhina".into(),
+            "C:/Music/Suhina/Projects/Morning.suhina".into(),
+            "C:/Music/Sets/Old jam.als".into(),
+        ],
+        vec!["C:/Music/Suhina/Templates/Beat starter.suhina".into()],
+    );
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(2.0)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    image.save(folder.join("start-panel.png")).unwrap_or_else(|e| panic!("{e}"));
 }

@@ -24,9 +24,9 @@ pub enum OnOpen {
 /// What opens when Suhina starts without a project given (Settings › General › At start).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AtStart {
-    /// The New or open dialog, with the recent projects.
+    /// The start panel, with the recent projects and the templates (`start_panel`).
     #[default]
-    Dialog,
+    Panel,
     /// A new blank project.
     Blank,
     /// A new project from the template `Settings::start_template` names.
@@ -218,7 +218,7 @@ impl Default for Settings {
             sample_stacking: false,
             midi_stacking: false,
             on_open: OnOpen::Ask,
-            at_start: AtStart::Dialog,
+            at_start: AtStart::Panel,
             start_template: String::new(),
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
@@ -315,7 +315,7 @@ impl Settings {
             OnOpen::Replace => "replace",
         };
         let at_start = match self.at_start {
-            AtStart::Dialog => "dialog",
+            AtStart::Panel => "panel",
             AtStart::Blank => "blank",
             AtStart::Template => "template",
             AtStart::Last => "last",
@@ -389,7 +389,8 @@ impl Settings {
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
                 ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
-                ("at_start", "dialog") => settings.at_start = AtStart::Dialog,
+                // `dialog` is what test builds wrote before the start panel took the dialog's place.
+                ("at_start", "panel" | "dialog") => settings.at_start = AtStart::Panel,
                 ("at_start", "blank") => settings.at_start = AtStart::Blank,
                 ("at_start", "template") => settings.at_start = AtStart::Template,
                 ("at_start", "last") => settings.at_start = AtStart::Last,
@@ -523,9 +524,10 @@ mod tests {
     }
 
     #[test]
-    fn at_start_reads_each_choice_and_keeps_the_dialog_for_anything_else() {
+    fn at_start_reads_each_choice_and_keeps_the_panel_for_anything_else() {
         for (text, choice) in [
-            ("dialog", AtStart::Dialog),
+            ("panel", AtStart::Panel),
+            ("dialog", AtStart::Panel),
             ("blank", AtStart::Blank),
             ("template", AtStart::Template),
             ("last", AtStart::Last),
@@ -534,7 +536,7 @@ mod tests {
             assert_eq!((settings.at_start, warnings.len()), (choice, 0), "{text}");
         }
         let (settings, warnings) = Settings::from_text("at_start = everything\nat_start\n");
-        assert_eq!(settings.at_start, AtStart::Dialog);
+        assert_eq!(settings.at_start, AtStart::Panel);
         assert_eq!(warnings.len(), 2, "{warnings:?}");
     }
 
