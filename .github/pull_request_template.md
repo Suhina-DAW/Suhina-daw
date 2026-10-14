@@ -10,13 +10,14 @@
 
 ## How to check it
 
-<!-- For anything a user sees, hears or does: numbered steps that someone who has never used
-     Suhina or any other music program can follow from the test build linked below, in a few
-     minutes. Start from opening Suhina with nothing loaded and say how to get every project,
-     track, clip or file the check needs. Name each control as it reads on screen and where it
-     is, give the shortcut too, and explain a music term the first time. After each step, say
-     what should happen. End with the edge cases (undo, empty project, a second click). For a
-     change with nothing to see (engine, refactor, CI), write one line saying so.
+<!-- For anything a user sees, hears or does, in the app, its sound, the files it reads and
+     writes, suhina-cli or MCP: numbered steps that someone who has never used Suhina or any
+     other music program can follow from the test build linked below, in a few minutes. Start
+     from opening Suhina with nothing loaded and say how to get every project, track, clip or
+     file the check needs. Name each control as it reads on screen and where it is, give the
+     shortcut too, give commands ready to copy, and explain a music term the first time. After
+     each step, say what should happen. End with the edge cases (undo, empty project, a second
+     click). For a change nobody can notice (refactor, tests, CI, docs), write one line saying so.
      AGENTS.md › Before you finish a task has the full rule.
 
 1. Open Suhina. You see an empty project.
@@ -41,7 +42,7 @@
 **Works and is tested**
 - [ ] I tried every change by hand and it works as intended, also the parts an AI agent wrote.
 - [ ] *How to check it* has steps a newcomer can follow, written by doing them in the build, or
-      says there is nothing a user sees.
+      says there is nothing a user can notice.
 - [ ] Tests cover it: round-trip and malformed input for file formats, offline renders for sound.
 - [ ] `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
       and `python scripts/rename_suhina.py --check` pass.
