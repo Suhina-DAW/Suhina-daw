@@ -359,6 +359,19 @@ static COMMANDS: &[CommandSpec] = &[
         run: paste_clip,
     },
     CommandSpec {
+        id: "clip.create",
+        label: "Make an empty MIDI clip on a track: in an empty Session slot (scene) or on the Arrangement (start), one bar long unless a length is given",
+        params: &[
+            TRACK,
+            optional("scene", ParamType::Integer, "the empty Session slot to make it in, scene number from 1"),
+            optional("start", ParamType::Number, "or where it starts on the Arrangement, in beats, at least 0"),
+            optional("length", ParamType::Number, "its length in beats, more than 0; one bar when left out"),
+            optional("stack", ParamType::Bool, "on the Arrangement, true leaves clips under it as they are"),
+        ],
+        kind: CommandKind::Edit,
+        run: create_clip,
+    },
+    CommandSpec {
         id: "clip.duplicate",
         label: "Place a copy of an arrangement clip right after it, replacing what the copy covers unless stacked",
         params: &[
@@ -1259,6 +1272,102 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
     let index = lane.clips.iter().position(|c| *c == placed).unwrap_or_default();
     Ok(json!({ "track": track.0, "index": index, "start": start }))
+}
+
+/// `clip.create`: an empty MIDI clip in a Session slot or on the Arrangement
+/// (docs/spec/arrangement-editing.md › Creating a clip, docs/spec/ui-session-view.md › Clip slots).
+fn create_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let track = track_id(p, params)?;
+    let target = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
+    if !target.content.notes {
+        return Err(format!("track {:?} cannot hold a MIDI clip", target.name).into());
+    }
+    let track_name = target.name.clone();
+    let length = match params.get("length") {
+        None | Some(Value::Null) => files::bar_beats(p),
+        Some(_) => number(params, "length")?,
+    };
+    if !(length > 0.0 && length <= MAX_START_BEAT) {
+        return Err(format!("length must be more than 0 and at most {MAX_START_BEAT} beats, got {length}").into());
+    }
+    let stack = match params.get("stack") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or("stack must be true or false")?,
+    };
+    let given = |key: &str| params.get(key).is_some_and(|v| !v.is_null());
+    let row = match (given("scene"), given("start")) {
+        (true, false) => Some(scene_index(p, params)?),
+        (false, true) => None,
+        _ => return Err("give either scene (a Session slot) or start (on the Arrangement)".into()),
+    };
+    let start = match row {
+        Some(_) => 0.0,
+        None => number(params, "start")?,
+    };
+    if !(0.0..=MAX_START_BEAT).contains(&start) {
+        return Err(format!("start must be between 0 and {MAX_START_BEAT} beats, got {start}").into());
+    }
+    let id = p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?;
+    let id = suhina_model::ContentId(id);
+    let name = "MIDI clip".to_string();
+    let clip = Clip {
+        content: id,
+        start,
+        length,
+        offset: 0.0,
+        loop_range: None,
+        enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        extensions: Default::default(),
+    };
+    let placed = match row {
+        Some(row) => {
+            let column = p
+                .launcher
+                .columns
+                .iter_mut()
+                .find(|c| c.track == track)
+                .ok_or_else(|| format!("track {track_name:?} has no clip slots"))?;
+            let slot = column.slots.get_mut(row).ok_or("the slot is missing")?;
+            if slot.clip.is_some() {
+                return Err(format!("scene {} on track {track_name:?} already has a clip", row + 1).into());
+            }
+            // A clip in a slot loops over its length.
+            let looping = suhina_model::LoopRange { start: 0.0, end: length };
+            slot.clip = Some(Clip { loop_range: Some(looping), ..clip });
+            json!({ "track": track.0, "scene": row + 1, "length": length, "name": name })
+        }
+        None => {
+            let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
+                Some(lane) => lane,
+                None => {
+                    let lane = ArrangementLane { name: track_name, track: Some(track), clips: Vec::new() };
+                    p.arrangement.lanes.push(lane);
+                    p.arrangement.lanes.len() - 1
+                }
+            };
+            let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
+            if !stack {
+                make_room(&mut lane.clips, start, start + length);
+            }
+            lane.clips.push(clip.clone());
+            lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+            let index = lane.clips.iter().position(|c| *c == clip).unwrap_or_default();
+            json!({ "track": track.0, "index": index, "start": start, "length": length, "name": name })
+        }
+    };
+    p.contents.push(suhina_model::ClipContent {
+        id,
+        name,
+        length,
+        lanes: vec![suhina_model::ContentLane { target: None, data: LaneData::Notes(Vec::new()) }],
+        extensions: Default::default(),
+    });
+    Ok(placed)
 }
 
 fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

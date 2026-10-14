@@ -277,6 +277,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
+- **Empty MIDI clips:** a double-click on an empty slot of a MIDI track, or on an empty place of
+  its Arrangement lane, makes a one-bar clip there (`clip.create`, also for the CLI and agents);
+  the Arrangement selects it ([spec](docs/spec/arrangement-editing.md#creating-a-clip)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template

@@ -1578,3 +1578,57 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
+
+/// Presses and releases at `at` twice, a frame each, a few frames apart: a double-click.
+fn double_click_at(harness: &mut Harness<'static, App>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    for _ in 0..2 {
+        harness.hover_at(at);
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.step();
+    }
+    harness.run();
+}
+
+#[test]
+fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_a_one_bar_clip() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    let slot = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, slot);
+    let made = harness.state().session().and_then(|s| {
+        let column = s.project().launcher.columns.iter().find(|c| c.track.0 == 3)?;
+        column.slots[0].clip.as_ref().map(|c| (c.length, c.loop_range.is_some()))
+    });
+    assert_eq!(made, Some((4.0, true)), "an empty one-bar clip that loops");
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some());
+    // One undo step.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Stop Keys (scene 1)").is_some());
+}
+
+#[test]
+fn a_double_click_on_an_empty_place_of_a_midi_lane_makes_a_clip_on_the_bar_and_selects_it() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    let bass = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().arrangement.lanes[1].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let before = bass(&harness);
+    // Bass is empty before beat 32, where Root starts; 8 points a beat: beat 10 is in bar 3.
+    let root = harness.get_by_label("Clip Root on Bass at bar 9").rect();
+    double_click_at(&mut harness, egui::pos2(root.left() - 22.0 * 8.0, root.center().y));
+    assert!(bass(&harness).contains(&(8.0, 4.0)), "{:?}", bass(&harness));
+    assert!(harness.query_by_label("Clip MIDI clip on Bass at bar 3").is_some());
+    // It is selected: Delete removes it.
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(bass(&harness), before);
+}

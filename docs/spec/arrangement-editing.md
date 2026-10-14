@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -23,6 +23,22 @@ covers:
 How arrangement clips behave when they are moved. The familiar behaviour (observed in Live 12.4,
 which this follows) is that a clip placed over others **replaces** what it covers. Some users come
 from pattern-based DAWs where clips **stack** and all play; two settings allow that.
+
+## Creating a clip
+
+Our own design. `clip.create {track, scene? | start?, length?, stack?}` makes an empty MIDI clip
+on a track that plays notes: in an empty Session slot (`scene`, from 1) or on the Arrangement at
+`start` (beats, at least 0). It is one bar of the time signature long unless `length` (beats,
+more than 0) says otherwise, holds no notes and is named "MIDI clip"; a clip in a slot loops over
+its length. On the Arrangement it replaces what it covers unless stacked, as a pasted clip does.
+A slot that holds a clip, a track that cannot hold MIDI, or both or neither of `scene` and
+`start`, is refused. It is one undo step, and returns where the clip went (on the Arrangement,
+its index on the track).
+
+In the Arrangement view a **double-click on an empty place of a MIDI track's lane** makes one
+there, from the grid line before the pointer (Alt: from the pointer itself), and selects it, so
+the detail area shows it. It stacks when the MIDI stacking setting is on. A double-click on an
+audio track's lane does nothing.
 
 ## Moving a clip
 

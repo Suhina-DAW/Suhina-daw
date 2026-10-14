@@ -153,6 +153,9 @@ pub struct ArrangementViewState {
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     selected: Option<(TrackId, usize)>,
+    /// A clip made with a double-click (`clip.create`): its track and start, selected once it is
+    /// on the lane, and the frames left to wait for it.
+    created: Option<(TrackId, f64, u8)>,
     clip_drag: Option<ClipDrag>,
     value_drag: Option<(TrackId, Control, f64)>,
     /// A clip gain being dragged, and its value so far.
@@ -182,6 +185,7 @@ impl Default for ArrangementViewState {
             header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: None,
+            created: None,
             clip_drag: None,
             value_drag: None,
             gain_drag: None,
@@ -570,6 +574,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         if lane_rect.bottom() < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
         }
+        if lane.kind == ColumnKind::Track && lane.notes {
+            create_on_lane(ui, row, lane, time.left(), bar_beats, state, actions);
+        }
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
                 let found = clip_box(
@@ -775,6 +782,50 @@ fn clip_rect(lane_time: Rect, start: f64, length: f64, x_of: &dyn Fn(f64) -> f32
         Pos2::new(left, lane_time.top()),
         Pos2::new((x_of(start + length).round() - 1.0).max(left + 1.0), lane_time.bottom()),
     )
+}
+
+/// The empty space of a MIDI track's lane: a double-click makes an empty clip there, one bar
+/// long from the grid line before the pointer (Alt: from the pointer), and selects it once it
+/// is on the lane (docs/spec/arrangement-editing.md › Creating a clip). Clips are drawn over
+/// it and answer their own clicks.
+fn create_on_lane(
+    ui: &Ui,
+    row: Row,
+    lane: &Lane,
+    time_left: f32,
+    bar_beats: f64,
+    state: &mut ArrangementViewState,
+    actions: &mut Vec<Action>,
+) {
+    if let Some((track, start, frames)) = state.created
+        && track == lane.track
+    {
+        let made = lane.clips.iter().find(|c| c.start == start && !c.audio && c.notes.is_empty());
+        state.created = match made {
+            Some(clip) => {
+                state.selected = Some((track, clip.index));
+                None
+            }
+            None => frames.checked_sub(1).map(|left| (track, start, left)),
+        };
+    }
+    let response = ui.interact(row.clip, Id::new(("arrangement-lane", lane.track.0)), Sense::click());
+    // A third click soon after counts as well: egui calls it a triple-click.
+    if (response.double_clicked() || response.triple_clicked())
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let raw = f64::from((pointer.x - time_left + state.scroll.x) / state.beat_width).max(0.0);
+        let start = if ui.input(|i| i.modifiers.alt) {
+            raw
+        } else {
+            let grid = snap(state.beat_width, bar_beats);
+            (raw / grid).floor() * grid
+        };
+        // Over a clip it may reach into, it stacks as a moved MIDI clip does.
+        let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
+        actions.push(Action::new("clip.create", params));
+        state.created = Some((lane.track, start, 3));
+    }
 }
 
 /// One arrangement clip: draws it and moves it when dragged, along its lane or onto another.

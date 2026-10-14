@@ -539,7 +539,8 @@ fn stretch_mode(text: &str) -> Option<StretchMode> {
     })
 }
 
-fn bar_beats(p: &Project) -> f64 {
+/// One bar of the project's time signature, in beats.
+pub(crate) fn bar_beats(p: &Project) -> f64 {
     let ts = p.transport.time_signature;
     if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) }
 }

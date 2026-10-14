@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-14
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -87,8 +87,11 @@ Each cell is a slot for one clip.
 | Clip, playing | launch control in the playing state, progress through the clip | relaunches |
 | Clip, recording | recording state | |
 
-Double-clicking an empty slot on a MIDI track creates an empty one-bar clip and opens it in the
-detail area. Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
+Double-clicking an empty slot on a MIDI track creates an empty one-bar clip there (`clip.create`,
+[arrangement editing](arrangement-editing.md#creating-a-clip)) and selects its track; on an
+empty slot with a stop button the first click of the two stops the track, as a single click
+does. Opening the new clip in the detail area, and double-clicking a clip to open it, come with
+clip selection in the Session view **(planned)**. Dropping a file or clip on a slot puts the clip
 there; on an empty audio track the track takes the clip's name **(observed in the corpus)**.
 
 Below the last scene each track has a **stop all clips** button for that track, and the main
