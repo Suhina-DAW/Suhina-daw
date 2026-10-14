@@ -118,9 +118,12 @@ impl WarpMode {
     }
 }
 
-/// The browser panel's narrowest and widest, and its width at first.
-pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
+/// The browser panel's narrowest and widest kept in the settings, and its width at first. On
+/// screen it is also never wider than [`BROWSER_SHARE`] of the window.
+pub const BROWSER_WIDTHS: (u32, u32) = (200, 4000);
 pub const BROWSER_WIDTH: u32 = 300;
+/// The most of the window's width the browser panel takes.
+pub const BROWSER_SHARE: f32 = 0.5;
 /// The preview's level, in dB: its range and its default.
 /// The longest sample the sample map shows by default, and the range it may be set to.
 pub const MAP_MAX_SECONDS: u32 = 10;

@@ -70,7 +70,7 @@ Both play a sample as soon as the pointer is over it.
 
 - **In the browser.** A **List | Map** switch above the results changes the results area into
   the map. The sidebar, the category filters, search, tags and the preview strip stay as they
-  are. The browser can be widened to 600 px.
+  are. The browser can be widened to half the window.
 - **Large.** The **Large** button at the map's corner (and View › Sample map,
   **Ctrl+Shift+M**) shows the map in the main area in place of the Session or Arrangement view,
   at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
@@ -109,7 +109,15 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   length is kept with the analysis, so changing the limit needs no new analysis.
 - The map's top bar says what it holds: "1 240 samples, analysing, 6 760 to go, 12 too long,
   3 could not be read". While the analysis goes on, the layout is computed again at most every
-  2 seconds, on a thread of its own ("arranging…"), so the window never waits for it.
+  2 seconds, on a thread of its own ("arranging…", then "arranging 42 %" as the layout's
+  iterations go by), so the window never waits for it.
+- While samples are left to analyse, a card in the middle of the map says **Analysing samples**,
+  with a bar and "6 760 of 14 000"; once they are all analysed and a layout takes longer than a
+  moment, it says **Arranging the map**, with a bar and the share of the layout's iterations done
+  ("Finding the samples that sound alike" before the first). The card is only drawn: the map
+  under it, its buttons and the rest of the window keep working.
+- When the status does not fit between the **Cloud | Grid** switch and the buttons, it is cut
+  short with "…"; its tooltip has all of it.
 - A file that cannot be decoded is left out and counted; `soundmap.info` gives the reason.
 
 ## Layout
@@ -119,15 +127,17 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
   item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
-  aspect ratio as `aspect`.
+  aspect ratio as `aspect`. Snapping a large map takes a while (over a second for 150 000 items),
+  so it is made on a thread of its own, only while the grid is shown, and the old grid is drawn
+  stretched meanwhile; resizing never waits for it.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
   **(to decide:** whether new items are placed into the existing layout instead, until a
   Re-layout button is pressed**)**.
 - A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items, a
-  minute or more for 200 000); meanwhile the map shows "Arranging…" over the previous layout or
-  an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
+  minute or more for 200 000); meanwhile the map shows the **Arranging the map** card over the
+  previous layout or an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
 
 ## Many items
 
@@ -245,7 +255,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
-| Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |
+| Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. The drag carries the point the button went down on (with the selection when it is part of it), not the one under the pointer when the drag begins a few pixels later; while it goes on, points are not highlighted or previewed and the view does not move. |
 | Double-click a point | Adds it to the selected track, as in the list. |
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |

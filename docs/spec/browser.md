@@ -69,7 +69,7 @@ From top to bottom (sizes in components.md › Browser):
 5. **Footer:** the tags (dots that filter) and the count ("312 items", "3 selected").
 
 The panel is on the left of the main view, or on the right (Settings › Interface › Browser ›
-Side). Its width is dragged at its inner edge (200–600 px, default 300) and kept. Ctrl+B and
+Side). Its width is dragged at its inner edge (from 200 px to half the window, default 300) and kept. Ctrl+B and
 View › Show browser show and hide it; hidden, it takes no space. Ctrl+F shows it if hidden and
 puts the cursor in the search field.
 

@@ -110,6 +110,11 @@ pub struct MapView {
     centre: [f32; 2],
     hovered: Option<(usize, f64)>,
     previewed: Option<usize>,
+    /// The point the primary button went down on: a drag carries it, not the point under the
+    /// pointer once the drag has begun a few pixels away.
+    pressed: Option<usize>,
+    /// Points are being dragged out of the map: no hover, preview or pan until the drop.
+    dragging_items: bool,
     /// Kinds the legend shows; the others are dimmed. Empty: all.
     pub legend: HashSet<Kind>,
     /// Shift-drag rectangle, from where it started.
@@ -221,6 +226,8 @@ impl Default for MapView {
             centre: [0.5, 0.5],
             hovered: None,
             previewed: None,
+            pressed: None,
+            dragging_items: false,
             legend: HashSet::new(),
             rubber_band: None,
             similar: None,
@@ -426,13 +433,24 @@ pub fn kind_colour(kind: Kind) -> Color32 {
     }
 }
 
+/// Work going on behind the map, shown in a card in the middle of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Busy {
+    pub title: String,
+    pub detail: String,
+    /// From 0 to 1.
+    pub fraction: f32,
+}
+
 /// Draws the map in the space `ui` offers and reports what the user did.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     view: &mut MapView,
     points: &[MapPoint],
     grid: Option<&Grid>,
     status: &str,
+    busy: Option<&Busy>,
     tags: &[String],
     events: &mut Vec<MapEvent>,
 ) {
@@ -452,10 +470,48 @@ pub fn show(
     let positions = positions(points, view.layout, grid, aspect);
     view.refresh(points, &positions, aspect);
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
+    if let Some(busy) = busy {
+        busy_card(ui, area, busy);
+    }
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
     }
     legend(ui, bottom, view);
+}
+
+/// The card in the middle of the map while it is analysed or arranged. It is only painted, so
+/// the map under it, the top bar and the rest of the window keep working.
+fn busy_card(ui: &Ui, area: Rect, busy: &Busy) {
+    const WIDTH: f32 = 240.0;
+    const HEIGHT: f32 = 62.0;
+    const BAR: f32 = 4.0;
+    let width = WIDTH.min(area.width() - 4.0 * theme::PAD);
+    if width < 80.0 || area.height() < HEIGHT + 2.0 * theme::PAD {
+        return;
+    }
+    let card = Rect::from_center_size(area.center(), Vec2::new(width, HEIGHT));
+    let painter = ui.painter().with_clip_rect(area);
+    painter.rect_filled(card, CornerRadius::ZERO, theme::panel_background());
+    painter.rect_stroke(card, CornerRadius::ZERO, Stroke::new(1.0, theme::border_strong()), StrokeKind::Inside);
+    let inner = card.shrink(2.0 * theme::PAD);
+    painter.text(
+        inner.left_top(),
+        egui::Align2::LEFT_TOP,
+        &busy.title,
+        theme::ui_font(theme::TEXT),
+        theme::text_primary(),
+    );
+    let bar = Rect::from_min_size(Pos2::new(inner.min.x, inner.center().y - BAR / 2.0), Vec2::new(inner.width(), BAR));
+    painter.rect_filled(bar, CornerRadius::ZERO, theme::control_background());
+    let done = Rect::from_min_size(bar.min, Vec2::new(bar.width() * busy.fraction.clamp(0.0, 1.0), BAR));
+    painter.rect_filled(done, CornerRadius::ZERO, theme::accent());
+    painter.text(
+        inner.left_bottom(),
+        egui::Align2::LEFT_BOTTOM,
+        &busy.detail,
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_secondary(),
+    );
 }
 
 fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &mut Vec<MapEvent>) {
@@ -471,7 +527,6 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
         }
     }
     child.add_space(theme::PAD);
-    child.label(egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL));
     child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         if ui
             .button(if view.window { "Dock" } else { "Window" })
@@ -502,6 +557,12 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
         if ui.button("+").on_hover_text("Zoom in").clicked() {
             view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
         }
+        // The status takes the room left between the switch and the buttons, cut short with
+        // "…" when it does not fit; the whole of it is in its tooltip.
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let text = egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL);
+            ui.add(egui::Label::new(text).truncate()).on_hover_text(status);
+        });
     });
 }
 
@@ -539,21 +600,35 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     let pointer = response.hover_pos();
     let under = pointer.and_then(|p| hit(&screen, p, HIT_RADIUS.max(cell_size(view, grid, transform) / 2.0)));
 
+    let primary_pressed = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+    if primary_pressed {
+        view.pressed = under;
+    }
     if response.drag_started_by(PointerButton::Primary) {
-        let start = response.interact_pointer_pos();
-        let on = start.and_then(|p| hit(&screen, p, HIT_RADIUS));
+        // Where the button went down, not where the pointer is now: the drag only begins once it
+        // has moved, and in a dense cloud another point is nearest by then.
+        let origin = ui.input(|i| i.pointer.press_origin()).or_else(|| response.interact_pointer_pos());
+        let on = view.pressed.take().or_else(|| origin.and_then(|p| hit(&screen, p, HIT_RADIUS)));
         match on {
             Some(i) => {
                 let selected: Vec<usize> =
                     points.iter().enumerate().filter(|(_, p)| p.selected).map(|(j, _)| j).collect();
                 let items = if points.get(i).is_some_and(|p| p.selected) { selected } else { vec![i] };
                 events.push(MapEvent::StartDrag(items));
+                view.dragging_items = true;
+                view.hovered = None;
             }
-            None if shift => view.rubber_band = start,
+            None if shift => view.rubber_band = origin,
             None => {}
         }
     }
-    if response.dragged_by(PointerButton::Primary) && view.rubber_band.is_none() && under.is_none()
+    if !response.dragged() && !response.drag_started() {
+        view.dragging_items = false;
+    }
+    if response.dragged_by(PointerButton::Primary)
+        && view.rubber_band.is_none()
+        && !view.dragging_items
+        && view.pressed.is_none()
         || response.dragged_by(PointerButton::Middle)
     {
         view.pan(rect, response.drag_delta());
@@ -582,8 +657,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         // all keeps the selection.
         let many = points.iter().filter(|p| p.selected).count() > 1;
         let deferred = |i: usize| many && !ctrl && points.get(i).is_some_and(|p| p.selected);
-        let pressed = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
-        if pressed && let Some(i) = under.filter(|i| !deferred(*i)) {
+        if primary_pressed && let Some(i) = under.filter(|i| !deferred(*i)) {
             events.push(MapEvent::Select { items: vec![i], add: ctrl });
             events.push(MapEvent::Preview(i));
             view.previewed = Some(i);
@@ -633,8 +707,9 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         }
     });
 
-    // Preview on hover, after the pointer rests.
+    // Preview on hover, after the pointer rests; not while points are dragged out of the map.
     let now = ui.input(|i| i.time);
+    let under = under.filter(|_| !view.dragging_items);
     match (under, view.hovered) {
         (Some(i), Some((j, since))) if i == j => {
             if view.preview_on_hover && view.previewed != Some(i) && now - since >= HOVER_PREVIEW_SECONDS {
@@ -1109,7 +1184,7 @@ mod tests {
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "20 samples", &[], events)
+                show(ui, view, &points, None, "20 samples", None, &[], events)
             },
             state,
         );
@@ -1135,6 +1210,72 @@ mod tests {
         );
     }
 
+    /// A drag carries the point the button went down on, even when the pointer is nearer
+    /// another point by the time the drag begins, and nothing is hovered or previewed on the way.
+    #[test]
+    fn a_drag_carries_the_pressed_point_not_the_one_under_the_pointer() {
+        use egui_kittest::Harness;
+        // A row of points 0.02 apart: a few pixels on screen, a dense cloud.
+        let points: Vec<MapPoint> = (0..40).map(|i| point(0.1 + i as f32 * 0.02, 0.5, Kind::Kick)).collect();
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "40 samples", None, &[], events)
+            },
+            state,
+        );
+        harness.run();
+        let view = &harness.state().0;
+        let transform = view.transform(view.area);
+        let first = transform.to_screen([0.1, 0.5]);
+        let far = transform.to_screen([0.1 + 30.0 * 0.02, 0.5]);
+        harness.drag_at(first);
+        harness.run();
+        for step in 1..=10 {
+            harness.hover_at(first + (far - first) * (step as f32 / 10.0));
+            harness.run();
+        }
+        let events = &harness.state().1;
+        let drags: Vec<&MapEvent> = events.iter().filter(|e| matches!(e, MapEvent::StartDrag(_))).collect();
+        assert_eq!(drags, vec![&MapEvent::StartDrag(vec![0])], "{events:?}");
+        let after = events.iter().position(|e| matches!(e, MapEvent::StartDrag(_))).unwrap_or(0);
+        assert!(
+            !events[after..].iter().any(|e| matches!(e, MapEvent::Preview(_) | MapEvent::Select { .. })),
+            "{events:?}"
+        );
+        harness.drop_at(far);
+        harness.run();
+    }
+
+    /// The card over the map while it is arranged is only painted: a point under it is still
+    /// previewed and selected.
+    #[test]
+    fn the_busy_card_does_not_block_the_map_under_it() {
+        use egui_kittest::Harness;
+        let points: Vec<MapPoint> = (0..20).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let busy = Busy { title: "Arranging the map".into(), detail: "42 %".into(), fraction: 0.42 };
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "20 samples", Some(&busy), &[], events)
+            },
+            state,
+        );
+        harness.run();
+        // Every point is in the middle, under the card.
+        let view = &harness.state().0;
+        let at = view.transform(view.area).to_screen([0.5, 0.5]);
+        harness.drag_at(at);
+        harness.run();
+        harness.drop_at(at);
+        harness.run();
+        assert!(
+            harness.state().1.iter().any(|e| matches!(e, MapEvent::Select { items, .. } if !items.is_empty())),
+            "{:?}",
+            harness.state().1
+        );
+    }
+
     /// The wheel and pinch zoom the map, but not through a dialog over it (#232).
     #[test]
     fn the_wheel_zooms_only_when_no_dialog_is_on_top() {
@@ -1146,7 +1287,7 @@ mod tests {
         let state = (MapView::default(), false);
         let mut harness = Harness::builder().with_size(size).build_ui_state(
             |ui, (view, dialog): &mut (MapView, bool)| {
-                show(ui, view, &points, None, "20 samples", &[], &mut Vec::new());
+                show(ui, view, &points, None, "20 samples", None, &[], &mut Vec::new());
                 if *dialog {
                     egui::Area::new(egui::Id::new("dialog")).order(egui::Order::Foreground).fixed_pos(Pos2::ZERO).show(
                         ui.ctx(),
@@ -1238,7 +1379,7 @@ mod many {
             let started = std::time::Instant::now();
             let mut output = ctx.run_ui(input, |ui| {
                 let mut events = Vec::new();
-                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+                show(ui, &mut view, points, None, "200 000 samples", None, &[], &mut events);
             });
             let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
             // No renderer here takes the density texture.
@@ -1267,7 +1408,7 @@ mod many {
             let started = std::time::Instant::now();
             let mut output = ctx.run_ui(input, |ui| {
                 let mut events = Vec::new();
-                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+                show(ui, &mut view, points, None, "200 000 samples", None, &[], &mut events);
             });
             let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
             output.textures_delta.clear();
@@ -1346,7 +1487,9 @@ mod similar_keys {
         let mut view = MapView::default();
         view.show_similar(0, vec![4, 2]);
         let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
-            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "6 samples", &[], events),
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "6 samples", None, &[], events)
+            },
             (view, Vec::<MapEvent>::new()),
         );
         harness.run();
@@ -1429,7 +1572,7 @@ mod look {
                 |ui, view: &mut MapView| {
                     crate::theme::install(ui.ctx());
                     let mut events = Vec::new();
-                    show(ui, view, &points, Some(&grid), "1 200 samples", &[], &mut events);
+                    show(ui, view, &points, Some(&grid), "1 200 samples", None, &[], &mut events);
                 },
                 view,
             );
@@ -1450,7 +1593,7 @@ mod look {
             |ui, view: &mut MapView| {
                 crate::theme::install(ui.ctx());
                 let mut events = Vec::new();
-                show(ui, view, &points, None, "200 000 samples", &[], &mut events);
+                show(ui, view, &points, None, "200 000 samples", None, &[], &mut events);
             },
             MapView::default(),
         );

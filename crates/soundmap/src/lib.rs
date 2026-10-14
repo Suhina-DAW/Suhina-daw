@@ -386,6 +386,11 @@ impl Prepared {
 
     /// Lays the scope out (or takes the kept layout) and finds the kinds.
     pub fn compute(self) -> Map {
+        self.compute_with_progress(&layout::Progress::new())
+    }
+
+    /// [`Prepared::compute`], counting how far the layout is in `progress`.
+    pub fn compute_with_progress(self, progress: &layout::Progress) -> Map {
         let features: Vec<features::Features> = self.items.iter().map(|(_, _, f)| *f).collect();
         let standardised = Standardised::new(&features);
         let named: Vec<Option<Kind>> =
@@ -393,7 +398,11 @@ impl Prepared {
         let kinds = standardised.guess_kinds(&named);
         let positions = match self.cached {
             Some(positions) => positions,
-            None => layout::layout(&standardised, scope_seed(self.items.iter().map(|(p, _, _)| p.as_path()))),
+            None => layout::layout_with_progress(
+                &standardised,
+                scope_seed(self.items.iter().map(|(p, _, _)| p.as_path())),
+                progress,
+            ),
         };
         let points = self
             .items

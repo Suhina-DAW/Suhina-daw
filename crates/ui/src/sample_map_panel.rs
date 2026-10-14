@@ -11,14 +11,18 @@ use serde_json::json;
 use suhina_session::Projects;
 use suhina_soundmap::Map;
 use suhina_soundmap::grid::Grid;
+use suhina_soundmap::layout::Progress;
 
 use crate::browser::{BrowserState, Place, ResultsMode};
 use crate::drop::{BrowserItem, ItemKind};
-use crate::sample_map::{self, Layout, MapEvent, MapPoint, MapView};
+use crate::sample_map::{self, Busy, Layout, MapEvent, MapPoint, MapView};
 use crate::settings::Settings;
 
 /// A scope is laid out again at most this often while its analysis goes on.
 const RELAYOUT_SECONDS: f64 = 2.0;
+/// A layout shows its progress card only once it has taken this long, so the quick ones made
+/// while samples are analysed do not flash it.
+const BUSY_AFTER_SECONDS: f64 = 0.3;
 /// How far the view's aspect ratio may drift from the grid's (as a fraction) before the grid is
 /// made again.
 const GRID_ASPECT_SLACK: f32 = 0.05;
@@ -34,6 +38,15 @@ struct ScopeKey {
 /// A finished layout: the map, its grid and the view's aspect the grid was made for.
 type Laid = (Map, Grid, f32);
 
+/// A layout being computed on a thread of its own.
+struct Job {
+    key: ScopeKey,
+    receiver: Receiver<Laid>,
+    progress: Progress,
+    /// When it started, in the window's time.
+    started: f64,
+}
+
 /// The map's state in the window.
 pub struct Panel {
     pub view: MapView,
@@ -42,8 +55,10 @@ pub struct Panel {
     /// The view's aspect the grid was made for.
     grid_aspect: f32,
     shown: Option<ScopeKey>,
-    /// A layout being computed on a thread of its own.
-    job: Option<(ScopeKey, Receiver<Laid>)>,
+    job: Option<Job>,
+    /// A grid being made again for the view's new shape, on a thread of its own: the aspect it is
+    /// made for, and where it arrives.
+    grid_job: Option<(f32, Receiver<Grid>)>,
     last_layout: f64,
     points: Vec<MapPoint>,
     /// What the points' flags were made from: search, tags, selection, pins, project.
@@ -63,6 +78,7 @@ impl Default for Panel {
             grid_aspect: 1.0,
             shown: None,
             job: None,
+            grid_job: None,
             last_layout: f64::NEG_INFINITY,
             points: Vec::new(),
             flags_key: None,
@@ -116,16 +132,17 @@ impl Panel {
     /// finished layout and starts a new one when it is out of date.
     fn refresh(&mut self, ui: &Ui, state: &BrowserState, projects: &mut Projects, settings: &Settings) {
         let analysed = projects.poll_sound_map();
-        if let Some((key, receiver)) = &self.job {
-            match receiver.try_recv() {
+        if let Some(job) = &self.job {
+            match job.receiver.try_recv() {
                 Ok((map, grid, aspect)) => {
                     projects.sound_map_mut().keep(&map);
-                    self.shown = Some(key.clone());
+                    self.shown = Some(job.key.clone());
                     self.map = Some(map);
                     self.grid = Some(grid);
                     self.grid_aspect = aspect;
                     self.flags_key = None;
                     self.job = None;
+                    self.grid_job = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -163,27 +180,55 @@ impl Panel {
         let (sender, receiver) = channel();
         let ctx = ui.ctx().clone();
         let aspect = self.view.aspect();
+        let progress = Progress::new();
+        let counter = progress.clone();
         let spawned = std::thread::Builder::new().name("soundmap-layout".into()).spawn(move || {
-            let map = prepared.compute();
+            let map = prepared.compute_with_progress(&counter);
             let grid = map.grid(aspect);
             let _ = sender.send((map, grid, aspect));
             ctx.request_repaint();
         });
         if spawned.is_ok() {
-            self.job = Some((key, receiver));
+            self.job = Some(Job { key, receiver, progress, started: now });
         }
     }
 
     /// Remakes the grid when the view's shape changed noticeably since it was made, so the grid
-    /// keeps the view's aspect ratio.
-    fn fit_grid(&mut self) {
+    /// keeps the view's aspect ratio. Snapping a large map takes a while (over a second for
+    /// 150 000 samples), so it is done on a thread of its own, one at a time, and only while the
+    /// grid is shown; the old grid is drawn stretched meanwhile.
+    fn fit_grid(&mut self, ui: &Ui) {
+        if let Some((aspect, receiver)) = &self.grid_job {
+            match receiver.try_recv() {
+                Ok(grid) => {
+                    self.grid_aspect = *aspect;
+                    self.grid = Some(grid);
+                    self.grid_job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.grid_job = None,
+            }
+        }
         let aspect = self.view.aspect();
-        if let Some(map) = &self.map
-            && self.grid.is_some()
-            && (aspect / self.grid_aspect - 1.0).abs() > GRID_ASPECT_SLACK
+        if self.view.layout != Layout::Grid
+            || self.grid.is_none()
+            || (aspect / self.grid_aspect - 1.0).abs() <= GRID_ASPECT_SLACK
         {
-            self.grid = Some(map.grid(aspect));
-            self.grid_aspect = aspect;
+            return;
+        }
+        let Some(map) = &self.map else { return };
+        let positions: Vec<[f32; 2]> = map.points.iter().map(|p| p.position).collect();
+        let (sender, receiver) = channel();
+        let ctx = ui.ctx().clone();
+        let spawned = std::thread::Builder::new().name("soundmap-grid".into()).spawn(move || {
+            let _ = sender.send(suhina_soundmap::grid::snap(&positions, aspect));
+            ctx.request_repaint();
+        });
+        if spawned.is_ok() {
+            self.grid_job = Some((aspect, receiver));
         }
     }
 
@@ -240,13 +285,23 @@ impl Panel {
         self.view.points_changed();
     }
 
+    /// How far the layout being computed is, as the status says it.
+    fn arranging(&self) -> Option<String> {
+        let job = self.job.as_ref()?;
+        let fraction = job.progress.fraction();
+        Some(if fraction > 0.0 { format!("arranging {} %", percent(fraction)) } else { "arranging…".into() })
+    }
+
     fn status(&self) -> String {
         let Some(map) = &self.map else {
-            return if self.job.is_some() { "Arranging…".into() } else { "No samples analysed yet".into() };
+            return match self.arranging() {
+                Some(arranging) => capitalised(&arranging),
+                None => "No samples analysed yet".into(),
+            };
         };
         let mut parts = vec![format!("{} samples", map.points.len())];
-        if self.job.is_some() {
-            parts.push("arranging…".into());
+        if let Some(arranging) = self.arranging() {
+            parts.push(arranging);
         }
         if map.pending > 0 {
             parts.push(format!("analysing, {} to go", map.pending));
@@ -261,6 +316,36 @@ impl Panel {
             parts.push(format!("{} left out", map.over_limit));
         }
         parts.join(", ")
+    }
+
+    /// The card in the middle of the map: the analysis while samples are left to analyse, else a
+    /// layout that has been running for a moment.
+    fn busy(&self, now: f64) -> Option<Busy> {
+        if let Some(map) = &self.map
+            && map.pending > 0
+        {
+            let done = map.points.len();
+            let total = done.saturating_add(map.pending);
+            return Some(Busy {
+                title: "Analysing samples".into(),
+                detail: format!("{done} of {total}; the map is arranged as it goes"),
+                fraction: done as f32 / total.max(1) as f32,
+            });
+        }
+        let job = self.job.as_ref()?;
+        if now - job.started < BUSY_AFTER_SECONDS {
+            return None;
+        }
+        let fraction = job.progress.fraction();
+        Some(Busy {
+            title: "Arranging the map".into(),
+            detail: if fraction > 0.0 {
+                format!("{} %", percent(fraction))
+            } else {
+                "Finding the samples that sound alike".into()
+            },
+            fraction,
+        })
     }
 
     /// Moves the map into a window of its own (`true`) or back into the browser. While it has a
@@ -282,12 +367,13 @@ impl Panel {
         revision: u64,
     ) -> bool {
         self.refresh(ui, state, projects, settings);
-        self.fit_grid();
-        self.update_points(state, projects, revision);
         self.view.layout = if settings.map_grid { Layout::Grid } else { Layout::Cloud };
+        self.fit_grid(ui);
+        self.update_points(state, projects, revision);
         self.view.preview_on_hover = settings.map_hover_preview;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
+        let busy = self.busy(ui.input(|i| i.time));
         // The waveform for the tooltip of the point the pointer rests on, read in the background.
         let now = ui.input(|i| i.time);
         let resting = self.view.resting(now);
@@ -297,7 +383,16 @@ impl Panel {
         }
         let mut events = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            sample_map::show(ui, &mut self.view, &self.points, self.grid.as_ref(), &status, &tags, &mut events);
+            sample_map::show(
+                ui,
+                &mut self.view,
+                &self.points,
+                self.grid.as_ref(),
+                &status,
+                busy.as_ref(),
+                &tags,
+                &mut events,
+            );
         });
         let mut settings_changed = false;
         for event in events {
@@ -410,6 +505,17 @@ impl Panel {
         }
         false
     }
+}
+
+/// A fraction from 0 to 1 as a whole percentage.
+fn percent(fraction: f32) -> u32 {
+    (fraction.clamp(0.0, 1.0) * 100.0).floor() as u32
+}
+
+/// `text` with its first letter in upper case.
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// Previews a sample as the browser does: decoded on the browser's reader thread, then played.
