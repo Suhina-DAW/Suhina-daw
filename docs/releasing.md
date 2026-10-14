@@ -1,9 +1,9 @@
 ---
 description: How versions are numbered, how release builds and the nightly for Linux, Windows and macOS are made
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, Discord announcement, release notes, changelog
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, Discord announcement, release notes, changelog
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - .github/workflows/release.yml
   - .github/workflows/discord.yml
@@ -67,8 +67,16 @@ packages keep one name, `suhina-nightly-<platform>`, so a link to the latest one
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz
 ```
 
+Each night is also kept as a pre-release of its own under the tag **`nightly-YYYYMMDD`**
+(`nightly-20261013`), with the same packages and notes, published on the same commit and never
+the latest. A tester can go back to an earlier night to check when something broke, or return
+to a build that opens their project. A second nightly on the same day, one run by hand, replaces
+that day's. The nightly job deletes the dated nightlies older than `NIGHTLY_KEEP_DAYS` (30) with
+their tags; it touches no other release, and a failure there leaves the new nightly published.
+
 Each new nightly is posted to Discord's releases channel (see [Discord](#discord)): the version,
-the download link and the changes since the previous nightly (at most 15, as described under
+a link to its dated release, so the link still leads to the build it announced after the next
+night, and the changes since the previous nightly (at most 15, as described under
 [Release notes](#release-notes)). A failed post leaves the nightly published.
 
 Until Suhina has a release of its own (published, not a release candidate), the nightly is the
