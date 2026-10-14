@@ -3,7 +3,8 @@ name: Release
 # Builds the release binaries. A `v*` tag builds them and attaches them to a draft GitHub Release:
 # `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Every night main is built as the
 # nightly, a release under the tag `nightly` that each new one replaces, so people can try the
-# current state; a night with no new commit on main builds nothing. Running the workflow by hand
+# current state, and kept for NIGHTLY_KEEP_DAYS as its own pre-release `nightly-YYYYMMDD`, so a
+# tester can go back to an earlier night; a night with no new commit on main builds nothing. Running the workflow by hand
 # only builds the packages, as workflow artifacts, or with "nightly" publishes the nightly from main
 # now. See docs/releasing.md.
 # The binaries are not signed yet (ROADMAP, M8): macOS Gatekeeper and Windows SmartScreen warn
@@ -35,6 +36,8 @@ env:
   APP: suhina
   # The process plug-ins run in (ADR 0006); suhina-cli and suhina look for it next to themselves.
   HOST: suhina-plugin-host
+  # How long a night's own release, `nightly-YYYYMMDD`, is kept (docs/releasing.md › Nightly).
+  NIGHTLY_KEEP_DAYS: 30
 
 jobs:
   version:
@@ -46,6 +49,7 @@ jobs:
       nightly: ${{ steps.version.outputs.nightly }}
       skip: ${{ steps.version.outputs.skip }}
       name: ${{ steps.version.outputs.name }}
+      dated: ${{ steps.version.outputs.dated }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -71,6 +75,7 @@ jobs:
             exit 1
           fi
           nightly=false
+          dated=
           skip=false
           if [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$NIGHTLY_INPUT" = "true" ]; then
             if [ "$GITHUB_REF" != "refs/heads/main" ]; then
@@ -80,7 +85,10 @@ jobs:
             nightly=true
             # The night's build of this commit: 0.1.0-nightly.20261013+a15ad35. The commit is
             # build metadata, so a hash with a leading zero is still a valid version.
-            version="${version%%-*}-nightly.$(date -u +%Y%m%d)+${GITHUB_SHA::7}"
+            day=$(date -u +%Y%m%d)
+            version="${version%%-*}-nightly.$day+${GITHUB_SHA::7}"
+            # The night's own release, kept after `nightly` has moved on.
+            dated="nightly-$day"
             # A scheduled night with nothing new on main builds nothing.
             built=$(git ls-remote origin refs/tags/nightly | cut -f1)
             if [ "$GITHUB_EVENT_NAME" = "schedule" ] && [ "$built" = "$GITHUB_SHA" ]; then
@@ -99,6 +107,7 @@ jobs:
             echo "nightly=$nightly"
             echo "skip=$skip"
             echo "name=$name"
+            echo "dated=$dated"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -340,6 +349,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
+          DATED: ${{ needs.version.outputs.dated }}
           PREVIOUS: ${{ steps.previous.outputs.sha }}
         run: |
           ls -l dist
@@ -369,6 +379,33 @@ jobs:
             "${flags[@]}" \
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
+          # The same packages under the night's own tag, a pre-release that is never the latest.
+          # A second nightly on the same day (one run by hand) replaces that day's.
+          gh release delete "$DATED" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create "$DATED" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "Suhina nightly $VERSION" \
+            --notes "$notes"
+      # Deletes the dated nightlies older than NIGHTLY_KEEP_DAYS, with their tags, so the list of
+      # releases stays readable. Only tags `nightly-YYYYMMDD` are touched; a failure here leaves
+      # the new nightly published.
+      - name: Delete old dated nightlies
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d "$NIGHTLY_KEEP_DAYS days ago" +%Y%m%d)
+          echo "Keeping the dated nightlies from $cutoff on"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' \
+            | { grep -E '^nightly-[0-9]{8}$' || true; } \
+            | while read -r tag; do
+                if [ "${tag#nightly-}" -lt "$cutoff" ]; then
+                  echo "Deleting $tag"
+                  gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+                fi
+              done
       # Posts the new nightly to the Discord releases channel, the secret DISCORD_WEBHOOK_RELEASES
       # (Discord: channel settings > Integrations > Webhooks); without the secret nothing is
       # posted. A failed post leaves the nightly published.
@@ -376,6 +413,7 @@ jobs:
         continue-on-error: true
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          DATED: ${{ needs.version.outputs.dated }}
           PREVIOUS: ${{ steps.previous.outputs.sha }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_RELEASES }}
         run: |
@@ -384,7 +422,7 @@ jobs:
             exit 0
           fi
           python3 scripts/release_notes.py --repo "$GITHUB_REPOSITORY" \
-            --base "$PREVIOUS" --head "$GITHUB_SHA" --style discord --version "$VERSION" > post.txt
+            --base "$PREVIOUS" --head "$GITHUB_SHA" --style discord --version "$VERSION" --tag "$DATED" > post.txt
           cat post.txt
           # allowed_mentions: a commit title never pings anyone.
           jq -Rs '{content: ., allowed_mentions: {parse: []}}' post.txt \
