@@ -656,7 +656,7 @@ fn clips_copy_cut_and_paste_with_their_own_content() {
 }
 
 /// Bass and Lead play notes, Drums audio; each has two clip slots, Lead's first one full.
-fn slot_project() -> Project {
+fn midi_slot_project() -> Project {
     let mut p = project();
     let mut drums = p.tracks[0].clone();
     drums.id = TrackId(3);
@@ -681,7 +681,7 @@ fn content_of<'a>(session: &'a Session, clip: &Clip) -> Option<&'a ClipContent> 
 
 #[test]
 fn an_empty_midi_clip_is_made_in_a_slot_one_bar_long_and_looping() {
-    let mut session = Session::new(slot_project());
+    let mut session = Session::new(midi_slot_project());
     let made = run(&mut session, "clip.create", json!({ "track": "Bass", "scene": 2 })).unwrap();
     assert_eq!((made["track"].as_u64(), made["scene"].as_u64()), (Some(1), Some(2)));
     let clip = session.project().launcher.columns[0].slots[1].clip.clone().unwrap();
@@ -693,7 +693,7 @@ fn an_empty_midi_clip_is_made_in_a_slot_one_bar_long_and_looping() {
     // One undo step takes it back.
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert!(session.project().launcher.columns[0].slots[1].clip.is_none());
-    assert_eq!(session.project(), &slot_project());
+    assert_eq!(session.project(), &midi_slot_project());
 }
 
 #[test]
@@ -723,7 +723,7 @@ fn an_empty_midi_clip_in_the_arrangement_replaces_what_it_covers_unless_stacked(
 
 #[test]
 fn an_empty_midi_clip_is_refused_where_it_cannot_go_and_changes_nothing() {
-    let mut session = Session::new(slot_project());
+    let mut session = Session::new(midi_slot_project());
     for (params, why) in [
         (json!({ "track": "Drums", "scene": 1 }), "MIDI track"),
         (json!({ "track": "Lead", "scene": 1 }), "already has a clip"),
@@ -746,14 +746,14 @@ fn an_empty_midi_clip_is_refused_where_it_cannot_go_and_changes_nothing() {
         let error = run(&mut session, "clip.create", params.clone()).unwrap_err();
         assert!(error.contains(why), "{params}: {error}");
     }
-    assert_eq!(session.project(), &slot_project());
+    assert_eq!(session.project(), &midi_slot_project());
     assert!(!session.can_undo(), "nothing was recorded");
 }
 
 #[test]
 fn an_empty_midi_clip_follows_odd_time_signatures_splits_a_clip_it_falls_inside_and_makes_a_lane() {
     // One bar of 7/8 is three and a half beats, in a slot; a given length wins.
-    let mut odd = slot_project();
+    let mut odd = midi_slot_project();
     odd.transport.time_signature = TimeSignature { numerator: 7, denominator: 8 };
     let mut session = Session::new(odd);
     let made = run(&mut session, "clip.create", json!({ "track": "Bass", "scene": 1 })).unwrap();
