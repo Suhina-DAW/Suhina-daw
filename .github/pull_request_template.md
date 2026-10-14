@@ -18,7 +18,7 @@
      shortcut too, give commands ready to copy, and explain a music term the first time. After
      each step, say what should happen. End with the edge cases (undo, empty project, a second
      click). For a change nobody can notice (refactor, tests, CI, docs), write one line saying so.
-     AGENTS.md › Before you finish a task has the full rule.
+     docs/how-to-check.md shows how, with a template and an example.
 
 1. Open Suhina. You see an empty project.
 2. ...

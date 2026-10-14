@@ -168,8 +168,8 @@ shortcut, a setting, drag and drop, playback and sound, a file it opens, imports
 `suhina-cli` command, an MCP tool), its description has a **How to check it** section: numbered
 steps that someone who has never used Suhina or any other music program can follow from a test
 build ([CONTRIBUTING.md › Trying a pull request](CONTRIBUTING.md#trying-a-pull-request)) and
-finish in a few minutes. The `how-to-check` skill (`.claude/skills/how-to-check/`) walks through
-writing them. The steps
+finish in a few minutes. [`docs/how-to-check.md`](docs/how-to-check.md) is the guide to writing
+them, for any agent or person. The steps
 
 - start from opening Suhina with nothing loaded, and say how to get everything the check needs:
   which menu creates the project, track or clip, or which file to use and where it comes from (a

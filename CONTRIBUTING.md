@@ -173,8 +173,7 @@ AI coding agents are welcome, under these rules:
   numbered steps from opening Suhina with nothing loaded, every control named as it reads on
   screen and where it is, every command ready to copy, and what should happen after each step,
   written so that someone who has never used a music program can check it from the test build.
-  [`AGENTS.md` › Before you finish a task](AGENTS.md#4-before-you-finish-a-task) says what the
-  steps contain.
+  [`docs/how-to-check.md`](docs/how-to-check.md) shows how to write them.
 - **You are responsible for what you submit.** Before you open a pull request, run the tests and
   try every change by hand to see that it works as intended; you answer review questions, not
   the agent.
