@@ -17,6 +17,18 @@ name: Test build
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    # Only a pull request that changes what goes into the binaries is built; one that changes
+    # only documentation, scripts, other workflows or agent files has no new binary to try.
+    paths:
+      - "apps/**"
+      - "crates/**"
+      - "devices/**"
+      - "presets/**"
+      - "third_party/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - ".github/workflows/test-build.yml"
   workflow_dispatch:
     inputs:
       pull_requests:
