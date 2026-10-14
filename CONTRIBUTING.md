@@ -66,6 +66,15 @@ acceptance criteria, where the code goes — and keep the plan in the issue and 
 pull request. The rules in [AI-assisted contributions](#ai-assisted-contributions) apply to what
 the agent wrote.
 
+## Trying a pull request
+
+A pull request can be tried without building it: GitHub Actions builds packages of it for
+Windows, macOS and Linux ([`docs/releasing.md` › Test builds](docs/releasing.md#test-builds)) and
+links the downloads from the pull request in a comment, updated with every new build. A maintainer's own pull requests are
+built on every push. A contributor's pull request is built once a maintainer has read the diff and
+added the `test-build` label; a later push takes the label off, and the new commits are built when
+the label is added again.
+
 ## Clean-room
 
 Suhina reimplements the *behaviour* of commercial DAWs, Ableton Live in particular, without
