@@ -17,16 +17,18 @@ name: Test build
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    # A pull request that changes only these builds nothing: there is no new binary to try.
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
-      - "LICENSE"
-      - "NOTICE"
-      - ".claude/**"
-      - "scripts/**"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE/**"
+    # Only a pull request that changes what goes into the binaries is built; one that changes
+    # only documentation, scripts, other workflows or agent files has no new binary to try.
+    paths:
+      - "apps/**"
+      - "crates/**"
+      - "devices/**"
+      - "presets/**"
+      - "third_party/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - ".github/workflows/test-build.yml"
   workflow_dispatch:
     inputs:
       pull_requests:
