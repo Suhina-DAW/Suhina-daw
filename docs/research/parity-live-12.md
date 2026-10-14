@@ -3,7 +3,7 @@ description: How much of Ableton Live 12's documented functionality Suhina has t
 read_when: Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap.
 type: plan
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - scripts/parity/**
 ---
@@ -96,6 +96,14 @@ Suhina is pre-alpha with milestones M0-M2, M5 done and M3, M4, M6, M8 in progres
 - **Started but narrow:** the device catalogue (section 5), the clip view, arrangement editing
   beyond moving and fading clips, and the browser's non-core parts (packs, collections, cloud, the
   tag editor).
+- **Inputs, the first part of recording** ([#263](https://github.com/suhina-daw/suhina-daw/issues/263),
+  [ADR 0017](../decisions/0017-inputs-and-latency.md)): arming and live input come before
+  recording itself, which is still not started.
+  - MIDI controllers play the armed tracks' instruments live, with the sustain pedal (#264).
+  - While a track is armed the engine keeps one block ahead instead of two, so a key sounds
+    within about 5 ms plus the device at 128 frames, and Settings › Audio says how long (#265).
+  - Each track chooses the MIDI port and channel it hears, so two controllers play two armed
+    tracks each its own (#278).
 
 ### Three places the repository's own docs read better than the code
 
@@ -375,6 +383,7 @@ Two observations the numbers make plain:
 | Session and Arrangement views, browser, sample map, settings, installers | M8 |
 | Sends and returns, automation, MIDI controllers and Push, patch devices, ARA | "Later, not ordered" |
 | Audio to MIDI, stem separation | own section of the roadmap |
+| Inputs: MIDI controllers, arming, input monitoring (parts of ch 17 and 19) | the recording-and-inputs epic [#263](https://github.com/suhina-daw/suhina-daw/issues/263), [ADR 0017](../decisions/0017-inputs-and-latency.md) |
 | **Recording (ch 19), comping (ch 21), bounce (ch 20), racks (ch 25), automation (ch 26), clip envelopes (ch 27), MIDI effects (ch 30), MIDI tools (ch 11), MPE (ch 12), grooves (ch 14), tuning (ch 15), MIDI remote (ch 34), Link and sync (ch 37), video (ch 28), accessibility (ch 41)** | **nothing, or "later, not ordered" at best** |
 
 Two areas are named in the roadmap only as devices ("a sampler and drum sampler", "delays,
@@ -391,7 +400,8 @@ whether a DAW is usable without it.
 
 1. **Recording and inputs** (ch 19-21): audio and MIDI recording, arming,
    monitoring, count-in, take lanes and comping. Nothing else unlocks as much, and three later
-   features (resampling, capture MIDI, bouncing a take) hang off it.
+   features (resampling, capture MIDI, bouncing a take) hang off it. Under way in the epic #263:
+   inputs and arming first (ADR 0017), then recording, take lanes and comping.
 2. **MIDI editing and the cheap MIDI effects** (ch 10-11 and 30): the note editor,
    quantise, and the eight MIDI effects, of which Scale, Chord, Arpeggiator and Velocity are small
    and immediately felt.
@@ -405,7 +415,7 @@ whether a DAW is usable without it.
 6. **Arrangement editing: locators, the loop brace, split, consolidate** (ch 6):
    small commands, large workflow gain, and two of them are already open issues (#98, #99).
 
-None of the six has a milestone today; the board's open items are dominated by the plug-in epic
+None of the six has a milestone today (the first has an epic, #263); the board's open items are dominated by the plug-in epic
 (M6) and UI polish. [ADR 0016](../decisions/0016-parity-target.md) turns the scope, the exclusions
 and the build order into a decision; the milestone assignment itself is still open.
 
