@@ -17,6 +17,16 @@ name: Test build
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    # A pull request that changes only these builds nothing: there is no new binary to try.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+      - "NOTICE"
+      - ".claude/**"
+      - "scripts/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
   workflow_dispatch:
     inputs:
       pull_requests:
