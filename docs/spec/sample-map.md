@@ -3,7 +3,7 @@ description: How the sample map behaves: samples laid out by how they sound, col
 read_when: sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
@@ -152,6 +152,11 @@ number of points in view:
   than a solid blob.
 - The grid layout draws the same way. A cell smaller than 3 pixels is part of the density;
   larger cells are drawn as before.
+- **Resizing.** While the map's area changes size (the window, the map's own window, the
+  large map), the last density raster is drawn scaled into place, so the points stay where they
+  are drawn. It is worked out again once the area has kept one size for 150 ms. In the cloud
+  the legend's counts and the clusters are kept, since the points' positions do not depend on
+  the view's shape; the grid works them out again, as its cells follow it.
 
 **Labels.** Every cluster of a kind gets a label, not one label for the whole kind. Kinds
 that sit in several places are named in each of them.

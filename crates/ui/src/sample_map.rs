@@ -27,6 +27,9 @@ const LABEL_FADE_ZOOM: f32 = 6.0;
 const TOP_BAR: f32 = 24.0;
 const LEGEND: f32 = 20.0;
 const SIMILAR_WIDTH: f32 = 180.0;
+/// How long the map area must keep one size before the density raster is worked out for it;
+/// until then the last raster is drawn scaled (docs/spec/sample-map.md › Many items).
+const RESIZE_SETTLE_SECONDS: f64 = 0.15;
 
 /// One point, as the browser gives it to the view.
 #[derive(Debug, Clone, PartialEq)]
@@ -114,6 +117,8 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The area the density was last asked for, and since when it has had that size.
+    resized: (Rect, f64),
     /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
     pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
     /// Counts [`MapView::points_changed`], so what is worked out from the points is kept until
@@ -123,7 +128,8 @@ pub struct MapView {
 }
 
 /// The points the cache was worked out for: [`MapView::points_changed`]'s count, their number and
-/// address, the layout and the view's aspect (the grid's positions follow it).
+/// address, the layout and, in the grid, the view's aspect (the grid's positions follow it; the
+/// cloud's do not, so resizing the cloud keeps the cache).
 type PointsKey = (u64, usize, usize, Layout, u32);
 
 /// What the view works out from the points when they change, not every frame
@@ -137,7 +143,18 @@ struct Cache {
     /// The clusters that get a label, largest first.
     clusters: Vec<Cluster>,
     /// The density raster last drawn and what it was drawn for.
-    density: Option<(DensityKey, egui::TextureHandle)>,
+    density: Option<Density>,
+}
+
+/// A density raster and what it was worked out for.
+#[derive(Clone)]
+struct Density {
+    key: DensityKey,
+    /// The area it covers.
+    area: Rect,
+    /// Where the points were on screen when it was drawn.
+    transform: Transform,
+    texture: egui::TextureHandle,
 }
 
 impl std::fmt::Debug for Cache {
@@ -146,20 +163,51 @@ impl std::fmt::Debug for Cache {
             .field("key", &self.key)
             .field("counts", &self.counts)
             .field("clusters", &self.clusters.len())
-            .field("density", &self.density.as_ref().map(|(_, t)| t.id()))
+            .field("density", &self.density.as_ref().map(|d| d.texture.id()))
             .finish()
     }
 }
 
-/// Everything the density raster depends on; it is drawn again only when one of these changes.
+/// Everything the density raster depends on apart from the size of the area it is drawn in; it
+/// is drawn again at once when one of these changes. A new size waits for the area to settle
+/// ([`density_plan`]).
 #[derive(Debug, Clone, PartialEq)]
 struct DensityKey {
     points: Option<PointsKey>,
-    rect: Rect,
-    scale: f32,
+    zoom: f32,
     centre: [f32; 2],
     legend: Vec<Kind>,
     similar: Option<(usize, Vec<usize>)>,
+}
+
+/// What to do with the density raster this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DensityPlan {
+    /// Draw the last one as it is.
+    Keep,
+    /// Draw the last one scaled into the new area: it is being resized.
+    Scale,
+    /// Work it out again.
+    Build,
+}
+
+/// What to do with the density raster `drawn` (what it was worked out for and in which area)
+/// when `wanted` is asked for in `area`, which has had its size since `since`. A change of the
+/// content builds it at once; a change of the area alone is drawn scaled until the area has
+/// kept its size for [`RESIZE_SETTLE_SECONDS`], so a resize does not work it out every frame.
+fn density_plan(
+    drawn: Option<(&DensityKey, Rect)>,
+    wanted: &DensityKey,
+    area: Rect,
+    since: f64,
+    now: f64,
+) -> DensityPlan {
+    match drawn {
+        Some((key, _)) if key != wanted => DensityPlan::Build,
+        Some((_, rect)) if rect == area => DensityPlan::Keep,
+        Some(_) if now - since < RESIZE_SETTLE_SECONDS => DensityPlan::Scale,
+        _ => DensityPlan::Build,
+    }
 }
 
 impl Default for MapView {
@@ -177,6 +225,7 @@ impl Default for MapView {
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            resized: (Rect::NOTHING, 0.0),
             revision: 0,
             cache: Cache::default(),
             hover_waveform: None,
@@ -193,7 +242,8 @@ impl MapView {
 
     /// Works out the counts and clusters again when the points changed.
     fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]], aspect: f32) {
-        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect.to_bits()));
+        let aspect = if self.layout == Layout::Grid { aspect.to_bits() } else { 0 };
+        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect));
         if self.cache.key == key {
             return;
         }
@@ -275,6 +325,12 @@ impl Transform {
         let d = p - self.rect.center();
         [self.centre[0] + d.x / self.scale.max(1e-6), self.centre[1] + d.y / self.scale.max(1e-6)]
     }
+}
+
+/// Where `rect`, on screen under `from`, is under `to`: the same map positions at `to`'s place and
+/// scale, for drawing the last density raster while the area is resized.
+fn moved(rect: Rect, from: Transform, to: Transform) -> Rect {
+    Rect::from_two_pos(to.to_screen(from.to_map(rect.min)), to.to_screen(from.to_map(rect.max)))
 }
 
 /// The width over the height of `rect`; 1 when it has no size.
@@ -696,22 +752,34 @@ fn draw_points(
         kinds.sort();
         let key = DensityKey {
             points: view.cache.key,
-            rect: area,
-            scale: transform.scale,
-            centre: transform.centre,
+            zoom: view.zoom,
+            centre: view.centre,
             legend: kinds,
             similar: view.similar.clone(),
         };
-        if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
-            let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
-            let image = crowd::density(screen, colour, area);
-            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
-            view.cache.density = Some((key, handle));
+        let now = painter.ctx().input(|i| i.time);
+        if view.resized.0 != area {
+            view.resized = (area, now);
         }
-        if let Some((_, handle)) = view.cache.density.as_ref() {
-            let size = handle.size_vec2() * crowd::BIN;
+        let drawn = view.cache.density.as_ref().map(|d| (&d.key, d.area));
+        match density_plan(drawn, &key, area, view.resized.1, now) {
+            DensityPlan::Build => {
+                let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
+                let image = crowd::density(screen, colour, area);
+                let texture = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
+                view.cache.density = Some(Density { key, area, transform, texture });
+            }
+            DensityPlan::Scale => {
+                // Come back once the size has settled, even if nothing else asks for a frame.
+                let left = RESIZE_SETTLE_SECONDS - (now - view.resized.1);
+                painter.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left.max(0.0)));
+            }
+            DensityPlan::Keep => {}
+        }
+        if let Some(density) = view.cache.density.as_ref() {
+            let drawn = Rect::from_min_size(density.area.min, density.texture.size_vec2() * crowd::BIN);
             let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-            painter.image(handle.id(), Rect::from_min_size(area.min, size), uv, Color32::WHITE);
+            painter.image(density.texture.id(), moved(drawn, density.transform, transform), uv, Color32::WHITE);
         }
     }
     let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
@@ -889,6 +957,53 @@ mod tests {
             pinned: false,
             tags: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_density_waits_for_a_resize_to_settle_but_not_for_a_change_of_content() {
+        let key = DensityKey { points: None, zoom: 1.0, centre: [0.5, 0.5], legend: Vec::new(), similar: None };
+        let small = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let large = Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 300.0));
+        assert_eq!(density_plan(None, &key, small, 0.0, 0.0), DensityPlan::Build, "nothing drawn yet");
+        assert_eq!(density_plan(Some((&key, small)), &key, small, 0.0, 9.0), DensityPlan::Keep);
+        assert_eq!(density_plan(Some((&key, small)), &key, large, 1.0, 1.1), DensityPlan::Scale, "being resized");
+        assert_eq!(density_plan(Some((&key, small)), &key, large, 1.0, 1.2), DensityPlan::Build, "settled");
+        let zoomed = DensityKey { zoom: 2.0, ..key.clone() };
+        assert_eq!(density_plan(Some((&key, small)), &zoomed, large, 1.0, 1.0), DensityPlan::Build, "zoomed");
+        let filtered = DensityKey { legend: vec![Kind::Kick], ..key.clone() };
+        assert_eq!(density_plan(Some((&key, small)), &filtered, small, 0.0, 0.0), DensityPlan::Build);
+    }
+
+    #[test]
+    fn a_scaled_raster_keeps_the_points_where_they_are_drawn_now() {
+        let view = MapView::default();
+        let before = view.transform(Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(400.0, 300.0)));
+        let after = view.transform(Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(800.0, 500.0)));
+        let raster = before.rect;
+        let moved = moved(raster, before, after);
+        for p in [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1]] {
+            // Where a point sat in the old raster, as a fraction of it, is where it is drawn now.
+            let old = before.to_screen(p);
+            let fraction = (old - raster.min) / raster.size();
+            let now = moved.min + fraction * moved.size();
+            assert!((now - after.to_screen(p)).length() < 1e-3, "{p:?}: {now:?} against {:?}", after.to_screen(p));
+        }
+    }
+
+    #[test]
+    fn resizing_the_cloud_keeps_the_counts_and_clusters_but_the_grid_works_them_out_again() {
+        let points: Vec<MapPoint> = (0..50).map(|i| point(i as f32 / 50.0, 0.5, Kind::Kick)).collect();
+        let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
+        let mut view = MapView::default();
+        view.refresh(&points, &positions, 1.0);
+        let cloud = view.cache.key;
+        view.refresh(&points, &positions, 1.6);
+        assert_eq!(view.cache.key, cloud, "the cloud's positions do not follow the aspect");
+        view.layout = Layout::Grid;
+        view.refresh(&points, &positions, 1.0);
+        let grid = view.cache.key;
+        view.refresh(&points, &positions, 1.6);
+        assert_ne!(view.cache.key, grid, "the grid's positions follow the aspect");
     }
 
     #[test]
@@ -1134,6 +1249,51 @@ mod many {
             }
         }
         slowest
+    }
+
+    /// Resizes a 200 000-point map every frame for `frames` frames of 1/60 s, then leaves it
+    /// alone for `settle` frames. Returns the slowest resize frame and how many density rasters
+    /// were worked out after the first frame.
+    fn resize(points: &[MapPoint], frames: usize, settle: usize) -> (std::time::Duration, usize) {
+        let ctx = egui::Context::default();
+        let mut view = MapView::default();
+        let mut slowest = std::time::Duration::ZERO;
+        let mut textures = Vec::new();
+        for frame in 0..1 + frames + settle {
+            let grow = frame.min(frames) as f32 * 6.0;
+            let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0 + grow, 700.0 + grow * 0.5));
+            let input =
+                egui::RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), ..Default::default() };
+            let started = std::time::Instant::now();
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut events = Vec::new();
+                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+            });
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            output.textures_delta.clear();
+            if (1..=frames).contains(&frame) {
+                slowest = slowest.max(started.elapsed());
+            }
+            if let Some(density) = view.cache.density.as_ref()
+                && textures.last() != Some(&density.texture.id())
+            {
+                textures.push(density.texture.id());
+            }
+        }
+        (slowest, textures.len().saturating_sub(1))
+    }
+
+    #[test]
+    fn resizing_a_map_of_200_000_points_does_not_draw_the_density_every_frame() {
+        let points = points(200_000);
+        let (slowest, built) = resize(&points, 30, 0);
+        assert_eq!(built, 0, "while the size keeps changing, the last raster is drawn scaled");
+        let (_, built) = resize(&points, 30, 15);
+        assert_eq!(built, 1, "once the size has settled, it is worked out once for it");
+        eprintln!("200 000 points: slowest resize frame {slowest:?}");
+        // 30 frames a second in an optimised build; unoptimised test builds get more room.
+        let budget = std::time::Duration::from_micros(if cfg!(debug_assertions) { 100_000 } else { 33_300 });
+        assert!(slowest < budget, "slowest resize frame {slowest:?}");
     }
 
     #[test]

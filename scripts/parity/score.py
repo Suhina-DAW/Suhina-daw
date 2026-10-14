@@ -45,7 +45,8 @@ CHAPTERS = [
      "concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin."),
     (4, "Working with the Browser", 60, 0.45, "partial",
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
-     "engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, "
+     "engine, sample map by sound similarity (smooth with 200 000 items, also while its window is "
+     "resized). Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.35, "partial",
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
