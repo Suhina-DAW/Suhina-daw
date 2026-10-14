@@ -104,6 +104,9 @@ Suhina is pre-alpha with milestones M0-M2, M5 done and M3, M4, M6, M8 in progres
     within about 5 ms plus the device at 128 frames, and Settings › Audio says how long (#265).
   - Each track chooses the MIDI port and channel it hears, so two controllers play two armed
     tracks each its own (#278).
+  - An audio input device beside the output: each audio track hears a channel or a stereo pair
+    of it, monitored Auto (while armed), In or Off, so a band can be heard on separate tracks,
+    each from its own input (#267). Recording what they play is next (#268).
 
 ### Three places the repository's own docs read better than the code
 
