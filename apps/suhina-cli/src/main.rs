@@ -834,6 +834,7 @@ fn demo_project() -> Project {
         channel: Some(ChannelId(id)),
         parent: None,
         midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let channel = |id: u32, name: &str, volume: f64, pan: f64| Channel {

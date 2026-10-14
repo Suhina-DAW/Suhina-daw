@@ -102,6 +102,7 @@ pub fn show(
 
     let bands = Bands {
         midi_ports: &grid.midi_ports,
+        input_channels: grid.input_channels,
         header,
         body,
         mixer,
@@ -267,8 +268,10 @@ pub(crate) fn empty_space(ui: &Ui, painter: &egui::Painter, area: Rect, actions:
 
 /// The view's horizontal bands, and where the first scene row is after scrolling.
 struct Bands<'a> {
-    /// The MIDI input ports there are, for the tracks' menus.
+    /// The MIDI input ports there are, and the audio input device's channels, for the tracks'
+    /// menus.
     midi_ports: &'a [String],
+    input_channels: u16,
     header: Rect,
     body: Rect,
     mixer: Rect,
@@ -292,7 +295,7 @@ fn draw_column(
 ) {
     let id = Id::new(("session-column", column.track.0));
     let header = Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip);
-    column_header(ui, painter, header, column, bands.midi_ports, state, actions);
+    column_header(ui, painter, header, column, (bands.midi_ports, bands.input_channels), state, actions);
     let body_clip = bands.body.intersect(clip);
     column_body(
         ui,
@@ -319,7 +322,7 @@ fn column_header(
     painter: &egui::Painter,
     rect: Rect,
     column: &Column,
-    midi_ports: &[String],
+    (midi_ports, input_channels): (&[String], u16),
     state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
@@ -346,7 +349,8 @@ fn column_header(
             name: &column.name,
             is_group: column.kind == ColumnKind::Group,
             selection: &[],
-            midi: column.armable.then_some((&column.midi_input, midi_ports)),
+            midi: column.plays_notes.then_some((&column.midi_input, midi_ports)),
+            audio: column.plays_audio.then_some((&column.audio_input, input_channels)),
         };
         menus::track_menu(ui, &menu, actions);
     });
@@ -606,8 +610,16 @@ fn mixer_strip(
     let small = if column.armable { (toggle.width() - 4.0) / 4.0 } else { (toggle.width() - 2.0) / 3.0 };
     let toggle = if column.armable {
         let arm = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
-        if let Some(action) = widgets::arm_button(ui, painter, arm, id.with("arm"), track.0, &column.name, column.armed)
-        {
+        if let Some(action) = widgets::arm_button(
+            ui,
+            painter,
+            arm,
+            id.with("arm"),
+            track.0,
+            &column.name,
+            column.armed,
+            column.plays_notes,
+        ) {
             actions.push(action);
         }
         Rect::from_min_max(toggle.min, Pos2::new(arm.left() - 2.0, toggle.bottom()))

@@ -117,6 +117,7 @@ fn a_choice_of_missing_things_falls_back_to_the_default() {
         sample_rate: Some(12_345),
         buffer_frames: Some(300),
         exclusive: false,
+        input: suhina_session::InputChoice::Off,
     };
     match Output::choose(&choice) {
         Ok(output) => {

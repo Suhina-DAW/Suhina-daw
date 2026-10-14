@@ -70,8 +70,44 @@ pub struct Track {
     pub parent: Option<TrackId>,
     /// Which MIDI controllers the track hears while it is armed (ADR 0017).
     pub midi_input: MidiInput,
+    /// Which channels of the audio input the track hears, and when (ADR 0017).
+    pub audio_input: AudioInput,
     pub extensions: Extensions,
 }
+
+/// What a track hears of the audio input device (a microphone, a guitar), and when.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AudioInput {
+    pub channels: InputChannels,
+    pub monitor: Monitor,
+}
+
+/// The channels of the audio input device a track hears, counted from 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputChannels {
+    /// None: the track has no audio input.
+    #[default]
+    None,
+    /// One channel, heard in the middle (then panned by the track).
+    Mono(u16),
+    /// This channel on the left and the next one on the right.
+    Stereo(u16),
+}
+
+/// When a track's audio input is heard through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Monitor {
+    /// While the track is armed.
+    #[default]
+    Auto,
+    /// Always.
+    In,
+    /// Never; the input is only recorded.
+    Off,
+}
+
+/// The highest audio input channel a track can name.
+pub const MAX_INPUT_CHANNEL: u16 = 256;
 
 /// Which MIDI controllers a track hears while it is armed: a port, or every one, or none, and
 /// one channel or every one.
@@ -538,6 +574,8 @@ pub enum ValidationError {
     },
     /// The track's MIDI input names an empty port or a channel outside 1 … 16.
     BadMidiInput(TrackId),
+    /// The track's audio input names a channel outside 1 … 256.
+    BadAudioInput(TrackId),
 }
 
 impl fmt::Display for ValidationError {
@@ -549,6 +587,9 @@ impl fmt::Display for ValidationError {
             Self::MissingTrack(id) => write!(f, "track {} does not exist", id.0),
             Self::MissingChannel(id) => write!(f, "channel {} does not exist", id.0),
             Self::MissingContent(id) => write!(f, "clip content {} does not exist", id.0),
+            Self::BadAudioInput(id) => {
+                write!(f, "track {} has an audio input on a channel outside 1 to {MAX_INPUT_CHANNEL}", id.0)
+            }
             Self::BadMidiInput(id) => {
                 write!(f, "track {} has a MIDI input with an empty port name or a channel outside 1 to 16", id.0)
             }
@@ -601,6 +642,14 @@ impl Project {
             let bad_port = matches!(&track.midi_input.port, MidiPort::Named(name) if name.trim().is_empty());
             if bad_port || track.midi_input.channel.is_some_and(|c| !(1..=16).contains(&c)) {
                 errors.push(ValidationError::BadMidiInput(track.id));
+            }
+            let audio_ok = match track.audio_input.channels {
+                InputChannels::None => true,
+                InputChannels::Mono(c) => (1..=MAX_INPUT_CHANNEL).contains(&c),
+                InputChannels::Stereo(c) => (1..MAX_INPUT_CHANNEL).contains(&c),
+            };
+            if !audio_ok {
+                errors.push(ValidationError::BadAudioInput(track.id));
             }
         }
         for channel in &self.channels {
@@ -682,6 +731,7 @@ mod tests {
             channel: Some(ChannelId(channel)),
             parent: None,
             midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }
     }

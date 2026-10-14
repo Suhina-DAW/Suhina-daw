@@ -187,6 +187,7 @@ mod tests {
                 channel: Some(ChannelId(1)),
                 parent: None,
                 midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             }],
             channels: vec![Channel {

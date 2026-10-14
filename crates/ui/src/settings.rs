@@ -186,6 +186,9 @@ pub struct Settings {
     pub audio_buffer: u32,
     /// WASAPI exclusive mode; off, so other programs stay heard.
     pub audio_exclusive: bool,
+    /// The audio input device (Settings › Audio, `audio.setOutput`'s `input`): "off" (the
+    /// default), "default" or a device's name.
+    pub audio_input: String,
     /// The MIDI input ports turned off, by name (Settings › MIDI, `midi.setInput`); every
     /// other port is on. One `midi_input_off` line each, since a port's name may hold commas.
     pub midi_inputs_off: Vec<String>,
@@ -227,6 +230,7 @@ impl Default for Settings {
             audio_sample_rate: 0,
             audio_buffer: 0,
             audio_exclusive: false,
+            audio_input: "off".into(),
             midi_inputs_off: Vec::new(),
             zoom: ZOOM,
         }
@@ -243,6 +247,7 @@ impl Settings {
             sample_rate: (self.audio_sample_rate > 0).then_some(self.audio_sample_rate),
             buffer_frames: (self.audio_buffer > 0).then_some(self.audio_buffer),
             exclusive: self.audio_exclusive,
+            input: suhina_session::InputChoice::from_text(&self.audio_input),
         }
     }
 
@@ -253,6 +258,7 @@ impl Settings {
         self.audio_sample_rate = choice.sample_rate.unwrap_or(0);
         self.audio_buffer = choice.buffer_frames.unwrap_or(0);
         self.audio_exclusive = choice.exclusive;
+        self.audio_input = choice.input.as_text().to_string();
     }
 
     /// Makes the window `steps` zoom steps larger (or smaller, when negative), onto the steps and
@@ -303,7 +309,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -324,6 +330,7 @@ impl Settings {
             self.audio_sample_rate,
             self.audio_buffer,
             on(self.audio_exclusive),
+            self.audio_input,
             self.zoom,
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
@@ -418,6 +425,9 @@ impl Settings {
                     settings.audio_buffer = frames.parse().unwrap_or(0);
                 }
                 ("audio_exclusive", "on" | "off") => settings.audio_exclusive = value == "on",
+                ("audio_input", input) => {
+                    settings.audio_input = suhina_session::InputChoice::from_text(input).as_text().to_string()
+                }
                 ("midi_input_off", port) if !port.is_empty() => {
                     if !settings.midi_inputs_off.iter().any(|p| p == port) {
                         settings.midi_inputs_off.push(port.to_string());
@@ -489,6 +499,7 @@ mod tests {
             audio_sample_rate: 48_000,
             audio_buffer: 256,
             audio_exclusive: true,
+            audio_input: "Line In (Interface)".into(),
             midi_inputs_off: vec!["Keys, port 1".into(), "Pads:Pads MIDI 1 20:0".into()],
             zoom: 130,
             map_window: true,
@@ -521,6 +532,10 @@ mod tests {
         back.set_output_choice(&choice);
         assert_eq!(back.output_choice(), choice);
         assert_eq!(Settings::default().output_choice(), suhina_session::OutputChoice::default());
+        // The input device: off unless chosen.
+        let (settings, _) = Settings::from_text("audio_input = default\n");
+        assert_eq!(settings.output_choice().input, suhina_session::InputChoice::Default);
+        assert_eq!(Settings::from_text("audio_input = \n").0.audio_input, "off");
 
         let (settings, warnings) =
             Settings::from_text("audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\n");

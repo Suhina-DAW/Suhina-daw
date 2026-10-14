@@ -3,7 +3,7 @@
 //! fails to answer is listed with the error or left out, never a panic (AGENTS.md rule 2).
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use suhina_session::audio::{DeviceInfo, HostInfo, MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
+use suhina_session::audio::{DeviceInfo, HostInfo, InputInfo, MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
 
 /// The buffer sizes offered when the driver gives no range: powers of two the engine renders
 /// well in.
@@ -95,10 +95,13 @@ pub fn list_hosts() -> Vec<HostInfo> {
         .map(|id| {
             let mut info = HostInfo { name: id.name().to_string(), default: id == default_host, ..HostInfo::default() };
             match cpal::host_from_id(id) {
-                Ok(host) => match list_devices(&host, id.name()) {
-                    Ok(devices) => info.devices = devices,
-                    Err(e) => info.error = Some(e),
-                },
+                Ok(host) => {
+                    match list_devices(&host, id.name()) {
+                        Ok(devices) => info.devices = devices,
+                        Err(e) => info.error = Some(e),
+                    }
+                    info.inputs = list_inputs(&host);
+                }
                 Err(e) => info.error = Some(e.to_string()),
             }
             #[cfg(windows)]
@@ -109,6 +112,33 @@ pub fn list_hosts() -> Vec<HostInfo> {
             }
             info
         })
+        .collect()
+}
+
+/// The host's input devices with their channels and sample rates; none when they cannot be
+/// listed.
+fn list_inputs(host: &cpal::Host) -> Vec<InputInfo> {
+    let default = host.default_input_device().map(|d| d.to_string());
+    let Ok(devices) = host.input_devices() else { return Vec::new() };
+    devices
+        .map(|device| {
+            let name = device.to_string();
+            let mut ranges = Vec::new();
+            let mut channels = 0;
+            if let Ok(configs) = device.supported_input_configs() {
+                for config in configs {
+                    ranges.push((config.min_sample_rate(), config.max_sample_rate()));
+                    channels = channels.max(config.channels());
+                }
+            }
+            InputInfo {
+                default: default.as_deref() == Some(name.as_str()),
+                channels,
+                sample_rates: sample_rates(&ranges),
+                name,
+            }
+        })
+        .filter(|input| input.channels > 0)
         .collect()
 }
 

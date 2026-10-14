@@ -79,7 +79,8 @@ crates/
            attached player, each project's decoded audio and previews (ADR 0011)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
   output   L3 the audio device: lists hosts and devices (cpal; ASIO with the `asio` feature), opens the one
-           chosen (WASAPI exclusive through `wasapi`), plays an engine in blocks of the chosen buffer
+           chosen (WASAPI exclusive through `wasapi`), plays an engine in blocks of the chosen buffer;
+           opens the input device chosen beside it for the tracks' audio inputs (ADR 0017)
   midi     L3 MIDI controllers: lists the input ports and opens them (midir); their notes play the armed
            tracks' instruments (ADR 0017)
   ui       L3 the main window, the browser and the views (egui, ADR 0009); every change is a command

@@ -20,6 +20,7 @@
 pub mod devices;
 #[cfg(windows)]
 mod exclusive;
+mod input;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -646,6 +647,9 @@ struct Live {
     sample_rate: u32,
     block: usize,
     exclusive: bool,
+    /// The input device open beside it: its name, channels and the engine's count of blocks
+    /// that found too little input.
+    input: Option<(String, usize, Arc<AtomicU64>)>,
 }
 
 impl LiveOutput for Live {
@@ -662,6 +666,12 @@ impl LiveOutput for Live {
             live_latency_ms: self.progress.live_latency(self.sample_rate).as_secs_f64() * 1000.0,
             underruns: self.progress.underruns(),
             failed: self.progress.failed(),
+            input: self.input.as_ref().map(|(name, _, _)| name.clone()),
+            input_channels: self
+                .input
+                .as_ref()
+                .map_or(0, |(_, channels, _)| u16::try_from(*channels).unwrap_or(u16::MAX)),
+            input_underruns: self.input.as_ref().map_or(0, |(_, _, underruns)| underruns.load(Ordering::Relaxed)),
         }
     }
 }
@@ -699,22 +709,34 @@ pub fn open_chosen(
         .name("suhina-audio".into())
         .spawn(move || {
             let started = (|| {
-                let (output, device, producer, progress) = open_fitting(&choice)?;
+                let (mut output, device, producer, progress) = open_fitting(&choice)?;
                 let (plugins, kept) = match carried {
                     Some((rate, plugins)) if rate == output.sample_rate => (plugins, true),
                     _ => (Plugins::new(), false),
                 };
                 let mut renderer = Renderer::stopped_with_plugins(&project, &audio, output.sample_rate, plugins)
                     .map_err(|e| e.to_string())?;
+                // The input device, when one is chosen: a failure leaves the output playing.
+                let input = match input::open(&output.host, &choice.input, output.sample_rate) {
+                    Ok(Some((stream, ring))) => {
+                        renderer.set_audio_input(ring, stream.channels, Arc::clone(&stream.underruns));
+                        Some(stream)
+                    }
+                    Ok(None) => None,
+                    Err(e) => {
+                        output.notices.push(format!("{e}; there is no audio input"));
+                        None
+                    }
+                };
                 let mut controller = renderer.controller();
                 controller
                     .run_stretch_worker(&mut renderer)
                     .map_err(|e| format!("could not start the stretch worker: {e}"))?;
                 let stream = output.play(device, renderer, producer, &progress)?;
-                Ok::<_, String>((output, controller, progress, stream, kept))
+                Ok::<_, String>((output, controller, progress, stream, kept, input))
             })();
             match started {
-                Ok((output, controller, progress, stream, kept)) => {
+                Ok((output, controller, progress, stream, kept, input)) => {
                     let live = Live {
                         progress,
                         host: output.host.clone(),
@@ -722,6 +744,7 @@ pub fn open_chosen(
                         sample_rate: output.sample_rate,
                         block: output.block,
                         exclusive: output.exclusive,
+                        input: input.as_ref().map(|i| (i.name.clone(), i.channels, Arc::clone(&i.underruns))),
                     };
                     let notice = (!output.notices.is_empty()).then(|| output.notices.join("; "));
                     if ready.send(Ok((controller, live, notice, kept))).is_ok() {
@@ -729,6 +752,7 @@ pub fn open_chosen(
                         let _closed = closed.recv();
                     }
                     let plugins = stream.close().map(Renderer::into_plugins);
+                    drop(input);
                     let _unheard = back_tx.send((output.sample_rate, plugins));
                 }
                 Err(e) => {

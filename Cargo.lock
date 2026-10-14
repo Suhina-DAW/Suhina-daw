@@ -4418,6 +4418,7 @@ name = "suhina-session"
 version = "0.0.1"
 dependencies = [
  "hound",
+ "rtrb",
  "serde_json",
  "suhina-als",
  "suhina-device-api",

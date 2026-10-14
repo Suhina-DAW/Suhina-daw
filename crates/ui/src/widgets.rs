@@ -115,7 +115,9 @@ pub fn solo_button(
 
 /// A track's arm button (components › Arm): a ring off, a filled red dot on its dark red
 /// background when armed. Returns the command a click asks for: a click arms the track alone;
-/// with Ctrl (Cmd) held it is added to the tracks armed already.
+/// with Ctrl (Cmd) held it is added to the tracks armed already. Arming a track that plays
+/// notes lets a MIDI controller play it; one that plays audio hears its audio input.
+#[allow(clippy::too_many_arguments)]
 pub fn arm_button(
     ui: &Ui,
     painter: &Painter,
@@ -124,8 +126,13 @@ pub fn arm_button(
     track: u32,
     name: &str,
     armed: bool,
+    notes: bool,
 ) -> Option<Action> {
-    let label = if armed { format!("Disarm {name}") } else { format!("Arm {name} to play it from a MIDI controller") };
+    let label = match (armed, notes) {
+        (true, _) => format!("Disarm {name}"),
+        (false, true) => format!("Arm {name} to play it from a MIDI controller"),
+        (false, false) => format!("Arm {name} to hear its audio input"),
+    };
     let response = button_area(ui, rect, id, label);
     let lit = motion::toward(ui.ctx(), response.id.with("on"), armed, motion::VALUE);
     let off = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, &response));

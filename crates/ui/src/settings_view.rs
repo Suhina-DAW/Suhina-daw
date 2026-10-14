@@ -1094,6 +1094,31 @@ fn audio_page(
         picked = choice.with_params(&serde_json::json!({ "exclusive": on })).ok();
     }
 
+    // Input device (ADR 0017): off until chosen, so nothing opens a microphone unasked.
+    let r = row(y);
+    let inputs = host.map_or(&[][..], |h| h.inputs.as_slice());
+    let note = match &choice.input {
+        suhina_session::InputChoice::Named(name)
+            if !inputs.iter().any(|i| suhina_session::InputChoice::Named(i.name.clone()) == choice.input) =>
+        {
+            format!("{name} is not there on this driver")
+        }
+        _ => "What tracks with an audio input hear: microphones, an interface's inputs".to_string(),
+    };
+    label(painter, r, "Input", &note);
+    let default_input = inputs.iter().find(|i| i.default).map_or("none", |i| i.name.as_str());
+    let mut options: Vec<(String, suhina_session::InputChoice)> = vec![
+        ("Off".to_string(), suhina_session::InputChoice::Off),
+        (format!("Default ({default_input})"), suhina_session::InputChoice::Default),
+    ];
+    options.extend(inputs.iter().map(|i| {
+        let label = format!("{} ({} in)", i.name, i.channels);
+        (label, suhina_session::InputChoice::Named(i.name.clone()))
+    }));
+    if let Some(input) = choice_dropdown(ui, painter, r, "Input", &options, &choice.input) {
+        picked = choice.with_params(&serde_json::json!({ "input": input.as_text() })).ok();
+    }
+
     *y += 8.0;
     section(y, "Now");
     let r = row(y);
@@ -1138,6 +1163,21 @@ fn audio_page(
         None => "-".to_string(),
     };
     label(painter, r, "Key to sound", &key);
+    let r = row(y);
+    let input = match &about.audio_live {
+        Some(info) => match &info.input {
+            Some(name) => format!(
+                "{name}, {} channel{}; {} underrun{}",
+                info.input_channels,
+                if info.input_channels == 1 { "" } else { "s" },
+                info.input_underruns,
+                if info.input_underruns == 1 { "" } else { "s" }
+            ),
+            None => "None: no input device is open".to_string(),
+        },
+        None => "-".to_string(),
+    };
+    label(painter, r, "Input now", &input);
     (picked, response.clicked())
 }
 

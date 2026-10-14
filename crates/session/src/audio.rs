@@ -34,6 +34,41 @@ pub struct OutputChoice {
     /// WASAPI only: take the device for Suhina alone (exclusive mode) when it allows it.
     /// Other programs are not heard on it meanwhile, so it is off unless asked for.
     pub exclusive: bool,
+    /// The audio input device the tracks' audio inputs hear (ADR 0017): off unless chosen, so
+    /// nothing opens a microphone unasked.
+    pub input: InputChoice,
+}
+
+/// The audio input device chosen, on the output's host.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum InputChoice {
+    /// No input device is opened.
+    #[default]
+    Off,
+    /// The host's default input device.
+    Default,
+    /// An input device by name.
+    Named(String),
+}
+
+impl InputChoice {
+    /// As `audio.setOutput` takes it and the settings keep it: "off", "default" or a name.
+    pub fn as_text(&self) -> &str {
+        match self {
+            Self::Off => "off",
+            Self::Default => "default",
+            Self::Named(name) => name,
+        }
+    }
+
+    /// From "off" (or empty), "default" or a device's name.
+    pub fn from_text(text: &str) -> Self {
+        match text.trim() {
+            "" | "off" => Self::Off,
+            "default" => Self::Default,
+            name => Self::Named(name.to_string()),
+        }
+    }
 }
 
 impl OutputChoice {
@@ -44,6 +79,7 @@ impl OutputChoice {
             "sample_rate": self.sample_rate,
             "buffer_frames": self.buffer_frames,
             "exclusive": self.exclusive,
+            "input": self.input.as_text(),
         })
     }
 
@@ -92,6 +128,9 @@ impl OutputChoice {
         if let Some(exclusive) = params.get("exclusive") {
             next.exclusive = exclusive.as_bool().ok_or("exclusive must be true or false")?;
         }
+        if let Some(input) = params.get("input") {
+            next.input = InputChoice::from_text(input.as_str().ok_or("input must be a text")?);
+        }
         Ok(next)
     }
 }
@@ -103,6 +142,8 @@ pub struct HostInfo {
     /// The one used when no host is chosen.
     pub default: bool,
     pub devices: Vec<DeviceInfo>,
+    /// Its input devices (microphones, interfaces' inputs).
+    pub inputs: Vec<InputInfo>,
     /// Why the host's devices could not be listed, when they could not.
     pub error: Option<String>,
 }
@@ -123,6 +164,17 @@ pub struct DeviceInfo {
     pub buffer_range: Option<(u32, u32)>,
     /// Whether it can be opened in exclusive mode (WASAPI).
     pub exclusive: bool,
+}
+
+/// An audio input device and what it can be opened with.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InputInfo {
+    pub name: String,
+    /// The host's default input device.
+    pub default: bool,
+    /// Its input channels; a track's audio input names them from 1.
+    pub channels: u16,
+    pub sample_rates: Vec<u32>,
 }
 
 /// What an open output runs with now.
@@ -147,6 +199,11 @@ pub struct OutputInfo {
     pub underruns: u64,
     /// The device reported an error (unplugged, taken by another program).
     pub failed: bool,
+    /// The audio input device open beside it, and its channels (ADR 0017).
+    pub input: Option<String>,
+    pub input_channels: u16,
+    /// Blocks the engine found too little input for.
+    pub input_underruns: u64,
 }
 
 impl OutputInfo {
@@ -163,6 +220,9 @@ impl OutputInfo {
             "live_latency_ms": (self.live_latency_ms * 100.0).round() / 100.0,
             "underruns": self.underruns,
             "failed": self.failed,
+            "input": self.input,
+            "input_channels": self.input_channels,
+            "input_underruns": self.input_underruns,
         })
     }
 
@@ -217,20 +277,25 @@ pub trait AudioSystem: Send + Sync {
 static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
     CommandSpec {
         id: "audio.devices",
-        label: "List the audio hosts (WASAPI, ASIO, ALSA…) and each one's output devices with their sample rates and buffer sizes, and the output chosen",
+        label: "List the audio hosts (WASAPI, ASIO, ALSA…), each one's output devices with their sample rates and buffer sizes and its input devices with their channels, and the output chosen",
         params: &[],
         kind: CommandKind::Audio,
         run: devices,
     },
     CommandSpec {
         id: "audio.setOutput",
-        label: "Choose the audio output: host, device, sample rate, buffer size (the engine renders in blocks of it) and WASAPI exclusive mode; parts left out stay, an empty text or 0 goes back to the default. Reopens the active project's output, keeping the transport where it is",
+        label: "Choose the audio output: host, device, sample rate, buffer size (the engine renders in blocks of it), WASAPI exclusive mode and the audio input device the tracks' audio inputs hear; parts left out stay, an empty text or 0 goes back to the default. Reopens the active project's output, keeping the transport where it is",
         params: &[
             optional("host", ParamType::Text, "a host from audio.devices, \"\" for the default"),
             optional("device", ParamType::Text, "an output device of that host, \"\" for its default"),
             optional("sample_rate", ParamType::Integer, "Hz, one the device lists; 0 for its default"),
             optional("buffer_frames", ParamType::Integer, "frames per buffer, 64 to 4096; 0 for the default"),
             optional("exclusive", ParamType::Bool, "WASAPI: open the device for Suhina alone (default false)"),
+            optional(
+                "input",
+                ParamType::Text,
+                "the audio input device on that host, from audio.devices' inputs: \"off\" (the default), \"default\" or a name",
+            ),
         ],
         kind: CommandKind::Audio,
         run: set_output,
@@ -273,6 +338,12 @@ pub(crate) fn hosts_json(hosts: &[HostInfo]) -> Value {
                         "buffer_sizes": d.buffer_sizes,
                         "buffer_range": d.buffer_range.map(|(min, max)| json!({ "min": min, "max": max })),
                         "exclusive": d.exclusive,
+                    })).collect::<Vec<_>>(),
+                    "inputs": h.inputs.iter().map(|d| json!({
+                        "name": d.name,
+                        "default": d.default,
+                        "channels": d.channels,
+                        "sample_rates": d.sample_rates,
                     })).collect::<Vec<_>>(),
                 })
             })
@@ -359,6 +430,7 @@ mod tests {
             sample_rate: Some(48_000),
             buffer_frames: Some(256),
             exclusive: false,
+            input: InputChoice::Off,
         };
         let same = start.with_params(&json!({})).unwrap();
         assert_eq!(same, start);
@@ -376,6 +448,18 @@ mod tests {
         assert_eq!((reset.device, reset.sample_rate, reset.buffer_frames), (None, None, None));
         let both = start.with_params(&json!({ "host": "ASIO", "device": "Interface", "exclusive": true })).unwrap();
         assert_eq!((both.device.as_deref(), both.exclusive), (Some("Interface"), true));
+        // The input: off until chosen, the default or one by name, off again.
+        assert_eq!(start.input, InputChoice::Off);
+        let mic = start.with_params(&json!({ "input": "default" })).unwrap();
+        assert_eq!(mic.input, InputChoice::Default);
+        let named = mic.with_params(&json!({ "input": " Line In (Interface) " })).unwrap();
+        assert_eq!(named.input, InputChoice::Named("Line In (Interface)".into()));
+        assert_eq!(named.with_params(&json!({ "input": "off" })).unwrap().input, InputChoice::Off);
+        assert_eq!(named.with_params(&json!({ "input": "" })).unwrap().input, InputChoice::Off);
+        assert_eq!(named.with_params(&json!({ "buffer_frames": 128 })).unwrap().input, named.input, "kept");
+        for choice in [InputChoice::Off, InputChoice::Default, InputChoice::Named("Mic".into())] {
+            assert_eq!(InputChoice::from_text(choice.as_text()), choice);
+        }
     }
 
     #[test]
@@ -389,6 +473,7 @@ mod tests {
             json!({ "sample_rate": 10_000_000 }),
             json!({ "host": 5 }),
             json!({ "exclusive": "yes" }),
+            json!({ "input": 3 }),
         ] {
             assert!(start.with_params(&bad).is_err(), "{bad}");
         }

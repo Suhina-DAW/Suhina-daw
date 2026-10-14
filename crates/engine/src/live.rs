@@ -187,6 +187,11 @@ impl Live {
         self.armed.get(..self.armed_count).unwrap_or_default()
     }
 
+    /// Whether `track` is armed.
+    pub(crate) fn is_armed(&self, track: TrackId) -> bool {
+        self.armed().iter().any(|(t, _)| *t == track)
+    }
+
     /// Whether any track is armed: the output then keeps a shallower queue (ADR 0017).
     pub(crate) fn any_armed(&self) -> bool {
         self.armed_count > 0

@@ -1133,6 +1133,7 @@ mod tests {
                     channel: Some(ChannelId(i)),
                     parent: None,
                     midi_input: Default::default(),
+                    audio_input: Default::default(),
                     extensions: Extensions::default(),
                 })
                 .collect(),

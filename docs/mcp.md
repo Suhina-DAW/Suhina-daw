@@ -80,7 +80,15 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   play, transport running or not. `track.setMidiInput {track, port?, channel?}` chooses which
   controllers it hears (`port` `"all"`, `"none"` or a port's name from `midi.inputs`; `channel`
   1 to 16, or 0 for every one), so two controllers can play two armed tracks; it is an edit,
-  saved with the project, and `project.tracks` reports each track's `midi_input`. Arming is not an edit (no undo step, not saved) and works
+  saved with the project, and `project.tracks` reports each track's `midi_input`.
+
+- **Audio input.** `audio.devices` lists each host's `inputs` (name, channels, sample rates).
+  `audio.setOutput {input}` opens one beside the output (`"off"`, the default; `"default"`; or
+  a name), at the output's sample rate. `track.setAudioInput {track, input?, monitor?}` chooses
+  what a track hears: `input` `"none"`, a channel (`"3"`) or a pair (`"1/2"`), `monitor`
+  `auto` (while armed), `in` or `off`; it is an edit, saved with the project. Arm several
+  tracks with `track.setArm` and `exclusive: false` to hear a band on separate tracks.
+  `audio.info` adds `input`, `input_channels` and `input_underruns`. Arming is not an edit (no undo step, not saved) and works
   before an engine plays; `project.tracks` says which tracks are `armed`. Without `--audio`,
   `midi.*` returns an error.
 

@@ -2,7 +2,7 @@
 
 use egui::{Id, Key, Sense, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::{MidiInput, MidiPort, Rgb, TrackId};
+use suhina_engine::model::{AudioInput, InputChannels, MidiInput, MidiPort, Monitor, Rgb, TrackId};
 
 use crate::grid::to_rgb;
 use crate::theme;
@@ -33,6 +33,76 @@ pub struct TrackMenu<'a> {
     pub selection: &'a [TrackId],
     /// For a track that plays notes: what it hears while armed, and the MIDI ports there are.
     pub midi: Option<(&'a MidiInput, &'a [String])>,
+    /// For a track that plays audio: its audio input, and the channels the input device has
+    /// (0 while none is open).
+    pub audio: Option<(&'a AudioInput, u16)>,
+}
+
+/// How a track's audio input reads: "No input", "In 3" or "In 1/2", with its monitoring.
+pub fn audio_input_text(input: &AudioInput) -> String {
+    let channels = match input.channels {
+        InputChannels::None => return "No input".to_string(),
+        InputChannels::Mono(c) => format!("In {c}"),
+        InputChannels::Stereo(c) => format!("In {c}/{}", c.saturating_add(1)),
+    };
+    let monitor = match input.monitor {
+        Monitor::Auto => "Auto",
+        Monitor::In => "Monitor in",
+        Monitor::Off => "Monitor off",
+    };
+    format!("{channels} · {monitor}")
+}
+
+/// The choices of a track's audio input (ADR 0017): none, each channel of the input device,
+/// each neighbouring pair; then its monitoring. A pick runs `track.setAudioInput`.
+pub fn audio_input_choices(ui: &mut Ui, track: TrackId, input: &AudioInput, channels: u16, actions: &mut Vec<Action>) {
+    let text = |t: &str| egui::RichText::new(t).font(theme::ui_font(theme::TEXT_SMALL));
+    let mut pick = |ui: &mut Ui, label: &str, on: bool, params: serde_json::Value| {
+        if ui.selectable_label(on, text(label)).clicked() && !on {
+            let mut params = params;
+            params["track"] = json!(track.0);
+            actions.push(Action::new("track.setAudioInput", params));
+            ui.close();
+        }
+    };
+    pick(ui, "No input", input.channels == InputChannels::None, json!({ "input": "none" }));
+    if channels == 0 {
+        ui.label(text("No input device: choose one in Settings › Audio"));
+    }
+    // The device's channels, and the one chosen if the device has fewer now; without a device,
+    // the first eight, so a project can be set up before the interface is there.
+    let channels = if channels == 0 { 8 } else { channels };
+    let chosen = match input.channels {
+        InputChannels::None => 0,
+        InputChannels::Mono(c) => c,
+        InputChannels::Stereo(c) => c.saturating_add(1),
+    };
+    let shown = channels.max(chosen);
+    egui::Grid::new(("audio-channels", track.0)).spacing(Vec2::splat(2.0)).show(ui, |ui| {
+        for c in 1..=shown {
+            pick(ui, &format!("In {c}"), input.channels == InputChannels::Mono(c), json!({ "input": c.to_string() }));
+            if c % 4 == 0 {
+                ui.end_row();
+            }
+        }
+    });
+    egui::Grid::new(("audio-pairs", track.0)).spacing(Vec2::splat(2.0)).show(ui, |ui| {
+        for c in (1..shown).step_by(2) {
+            let pair = format!("{c}/{}", c + 1);
+            pick(ui, &format!("In {pair}"), input.channels == InputChannels::Stereo(c), json!({ "input": pair }));
+            if c % 8 == 7 {
+                ui.end_row();
+            }
+        }
+    });
+    ui.separator();
+    for (label, monitor, value) in [
+        ("Monitor auto (while armed)", Monitor::Auto, "auto"),
+        ("Monitor in", Monitor::In, "in"),
+        ("Monitor off", Monitor::Off, "off"),
+    ] {
+        pick(ui, label, input.monitor == monitor, json!({ "monitor": value }));
+    }
 }
 
 /// How a track's MIDI input reads: "All ports", the port, or "No input", with the channel.
@@ -120,6 +190,11 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
             }
         }
     });
+    if let Some((input, channels)) = menu.audio {
+        ui.menu_button(format!("Audio input: {}", audio_input_text(input)), |ui| {
+            audio_input_choices(ui, menu.track, input, channels, actions);
+        });
+    }
     if let Some((input, ports)) = menu.midi {
         ui.menu_button(format!("MIDI input: {}", midi_input_text(input)), |ui| {
             midi_input_choices(ui, menu.track, input, ports, actions);

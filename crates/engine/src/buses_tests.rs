@@ -30,6 +30,7 @@ fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         channel: Some(ChannelId(id)),
         parent: parent.map(TrackId),
         midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let clip = Clip {

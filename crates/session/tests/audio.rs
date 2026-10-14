@@ -61,6 +61,7 @@ impl AudioSystem for Stand {
                 buffer_range: Some((256, 1024)),
                 exclusive: false,
             }],
+            inputs: Vec::new(),
             error: None,
         }]
     }

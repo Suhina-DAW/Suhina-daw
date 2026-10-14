@@ -87,18 +87,24 @@ fn everything() -> Project {
         channel: channel.map(ChannelId),
         parent: parent.map(TrackId),
         midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
         transport: Transport { tempo_bpm: 128.5, time_signature: TimeSignature { numerator: 7, denominator: 8 } },
         tracks: vec![
-            Track { color: None, ..track(1, false, Some(4), None) },
+            Track {
+                color: None,
+                audio_input: AudioInput { channels: InputChannels::Mono(3), monitor: Monitor::Off },
+                ..track(1, false, Some(4), None)
+            },
             Track {
                 midi_input: MidiInput { port: MidiPort::Named("Keys: Port 1, \"A\"".into()), channel: Some(16) },
                 ..track(2, true, Some(2), Some(1))
             },
             Track {
                 midi_input: MidiInput { port: MidiPort::Nothing, channel: None },
+                audio_input: AudioInput { channels: InputChannels::Stereo(255), monitor: Monitor::In },
                 ..track(3, false, Some(5), Some(1))
             },
             Track { extensions: ext("ReturnTrack"), ..track(4, false, Some(3), None) },
@@ -282,6 +288,15 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "tracks": [ { "id": 1, "midi_input": { "port": { "name": " " } } } ] }"#,
         r#"{ "tracks": [ { "id": 1, "midi_input": { "port": 3 } } ] }"#,
         r#"{ "tracks": [ { "id": 1, "midi_input": "keys" } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [0] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [257] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [1, 3] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [2, 1] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [1, 2, 3] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": 1 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": "loud" } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": 1 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": [1] } ] }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -296,6 +311,9 @@ fn a_track_without_a_midi_input_hears_every_controller() {
     assert_eq!(project.tracks[0].midi_input, MidiInput::default());
     assert_eq!(MidiInput::default(), MidiInput { port: MidiPort::All, channel: None });
     assert!(!to_json(&project).contains("midi_input"));
+    assert_eq!(project.tracks[0].audio_input, AudioInput::default());
+    assert_eq!(AudioInput::default(), AudioInput { channels: InputChannels::None, monitor: Monitor::Auto });
+    assert!(!to_json(&project).contains("audio_input"));
     let all_on_one = r#"{ "format": "suhina", "version": 1, "project": { "tracks": [ { "id": 1, "midi_input": { "port": "all", "channel": 10 } } ] } }"#;
     assert_eq!(
         from_json(all_on_one).unwrap().tracks[0].midi_input,

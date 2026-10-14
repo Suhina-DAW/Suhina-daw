@@ -10,11 +10,14 @@ covers:
   - crates/session/src/midi.rs
   - crates/midi/src/lib.rs
   - crates/output/src/lib.rs
+  - crates/output/src/input.rs
+  - crates/engine/src/input.rs
+  - crates/engine/src/input_tests.rs
 ---
 
 # 0017: Inputs, arming and live latency
 
-- **Status:** accepted (MIDI input, and the shallower queue while armed, #265); audio input, monitoring and recording are planned in [#263](https://github.com/suhina-daw/suhina-daw/issues/263)
+- **Status:** accepted (MIDI input; the shallower queue while armed, #265; a MIDI input per track, #278; audio input and monitoring, #267); recording is planned in [#263](https://github.com/suhina-daw/suhina-daw/issues/263)
 - **Date:** 2026-10-14
 
 ## Context
@@ -102,6 +105,33 @@ engine code.
    once, silent ones reused), so one controller's pedal does not hold another's notes. A track
    that stops hearing a source lets go of that source's keys. A Live Set's track input routing
    is not read yet; imported tracks hear every port.
+9. **Audio input** (amendment, [#267](https://github.com/suhina-daw/suhina-daw/issues/267)).
+   - *The device.* An input device is chosen beside the output (`audio.setOutput`'s `input`,
+     Settings › Audio › Input): off by default, so nothing opens a microphone unasked; the host's
+     default input; or one by name. It is opened on the output's host at the output's sample rate
+     (the engine takes no resampled input: a device that cannot record at that rate says so in a
+     notice, and the output plays on without input), by `crates/output/src/input.rs`, beside the
+     output on the audio owner's thread. Its callback converts every channel, up to 64, to `f32`
+     and writes whole frames into a lock-free ring; frames that find it full are dropped.
+   - *The engine.* `Renderer::set_audio_input` gives the renderer the ring's reading end. At the
+     start of each block the render thread takes one block of frames into a scratch buffer made
+     up front (`crates/engine/src/input.rs`). The input device runs on its own clock, so when more
+     than four blocks wait, the oldest are dropped down to two, and a block that finds too little
+     is filled with silence and counted (`input_underruns`).
+   - *The track.* A track's `audio_input` is part of the project: no input (the default), one
+     channel (heard in the middle, then panned by the track) or a neighbouring pair (left and
+     right), counted from 1; and its monitoring: **Auto** (heard while the track is armed, the
+     default), **In** (always) or **Off** (never; for recording). `track.setAudioInput` sets
+     it; the track's menu and, at 90 px, the Arrangement header show it. Heard input goes the way
+     an audio clip's sound goes: into the track's chain, or with the track's gains to the output,
+     so its devices, plug-ins, mix, solo and latency compensation apply. Arm appears on tracks
+     that play audio too, and the same arm (and Ctrl to add tracks) arms many tracks at once: a
+     band on separate tracks, each from its own input, is the acceptance test
+     (`input_tests.rs`, thirteen inputs onto tracks 1, 2 and 10 to 20).
+   - *Latency.* What a microphone costs to be heard is the input device's buffer, up to a block
+     waiting in the ring, and then the same path as a key on a MIDI controller (decision 5); an
+     armed track keeps the shallower queue (decision 6). `audio.info` reports the input device,
+     its channels and its underruns.
 
 ## Consequences
 
@@ -123,6 +153,7 @@ engine code.
 ## Planned
 
 The rest of [#263](https://github.com/suhina-daw/suhina-daw/issues/263) follows this ADR and
-amends it as it lands: MIDI recording with count-in (#266), audio inputs and monitoring In / Auto /
-Off (#267), and audio recording lined up for input and output latency (#268). Monitored audio
-input takes the same shallower queue while its track is armed.
+amends it as it lands: MIDI recording with count-in (#266), and audio recording of every armed
+track at once into files of its own, lined up for input and output latency (#268). An input
+device on another host than the output, or at another sample rate (resampled), is not planned
+yet.

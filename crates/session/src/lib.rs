@@ -23,7 +23,7 @@ use serde_json::Value;
 use suhina_engine::{Controller, LauncherMonitor};
 use suhina_model::Project;
 
-pub use audio::{AudioSystem, LiveOutput, OutputChoice, OutputInfo, audio_commands};
+pub use audio::{AudioSystem, InputChoice, LiveOutput, OutputChoice, OutputInfo, audio_commands};
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};

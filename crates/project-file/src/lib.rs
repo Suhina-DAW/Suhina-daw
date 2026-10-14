@@ -21,10 +21,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, MidiInput, MidiPort, Note, Project, Rgb, Scene, Send, Slot, StretchMode,
-    TimeSignature, Track, TrackId, Transport, WarpMarker,
+    Arrangement, ArrangementLane, AudioInput, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent,
+    ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape,
+    InputChannels, LaneData, Launcher, LauncherColumn, LoopRange, MAX_INPUT_CHANNEL, MidiInput, MidiPort, Monitor,
+    Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -247,6 +247,20 @@ fn track_value(t: &Track) -> Value {
                 MidiPort::Named(name) => json!({ "name": name }),
             };
             map.insert("midi_input".into(), json!({ "port": port, "channel": t.midi_input.channel }));
+        }
+        // Left out while it is the default: no input, monitored automatically.
+        if t.audio_input != AudioInput::default() {
+            let channels = match t.audio_input.channels {
+                InputChannels::None => json!([]),
+                InputChannels::Mono(c) => json!([c]),
+                InputChannels::Stereo(c) => json!([c, c.saturating_add(1)]),
+            };
+            let monitor = match t.audio_input.monitor {
+                Monitor::Auto => "auto",
+                Monitor::In => "in",
+                Monitor::Off => "off",
+            };
+            map.insert("audio_input".into(), json!({ "channels": channels, "monitor": monitor }));
         }
         with_extensions(map, &t.extensions);
     }
@@ -610,8 +624,46 @@ fn read_track(value: &Value, at: &str) -> Result<Track, ProjectFileError> {
         channel: optional_whole(t, "channel", at)?.map(ChannelId),
         parent: optional_whole(t, "parent", at)?.map(TrackId),
         midi_input: read_midi_input(t.get("midi_input"), at)?,
+        audio_input: read_audio_input(t.get("audio_input"), at)?,
         extensions: extensions(t, at)?,
     })
+}
+
+/// A track's `audio_input`: `{ "channels": [] | [n] | [n, n + 1], "monitor": "auto" | "in" |
+/// "off" }`, channels counted from 1; no input, monitored automatically, when it is left out.
+fn read_audio_input(value: Option<&Value>, at: &str) -> Result<AudioInput, ProjectFileError> {
+    let at = format!("{at}.audio_input");
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(AudioInput::default()) };
+    let a = object(value, &at)?;
+    let channel =
+        |v: &Value| v.as_u64().and_then(|c| u16::try_from(c).ok()).filter(|c| (1..=MAX_INPUT_CHANNEL).contains(c));
+    let bad = || {
+        ProjectFileError(format!("{at}.channels: expected [], [n] or [n, n + 1] with n from 1 to {MAX_INPUT_CHANNEL}"))
+    };
+    let channels = match a.get("channels") {
+        None | Some(Value::Null) => InputChannels::None,
+        Some(Value::Array(list)) => match list.as_slice() {
+            [] => InputChannels::None,
+            [one] => InputChannels::Mono(channel(one).ok_or_else(bad)?),
+            [left, right] => {
+                let (left, right) = (channel(left).ok_or_else(bad)?, channel(right).ok_or_else(bad)?);
+                if left.checked_add(1) != Some(right) {
+                    return Err(bad());
+                }
+                InputChannels::Stereo(left)
+            }
+            _ => return Err(bad()),
+        },
+        Some(_) => return Err(bad()),
+    };
+    let monitor = match a.get("monitor").and_then(Value::as_str) {
+        None if a.get("monitor").is_none_or(Value::is_null) => Monitor::Auto,
+        Some("auto") => Monitor::Auto,
+        Some("in") => Monitor::In,
+        Some("off") => Monitor::Off,
+        _ => return Err(format!("{at}.monitor: expected \"auto\", \"in\" or \"off\"").into()),
+    };
+    Ok(AudioInput { channels, monitor })
 }
 
 /// A track's `midi_input`: `{ "port": "all" | "none" | { "name" }, "channel": 1–16 or null }`,

@@ -382,8 +382,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
   input port opened and Settings › Audio › MIDI inputs to turn one off (`midi.inputs`,
   `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
-  the buffer size. Still to do: recording and audio inputs
+  the buffer size. Still to do: recording
   ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
+- **Audio input and monitoring:** choose an input device in Settings › Audio (off by default);
+  each audio track hears one channel or a stereo pair of it, monitored while armed (Auto),
+  always (In) or never (Off), through its devices and mix (`track.setAudioInput`); arm many
+  tracks at once to hear a band on separate tracks
+  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017). Recording is next
+  ([#268](https://github.com/suhina-daw/suhina-daw/issues/268)).
 - **A MIDI input per track:** each track hears every MIDI port, one port, or none, and every
   channel or one, so a keyboard and a pad controller (or two players) each play their own armed
   track; set from the track's menu or the Arrangement header (`track.setMidiInput`), saved with

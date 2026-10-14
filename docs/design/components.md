@@ -156,7 +156,7 @@ part is empty (the main track's strip is planned). From top to bottom:
 | Toggles | 18 px at the bottom: track on (two thirds, the track number, or the return's letter, in 10 px mono) and solo (one third, "S" in 10 px), 2 px apart; on a track that plays notes, solo and arm take a quarter each and track on the rest |
 | Track on | On: `#C9C4BB` with `window.background` text. Off: `control.background` with `text.hint` |
 | Solo | On: `accent` with `window.background` text; off: `control.background`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
-| Arm | Off: a 1.2 px `text.secondary` ring on `control.background` (hover `control.hoverBackground`). On: `recording.background`, the ring filled in `recording`. A click arms the track alone (`track.setArm`, exclusive); Ctrl (Cmd) adds it to the tracks armed already. Only tracks that play notes have one, until audio inputs come |
+| Arm | Off: a 1.2 px `text.secondary` ring on `control.background` (hover `control.hoverBackground`). On: `recording.background`, the ring filled in `recording`. A click arms the track alone (`track.setArm`, exclusive); Ctrl (Cmd) adds it to the tracks armed already. Tracks that play notes or audio have one: an armed note track plays the MIDI controllers, an armed audio track hears its audio input |
 | Meter | (planned) Two 4 px bars, 2 px apart, on `window.background`, beside the values; `meter.normal`, the top 12 % `meter.hot` when above −3 dB |
 
 ## Arrangement view
@@ -193,7 +193,7 @@ a lane between 20 and 26 px shows the first row clipped.
 | ≥ 26 px | Row 1, 15 px: track on (30 px, the track number in 10 px mono), solo (18 px, "S"), arm (18 px, on a track that plays notes), a 6 px colour square, the name in 11 px |
 | ≥ 48 px | Row 2, 6 px under row 1: the volume field (the rest of the row) and the pan field (46 px), 4 px apart |
 | ≥ 70 px | Routing, 4 px under row 2: "→" and the output dropdown ("Main" or a group track, `track.setOutput`); audio input and monitor In / Auto / Off (planned, with recording) |
-| ≥ 90 px | On a track that plays notes, 4 px under routing: "MIDI" (28 px, 10 px `text.hint`) and the MIDI input dropdown, the rest of the row ("All ports", a port, or "No input", then " · Ch N" for one channel; `track.setMidiInput`). The track's menu, in both views, has the same choices under "MIDI input: …": every port, each port there is (one chosen but not connected says so), none; every channel, or Ch 1 to 16 in a grid of four |
+| ≥ 90 px | On a track that plays audio, 4 px under routing: "Audio" (28 px, 10 px `text.hint`) and the audio input dropdown ("No input", or "In 3" or "In 1/2" and " · Auto", " · Monitor in" or " · Monitor off"; `track.setAudioInput`); its menu, also under "Audio input: …" in the track's menu in both views, offers No input, each channel of the input device and each neighbouring pair (the first eight while no input device is open, saying so), then Monitor auto, in or off. On a track that plays notes, 4 px under routing: "MIDI" (28 px, 10 px `text.hint`) and the MIDI input dropdown, the rest of the row ("All ports", a port, or "No input", then " · Ch N" for one channel; `track.setMidiInput`). The track's menu, in both views, has the same choices under "MIDI input: …": every port, each port there is (one chosen but not connected says so), none; every channel, or Ch 1 to 16 in a grid of four |
 | ≥ 114 px | (planned) Send fields, one per return, labelled "Send A", "Send B", once the engine plays sends; routing then moves below them |
 
 ### Value field (slider)
@@ -273,7 +273,8 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Audio › Output | Sample rate | The device's own (default), then the rates the device offers |
 | Audio › Output | Buffer size | Default (1024 frames), then the device's sizes with their length in ms |
 | Audio › Output | Exclusive mode | On, Off (default): WASAPI only; the note says when the device does not allow it |
-| Audio › Now | Output, Latency, Key to sound | Read only: the device in use, its measured latency and underruns, and the longest a key on a MIDI controller takes to be heard (saying whether a track is armed, which keeps one block ahead); "List devices again" (120 px) on the Output row. Changes on this page run `audio.setOutput` |
+| Audio › Output | Input | Off (default), Default (the host's default input), then the host's input devices with their channel count ("Line In (2 in)"); a saved device that is gone says so. Tracks with an audio input hear it |
+| Audio › Now | Output, Latency, Key to sound, Input now | Read only: the device in use, its measured latency and underruns, the longest a key on a MIDI controller takes to be heard (saying whether a track is armed, which keeps one block ahead), and the input device open with its channels and underruns; "List devices again" (120 px) on the Output row. Changes on this page run `audio.setOutput` |
 | Audio › MIDI inputs | Each MIDI input port | On (default), Off: the note says whether it plays the armed tracks or why it could not be opened; "None" when no controller is connected. Listed again every 2 s while the page shows; runs `midi.setInput` |
 
 **Interface › Theme**: the themes as 20 px rows in a list that scrolls after eight, the user's

@@ -40,6 +40,7 @@ pub fn blank_project() -> Project {
             channel: Some(ChannelId(id)),
             parent: None,
             midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         project.channels.push(channel(ChannelId(id), name, ChannelRole::Regular, Some(main)));
@@ -56,6 +57,7 @@ pub fn blank_project() -> Project {
             channel: Some(id),
             parent: None,
             midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         project.channels.push(channel(id, name, ChannelRole::Effect, Some(main)));

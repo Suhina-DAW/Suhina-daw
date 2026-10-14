@@ -41,6 +41,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
             channel: Some(ChannelId(1)),
             parent: None,
             midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }],
         channels: vec![Channel {

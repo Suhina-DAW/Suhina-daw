@@ -599,7 +599,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             lane,
             track_number,
             &groups,
-            &timeline.midi_ports,
+            (&timeline.midi_ports, timeline.input_channels),
             state,
             actions,
         );
@@ -1315,6 +1315,38 @@ fn midi_input(
     egui::Popup::menu(&response).show(|ui| menus::midi_input_choices(ui, lane.track, &lane.midi_input, ports, actions));
 }
 
+/// The audio input dropdown (ADR 0017): "In" and the track's input channels and monitoring;
+/// its menu runs `track.setAudioInput`.
+fn audio_input(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    lane: &Lane,
+    channels: u16,
+    actions: &mut Vec<Action>,
+) {
+    let current = menus::audio_input_text(&lane.audio_input);
+    let label = Rect::from_min_size(rect.min, Vec2::new(28.0, rect.height()));
+    widgets::text_in(
+        painter,
+        label,
+        Align2::LEFT_CENTER,
+        "Audio",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_hint(),
+    );
+    let field = Rect::from_min_max(Pos2::new(label.right(), rect.top()), rect.max);
+    let response = widgets::button_area(
+        ui,
+        field,
+        Id::new(("audio-input", lane.track.0)),
+        format!("{} audio input: {current}", lane.name),
+    );
+    widgets::dropdown(ui, painter, field, &response, &current);
+    egui::Popup::menu(&response)
+        .show(|ui| menus::audio_input_choices(ui, lane.track, &lane.audio_input, channels, actions));
+}
+
 /// A return track's row: its name and its volume.
 fn fixed_row(
     ui: &Ui,
@@ -1344,7 +1376,7 @@ fn track_header(
     lane: &Lane,
     track_number: usize,
     groups: &[(TrackId, String)],
-    midi_ports: &[String],
+    (midi_ports, input_channels): (&[String], u16),
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) {
@@ -1382,7 +1414,8 @@ fn track_header(
             name: &lane.name,
             is_group: lane.kind == ColumnKind::Group,
             selection: &selection,
-            midi: lane.armable.then_some((&lane.midi_input, midi_ports)),
+            midi: lane.plays_notes.then_some((&lane.midi_input, midi_ports)),
+            audio: lane.plays_audio.then_some((&lane.audio_input, input_channels)),
         };
         menus::track_menu(ui, &menu, actions);
     });
@@ -1414,8 +1447,16 @@ fn track_header(
         actions.push(action);
     }
     if let Some(arm) = arm.filter(|a| a.intersects(clip))
-        && let Some(action) =
-            widgets::arm_button(ui, painter, arm, id.with("arm"), lane.track.0, &lane.name, lane.armed)
+        && let Some(action) = widgets::arm_button(
+            ui,
+            painter,
+            arm,
+            id.with("arm"),
+            lane.track.0,
+            &lane.name,
+            lane.armed,
+            lane.plays_notes,
+        )
     {
         actions.push(action);
     }
@@ -1453,8 +1494,12 @@ fn track_header(
         }
         // Taller still, on a track that plays notes: which controllers it hears when armed.
         let input = line.translate(Vec2::new(0.0, DROPDOWN + PAD));
-        if lane.armable && rect.height() >= SHOWS_MIDI_INPUT && input.intersects(clip) {
-            midi_input(ui, painter, input, lane, midi_ports, actions);
+        if rect.height() >= SHOWS_MIDI_INPUT && input.intersects(clip) {
+            if lane.plays_notes {
+                midi_input(ui, painter, input, lane, midi_ports, actions);
+            } else if lane.plays_audio {
+                audio_input(ui, painter, input, lane, input_channels, actions);
+            }
         }
     }
 

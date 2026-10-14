@@ -184,6 +184,7 @@ impl Reader {
                 channel: Some(entry.channel),
                 parent,
                 midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             });
             if entry.kind != TrackKind::Return {

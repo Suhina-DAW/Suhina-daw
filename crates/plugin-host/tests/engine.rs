@@ -81,6 +81,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             channel: Some(ChannelId(1)),
             parent: None,
             midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }],
         channels: vec![Channel {

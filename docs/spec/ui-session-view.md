@@ -121,7 +121,7 @@ the return tracks (so effects stay audible); mute still wins. A click solos one 
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). **Arm:**
 an armed track's instrument plays what the MIDI controllers play; a click arms one track and
 disarms the others, Ctrl adds (`track.setArm`, `exclusive`; [ADR 0017](../decisions/0017-inputs-and-latency.md)).
-Suhina shows arm on tracks that play notes only, until audio inputs come. MIDI tracks without an instrument show no
+A track that plays audio is armed to hear its audio input (`track.setAudioInput`, monitoring Auto). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
 
