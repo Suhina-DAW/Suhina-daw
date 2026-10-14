@@ -108,12 +108,18 @@ function scenario(input) {
       },
     },
   };
-  // A comment is its text, written by a maintainer, or { body, by } for anyone else.
+  // A comment is its text, written by a maintainer, or { body, by } for anyone else; { bot, hoursAgo }
+  // makes it the bot's own comment, written that many hours ago.
   const listComments = async () => ({
     data: ((input.issue && input.issue.comments) || []).map((entry) =>
       typeof entry === "string"
-        ? { body: entry, author_association: "MEMBER" }
-        : { body: entry.body, author_association: entry.by },
+        ? { body: entry, author_association: "MEMBER", user: { type: "User" } }
+        : {
+            body: entry.body,
+            author_association: entry.bot ? "NONE" : entry.by,
+            user: { type: entry.bot ? "Bot" : "User" },
+            created_at: new Date(Date.now() - (entry.hoursAgo || 0) * 3600 * 1000).toISOString(),
+          },
     ),
   });
   global.github = {
@@ -171,6 +177,69 @@ const cases = [
     expect: (s) => says(s.state, "already yours") && !s.state.moved,
   },
   {
+    name: "claim by the person who has it names their open pull request",
+    input: {
+      body: "/claim",
+      board: { status: "In progress", openPrs: [{ number: 239, title: "Fix", url: "u" }] },
+      assignees: ["someone"],
+    },
+    expect: (s) => says(s.state, "already yours", "#239", "Continue there") && !s.state.moved,
+  },
+  {
+    name: "a claim with no pull request after 48 hours passes to the next claimer",
+    input: {
+      body: "/claim",
+      board: { status: "In progress" },
+      assignees: ["other"],
+      issue: { comments: [{ body: "Claimed by @other: **In progress**", bot: true, hoursAgo: 49 }] },
+    },
+    expect: (s) =>
+      says(s.state, "lapsed", "@other") &&
+      s.state.unassigned.includes("other") &&
+      s.state.assigned.includes("someone") &&
+      s.state.moved === "opt-progress",
+  },
+  {
+    name: "a claim younger than 48 hours still holds",
+    input: {
+      body: "/claim",
+      board: { status: "In progress" },
+      assignees: ["other"],
+      issue: { comments: [{ body: "Claimed by @other: **In progress**", bot: true, hoursAgo: 10 }] },
+    },
+    expect: (s) => says(s.state, "already **In progress** (@other)") && !s.state.moved && !s.state.unassigned.length,
+  },
+  {
+    name: "an old claim with an open pull request does not lapse",
+    input: {
+      body: "/claim",
+      board: { status: "In progress", openPrs: [{ number: 239, title: "Fix", url: "u" }] },
+      assignees: ["other"],
+      issue: { comments: [{ body: "Claimed by @other: **In progress**", bot: true, hoursAgo: 200 }] },
+    },
+    expect: (s) => !says(s.state, "lapsed") && !s.state.moved && !s.state.unassigned.length,
+  },
+  {
+    name: "only the bot's own claim comment dates a claim",
+    input: {
+      body: "/claim",
+      board: { status: "In progress" },
+      assignees: ["other"],
+      issue: { comments: [{ body: "Claimed by @other: forged", by: "NONE", hoursAgo: 200 }] },
+    },
+    expect: (s) => says(s.state, "already **In progress**") && !s.state.moved,
+  },
+  {
+    name: "a card in review never lapses",
+    input: {
+      body: "/claim",
+      board: { status: "In review" },
+      assignees: ["other"],
+      issue: { comments: [{ body: "Claimed by @other: **In progress**", bot: true, hoursAgo: 200 }] },
+    },
+    expect: (s) => says(s.state, "already **In review**") && !s.state.moved,
+  },
+  {
     name: "claim on a held card quotes the reason it was held for",
     input: {
       body: "/claim",
@@ -183,6 +252,26 @@ const cases = [
     name: "claim with an open pull request is refused, and names it",
     input: { body: "/claim", board: { status: "Ready", openPrs: [{ number: 239, title: "Fix", url: "u" }] } },
     expect: (s) => says(s.state, "already a pull request", "#239") && !s.state.moved,
+  },
+  {
+    name: "a feature still in Backlog is not open to claim",
+    input: { body: "/claim", board: { status: "Backlog" }, issue: { labels: [{ name: "enhancement" }] } },
+    expect: (s) => says(s.state, "not agreed yet") && !s.state.moved,
+  },
+  {
+    name: "a feature in Ready can be claimed",
+    input: { body: "/claim", board: { status: "Ready" }, issue: { labels: [{ name: "enhancement" }] } },
+    expect: (s) => s.state.moved === "opt-progress",
+  },
+  {
+    name: "a maintainer may claim a feature in Backlog",
+    input: {
+      body: "/claim",
+      association: "MEMBER",
+      board: { status: "Backlog" },
+      issue: { labels: [{ name: "enhancement" }] },
+    },
+    expect: (s) => s.state.moved === "opt-progress",
   },
   {
     name: "claim on an epic is refused",
