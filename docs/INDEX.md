@@ -55,6 +55,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Waveforms](spec/waveforms.md) | spec | current | waveform, peaks, RMS, waveform drawing, zoom, samples, stereo lanes, dB scale, clip waveform, preview waveform, sample map tooltip, frame budget | How waveforms are computed and drawn in clips, the browser's preview and the sample map's tooltips: peak levels with RMS, lanes per channel, the shape, samples close up, the dB scale, the frame budget |
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [The claim bot](claim-bot.md) | howto | current | claim, /claim, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue | How the claim bot moves an issue's card on the project board, holds work, and is set up |
+| [How to check it](how-to-check.md) | howto | current | how to check it, test steps, QA steps, how to test, pull request description, manual testing, reviewer steps, check a change | How to write a pull request's "How to check it" section, steps a newcomer can follow from the test build to check a change in what Suhina does |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, test build, pull request build, try a pull request, Discord announcement, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
@@ -66,8 +67,10 @@ Change this code, and check these documents.
 
 | Code | Documents |
 |---|---|
+| `.claude/skills/how-to-check/SKILL.md` | [How to check it](how-to-check.md) |
 | `.github/ISSUE_TEMPLATE/5-preset.yml` | [0014: Stock presets](decisions/0014-stock-presets.md) |
 | `.github/PULL_REQUEST_TEMPLATE/preset.md` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `.github/pull_request_template.md` | [How to check it](how-to-check.md) |
 | `.github/workflows/claim.yml` | [The claim bot](claim-bot.md) |
 | `.github/workflows/discord.yml` | [Releasing](releasing.md) |
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
