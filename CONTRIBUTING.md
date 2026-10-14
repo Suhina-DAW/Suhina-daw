@@ -168,6 +168,12 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
+- **Steps anyone can follow.** A change in what Suhina does, in the app, its sound, the files it
+  reads and writes, the CLI or MCP, comes with a *How to check it* section in the pull request:
+  numbered steps from opening Suhina with nothing loaded, every control named as it reads on
+  screen and where it is, every command ready to copy, and what should happen after each step,
+  written so that someone who has never used a music program can check it from the test build.
+  [`docs/how-to-check.md`](docs/how-to-check.md) shows how to write them.
 - **You are responsible for what you submit.** Before you open a pull request, run the tests and
   try every change by hand to see that it works as intended; you answer review questions, not
   the agent.
