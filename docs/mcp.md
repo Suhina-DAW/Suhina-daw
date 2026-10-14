@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -49,7 +49,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
-  `launcher.state`) are heard. Without it they return an error; launch scripts in
+  `launcher.state`) are heard. Without it they return an error, except `launcher.setQuantization`,
+  which the project's session keeps and hands to an engine attached later; launch scripts in
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
   launched clips playing on

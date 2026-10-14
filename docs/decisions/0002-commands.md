@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
@@ -60,6 +60,11 @@ session (a `Player`: the renderer's lock-free command queue and its state monito
 the project and record no undo step. Without an attached engine they return an error that says
 how to start one. `launcher.state` reads the engine's state the same way. See
 `docs/spec/clip-launching.md`.
+
+`launcher.setQuantization` is the one exception (2026-10-14): its value is also the Arrangement
+view's grid, so the session keeps it (not the project, no undo step) and the command works without
+an engine; an engine attached later is sent the session's value
+([arrangement editing](../spec/arrangement-editing.md) › The grid).
 
 ## Amendment: project commands (2026-10-11)
 

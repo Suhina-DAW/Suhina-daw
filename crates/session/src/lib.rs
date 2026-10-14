@@ -19,7 +19,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use suhina_engine::{Controller, LauncherMonitor};
+use suhina_engine::{Controller, LauncherMonitor, Quantization};
 use suhina_model::Project;
 
 pub use audio::{AudioSystem, LiveOutput, OutputChoice, OutputInfo, audio_commands};
@@ -183,6 +183,9 @@ pub struct Session {
     undo: Vec<Project>,
     redo: Vec<Project>,
     player: Option<Player>,
+    /// The grid launches wait for, which the Arrangement view's grid follows too. Kept here,
+    /// not in the project: it reaches a player when one is attached (`launcher.setQuantization`).
+    quantization: Quantization,
     /// A copied arrangement clip and the content it plays, for `clip.paste`.
     clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
     /// Set by an edit command whose only change is one device parameter.
@@ -211,6 +214,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             player: None,
+            quantization: Quantization::Bars(1),
             clipboard: None,
             param_edit: None,
             plugins: rack::Rack::default(),
@@ -331,9 +335,27 @@ impl Session {
     /// Connects an audio engine playing this session's project; transport and launcher commands
     /// go to it from now on. Replaces (and so closes) any previous player. It should have been
     /// started with [`Session::audio`]; audio added later reaches it with the next edit.
-    pub fn attach_player(&mut self, player: Player) {
+    pub fn attach_player(&mut self, mut player: Player) {
+        // A new engine starts on its own default grid; it takes this session's instead. Its
+        // command queue is empty, so this send only fails if the engine is gone, and then every
+        // later command says so.
+        let _ = player.send(suhina_engine::LaunchCommand::SetQuantization(self.quantization));
         self.player = Some(player);
         self.audio_changed = false;
+    }
+
+    /// The launch quantisation `launcher.setQuantization` set last (1 bar until then); the
+    /// Arrangement view's grid follows it too.
+    pub fn quantization(&self) -> Quantization {
+        self.quantization
+    }
+
+    pub(crate) fn set_quantization(&mut self, quantization: Quantization) -> Result<(), CommandError> {
+        if let Some(player) = self.player.as_mut() {
+            player.send(suhina_engine::LaunchCommand::SetQuantization(quantization))?;
+        }
+        self.quantization = quantization;
+        Ok(())
     }
 
     /// Replaces the player with the one `open` makes from the old one, keeping the project's

@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-14
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -27,7 +27,8 @@ From top to bottom:
    Edit, View, Projects and Options so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
-   - groove amount, metronome, global launch quantisation
+   - groove amount, metronome, global launch quantisation (in Suhina also the Arrangement
+     view's grid: [arrangement editing](arrangement-editing.md) › The grid)
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker and

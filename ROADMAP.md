@@ -272,11 +272,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - The **Arrangement view** (Tab switches): bar ruler, one lane per track with its clips and their
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
-  by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+  by dragging (`clip.move`), snapped to the grid (Ctrl and the wheel zoom).
 - A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
+- The grid value in the control bar (`1 bar`, `1/16`, `1/8T` … `none`) is also the Arrangement
+  view's grid: lines at every step, coarser as the view zooms out, and moved clips, dropped files,
+  fade handles and ruler clicks snap to them (Alt held, or `none`: off the grid); each project tab
+  keeps its own value ([spec](docs/spec/arrangement-editing.md#the-grid)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template

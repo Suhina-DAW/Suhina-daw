@@ -3,7 +3,7 @@ description: How the browser behaves: places, categories, search, the tree, prev
 read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -210,7 +210,7 @@ without Ctrl).
 
 | Dropped on | Result |
 |---|---|
-| An Arrangement lane | Clips from the beat under the pointer, on the grid the view snaps to (Alt: no snap). The clips replace what they cover, unless the stacking settings allow it ([arrangement editing](arrangement-editing.md)). |
+| An Arrangement lane | Clips from the beat under the pointer, on the grid the control bar's value sets at that zoom ([arrangement editing](arrangement-editing.md) › The grid; Alt or `none`: no snap). The clips replace what they cover, unless the stacking settings allow it ([arrangement editing](arrangement-editing.md)). |
 | A Session slot (empty or not) | Clips into that slot and the ones below it; a clip already there is replaced. Scenes are added at the bottom when there are more clips than slots. |
 | The empty area | New tracks, see below. |
 

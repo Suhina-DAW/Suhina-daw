@@ -1578,3 +1578,152 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
+
+/// Picks `value` in the control bar's grid box, as a user does: open it, click the value.
+fn choose_grid(harness: &mut Harness<'static, App>, value: &str) {
+    harness.get_by_label("Grid and launch quantisation").click();
+    harness.run();
+    harness.get_by_label(value).click();
+    harness.run();
+}
+
+/// The grid value of the active project's session.
+fn grid_of(harness: &Harness<'static, App>) -> Option<suhina_engine::Quantization> {
+    harness.state().session().map(|s| s.quantization())
+}
+
+/// Zooms the Arrangement view in eight times (64 points a beat) around a point just inside
+/// Beat B's left edge, so that edge stays in view; returns where the edge is then.
+fn zoom_in_at_beat_b(harness: &mut Harness<'static, App>) -> f32 {
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    // 8 points a beat by default: 4 points in is half a beat into the clip, which starts on beat 64.
+    let at = egui::pos2(clip.left() + 4.0, clip.center().y);
+    harness.hover_at(at);
+    harness.run();
+    harness.input_mut().events.push(egui::Event::Zoom(8.0));
+    harness.run();
+    let left = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().left();
+    assert!((left - (at.x - 32.0)).abs() <= 1.0, "zoomed to 64 points a beat around the pointer: {left}");
+    left
+}
+
+/// Drags Beat B by `by` points, taking hold of it just inside its left edge, which stays in
+/// view when zoomed in.
+fn drag_beat_b(harness: &mut Harness<'static, App>, by: egui::Vec2) {
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    let from = egui::pos2(clip.left() + 16.0, clip.center().y);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + by * 0.5);
+    harness.run();
+    harness.hover_at(from + by);
+    harness.run();
+    harness.drop_at(from + by);
+    harness.run();
+}
+
+/// Where Beat B (on beat 64 in the demo) starts now, after a move of less than two bars.
+fn beat_b_start(harness: &Harness<'static, App>) -> Option<f64> {
+    harness
+        .state()
+        .session()?
+        .project()
+        .arrangement
+        .lanes
+        .first()?
+        .clips
+        .iter()
+        .map(|c| c.start)
+        .find(|s| (63.9..72.0).contains(s))
+}
+
+#[test]
+fn the_grid_value_in_the_control_bar_sets_where_a_dragged_clip_lands() {
+    let mut harness = arrangement_app();
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Bars(1)));
+    // No audio engine is needed to choose the grid.
+    choose_grid(&mut harness, "1/16");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+    assert!(matches!(harness.state().status(), Status::Done(s) if s == "Grid 1/16"));
+    zoom_in_at_beat_b(&mut harness);
+
+    // 1.3 beats right (83.2 points at 64 a beat): on the nearest sixteenth, beat 65.25.
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(65.25));
+    // The move is one undo step.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(beat_b_start(&harness), Some(64.0));
+
+    // With Alt held it lands where it is let go, off the grid.
+    harness.event(egui::Event::ModifiersChanged(Modifiers::ALT));
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    harness.run();
+    let free = beat_b_start(&harness).unwrap_or_default();
+    assert!((free - 65.3).abs() < 0.02 && (free * 4.0).fract().abs() > 0.01, "{free}");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+
+    // 1 bar: 3.5 beats right lands on the next bar, beat 68, at the same zoom.
+    choose_grid(&mut harness, "1 bar");
+    drag_beat_b(&mut harness, egui::vec2(224.0, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(68.0));
+}
+
+#[test]
+fn a_triplet_or_none_grid_places_a_dragged_clip_by_its_own_rule() {
+    let mut harness = arrangement_app();
+    choose_grid(&mut harness, "1/16T");
+    zoom_in_at_beat_b(&mut harness);
+    // 1.3 beats right: the nearest sixth of a beat is 64 + 8/6.
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    let start = beat_b_start(&harness).unwrap_or_default();
+    assert!((start - (64.0 + 8.0 / 6.0)).abs() < 1e-9, "{start}");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+
+    // none: nothing snaps, as if Alt were held.
+    choose_grid(&mut harness, "none");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::None));
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    let free = beat_b_start(&harness).unwrap_or_default();
+    assert!((free - 65.3).abs() < 0.02 && (free * 4.0).fract().abs() > 0.01, "{free}");
+}
+
+#[test]
+fn each_project_tab_keeps_its_own_grid() {
+    let mut harness = two_projects();
+    // The browser has tests of its own; the views get the whole width.
+    harness.state_mut().set_browser_open(false);
+    harness.run();
+    let ids = harness.state().projects().ids();
+    // The second project shows: 1/16 there.
+    choose_grid(&mut harness, "1/16");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+
+    // The first keeps 1 bar: in its Arrangement a short drag at a fine zoom lands on a bar.
+    harness.get_by_label("Tab Untitled 1").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().projects().active(), ids.first().copied());
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Bars(1)));
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    zoom_in_at_beat_b(&mut harness);
+    drag_beat_b(&mut harness, egui::vec2(160.0, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(68.0));
+
+    // Back in the second, its 1/16 is still chosen and is its grid.
+    harness.get_by_label("Tab Untitled 2").click();
+    harness.run();
+    harness.run();
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    zoom_in_at_beat_b(&mut harness);
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(65.25));
+}

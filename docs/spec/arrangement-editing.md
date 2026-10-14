@@ -1,9 +1,9 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -16,6 +16,8 @@ covers:
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
+  - crates/ui/src/app.rs
+  - crates/session/src/lib.rs
 ---
 
 # Arrangement editing
@@ -30,6 +32,39 @@ from pattern-based DAWs where clips **stack** and all play; two settings allow t
 at least 0), on its own track or on `to_track`, which must take the clip's kind: a MIDI clip goes
 to a track that plays notes, an audio clip to an audio track. A clip that moves to another track
 plays through that track's instrument and effects. The move is one undo step.
+
+In the Arrangement view a clip is moved by dragging it, along its lane or onto another; it lands
+on the nearest line of [the grid](#the-grid), or where it is let go with Alt held (at the end of
+the drag; the clip is drawn where it will land while it is dragged).
+
+## The grid
+
+The Arrangement view has one grid, drawn as vertical lines across the lanes and used by
+everything that snaps. Its value is the box in the control bar next to the tempo and the time
+signature (`none`, `8 bars` … `1 bar`, `1/2`, `1/2T` … `1/16T`, `1/32`), the same value that sets
+when launched clips start ([clip launching](clip-launching.md) › Launch quantisation): changing it
+runs `launcher.setQuantization`. Note values are quarter-note beats (`1/16` is a quarter of a beat,
+a `T` triplet two thirds of that note), and bars are the time signature's bar. The value is kept by
+each open project's session, so every project tab has its own; it is not saved in the project
+file and is not an undo step (a new or opened project starts on `1 bar`).
+
+**Lines follow the zoom.** A line is drawn at every step of the value, starting again at every bar
+line, and bar lines are stronger than the lines between them. Lines are never drawn closer than
+**8 points**: where they would be, the grid coarsens until they are at least that far apart. A
+straight note value doubles (`1/16` to `1/8` to `1/4`) up to the beat; a triplet finer than a beat
+goes straight to the beat, so lines stay on the bar; from the beat it goes to the bar, then 2, 4,
+8 bars and so on. A value of a bar or more is never drawn finer than it is. So with `1/16`, zoomed
+in, a beat has four lines; zoomed out, lines fall on beats, then on bars.
+
+**What snaps.** Everything placed in the view goes to the nearest line of the grid as it is drawn
+at that zoom (never before the start): a clip moved by dragging ([moving a clip](#moving-a-clip)),
+samples and MIDI files dragged from the browser onto a lane or the empty space below the tracks
+([browser](browser.md) › Dragging into the project), fade handles ([fades](#fades)) and ruler
+clicks ([play position](#play-position)). With **Alt** held, each of them goes exactly where the
+pointer is instead (off the grid).
+
+**`none`** launches clips at once, and in the Arrangement view nothing snaps (as if Alt were held);
+lines show beats and bars by the zoom alone.
 
 ## Duplicating and deleting
 
@@ -107,7 +142,7 @@ clip's bottom corner to where the fade ends at the top, following the fade's sha
 and the waveform is scaled by the fades.
 While the clip is hovered or selected, a small square **handle** sits at its top-left corner
 (fade-in) and top-right corner (fade-out); with a fade, the handle sits where the fade ends. A
-horizontal drag sets the fade with its end on the grid (Alt held: free), up to the other fade;
+horizontal drag sets the fade with its end on [the grid](#the-grid) (Alt held: free), up to the other fade;
 the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
 double-click on a handle removes that fade. A right-click on a handle opens a menu of the shapes,
 with the fade's shape checked; choosing one runs `clip.setFades`. A fade at least 21 px wide has a
@@ -171,7 +206,7 @@ waiting are queued again for the next boundary from the new beat. Time-stretched
 silent until the stretch worker has caught up with the new place (about one block in practice).
 
 **In the Arrangement view** a click on the ruler runs `transport.setPosition`: the beat under the
-pointer, on the same grid clips snap to at that zoom (Alt held: free, to a thousandth of a beat).
+pointer, on [the grid](#the-grid) (Alt held, or the grid `none`: free, to a thousandth of a beat).
 The marker is a small triangle hanging from the ruler's lower edge; the playhead is a line through
 the ruler and the lanes, at the marker while stopped (measurements in
 [components](../design/components.md) › Arrangement view). The Stop button and the play/stop key

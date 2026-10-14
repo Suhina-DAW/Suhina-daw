@@ -264,6 +264,56 @@ fn a_sample_dragged_onto_the_empty_space_makes_an_audio_track() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// Drops Groove.mid from the browser onto the Drums lane in the Arrangement view with the
+/// control bar's grid at 1/8, zoomed in to 64 points a beat, 1.3 beats after Beat B's start
+/// (beat 64), holding `modifiers`. Returns the starts of the Drums lane's clips once it is in.
+fn drop_groove_on_the_drums_lane(name: &str, modifiers: Modifiers) -> Vec<f64> {
+    let (settings, folder) = (temp(&format!("{name}-settings")), temp(name));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().browser.search = "groove".into();
+    harness.run();
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("Grid and launch quantisation").click();
+    harness.run();
+    harness.get_by_label("1/8").click();
+    harness.run();
+    // Zoom in eight times around a point half a beat into Beat B: its start stays in view.
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    harness.hover_at(egui::pos2(clip.left() + 4.0, clip.center().y));
+    harness.run();
+    harness.event(egui::Event::Zoom(8.0));
+    harness.run();
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    let to = egui::pos2(clip.left() + 1.3 * 64.0, clip.center().y);
+
+    let starts = |app: &App| {
+        app.session()
+            .map_or_else(Vec::new, |s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect())
+    };
+    let before = starts(harness.state()).len();
+    let from = harness.get_by_label(&row("Groove.mid")).rect().center();
+    harness.event(egui::Event::ModifiersChanged(modifiers));
+    drag(&mut harness, from, to);
+    harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    assert!(until(&mut harness, |app| starts(app).len() > before), "the clip is on the Drums lane");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+    starts(harness.state())
+}
+
+#[test]
+fn a_midi_file_dropped_on_a_lane_starts_on_the_chosen_grid_unless_alt_is_held() {
+    // 1/8: on the eighth nearest the pointer, beat 65.5 (not the sixteenth the zoom alone
+    // would allow).
+    let starts = drop_groove_on_the_drums_lane("lane-grid", Modifiers::NONE);
+    assert!(starts.contains(&65.5), "{starts:?}");
+    // Alt: where the pointer is, off the grid.
+    let starts = drop_groove_on_the_drums_lane("lane-free", Modifiers::ALT);
+    assert!(starts.iter().any(|s| (s - 65.3).abs() < 0.02 && (s * 8.0).fract().abs() > 0.01), "{starts:?}");
+}
+
 #[test]
 fn a_device_dragged_onto_a_track_header_joins_its_chain_and_becomes_recent() {
     let (settings, folder) = (temp("device-settings"), temp("device"));
