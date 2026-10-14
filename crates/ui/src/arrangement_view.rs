@@ -288,17 +288,25 @@ fn snap(beat_width: f32, bar_beats: f64) -> f64 {
 }
 
 /// A fade's length after a drag of `raw` beats: its end on the grid (unless `grid` is `None`,
-/// Alt held), and no longer than the clip leaves beside the other fade.
+/// Alt held), and no longer than the clip leaves beside the other fade. No fade and all the room
+/// there is snap too, so a clip that does not start or end on the grid can still be faded over
+/// its whole length.
 fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<f64>) -> f64 {
+    if !raw.is_finite() {
+        return 0.0;
+    }
     let end = clip.start + clip.length;
+    let room = (clip.length - other).max(0.0);
     let snapped = match grid.filter(|g| *g > 0.0) {
-        Some(g) => match edge {
-            FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
-            FadeEdge::Out => end - ((end - raw) / g).round() * g,
-        },
+        Some(g) => {
+            let on_grid = match edge {
+                FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
+                FadeEdge::Out => end - ((end - raw) / g).round() * g,
+            };
+            [0.0, room].into_iter().fold(on_grid, |best, v| if (v - raw).abs() < (best - raw).abs() { v } else { best })
+        }
         None => raw,
     };
-    let room = (clip.length - other).max(0.0);
     if snapped.is_finite() { snapped.clamp(0.0, room) } else { 0.0 }
 }
 
@@ -1614,6 +1622,15 @@ mod tests {
         assert_eq!(fade_length(-5.0, FadeEdge::In, &clip, 0.0, None), 0.0);
         assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 3.0, None), 5.0);
         assert_eq!(fade_length(f64::NAN, FadeEdge::In, &clip, 0.0, None), 0.0);
+        // The clip's own ends snap too: from beat 10 back to beat 2.6, nearer the clip's start
+        // (beat 2) than the grid line at beat 4, the fade-out takes the whole clip, and the
+        // fade-in from beat 2 to 9.5 takes the room the fade-out leaves.
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 8.0);
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 1.0, Some(4.0)), 7.0);
+        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 0.0, Some(4.0)), 8.0);
+        assert_eq!(fade_length(0.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 0.0);
+        // Nearer the grid line, the grid wins.
+        assert_eq!(fade_length(6.5, FadeEdge::Out, &clip, 0.0, Some(4.0)), 6.0);
     }
 
     #[test]
