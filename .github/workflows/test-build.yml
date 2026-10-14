@@ -1,7 +1,7 @@
 name: Test build
 
-# A Windows package of a pull request, to download and try without building it: the same binaries
-# as the nightly's, uploaded as a workflow artifact kept for 7 days. test-build-links.yml then
+# Packages of a pull request for Windows, macOS and Linux, to download and try without building
+# it: the same binaries as the nightly's, uploaded as workflow artifacts kept for 7 days. test-build-links.yml then
 # links it from the pull request. See docs/releasing.md › Test builds.
 #
 # Who gets one: a pull request opened and pushed by a maintainer is built on every push. Any other
@@ -36,7 +36,7 @@ env:
 
 jobs:
   build:
-    name: test build (windows-x86_64)
+    name: test build (${{ matrix.name }})
     # A maintainer's own pull request on every push, any pull request when a maintainer labels it,
     # and a run by hand (only people who can write to the repository can start one). The
     # maintainers are listed here and in test-build-links.yml.
@@ -46,10 +46,27 @@ jobs:
         ((github.event.action != 'labeled' &&
           contains(fromJSON('["juhamikael"]'), github.event.pull_request.user.login)) ||
          (github.event.action == 'labeled' && github.event.label.name == 'test-build')))
-    runs-on: windows-latest
-    # A newer push to the same pull request replaces a build still running.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # As release.yml: the oldest supported Ubuntu, so the binary runs on older glibc too.
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            targets: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            targets: x86_64-pc-windows-msvc
+          # Both architectures, joined into one universal binary with lipo.
+          - name: macos-universal
+            os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    # A newer push to the same pull request replaces a build still running, per platform.
     concurrency:
-      group: test-build-${{ github.event.pull_request.number || github.run_id }}
+      group: test-build-${{ github.event.pull_request.number || github.run_id }}-${{ matrix.name }}
       cancel-in-progress: true
     timeout-minutes: 60
     steps:
@@ -113,6 +130,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           PULL_REQUESTS: ${{ inputs.pull_requests }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PLATFORM: ${{ matrix.name }}
         run: |
           if [ -n "$PR" ]; then
             tag="pr.$PR"
@@ -131,13 +149,18 @@ jobs:
           echo "Version $version"
           {
             echo "version=$version"
-            echo "package=suhina-$name-windows-x86_64"
+            echo "package=suhina-$name-$PLATFORM"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Install ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: test-build
+          key: test-build-${{ matrix.name }}
 
       # As release.yml does for the nightly: the version in [workspace.package], and so in every
       # crate and Cargo.lock; nothing is committed.
@@ -155,8 +178,13 @@ jobs:
       - name: Build
         shell: bash
         env:
-          RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --release --locked -p suhina-cli -p suhina -p suhina-plugin-host
+          # As release.yml: the C runtime linked statically on Windows.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          for target in ${TARGETS//,/ }; do
+            cargo build --release --locked -p suhina-cli -p suhina -p suhina-plugin-host --target "$target"
+          done
 
       - name: Collect and smoke-test the package
         shell: bash
@@ -166,20 +194,33 @@ jobs:
         run: |
           mkdir -p "dist/$PACKAGE"
           for bin in suhina-cli suhina suhina-plugin-host; do
-            cp "target/release/$bin.exe" "dist/$PACKAGE/"
+            case "$RUNNER_OS" in
+              Windows) cp "target/x86_64-pc-windows-msvc/release/$bin.exe" "dist/$PACKAGE/" ;;
+              macOS)
+                lipo -create -output "dist/$PACKAGE/$bin"                   "target/aarch64-apple-darwin/release/$bin"                   "target/x86_64-apple-darwin/release/$bin" ;;
+              *) cp "target/x86_64-unknown-linux-gnu/release/$bin" "dist/$PACKAGE/" ;;
+            esac
           done
           cp LICENSE NOTICE README.md ATTRIBUTION.md "dist/$PACKAGE/"
           cp devices/fm-synth/LICENSE-APACHE crates/stretch/LICENSE-signalsmith.txt "dist/$PACKAGE/"
-          output=$("dist/$PACKAGE/suhina-cli.exe" --version)
+          exe="dist/$PACKAGE/suhina-cli"
+          if [ "$RUNNER_OS" = "Windows" ]; then exe="$exe.exe"; fi
+          output=$("$exe" --version)
           echo "$output"
           if [ "$output" != "suhina-cli $VERSION" ]; then
             echo "::error::expected 'suhina-cli $VERSION', got '$output'"
             exit 1
           fi
-          "dist/$PACKAGE/suhina-cli.exe" plugin run test:vst3 - smoke.wav --seconds 0.1 --tail 0
+          "$exe" plugin run test:vst3 - smoke.wav --seconds 0.1 --tail 0
           test -s smoke.wav
+          # A workflow artifact is a zip, which drops the executable bit: on Linux and macOS the
+          # package goes in as a .tar.gz that keeps it.
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            tar -czf "dist/$PACKAGE.tar.gz" -C dist "$PACKAGE"
+            rm -r "dist/$PACKAGE"
+          fi
 
-      # The artifact is a zip of the package folder.
+      # The artifact is a zip: of the package folder on Windows, of its .tar.gz elsewhere.
       - uses: actions/upload-artifact@v4
         id: upload
         with:
@@ -198,5 +239,5 @@ jobs:
           {
             echo "### Test build $VERSION"
             echo
-            echo "[Download $PACKAGE.zip]($URL) (Windows x86-64, kept for 7 days)"
+            echo "[Download $PACKAGE]($URL) (kept for 7 days)"
           } >> "$GITHUB_STEP_SUMMARY"

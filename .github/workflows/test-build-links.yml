@@ -44,9 +44,10 @@ jobs:
             const { data: { jobs } } = await github.rest.actions.listJobsForWorkflowRun({
               owner, repo, run_id: run.id,
             });
-            const build = jobs.find((job) => job.name.startsWith('test build'));
-            if (!build || ['skipped', 'cancelled'].includes(build.conclusion)) {
-              core.info(`Run ${run.id} built nothing (${build ? build.conclusion : 'no build job'}).`);
+            const builds = jobs.filter((job) => job.name.startsWith('test build ('));
+            const ran = builds.filter((job) => !['skipped', 'cancelled'].includes(job.conclusion));
+            if (ran.length === 0) {
+              core.info(`Run ${run.id} built nothing.`);
               return;
             }
 
@@ -66,35 +67,42 @@ jobs:
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
             const commit = run.head_sha.slice(0, 7);
 
-            let body;
-            if (build.conclusion === 'success') {
-              const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
-                owner, repo, run_id: run.id,
-              });
-              const artifact = artifacts.find((a) => a.name.startsWith('suhina-pr'));
-              if (!artifact) {
-                core.setFailed(`Run ${run.id} succeeded but has no suhina-pr artifact.`);
-                return;
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: run.id, per_page: 100,
+            });
+            const PLATFORMS = [
+              ['windows-x86_64', 'Windows x86-64', 'unzip and run `suhina.exe`'],
+              ['macos-universal', 'macOS 11+, Apple silicon and Intel', 'unzip, then `tar -xzf` the `.tar.gz`'],
+              ['linux-x86_64', 'Linux x86-64, needs libasound2', 'unzip, then `tar -xzf` the `.tar.gz`'],
+            ];
+            const rows = PLATFORMS.map(([platform, label, how]) => {
+              const job = builds.find((j) => j.name === `test build (${platform})`);
+              const artifact = artifacts.find(
+                (a) => a.name.startsWith('suhina-pr') && a.name.endsWith(`-${platform}`),
+              );
+              if (job && job.conclusion === 'success' && artifact) {
+                const url = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
+                const size = (artifact.size_in_bytes / 1048576).toFixed(0);
+                return `| ${label} | [${artifact.name}](${url}) (${size} MB) | ${how} |`;
               }
-              const url = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
-              const size = (artifact.size_in_bytes / 1048576).toFixed(0);
-              const expires = artifact.expires_at.slice(0, 10);
-              body = [
-                MARKER,
-                '### Test build',
-                '',
-                `**[Download ${artifact.name}.zip](${url})** (Windows x86-64, ${size} MB, kept until ${expires})`,
-                '',
-                `Commit \`${commit}\` merged with main. Unzip it and run \`suhina.exe\`; SmartScreen warns about unsigned builds (More info › Run anyway). Downloading needs a GitHub sign-in. [The run](${run.html_url}).`,
-              ];
-            } else {
-              body = [
-                MARKER,
-                '### Test build',
-                '',
-                `The test build of \`${commit}\` failed: [the run](${run.html_url}).`,
-              ];
-            }
+              const state = job ? (job.conclusion || job.status) : 'not built';
+              return `| ${label} | ${state}${job ? ` ([log](${job.html_url}))` : ''} | |`;
+            });
+            const expires = artifacts.length
+              ? artifacts.map((a) => a.expires_at).sort()[0].slice(0, 10)
+              : null;
+            const body = [
+              MARKER,
+              '### Test build',
+              '',
+              `Commit \`${commit}\` merged with main${expires ? `, kept until ${expires}` : ''}. [The run](${run.html_url}).`,
+              '',
+              '| Platform | Download | Then |',
+              '|---|---|---|',
+              ...rows,
+              '',
+              'Downloading needs a GitHub sign-in. The builds are unsigned: SmartScreen (More info › Run anyway) and Gatekeeper (right-click › Open) warn about them.',
+            ];
             if (!MAINTAINERS.includes(pr.user.login)) {
               body.push(
                 '',

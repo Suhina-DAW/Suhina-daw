@@ -82,11 +82,13 @@ latest. Nothing is promoted from it: a release is made from a version tag as abo
 
 A test build is a pull request packaged for download, so it can be tried without building it
 locally. [`.github/workflows/test-build.yml`](../.github/workflows/test-build.yml) builds the
-Windows package (`suhina.exe`, `suhina-cli.exe`, `suhina-plugin-host.exe` and the licences, as in
-the nightly) and uploads it as a workflow artifact kept for 7 days.
-[`.github/workflows/test-build-links.yml`](../.github/workflows/test-build-links.yml) then links it
-from the pull request in one comment that each new build updates. Downloading an artifact needs a
-GitHub sign-in.
+same three packages as the nightly, for Linux, Windows and macOS (see [Packages](#packages)), and
+uploads each as a workflow artifact kept for 7 days.
+[`.github/workflows/test-build-links.yml`](../.github/workflows/test-build-links.yml) then links
+them from the pull request in one comment that each new build updates, with a platform that failed
+linked to its log. Downloading an artifact needs a GitHub sign-in, and an artifact is always a
+zip: on Windows it holds the package folder, on Linux and macOS the package's `.tar.gz`, because a
+zip drops the executable bit.
 
 | Pull request | Built |
 |---|---|
@@ -105,7 +107,7 @@ build faster and run slightly slower than the nightly.
 
 **Several pull requests together:** Actions › Test build › Run workflow with their numbers
 (`302 303 304`) merges them onto `main` in that order and builds the result, named
-`suhina-prs-302-303-304-windows-x86_64`; the run's summary links it. A pull request that does not
+`suhina-prs-302-303-304-<platform>`; each platform's summary links its package. A pull request that does not
 merge cleanly fails the run and is named in the error.
 
 The build has a read-only token and no secrets, and for a fork GitHub runs `test-build.yml` as the
