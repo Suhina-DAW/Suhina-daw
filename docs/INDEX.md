@@ -55,7 +55,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Waveforms](spec/waveforms.md) | spec | current | waveform, peaks, RMS, waveform drawing, zoom, samples, stereo lanes, dB scale, clip waveform, preview waveform, sample map tooltip, frame budget | How waveforms are computed and drawn in clips, the browser's preview and the sample map's tooltips: peak levels with RMS, lanes per channel, the shape, samples close up, the dB scale, the frame budget |
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [The claim bot](claim-bot.md) | howto | current | claim, /claim, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue | How the claim bot moves an issue's card on the project board, holds work, and is set up |
-| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, Discord announcement, release notes, changelog | How versions are numbered, how release builds and the nightly for Linux, Windows and macOS are made |
+| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, test build, pull request build, try a pull request, Discord announcement, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
 | [parity-live-12](research/parity-live-12.md) | plan | draft | Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap. | How much of Ableton Live 12's documented functionality Suhina has today, chapter by chapter, measured against the Live 12 reference manual; contains no content from the manual. |
@@ -71,6 +71,8 @@ Change this code, and check these documents.
 | `.github/workflows/claim.yml` | [The claim bot](claim-bot.md) |
 | `.github/workflows/discord.yml` | [Releasing](releasing.md) |
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
+| `.github/workflows/test-build-links.yml` | [Releasing](releasing.md) |
+| `.github/workflows/test-build.yml` | [Releasing](releasing.md) |
 | `Cargo.toml` | [Architecture](architecture.md) |
 | `apps/suhina-cli/src/main.rs` | [MCP server](mcp.md) |
 | `apps/suhina-cli/src/play.rs` | [Architecture](architecture.md), [Arrangement editing](spec/arrangement-editing.md) |
