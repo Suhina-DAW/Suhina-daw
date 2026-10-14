@@ -10,6 +10,7 @@ covers:
   - crates/ui/src/arrangement_view.rs
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
+  - crates/engine/src/fade_cost_tests.rs
   - crates/engine/src/launcher.rs
   - apps/suhina-cli/src/play.rs
   - crates/ui/src/menus.rs
@@ -137,6 +138,35 @@ for +, down for −), until it reaches −1 or +1, the line following live, and 
 with `t` in beats (`length − beats` for the fade-out), without the one-frame term above, which
 is less than a pixel at any zoom. Measurements are in
 [components](../design/components.md) › Arrangement view.
+
+### What fades cost the audio thread
+
+The engine works out each frame's gain inside a fade from its shape and curve: a curve other
+than 0 is one `powf` per frame (its exponent is worked out once per clip), equal power one `sin`.
+Past the fade nothing is computed. Measured 2026-10-13 on a 4-core Xeon at 2.8 GHz (a cloud
+container), release build, `crates/engine/src/fade_cost_tests.rs`: 64 audio tracks of 16
+back-to-back clips, each faded in over its first half and out over its second, so every frame of
+every track is inside a fade. 512-frame blocks at 48 kHz, budget 10.67 ms; the fastest of three
+runs. A second run gave the same figures within about 10 %.
+
+| Fades | Mean block | Load | 99th percentile | Per frame, `Fades::gain` alone |
+|---|---|---|---|---|
+| none | 447 µs | 4.2 % | 1.27 ms | 8 ns |
+| linear, curve 0 | 476 µs | 4.5 % | 1.42 ms | 9 ns |
+| S-curve, curve 0 | 480 µs | 4.5 % | 1.51 ms | 11 ns |
+| equal power, curve 0 | 588 µs | 5.5 % | 1.83 ms | 19 ns |
+| linear, curve ±1 | 839–881 µs | 7.9–8.3 % | 2.46–3.04 ms | 31 ns |
+| fast +0.5, slow −0.5, S-curve +1 | 931–952 µs | 8.7–8.9 % | 2.61–3.50 ms | 33–35 ns |
+| equal power, curve ±1 | 1.13 ms | 10.6–10.7 % | 2.91–3.09 ms | 47 ns |
+
+A curve adds about 22 ns per frame per clip inside a fade; at 48 kHz that is about 0.1 % of one
+core for each clip that is fading at the time. The worst case above, 64 tracks all inside curved
+equal-power fades at once, adds 6.5 points of load and stays well within the budget. A project
+fades a few clips at a time, so the cost is not worth a cheaper curve, and the engine keeps the
+exact `powf`. A lookup table was weighed and left out: near the silent end, `t^¼` (curve +1)
+rises too steeply for a table of reasonable size to stay within 10⁻⁶ of the exact gain, which the
+fade tests check. Measure again with
+`cargo test --release -p suhina-engine fade_cost -- --ignored --nocapture --test-threads=1`.
 
 ## Start marker and loop
 
