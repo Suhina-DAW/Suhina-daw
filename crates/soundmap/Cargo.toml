@@ -13,6 +13,7 @@ realfft = "3.5"  # MIT
 
 [dev-dependencies]
 hound.workspace = true
+rayon = "1.12"  # MIT OR Apache-2.0; already in the tree through bhtsne
 
 [lints]
 workspace = true

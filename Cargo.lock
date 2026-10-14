@@ -4288,6 +4288,7 @@ version = "0.0.1"
 dependencies = [
  "bhtsne",
  "hound",
+ "rayon",
  "realfft",
  "suhina-media",
 ]
