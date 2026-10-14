@@ -364,6 +364,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   fades are drawn over the waveform, and
   the engine plays them sample-accurately in renders and playback (`clip.setFades`,
   [spec](docs/spec/arrangement-editing.md#fades)).
+- Launched audio clips play their own fades: the fade-in once from the launch, the fade-out at
+  the end marker of a clip without a loop (`clip.setFades` with `scene`,
+  [spec](docs/spec/clip-launching.md#suhina-decisions)).
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
@@ -386,6 +389,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
+- In the Session view a click on a clip's name selects it and its mark launches it; the detail area
+  shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
+  Interface › Detail area › Select on launch), Enter launches the selected slot and the arrow keys
+  move through the slots ([spec](docs/spec/ui-session-view.md)).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
   input routing and sends, arm, level meters, device editing
   ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the clip editor

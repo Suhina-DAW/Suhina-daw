@@ -146,6 +146,9 @@ pub struct Settings {
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
     pub device_layout: DeviceLayout,
+    /// Launching a clip in the Session view selects it, so the detail area shows it
+    /// (`docs/spec/ui-session-view.md` › Launching and selecting).
+    pub select_on_launch: bool,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
@@ -202,6 +205,7 @@ impl Default for Settings {
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
+            select_on_launch: true,
             plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
@@ -299,7 +303,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -324,6 +328,7 @@ impl Settings {
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
+            select_on_launch = on(self.select_on_launch),
             browser_side = match self.browser_side {
                 Side::Left => "left",
                 Side::Right => "right",
@@ -355,6 +360,7 @@ impl Settings {
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
                 ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
+                ("select_on_launch", "on" | "off") => settings.select_on_launch = value == "on",
                 ("plugin_editors", "window") => settings.plugin_editors = EditorPlacement::Window,
                 ("plugin_editors", "device") => settings.plugin_editors = EditorPlacement::DeviceView,
                 ("projects_folder", folder) => settings.projects_folder = folder.to_string(),
@@ -460,6 +466,7 @@ mod tests {
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
+            select_on_launch: false,
             plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),

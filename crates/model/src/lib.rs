@@ -292,9 +292,9 @@ pub struct Clip {
     pub offset: f64,
     pub loop_range: Option<LoopRange>,
     pub enabled: bool,
-    /// Fade-in and fade-out of an audio clip on the arrangement, in beats from the clip's start
-    /// and to its end; 0.0 is no fade. Both are at least 0 and together at most `length`
-    /// ([`Clip::fades_valid`]). Notes and launcher slots ignore them.
+    /// Fade-in and fade-out of an audio clip, on the arrangement or in a launcher slot, in beats
+    /// from the clip's start and to its end; 0.0 is no fade. Both are at least 0 and together at
+    /// most `length` ([`Clip::fades_valid`]). Notes ignore them.
     pub fade_in: f64,
     pub fade_out: f64,
     /// How the fade-in and the fade-out rise: a shape, bent by a curve. Linear and unbent by

@@ -87,9 +87,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
   `clip.cut`, `clip.paste`, `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats,
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
-  `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.create {track,
-  scene? | start?, length?, stack?}` makes an empty MIDI clip, a bar long by default, in an empty
-  slot or at a beat ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
+  `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.setFades` with
+  `scene` instead of `index` sets a launcher slot clip's fades
+  ([clip launching](spec/clip-launching.md)). `clip.create {track, scene? | start?, length?,
+  stack?}` makes an empty MIDI clip, a bar long by default, in an empty slot or at a beat
+  ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
