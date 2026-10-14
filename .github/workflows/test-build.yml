@@ -1,0 +1,202 @@
+name: Test build
+
+# A Windows package of a pull request, to download and try without building it: the same binaries
+# as the nightly's, uploaded as a workflow artifact kept for 7 days. test-build-links.yml then
+# links it from the pull request. See docs/releasing.md › Test builds.
+#
+# Who gets one: a pull request opened and pushed by a maintainer is built on every push. Any other
+# pull request is built only when a maintainer adds the `test-build` label after reading the diff,
+# and the build is of the commit the label was added on; a later push takes the label off
+# (test-build-links.yml), so new code is never built unreviewed. Running the workflow by hand with
+# a list of pull request numbers merges them onto main and builds the result.
+#
+# The build runs with a read-only token and no secrets. For a pull request from a fork, GitHub runs
+# this file as the pull request has it, so the checks that matter are repeated by
+# test-build-links.yml, which runs from main.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      pull_requests:
+        description: "Pull request numbers to merge onto main and build together, e.g. 302 303 304"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Faster than the release profile (thin LTO, one codegen unit) at a small cost in speed; still
+  # optimised, with the same static C runtime.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+
+jobs:
+  build:
+    name: test build (windows-x86_64)
+    # A maintainer's own pull request on every push, any pull request when a maintainer labels it,
+    # and a run by hand (only people who can write to the repository can start one). The
+    # maintainers are listed here and in test-build-links.yml.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(fromJSON('["juhamikael"]'), github.triggering_actor) &&
+        ((github.event.action != 'labeled' &&
+          contains(fromJSON('["juhamikael"]'), github.event.pull_request.user.login)) ||
+         (github.event.action == 'labeled' && github.event.label.name == 'test-build')))
+    runs-on: windows-latest
+    # A newer push to the same pull request replaces a build still running.
+    concurrency:
+      group: test-build-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    timeout-minutes: 60
+    steps:
+      # The merge of the pull request's head into main as it was when the event happened
+      # (github.sha), so a push after the label is not what gets built.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check that the head is the one the event was for
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          parents=$(git show -s --format=%P HEAD)
+          echo "Building $(git rev-parse HEAD), parents $parents"
+          case " $parents " in
+            *" $HEAD_SHA "*) ;;
+            *) echo "::error::the merge commit is not of the pull request's head $HEAD_SHA"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge the pull requests onto main
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          PULL_REQUESTS: ${{ inputs.pull_requests }}
+        run: |
+          git config user.name "Suhina test build"
+          git config user.email "test-build@users.noreply.github.com"
+          numbers=$(echo "$PULL_REQUESTS" | tr ',#' '  ')
+          for n in $numbers; do
+            if ! [[ "$n" =~ ^[1-9][0-9]{0,6}$ ]]; then
+              echo "::error::'$n' is not a pull request number"
+              exit 1
+            fi
+          done
+          merged=""
+          for n in $numbers; do
+            git fetch --quiet origin "pull/$n/head"
+            if ! git merge --no-edit --quiet FETCH_HEAD -m "Test build: merge #$n"; then
+              echo "::error::#$n does not merge cleanly onto main${merged:+ with$merged}"
+              git merge --abort
+              exit 1
+            fi
+            merged="$merged #$n"
+            echo "Merged #$n ($(git rev-parse --short FETCH_HEAD))"
+          done
+
+      - name: Name the build
+        id: name
+        shell: bash
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          PULL_REQUESTS: ${{ inputs.pull_requests }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$PR" ]; then
+            tag="pr.$PR"
+            name="pr$PR"
+            commit="${HEAD_SHA::7}"
+          else
+            numbers=$(echo "$PULL_REQUESTS" | tr ',#' '  ' | xargs | tr ' ' '.')
+            tag="prs.$numbers"
+            name="prs-${numbers//./-}"
+            commit=$(git rev-parse --short=7 HEAD)
+          fi
+          base=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)
+          # 0.0.1-pr.302+abc1234: which pull request and which of its commits, in --version and
+          # Help › About.
+          version="${base%%-*}-$tag+$commit"
+          echo "Version $version"
+          {
+            echo "version=$version"
+            echo "package=suhina-$name-windows-x86_64"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-build
+
+      # As release.yml does for the nightly: the version in [workspace.package], and so in every
+      # crate and Cargo.lock; nothing is committed.
+      - name: Set the version
+        shell: bash
+        env:
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          perl -pi -e '
+            $in = /^\[workspace\.package\]/ if /^\[/;
+            $done ||= $in && s/^version = "[^"]*"/version = "$ENV{VERSION}"/;
+          ' Cargo.toml
+          cargo update --workspace
+
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p suhina-cli -p suhina -p suhina-plugin-host
+
+      - name: Collect and smoke-test the package
+        shell: bash
+        env:
+          PACKAGE: ${{ steps.name.outputs.package }}
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          mkdir -p "dist/$PACKAGE"
+          for bin in suhina-cli suhina suhina-plugin-host; do
+            cp "target/release/$bin.exe" "dist/$PACKAGE/"
+          done
+          cp LICENSE NOTICE README.md ATTRIBUTION.md "dist/$PACKAGE/"
+          cp devices/fm-synth/LICENSE-APACHE crates/stretch/LICENSE-signalsmith.txt "dist/$PACKAGE/"
+          output=$("dist/$PACKAGE/suhina-cli.exe" --version)
+          echo "$output"
+          if [ "$output" != "suhina-cli $VERSION" ]; then
+            echo "::error::expected 'suhina-cli $VERSION', got '$output'"
+            exit 1
+          fi
+          "dist/$PACKAGE/suhina-cli.exe" plugin run test:vst3 - smoke.wav --seconds 0.1 --tail 0
+          test -s smoke.wav
+
+      # The artifact is a zip of the package folder.
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: ${{ steps.name.outputs.package }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Summary
+        shell: bash
+        env:
+          URL: ${{ steps.upload.outputs.artifact-url }}
+          PACKAGE: ${{ steps.name.outputs.package }}
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          {
+            echo "### Test build $VERSION"
+            echo
+            echo "[Download $PACKAGE.zip]($URL) (Windows x86-64, kept for 7 days)"
+          } >> "$GITHUB_STEP_SUMMARY"
