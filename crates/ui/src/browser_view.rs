@@ -40,6 +40,8 @@ pub struct BrowserOut {
     /// A project file to open.
     pub open_project: Option<PathBuf>,
     pub status: Option<Status>,
+    /// Browse… beside the new folder's field: the system's folder dialog.
+    pub pick_folder: bool,
 }
 
 /// Draws the results area another way: the area, the browser's state and the projects.
@@ -464,7 +466,18 @@ fn sidebar_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mu
                 .hint_text("A folder's path")
                 .font(item_font.clone())
                 .text_color(theme::text_primary());
-            let response = ui.put(rect.shrink2(Vec2::new(4.0, 1.0)).intersect(area), edit);
+            let field = rect.shrink2(Vec2::new(4.0, 1.0));
+            let browse =
+                Rect::from_min_size(Pos2::new(field.right() - 56.0, field.top()), Vec2::new(56.0, field.height()));
+            if crate::project_dialog::button(ui, &painter, browse.intersect(area), "Browse…", "Browse for a folder") {
+                out.pick_folder = true;
+                state.new_folder = None;
+                return;
+            }
+            let response = ui.put(
+                Rect::from_min_max(field.min, Pos2::new(browse.left() - 4.0, field.bottom())).intersect(area),
+                edit,
+            );
             if !response.has_focus() && !response.lost_focus() {
                 response.request_focus();
             }

@@ -1749,3 +1749,77 @@ fn render_the_start_panel() {
     std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
     image.save(folder.join("start-panel.png")).unwrap_or_else(|e| panic!("{e}"));
 }
+
+#[test]
+fn browse_buttons_ask_for_the_systems_dialog_and_fill_their_fields() {
+    use suhina_ui::pick::PickField;
+    // Settings › General: the folders and the start template.
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Browse for Projects folder").click();
+    harness.run();
+    let request = harness.state_mut().take_pick_request().unwrap_or_else(|| panic!("no dialog asked for"));
+    assert_eq!(request.field, PickField::ProjectsFolder);
+    assert!(request.field.folder());
+    let _ = harness.state_mut().take_changed_settings();
+    harness.state_mut().set_picked(PickField::ProjectsFolder, "/music/projects".into());
+    harness.run();
+    assert_eq!(harness.state().settings().projects_folder, "/music/projects");
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.to_text()).unwrap_or_default();
+    assert!(saved.contains("projects_folder = /music/projects"), "{saved}");
+    harness.get_by_label("At start: Template").click();
+    harness.run();
+    harness.get_by_label("Browse for Start template").click();
+    harness.run();
+    let request = harness.state_mut().take_pick_request().unwrap_or_else(|| panic!("no dialog asked for"));
+    assert_eq!(request.field, PickField::StartTemplate);
+    assert_eq!(request.field.extensions(), ["suhina", "locr", "als"]);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+
+    // Save as: the folder; the prompt stays open meanwhile.
+    harness.state_mut().do_action("file.saveAs", &mut Vec::new());
+    harness.run();
+    harness.get_by_label("Browse for the folder").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::SaveFolder));
+    harness.state_mut().set_picked(PickField::SaveFolder, "/music/songs".into());
+    harness.run();
+    assert_eq!(harness.get_by_label("Folder").value().as_deref(), Some("/music/songs"));
+    harness.key_press(Key::Escape);
+    harness.run();
+
+    // File › Open…: a project, which then opens; cancelling the dialog keeps File › Open.
+    harness.state_mut().open_project_dialog(true);
+    harness.run();
+    harness.get_by_label("Browse for a project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::OpenProject));
+    assert!(harness.state().project_dialog_open(), "the dialog stays while the system's is shown");
+    harness.state_mut().set_picked(PickField::OpenProject, "/music/songs/Night.suhina".into());
+    harness.run();
+    assert!(!harness.state().project_dialog_open());
+    // A project is open, so Suhina asks how to open it, as for any other way of opening one.
+    harness.get_by_label("In a new tab").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_open_request().map(|(path, _)| path),
+        Some(std::path::PathBuf::from("/music/songs/Night.suhina"))
+    );
+}
+
+#[test]
+fn open_on_the_start_panel_shows_the_systems_dialog() {
+    use suhina_ui::pick::PickField;
+    let mut harness = window(App::new());
+    harness.get_by_label("Open a project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::OpenProject));
+    harness.state_mut().set_picked(PickField::OpenProject, "/music/Old jam.als".into());
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_open_request().map(|(path, _)| path),
+        Some(std::path::PathBuf::from("/music/Old jam.als"))
+    );
+}

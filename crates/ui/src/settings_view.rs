@@ -6,6 +6,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
+use crate::pick::PickField;
 use crate::settings::{AtStart, DeviceLayout, EditorPlacement, Graphics, OnOpen, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
@@ -22,6 +23,8 @@ const SETTING_ROW: f32 = 34.0;
 const SEGMENT: f32 = 15.0;
 /// A folder field on the right of its row; empty shows the default folder.
 const FOLDER_FIELD: f32 = 300.0;
+/// The Browse… button at the end of a path field.
+const BROWSE_WIDTH: f32 = 60.0;
 /// Themes shown before their list scrolls.
 const THEME_ROWS: usize = 8;
 /// A dropdown on the right of its row (Settings › Audio).
@@ -168,6 +171,8 @@ pub struct Outcome {
     pub audio_output: Option<suhina_session::OutputChoice>,
     /// The audio devices should be listed again.
     pub audio_refresh: bool,
+    /// A field's Browse… was clicked: the app shows the system's dialog for it.
+    pub pick: Option<PickField>,
 }
 
 /// What the page shows and changes besides the settings.
@@ -300,12 +305,14 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                     "Where a new project is saved first",
                     &mut settings.projects_folder,
                     &about.projects_default,
+                    PickField::ProjectsFolder,
                 ),
                 (
                     "Templates folder",
                     "Projects listed under New › From a template, and where Save as template puts one",
                     &mut settings.templates_folder,
                     &about.templates_default,
+                    PickField::TemplatesFolder,
                 ),
             ];
             if starts_from_template {
@@ -314,17 +321,25 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                     "The template At start makes a new project from",
                     &mut settings.start_template,
                     &template_hint,
+                    PickField::StartTemplate,
                 ));
             }
-            for (name, note, value, default) in folders {
+            for (name, note, value, default, pick) in folders {
                 let r = row(&mut y);
                 // The note is cut where the field starts.
                 let left =
                     Rect::from_min_size(r.min, Vec2::new(r.width() - FOLDER_FIELD - 8.0 + LABEL_WIDTH, r.height()));
                 label(&painter, left, name, note);
+                let browse = Rect::from_min_size(
+                    Pos2::new(r.right() - BROWSE_WIDTH, r.top() + 1.0),
+                    Vec2::new(BROWSE_WIDTH, SEGMENT),
+                );
+                if crate::project_dialog::button(ui, &painter, browse, "Browse…", &format!("Browse for {name}")) {
+                    outcome.pick = Some(pick);
+                }
                 let field = Rect::from_min_size(
                     Pos2::new(r.right() - FOLDER_FIELD, r.top()),
-                    Vec2::new(FOLDER_FIELD, SEGMENT + 2.0),
+                    Vec2::new(FOLDER_FIELD - BROWSE_WIDTH - 4.0, SEGMENT + 2.0),
                 );
                 let edit = ui.put(
                     field,

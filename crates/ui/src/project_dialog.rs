@@ -44,6 +44,8 @@ pub enum Choice {
     Open(PathBuf),
     NewBlank,
     NewFromTemplate(PathBuf),
+    /// Browse…: the system's dialog for a project to open.
+    Browse,
     Close,
 }
 
@@ -105,7 +107,11 @@ fn draw(ui: &mut Ui, area: Rect, state: &mut DialogState, lists: &Lists) -> Opti
     heading(&painter, right, "Open");
     let y = right.top() + LINE;
     let open_button = Rect::from_min_size(Pos2::new(right.right() - 56.0, y + 1.0), Vec2::new(56.0, BUTTON.y));
-    let field = Rect::from_min_max(Pos2::new(right.left(), y), Pos2::new(open_button.left() - 4.0, y + 20.0));
+    let browse = Rect::from_min_size(Pos2::new(open_button.left() - 4.0 - 64.0, y + 1.0), Vec2::new(64.0, BUTTON.y));
+    if button(ui, &painter, browse, "Browse…", "Browse for a project") {
+        choice = Some(Choice::Browse);
+    }
+    let field = Rect::from_min_max(Pos2::new(right.left(), y), Pos2::new(browse.left() - 4.0, y + 20.0));
     let edit = ui.put(
         field,
         egui::TextEdit::singleline(&mut state.path).hint_text("Path to a .suhina or .als file").font(small.clone()),
@@ -161,6 +167,8 @@ pub struct SavePrompt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SaveChoice {
     Save(PathBuf),
+    /// Browse… beside the folder: the system's dialog for it; the prompt stays.
+    BrowseFolder,
     Cancel,
 }
 
@@ -184,10 +192,16 @@ fn draw_save(ui: &mut Ui, area: Rect, prompt: &mut SavePrompt) -> Option<SaveCho
     let small = theme::ui_font(theme::TEXT_SMALL);
     let label_width = 52.0;
     let mut y = panel.top() + ROW + PAD;
+    let mut browse_folder = false;
     let mut field = |ui: &mut Ui, label: &str, value: &mut String, focus: bool| {
         let r = Rect::from_min_size(Pos2::new(panel.left() + PAD, y), Vec2::new(panel.width() - 2.0 * PAD, LINE));
         widgets::text_in(&painter, r, Align2::LEFT_CENTER, label, small.clone(), theme::text_secondary());
-        let input = Rect::from_min_max(Pos2::new(r.left() + label_width, r.top()), r.max);
+        let mut input = Rect::from_min_max(Pos2::new(r.left() + label_width, r.top()), r.max);
+        if label == "Folder" {
+            let browse = Rect::from_min_size(Pos2::new(r.right() - 64.0, r.top() + 1.0), Vec2::new(64.0, BUTTON.y));
+            browse_folder = button(ui, &painter, browse, "Browse…", "Browse for the folder");
+            input.max.x = browse.left() - 4.0;
+        }
         let edit = ui.put(input, egui::TextEdit::singleline(value).font(small.clone()));
         edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, label));
         if focus {
@@ -218,6 +232,9 @@ fn draw_save(ui: &mut Ui, area: Rect, prompt: &mut SavePrompt) -> Option<SaveCho
     }
     if closed.is_some() {
         return Some(SaveChoice::Cancel);
+    }
+    if browse_folder {
+        return Some(SaveChoice::BrowseFolder);
     }
     match path {
         Some(path) if saved || entered => Some(SaveChoice::Save(path)),

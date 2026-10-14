@@ -62,13 +62,18 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
 9. **The window** offers New or open (Ctrl+T): a new blank project, one from a template in the
    templates folder, or a project to open from a typed path or the recent list (kept in
    `recent.txt`). Started without a project given, it opens what Settings › General › At start
-   says (`at_start` in `settings.txt`, #234): the New or open dialog (the default), a new
-   blank project, a new one from the start template (`start_template`: a name in the templates
-   folder or a path), or the project opened last (the newest in `recent.txt`); a template or
-   last project that is not there shows the dialog with a hint saying why. A project given on
-   the command line opens instead; Save (Ctrl+S), Save as (Ctrl+Shift+S) and Save as template ask for a name and
-   folder. The projects and templates folders are settings. There is no system file dialog: the
-   dialog lists what Suhina knows, and a path can be typed or a file dropped. Closing a project,
+   says (`at_start` in `settings.txt`, #234): the start panel (the default, `panel`; #318),
+   a new blank project, a new one from the start template (`start_template`: a name in the
+   templates folder or a path), or the project opened last (the newest in `recent.txt`); a
+   template or last project that is not there leaves the start panel with a hint saying why.
+   The start panel shows whenever no project is open: New, a template, Open, the recent
+   projects with when each was saved, searchable, and one can be taken off `recent.txt`. A
+   project given on the command line opens instead; Save (Ctrl+S), Save as (Ctrl+Shift+S) and
+   Save as template ask for a name and folder. The projects and templates folders are settings.
+   Every path field (the folders, the start template, Save as › Folder, Open, the browser's
+   + Add folder) can be typed, or filled with **Browse…** from the system's own file or folder
+   dialog (#319): the window only asks for one, and the desktop app shows it with `rfd` (MIT;
+   on Linux through the desktop portal, with no GTK), so the window and its tests need none. Closing a project,
    opening another in its place or quitting while a project has unsaved changes asks first:
    Save, Don't save or Cancel; quitting asks about each such project in turn, and Save on one
    that has no file yet asks for a name before the app closes.

@@ -16,6 +16,7 @@ pub mod logo;
 pub mod menus;
 pub mod missing_files;
 pub mod motion;
+pub mod pick;
 pub mod project_dialog;
 pub mod sample_map;
 mod sample_map_crowd;

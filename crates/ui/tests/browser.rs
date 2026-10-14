@@ -465,3 +465,27 @@ fn with_no_project_open_samples_are_browsed_and_previewed() {
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_folder_for_the_browser_is_chosen_in_the_systems_dialog() {
+    use suhina_ui::pick::PickField;
+    let (settings, folder) = (temp("pick-settings"), temp("pick"));
+    let other = temp("pick-other");
+    pack(&folder);
+    wav(&other.join("Clap.wav"), 0.1);
+    let mut harness = window(&settings, &folder);
+    harness.get_by_label("Add folder").click();
+    harness.run();
+    harness.get_by_label("Browse for a folder").click();
+    harness.run();
+    let request = harness.state_mut().take_pick_request();
+    assert_eq!(request.map(|r| r.field), Some(PickField::BrowserFolder));
+    // The app shows the dialog and hands back the folder chosen.
+    harness.state_mut().set_picked(PickField::BrowserFolder, other.clone());
+    harness.run();
+    let name = other.file_name().unwrap().to_string_lossy().to_string();
+    assert!(harness.query_by_label(&format!("Place {name}")).is_some(), "the folder is in the sidebar");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+    let _ = std::fs::remove_dir_all(&other);
+}

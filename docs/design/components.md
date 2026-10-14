@@ -16,6 +16,8 @@ covers:
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
   - crates/ui/src/project_dialog.rs
+  - crates/ui/src/start_panel.rs
+  - crates/ui/src/pick.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/loading_dialog.rs
   - crates/ui/src/missing_files.rs
@@ -253,9 +255,9 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Page | Setting | Values |
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
-| General | At start | Dialog (default), New, Template, Last: what opens when Suhina starts without a project given (ADR 0010) |
-| General | Start template | Shown with At start › Template: a 300 px field, a template's file name in the templates folder or a path |
-| General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
+| General | At start | Panel (default), New, Template, Last: what opens when Suhina starts without a project given (ADR 0010); Panel is the [start panel](#start-panel) |
+| General | Start template | Shown with At start › Template: a 300 px field, a template's file name in the templates folder or a path, ending in a 60 px **Browse…** button (the system's file dialog) |
+| General | Projects folder, Templates folder | A 300 px field each, ending in a 60 px **Browse…** button (the system's folder dialog); empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
 | General › Dropping files | Several files | One track (default), One each; Ctrl while dropping does the other ([browser spec](../spec/browser.md) › Files) |
 | General › Dropping files | Warp mode | Rhythmic (default), Tonal, Texture, Smooth, High quality, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
@@ -319,12 +321,13 @@ shortcuts wait while it shows.
 | Part | Spec |
 |---|---|
 | New (left half) | "New" heading (10 px `text.hint` over a `border` hairline); a 20 px row "New blank project" with "4 tracks, 2 returns, 8 scenes" on the right; "From a template" and the templates folder's `.suhina`, `.locr` (saved before October 2026) and `.als` files by name, 20 px rows that scroll, "Suhina project" or "Live Set" on the right; "No templates yet: File › Save as template" when there are none; the folder at the bottom in 10 px `text.hint` |
-| Open (right half) | A path field (hint "Path to a .suhina or .als file"; Enter opens; quotes around a pasted path are dropped) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
+| Open (right half) | A path field (hint "Path to a .suhina or .als file"; Enter opens; quotes around a pasted path are dropped), a 64 px **Browse…** button (the system's file dialog, offering `.suhina`, `.locr` and `.als`; the dialog stays behind it, and a project chosen opens) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
 | Rows | Hover `panel.hoverBackground`; name 11 px `text.primary`, note 10 px `text.hint` |
 
 A new project opens in a new tab. Save (Ctrl+S) writes the project's own `.suhina` file (or the `.locr` it was opened from); the first
 time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name and Folder fields
-(the projects folder, the project's own folder, or the templates folder), the file that will be
+(the projects folder, the project's own folder, or the templates folder; Folder ends in a 64 px
+**Browse…** button, the system's folder dialog), the file that will be
 written under them (in the recording red when it is there already and will be replaced), Cancel
 and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
 
@@ -334,6 +337,27 @@ before closing it?" (or "opening another project in its place", "quitting") in 1
 `text.primary`, and Cancel, Don't save and Save (Enter) at the bottom right; Escape cancels.
 Quitting asks about each project with changes in turn; Save on a project without a file shows
 the save prompt first, and cancelling it cancels the close.
+
+**Browse…** buttons ask the desktop app to show the system's own dialog (`pick.rs`; the app uses
+`rfd`: the native dialogs on Windows and macOS, the desktop portal on Linux) and put what is
+chosen in the field; cancelling leaves it as it was. The dialog opens in the field's folder
+(the projects or templates folder) when it is there. Every path can still be typed.
+
+## Start panel
+
+While no project is open, the area right of the browser shows the start panel (`start_panel.rs`)
+on `window.background`: at start when Settings › General › At start is Panel (the default), and
+after the last project is closed. Its content is at most 820 px wide, centred, 24 px from the
+top. Files dropped anywhere on it open as on the rest of the window.
+
+| Part | Spec |
+|---|---|
+| Actions | Three 132 × 24 px buttons along the top, 6 px apart: **New project** (a blank one), **From a template** (shows the Templates tab), **Open…** (the system's file dialog; a project chosen opens) |
+| List | A `panel.background` card with a 1 px `border`: the tabs **Recent** and **Templates** (11 px, the chosen one `text.primary` over a 2 px `accent` line, the other `text.hint`) and a search field up to 200 px wide on the right (hint "Search") that filters both lists by name, ignoring case |
+| Recent | The projects opened and saved lately, newest first, as 20 px rows: the name, and on the right when it was last saved in words ("Just now", "5 minutes ago", "Yesterday", "3 weeks ago", "Last year"), or its folder when that cannot be read; the whole path as the tooltip. A click opens it as File › Open would; right-click › **Remove from list** takes it off `recent.txt`. "No projects yet: start a new one, or drop a project here" when there are none |
+| Templates | The templates folder's projects as in the project dialog; a click makes a new project from one; the folder in 10 px `text.hint` at the bottom |
+| Audio | A 240 px card on the right: "Audio" heading, Output, Sample rate and Buffer as the settings choose them ("Default" when unset), and an **Audio settings…** button that opens Settings › Audio. Below 560 px of width it goes under the list |
+| Footer | "Suhina" and the version on the left, "Drop a project or a Live Set (.als) here to open it" on the right, 10 px `text.hint` |
 
 ## Device panel
 

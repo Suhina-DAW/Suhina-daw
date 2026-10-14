@@ -272,9 +272,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - A **splash** while Suhina starts: a 300 × 200 px panel centred in the window with the logo and
   the version, shown while the browser's library, the sample map and the project asked for start,
   then fading into the ready window ([components](docs/design/components.md#splash)).
-- **At start** (Settings › General): with no project given, Suhina opens the New or open dialog,
+- **At start** (Settings › General): with no project given, Suhina opens the start panel,
   a new blank project, a new one from a chosen template, or the project opened last
   ([ADR 0010](docs/decisions/0010-project-files.md)).
+- A **start panel** while no project is open: New, a template or Open, the recent projects with
+  when each was saved and a search field, and the audio output with a button to its settings
+  ([components](docs/design/components.md#start-panel)).
+- **Browse…** beside every path field (the projects and templates folders, the start template,
+  Save as, Open, + Add folder) picks the path in the system's own file or folder dialog.
 - With **no project open**, the browser works as with one: browsing, searching, the sample map
   and previews, which then play through an output of their own
   ([ADR 0011](docs/decisions/0011-preview-and-added-audio.md)).

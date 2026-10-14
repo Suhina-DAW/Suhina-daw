@@ -20,6 +20,7 @@ use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
+use crate::pick::{PickField, PickRequest};
 use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{AtStart, DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
@@ -201,6 +202,8 @@ pub struct App {
     start_lists: bool,
     /// A project the user took off the recent list, for the app to forget.
     forget_request: Option<PathBuf>,
+    /// A system file or folder dialog for the app to show.
+    pick_request: Option<PickRequest>,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
     new_request: Option<NewProject>,
@@ -276,6 +279,7 @@ impl App {
             start: StartState::default(),
             start_lists: false,
             forget_request: None,
+            pick_request: None,
             save_prompt: None,
             new_request: None,
             saved_path: None,
@@ -688,7 +692,7 @@ impl App {
             Some(StartChoice::NewBlank) => self.new_request = Some(NewProject::Blank),
             Some(StartChoice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
             Some(StartChoice::Open(path)) => self.request_open(path),
-            Some(StartChoice::OpenDialog) => self.open_project_dialog(true),
+            Some(StartChoice::Browse) => self.ask_pick(PickField::OpenProject),
             Some(StartChoice::AudioSettings) => {
                 self.page.page = settings_view::Page::Audio;
                 self.settings_open = true;
@@ -738,6 +742,60 @@ impl App {
     /// Whether the start panel shows: no project is open.
     pub fn start_panel_open(&self) -> bool {
         self.projects.active().is_none()
+    }
+
+    /// Asks the app to show the system's dialog for `field`, opening in the folder it names.
+    fn ask_pick(&mut self, field: PickField) {
+        let folder_of = |value: &str| {
+            let path = PathBuf::from(value.trim());
+            (!value.trim().is_empty()).then_some(path)
+        };
+        let start = match field {
+            PickField::ProjectsFolder | PickField::OpenProject => Some(self.projects_folder()),
+            PickField::TemplatesFolder | PickField::StartTemplate => Some(self.templates_folder()),
+            PickField::SaveFolder => self.save_prompt.as_ref().and_then(|p| folder_of(&p.folder)),
+            PickField::BrowserFolder => None,
+        };
+        self.pick_request = Some(PickRequest { field, start });
+    }
+
+    /// A dialog for the app to show with the system's file or folder picker; what is chosen comes
+    /// back through [`App::set_picked`].
+    pub fn take_pick_request(&mut self) -> Option<PickRequest> {
+        self.pick_request.take()
+    }
+
+    /// Puts a path chosen in the system's dialog where it was asked for: a setting, the save
+    /// prompt's folder, a project to open, or a folder for the browser.
+    pub fn set_picked(&mut self, field: PickField, path: PathBuf) {
+        let text = path.display().to_string();
+        match field {
+            PickField::ProjectsFolder => self.settings.projects_folder = text,
+            PickField::TemplatesFolder => self.settings.templates_folder = text,
+            PickField::StartTemplate => self.settings.start_template = text,
+            PickField::SaveFolder => {
+                if let Some(prompt) = self.save_prompt.as_mut() {
+                    prompt.folder = text;
+                }
+                return;
+            }
+            PickField::OpenProject => {
+                self.project_dialog = None;
+                self.request_open(path);
+                return;
+            }
+            PickField::BrowserFolder => {
+                match self.projects.execute("library.addFolder", &json!({ "folder": text })) {
+                    Ok(_) => {
+                        self.browser.relist();
+                        self.status = Status::Done(format!("Added {text} to the browser"));
+                    }
+                    Err(e) => self.status = Status::Error(e.0),
+                }
+                return;
+            }
+        }
+        self.settings_changed = true;
     }
 
     /// A project the user took off the recent list on the start panel, for the app to forget.
@@ -819,6 +877,10 @@ impl App {
                 Some(Choice::Open(path)) => self.request_open(path),
                 Some(Choice::NewBlank) => self.new_request = Some(NewProject::Blank),
                 Some(Choice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
+                Some(Choice::Browse) => {
+                    self.project_dialog = Some(state);
+                    self.ask_pick(PickField::OpenProject);
+                }
                 Some(Choice::Close) => {}
                 None => self.project_dialog = Some(state),
             }
@@ -835,6 +897,10 @@ impl App {
                 }
                 // Cancelling the name also cancels closing or quitting.
                 Some(SaveChoice::Cancel) => self.save_then = None,
+                Some(SaveChoice::BrowseFolder) => {
+                    self.save_prompt = Some(prompt);
+                    self.ask_pick(PickField::SaveFolder);
+                }
                 None => self.save_prompt = Some(prompt),
             }
         }
@@ -1535,6 +1601,9 @@ impl App {
         if outcome.audio_refresh {
             self.list_audio_devices();
         }
+        if let Some(field) = outcome.pick {
+            self.ask_pick(field);
+        }
         if let Some(choice) = outcome.audio_output.clone() {
             self.choose_output(&choice);
         }
@@ -1955,6 +2024,9 @@ impl App {
         }
         if let Some(status) = out.status {
             self.status = status;
+        }
+        if out.pick_folder {
+            self.ask_pick(PickField::BrowserFolder);
         }
         if let Some(path) = out.open_project {
             self.request_open(path);

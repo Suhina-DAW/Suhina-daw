@@ -87,7 +87,8 @@ Three sections, each title in small hint text:
   opened or saved; anything else when it is added to a project (dropped, or added with Enter or
   a double-click). Previewing does not count.
 - **Folders:** the added folders by name, each with a mark when it is not plain (`…` while
-  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it).
+  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it), with a **Browse…** button
+  at its end that picks the folder in the system's folder dialog instead.
   A folder dragged from the system onto the window is added too (and the browser shows). A folder's right-click menu
   has Refresh, Pin and Remove from the browser.
 

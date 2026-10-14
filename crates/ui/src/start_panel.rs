@@ -50,8 +50,8 @@ pub enum StartChoice {
     NewBlank,
     NewFromTemplate(PathBuf),
     Open(PathBuf),
-    /// File › Open…: the project dialog with the keys in its path field.
-    OpenDialog,
+    /// Open…: the system's dialog for a project to open.
+    Browse,
     /// Settings › Audio.
     AudioSettings,
     /// Take a project off the recent list.
@@ -86,7 +86,7 @@ pub fn show(
     for (text, label, chosen) in [
         ("New project", "New project", Some(StartChoice::NewBlank)),
         ("From a template", "From a template", None),
-        ("Open…", "Open a project", Some(StartChoice::OpenDialog)),
+        ("Open…", "Open a project", Some(StartChoice::Browse)),
     ] {
         let rect = Rect::from_min_size(Pos2::new(x, content.top()), ACTION);
         if rect.right() > content.right() {
@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(harness.state().1, Some(StartChoice::Open("songs/Night drive.suhina".into())));
         harness.get_by_label("Open a project").click();
         harness.run();
-        assert_eq!(harness.state().1, Some(StartChoice::OpenDialog));
+        assert_eq!(harness.state().1, Some(StartChoice::Browse));
         harness.get_by_label("Audio settings").click();
         harness.run();
         assert_eq!(harness.state().1, Some(StartChoice::AudioSettings));

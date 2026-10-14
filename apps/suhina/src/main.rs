@@ -230,6 +230,11 @@ impl eframe::App for Window {
         if let Some(path) = self.app.take_saved_path() {
             self.remember(&path);
         }
+        if let Some(request) = self.app.take_pick_request()
+            && let Some(path) = pick(&request)
+        {
+            self.app.set_picked(request.field, path);
+        }
         if let Some(path) = self.app.take_forget_request()
             && let Err(e) = self.recent.remove(&path)
         {
@@ -441,6 +446,20 @@ impl Window {
 }
 
 /// "<what> <file>", and the file shown in the file manager.
+/// Shows the system's file or folder dialog `request` asks for; `None` when it was cancelled.
+/// It waits on the main thread, as macOS requires, while the window stays behind it.
+fn pick(request: &suhina_ui::pick::PickRequest) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().set_title(request.field.title());
+    if let Some(start) = request.start.as_ref().filter(|s| s.is_dir()) {
+        dialog = dialog.set_directory(start);
+    }
+    if request.field.folder() {
+        dialog.pick_folder()
+    } else {
+        dialog.add_filter("Projects", request.field.extensions()).pick_file()
+    }
+}
+
 fn saved(path: &Path, what: &str) -> String {
     let _shown = theme_files::reveal(path, true);
     format!("{what} {}", path.display())
