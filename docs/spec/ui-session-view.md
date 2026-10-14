@@ -87,11 +87,12 @@ Each cell is a slot for one clip.
 | Clip, playing | launch control in the playing state, progress through the clip | relaunches |
 | Clip, recording | recording state | |
 
-Double-clicking an empty slot on a MIDI track creates an empty one-bar clip there (`clip.create`,
-[arrangement editing](arrangement-editing.md#creating-a-clip)) and selects its track; on an
-empty slot with a stop button the first click of the two stops the track, as a single click
-does. Opening the new clip in the detail area, and double-clicking a clip to open it, come with
-clip selection in the Session view **(planned)**. Dropping a file or clip on a slot puts the clip
+Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
+empty MIDI clip there, one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
+[arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects its
+track; a first click on a slot with a stop button still stops the track. Audio tracks, groups and
+returns do nothing on a double-click. Opening the new clip in the detail area waits for the
+piano roll (#200) and for selecting slot clips (#276). Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
 there; on an empty audio track the track takes the clip's name **(observed in the corpus)**.
 
 Below the last scene each track has a **stop all clips** button for that track, and the main

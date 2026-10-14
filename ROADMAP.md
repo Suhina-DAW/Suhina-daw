@@ -277,9 +277,6 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
-- **Empty MIDI clips:** a double-click on an empty slot of a MIDI track, or on an empty place of
-  its Arrangement lane, makes a one-bar clip there (`clip.create`, also for the CLI and agents);
-  the Arrangement selects it ([spec](docs/spec/arrangement-editing.md#creating-a-clip)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
@@ -351,6 +348,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
+  makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
+  the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right

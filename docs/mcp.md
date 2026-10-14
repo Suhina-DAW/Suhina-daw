@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-13
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -84,11 +84,12 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `.suhina` (and older `.locr`) files as well as Live Sets.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades
-  (lengths, shapes and curves); `clip.create` makes an empty MIDI clip in a Session slot or on
-  the Arrangement; `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
+  (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
   `clip.cut`, `clip.paste`, `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats,
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
-  `command_run` ([arrangement editing](spec/arrangement-editing.md)).
+  `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.create {track,
+  scene? | start?, length?, stack?}` makes an empty MIDI clip, a bar long by default, in an empty
+  slot or at a beat ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |

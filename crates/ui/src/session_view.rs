@@ -2,7 +2,7 @@
 //! along the bottom (`docs/spec/ui-session-view.md`, sizes in `docs/design/components.md`).
 //! It draws a [`Grid`] and turns clicks into [`Action`]s; it never changes the project itself.
 
-use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
+use egui::{Align2, Color32, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::TrackId;
 
@@ -295,7 +295,6 @@ fn draw_column(
         column,
         progress,
         id,
-        state,
         actions,
     );
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
@@ -369,7 +368,6 @@ fn column_body(
     column: &Column,
     progress: Option<f32>,
     id: Id,
-    state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
     for (scene, slot) in column.slots.iter().enumerate() {
@@ -382,13 +380,16 @@ fn column_body(
         }
         let number = scene + 1;
         let response = match slot.state {
-            // An empty slot without a stop button answers only a double-click, on a MIDI track.
-            SlotState::Empty if column.notes => Some(widgets::button_area(
-                ui,
-                rect.intersect(clip),
-                id.with(scene),
-                format!("Empty slot on {} (scene {number})", column.name),
-            )),
+            // An empty slot without a stop button does nothing on a click; on a track that plays
+            // notes a double-click makes a MIDI clip in it.
+            SlotState::Empty if column.notes => {
+                let response = ui.interact(rect.intersect(clip), id.with(scene), Sense::click());
+                response.widget_info(|| {
+                    let label = format!("Empty slot of {} (scene {number})", column.name);
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)
+                });
+                Some(response)
+            }
             SlotState::Empty => None,
             SlotState::EmptyStop => Some(widgets::button_area(
                 ui,
@@ -409,14 +410,11 @@ fn column_body(
         let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         let empty = matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
-        if let Some(r) = &response {
-            if empty && column.notes && (r.double_clicked() || r.triple_clicked()) {
-                // An empty MIDI clip, one bar long (docs/spec/ui-session-view.md › Clip slots).
-                actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
-                state.selected = Some(column.track);
-            } else if r.clicked() && slot.state != SlotState::Empty {
-                actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
-            }
+        if slot.state != SlotState::Empty && response.as_ref().is_some_and(Response::clicked) {
+            actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+        }
+        if empty && column.notes && response.as_ref().is_some_and(Response::double_clicked) {
+            actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
         }
         slot_cell(painter, rect, column, slot, hover, pulse, progress);
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));

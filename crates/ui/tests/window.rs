@@ -1579,10 +1579,15 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
 
-/// Presses and releases at `at` twice, a frame each, a few frames apart: a double-click.
+/// Presses and lets go twice at `at`, a frame apart: a double-click. It waits a second first,
+/// as a person would, so an earlier click does not make it a triple-click.
 fn double_click_at(harness: &mut Harness<'static, App>, at: egui::Pos2) {
     harness.hover_at(at);
     harness.run();
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
     for _ in 0..2 {
         harness.hover_at(at);
         harness.drag_at(at);
@@ -1592,43 +1597,74 @@ fn double_click_at(harness: &mut Harness<'static, App>, at: egui::Pos2) {
     harness.run();
 }
 
-#[test]
-fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_a_one_bar_clip() {
-    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
-    let slot = harness.get_by_label("Stop Keys (scene 1)").rect().center();
-    double_click_at(&mut harness, slot);
-    let made = harness.state().session().and_then(|s| {
-        let column = s.project().launcher.columns.iter().find(|c| c.track.0 == 3)?;
-        column.slots[0].clip.as_ref().map(|c| (c.length, c.loop_range.is_some()))
-    });
-    assert_eq!(made, Some((4.0, true)), "an empty one-bar clip that loops");
-    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some());
-    // One undo step.
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
-    harness.run();
-    assert!(harness.query_by_label("Stop Keys (scene 1)").is_some());
+/// The name of each clip's content in Keys' slots, `None` for an empty slot.
+fn keys_slots(harness: &Harness<'static, App>) -> Vec<Option<String>> {
+    let Some(session) = harness.state().session() else { return Vec::new() };
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+    let column = p.launcher.columns.iter().find(|c| Some(c.track) == keys);
+    column
+        .map(|c| {
+            c.slots
+                .iter()
+                .map(|s| s.clip.as_ref().and_then(|clip| p.content(clip.content)).map(|c| c.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[test]
-fn a_double_click_on_an_empty_place_of_a_midi_lane_makes_a_clip_on_the_bar_and_selects_it() {
+fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(keys_slots(&harness).first(), Some(&Some("MIDI clip".to_string())));
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some());
+    // One undo step takes it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    // A double-click on a slot with a clip launches it and makes nothing.
+    let before = harness.state().session().map(|s| s.project().clone());
+    let at = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(harness.state().session().map(|s| s.project().clone()), before);
+}
+
+#[test]
+fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
     harness.get_by_label("Arrangement view").click();
     harness.run();
-    let bass = |h: &Harness<'static, App>| {
-        h.state()
-            .session()
-            .map(|s| s.project().arrangement.lanes[1].clips.iter().map(|c| (c.start, c.length)).collect::<Vec<_>>())
-            .unwrap_or_default()
+    let lane = harness.get_by_label("Lane Keys").rect();
+    let clips: Vec<egui::Rect> = harness.query_all_by_label_contains(" on Keys at bar ").map(|n| n.rect()).collect();
+    // The rightmost spot of the lane that no clip covers, a little into a bar (8 points a beat).
+    let at = (0..200)
+        .map(|i| egui::pos2(lane.right() - 12.0 - i as f32 * 8.0, lane.center().y))
+        .find(|p| lane.contains(*p) && !clips.iter().any(|c| c.expand(2.0).contains(*p)))
+        .unwrap();
+    let count = |h: &Harness<'static, App>| {
+        h.state().session().map_or(0, |s| {
+            let p = s.project();
+            let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+            p.arrangement.lanes.iter().filter(|l| l.track == keys).map(|l| l.clips.len()).sum::<usize>()
+        })
     };
-    let before = bass(&harness);
-    // Bass is empty before beat 32, where Root starts; 8 points a beat: beat 10 is in bar 3.
-    let root = harness.get_by_label("Clip Root on Bass at bar 9").rect();
-    double_click_at(&mut harness, egui::pos2(root.left() - 22.0 * 8.0, root.center().y));
-    assert!(bass(&harness).contains(&(8.0, 4.0)), "{:?}", bass(&harness));
-    assert!(harness.query_by_label("Clip MIDI clip on Bass at bar 3").is_some());
-    // It is selected: Delete removes it.
-    harness.run();
-    harness.key_press(Key::Delete);
-    harness.run();
-    assert_eq!(bass(&harness), before);
+    let before = count(&harness);
+    double_click_at(&mut harness, at);
+    assert_eq!(count(&harness), before + 1);
+    let session = harness.state().session().unwrap();
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id).unwrap();
+    let lane = p.arrangement.lanes.iter().find(|l| l.track == Some(keys)).unwrap();
+    let (index, made) = lane
+        .clips
+        .iter()
+        .enumerate()
+        .find(|(_, c)| p.content(c.content).is_some_and(|x| x.name == "MIDI clip"))
+        .unwrap();
+    assert_eq!(made.length, 4.0, "one bar of 4/4");
+    assert_eq!(made.start % 4.0, 0.0, "on the bar grid at this zoom: {}", made.start);
+    assert_eq!(harness.state().selected_clip(), Some((keys, index)), "the new clip is selected");
 }

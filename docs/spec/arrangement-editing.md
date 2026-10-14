@@ -24,22 +24,6 @@ How arrangement clips behave when they are moved. The familiar behaviour (observ
 which this follows) is that a clip placed over others **replaces** what it covers. Some users come
 from pattern-based DAWs where clips **stack** and all play; two settings allow that.
 
-## Creating a clip
-
-Our own design. `clip.create {track, scene? | start?, length?, stack?}` makes an empty MIDI clip
-on a track that plays notes: in an empty Session slot (`scene`, from 1) or on the Arrangement at
-`start` (beats, at least 0). It is one bar of the time signature long unless `length` (beats,
-more than 0) says otherwise, holds no notes and is named "MIDI clip"; a clip in a slot loops over
-its length. On the Arrangement it replaces what it covers unless stacked, as a pasted clip does.
-A slot that holds a clip, a track that cannot hold MIDI, or both or neither of `scene` and
-`start`, is refused. It is one undo step, and returns where the clip went (on the Arrangement,
-its index on the track).
-
-In the Arrangement view a **double-click on an empty place of a MIDI track's lane** makes one
-there, from the grid line before the pointer (Alt: from the pointer itself), and selects it, so
-the detail area shows it. It stacks when the MIDI stacking setting is on. A double-click on an
-audio track's lane does nothing.
-
 ## Moving a clip
 
 `clip.move {track, index, start, to_track?, stack?}` moves one arrangement clip to `start` (beats,
@@ -53,6 +37,23 @@ plays through that track's instrument and effects. The move is one undo step.
 copy covers unless stacked, as a moved clip does (the window stacks when the setting for the
 clip's kind is on); `clip.delete {track, index}` removes it. In the Arrangement view a clip's
 right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
+
+## Making an empty MIDI clip
+
+`clip.create {track, scene? | start?, length?, stack?}` makes an empty MIDI clip, named "MIDI
+clip", on a track that plays notes; an audio track, a group or a return is refused. It goes
+either in clip slot `scene` (from 1, an existing scene; the slot must be empty), where it loops
+over its length, or at beat `start` in the arrangement (0 up to the engine's last beat), where it
+replaces what it covers unless stacked, as a pasted clip does. `length` is in beats, one bar of
+the project's time signature by default (four beats in 4/4, three in 3/4), more than 0. It is
+one undo step and returns the track and the scene, or the start and the clip's index as
+`project.clips` counts it.
+
+In the Arrangement view a double-click on an empty spot of a lane that plays notes makes one a
+bar long, starting at the grid line before the pointer (with Alt, exactly at the pointer), and
+selects it; it stacks when the MIDI stacking setting is on. A double-click on a clip is the
+clip's own. In the Session view a double-click on an empty slot makes one there
+([Session view](ui-session-view.md) › Clip slots).
 
 ## Copy, cut and paste
 

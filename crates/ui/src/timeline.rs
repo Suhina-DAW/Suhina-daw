@@ -90,7 +90,7 @@ pub struct Lane {
     pub name: String,
     pub color: Rgb,
     pub kind: ColumnKind,
-    /// The track holds MIDI clips, so a double-click on its empty lane makes one.
+    /// The track plays notes: a double-click on an empty spot of its lane makes a MIDI clip.
     pub notes: bool,
     /// How many groups the track is inside.
     pub depth: usize,
@@ -176,7 +176,7 @@ impl Timeline {
                 name: track.name.clone(),
                 color: track.color.unwrap_or_else(|| default_track_colour(position)),
                 kind,
-                notes: track.content.notes,
+                notes: kind == ColumnKind::Track && track.content.notes,
                 depth: depth(project, track.parent),
                 position,
                 mute: channel.is_some_and(|c| c.mute),
