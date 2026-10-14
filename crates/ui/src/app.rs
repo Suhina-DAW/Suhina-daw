@@ -550,6 +550,11 @@ impl App {
         self.shown
     }
 
+    /// The clip selected in the Arrangement view: its track and index.
+    pub fn selected_clip(&self) -> Option<(TrackId, usize)> {
+        self.arrangement.selected_clip()
+    }
+
     /// `transport.stop`, with where the playhead goes from the settings.
     fn stop_action(&self) -> Action {
         Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
@@ -834,7 +839,17 @@ impl App {
         }
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
-            Ok(_) => {
+            Ok(result) => {
+                // A clip made by a double-click is selected, ready to edit: in the Arrangement
+                // the clip, in the Session its track.
+                if action.id == "clip.create"
+                    && let Some(track) = result["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId)
+                {
+                    match result["index"].as_u64().and_then(|i| usize::try_from(i).ok()) {
+                        Some(index) => self.arrangement.select_clip(track, index),
+                        None => self.view.selected = Some(track),
+                    }
+                }
                 let changes_project = suhina_session::commands()
                     .iter()
                     .find(|c| c.id == action.id)

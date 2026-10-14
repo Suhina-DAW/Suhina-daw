@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -37,6 +37,23 @@ plays through that track's instrument and effects. The move is one undo step.
 copy covers unless stacked, as a moved clip does (the window stacks when the setting for the
 clip's kind is on); `clip.delete {track, index}` removes it. In the Arrangement view a clip's
 right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
+
+## Making an empty MIDI clip
+
+`clip.create {track, scene? | start?, length?, stack?}` makes an empty MIDI clip, named "MIDI
+clip", on a track that plays notes; an audio track, a group or a return is refused. It goes
+either in clip slot `scene` (from 1, an existing scene; the slot must be empty), where it loops
+over its length, or at beat `start` in the arrangement (0 up to the engine's last beat), where it
+replaces what it covers unless stacked, as a pasted clip does. `length` is in beats, one bar of
+the project's time signature by default (four beats in 4/4, three in 3/4), more than 0. It is
+one undo step and returns the track and the scene, or the start and the clip's index as
+`project.clips` counts it.
+
+In the Arrangement view a double-click on an empty spot of a lane that plays notes makes one a
+bar long, starting at the grid line before the pointer (with Alt, exactly at the pointer), and
+selects it; it stacks when the MIDI stacking setting is on. A double-click on a clip is the
+clip's own. In the Session view a double-click on an empty slot makes one there
+([Session view](ui-session-view.md) › Clip slots).
 
 ## Copy, cut and paste
 

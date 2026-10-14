@@ -617,6 +617,19 @@ static COMMANDS: &[CommandSpec] = &[
         run: files::add_files,
     },
     CommandSpec {
+        id: "clip.create",
+        label: "Make an empty MIDI clip on a track that plays notes: in an empty clip slot, or at a beat in the arrangement, replacing what it covers unless stacked",
+        params: &[
+            TRACK,
+            optional("scene", ParamType::Integer, "scene number, from 1, of an empty clip slot"),
+            optional("start", ParamType::Number, "arrangement beat it starts at, at least 0"),
+            optional("length", ParamType::Number, "length in beats (default one bar of the time signature)"),
+            optional("stack", ParamType::Bool, "in the arrangement, keep the clips the new one covers (default false)"),
+        ],
+        kind: CommandKind::Edit,
+        run: files::create_clip,
+    },
+    CommandSpec {
         id: "preview.play",
         label: "Preview a sample or a MIDI file once, at its own speed, after the main channel; a MIDI file plays through a track's instrument or the FM synth",
         params: &[

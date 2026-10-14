@@ -63,7 +63,8 @@ From [research](#sources) and the first design rounds:
   tracks and the main track after the regular tracks.
 - Arrangement view: timeline left, track headers on the right with their controls.
 - Interactions: click to launch, pending state while quantised, drag from the browser, double-click
-  to open a clip, Tab between Session and Arrangement; keyboard shortcuts and menu structure.
+  to open a clip (on an empty slot or lane of a MIDI track, to make one), Tab between Session and
+  Arrangement; keyboard shortcuts and menu structure.
 - Number fields that are their own sliders (drag to change, the fill shows the value).
 
 ## Make our own (appearance)
