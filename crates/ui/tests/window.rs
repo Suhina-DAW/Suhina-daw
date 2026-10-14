@@ -1578,3 +1578,24 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
+
+#[test]
+fn help_about_shows_the_version_and_copies_it() {
+    let mut harness = window(demo_app());
+    let version = suhina_ui::project_dialog::VERSION;
+    assert!(harness.query_by_label_contains(version).is_none());
+    harness.get_by_label("Help").click();
+    harness.run();
+    harness.get_by_label_contains("About Suhina").click();
+    harness.run();
+    let line = suhina_ui::project_dialog::version_line();
+    assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
+    harness.get_by_label(&format!("Copy version: {line}")).click();
+    harness.run();
+    assert_eq!(harness.state().status(), &Status::Done(format!("Copied {line}")));
+    // Still open after copying; Escape closes it.
+    assert!(harness.query_by_label_contains(version).is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label_contains(version).is_none());
+}

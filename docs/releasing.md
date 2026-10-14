@@ -59,9 +59,9 @@ nothing. Running the workflow by hand from `main` with **nightly** checked publi
 
 The nightly's version is the workspace version without a pre-release suffix, the date and the
 commit: `0.0.1-nightly.20261013+a15ad35`. The workflow writes it into `Cargo.toml` and
-`Cargo.lock` before building (nothing is committed), so `suhina-cli --version` and bug reports
-say which build it is. Its packages keep one name, `suhina-nightly-<platform>`, so a link to
-the latest one never changes:
+`Cargo.lock` before building (nothing is committed), so `suhina-cli --version`, the desktop
+app's Help › About Suhina ([spec](spec/about.md)) and bug reports say which build it is. Its
+packages keep one name, `suhina-nightly-<platform>`, so a link to the latest one never changes:
 
 ```text
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz

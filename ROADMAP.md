@@ -321,6 +321,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
+- **Help › About Suhina** says which build this is: the version (a nightly's names its night and
+  commit), the platform and the licence, and copies one line naming the build for a bug report
+  ([spec](docs/spec/about.md)).
 - The whole window zooms from 50 % to 200 % (Ctrl and + or -, Cmd on macOS; Ctrl and 0 for
   100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
   ([spec](docs/spec/window-zoom.md)).

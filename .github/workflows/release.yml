@@ -138,7 +138,7 @@ jobs:
           key: release-${{ matrix.name }}
 
       # The nightly's version, in [workspace.package] and so in every crate and Cargo.lock, so
-      # `--version` and the About page show which night and commit it is.
+      # `--version` and Help › About Suhina show which night and commit it is.
       - name: Set the nightly version
         if: needs.version.outputs.nightly == 'true'
         shell: bash
