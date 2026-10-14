@@ -125,8 +125,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 ## What works now
 
 ### M0 Foundation
-- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
-  Windows and macOS when started by hand and in every release build.
+- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux, Windows and
+  macOS for every change; macOS does not block merging yet.
 - A nightly build of `main` for Linux, Windows and macOS, with the desktop app, the CLI and the
   plug-in host, published every night as the `nightly` release
   ([`docs/releasing.md`](docs/releasing.md#nightly)).
