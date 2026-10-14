@@ -151,8 +151,22 @@ area labels (`CONTRIBUTING.md` › Issues lists them); a larger piece split into
 `epic`, and repository, build and release work is a `chore`. Items imported from the earlier
 board keep their old key in the title (`(LOOP-27)`); a pull request for one names that key.
 Before starting, claim the item the way [`CONTRIBUTING.md`](CONTRIBUTING.md) › *Working on an issue*
-describes — no open pull request for it, `Backlog` or `Ready` on the board, a comment with the plan —
-for a person and for an agent alike.
+describes, for a person and for an agent alike: no assignee and no open pull request for it,
+`Backlog` or `Ready` on the board (`Ready` for a feature), and a `/claim` comment with the plan.
+
+Several agents often run at once, so an agent never starts work that exists already:
+
+- **Before opening an issue**, search the open issues for the same problem; when one exists,
+  comment there instead.
+- **Before writing code**, comment `/claim` with the plan and read the bot's answer. When it says
+  the work is taken, or that it is already yours and names a pull request, do not start a second
+  one: continue in that pull request, or stop and tell the user.
+- **Before opening a pull request**, check the issue's linked pull requests; when one is open,
+  push to it rather than opening another.
+
+Continuing open work is always allowed, in a new session too. A second, competing pull request for
+the same issue is opened only when the user asks for one, and its description says
+`Alternative to #N`.
 
 ## 4. Before you finish a task
 
