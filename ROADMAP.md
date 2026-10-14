@@ -368,5 +368,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Changing devices from it follows the device commands (#73).
+- In the Session view a click on a clip's name selects it and its mark launches it; the detail area
+  shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
+  Interface › Detail area › Select on launch), Enter launches the selected slot and the arrow keys
+  move through the slots ([spec](docs/spec/ui-session-view.md)).
 - Still to do: fades read from Live Sets, input routing and sends, arm, level meters, device
   editing and the clip editor in the detail area, installers.

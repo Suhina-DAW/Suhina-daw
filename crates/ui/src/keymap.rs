@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 29] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -105,6 +105,11 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
     ("selection.duplicate", "Duplicate the selected clip", "Edit"),
     ("selection.delete", "Delete the selected clip", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("selection.launch", "Launch the selected clip slot", "Session"),
+    ("selection.up", "Select the clip slot above", "Session"),
+    ("selection.down", "Select the clip slot below", "Session"),
+    ("selection.left", "Select the clip slot in the track to the left", "Session"),
+    ("selection.right", "Select the clip slot in the track to the right", "Session"),
 ];
 
 /// Every action a key can be bound to: the window's, then each command that needs no
@@ -132,7 +137,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 25] = [
+const DEFAULTS: [(&str, &[&str]); 30] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -156,6 +161,11 @@ const DEFAULTS: [(&str, &[&str]); 25] = [
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
     ("selection.group", &["Ctrl+G"]),
+    ("selection.launch", &["Enter"]),
+    ("selection.up", &["Up"]),
+    ("selection.down", &["Down"]),
+    ("selection.left", &["Left"]),
+    ("selection.right", &["Right"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
 ];
@@ -283,6 +293,9 @@ mod tests {
             "Ctrl+Equals",
             "Ctrl+0",
             "Minus",
+            "Enter",
+            "Up",
+            "Left",
         ] {
             let shortcut = Shortcut::parse(text).unwrap_or_else(|| panic!("{text}"));
             assert_eq!(Shortcut::parse(&shortcut.text()), Some(shortcut), "{text}");

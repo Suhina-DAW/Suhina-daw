@@ -3,13 +3,14 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-14
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/app.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/keymap.rs
   - crates/engine/src/cpu.rs
 ---
 
@@ -82,10 +83,28 @@ Each cell is a slot for one clip.
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
 | Empty, without stop button | nothing | nothing |
-| Clip, stopped | clip colour, clip name, launch control | launches the clip |
-| Clip, queued | launch control in a pending (blinking) state until the quantisation point | |
-| Clip, playing | launch control in the playing state, progress through the clip | relaunches |
+| Clip, stopped | clip colour, clip name, launch control | on the launch control: launches the clip; on the name: selects it |
+| Clip, queued | launch control in a pending (blinking) state until the quantisation point | as stopped |
+| Clip, playing | launch control in the playing state, progress through the clip | on the launch control: relaunches; on the name: selects it |
 | Clip, recording | recording state | |
+
+**Launching and selecting** (public manual, Session View › clips and launch settings). A clip's
+launch control is at the left edge of its slot; the rest of the slot, its name, selects the clip
+without launching it. A selected clip shows in the detail area. Launching a clip with its launch
+control also selects it, unless the user turns that off (a launch setting, on by default); with it
+off, launching leaves the selection and the detail area as they were. With a clip selected, Enter
+launches it and the arrow keys move the selection to the slot above, below, or in the next track.
+Shift-click and Ctrl-click add clips to the selection **(not built)**.
+
+**Suhina:** the launch control is the slot's mark and the padding around it (the first 18 px);
+the name selects. Selecting a clip selects its track too, and selecting a track by its header ends
+the clip's selection. The selected slot is drawn like a selected arrangement clip. The setting is
+Settings › Interface › Detail area › **Select on launch** (On by default, saved as
+`select_on_launch`). Enter is the action `selection.launch`; the arrows are `selection.up`,
+`selection.down`, `selection.left` and `selection.right` (all rebindable,
+[shortcuts](../shortcuts.md)); left and right move to the next track with clip slots (groups and
+return tracks are skipped) and keep the scene, up and down stay in the track. They act in the
+Session view only, and only while a clip slot is selected. Multiple selection is not built.
 
 Double-clicking an empty slot on a MIDI track creates an empty one-bar clip and opens it in the
 detail area. Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
@@ -121,6 +140,16 @@ the return tracks (so effects stay audible); mute still wins. A click solos one 
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+## Detail area: a selected clip
+
+A selected clip in a slot shows its properties as an arrangement clip does
+([components](../design/components.md) › Clip properties), with **Scene** (its number) in place
+of Start: track, scene, length, loop, then gain, fade-in and fade-out for an audio clip
+(`clip.setFades {track, scene, …}` sets them, [clip launching](clip-launching.md) › Clip fades)
+or the note count for a MIDI clip; the track's device chain follows. A slot that is emptied, or a
+track that is deleted, shows the track's devices or nothing. Editing the properties there is
+planned.
 
 ## Detail area: device chain
 

@@ -5,6 +5,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
+use suhina_engine::model::TrackId;
 use suhina_session::Session;
 use suhina_ui::arrangement_view::{self, ArrangementViewState};
 use suhina_ui::demo::demo_project;
@@ -584,7 +585,7 @@ fn solo_is_exclusive_unless_ctrl_is_held() {
 
 /// The demo project with a group track, "Group", that tracks can play into.
 fn project_with_a_group() -> suhina_engine::model::Project {
-    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
+    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track};
     let mut project = demo_project();
     project.tracks.push(Track {
         id: TrackId(20),
@@ -1546,4 +1547,90 @@ fn settings_open_as_a_dialog_over_the_view_and_escape_closes_them() {
     harness.key_press(Key::Escape);
     harness.run();
     assert!(!harness.state().settings_open());
+}
+
+#[test]
+fn a_clips_name_selects_it_and_its_mark_launches_it() {
+    let mut harness = view();
+    let walk = (TrackId(2), 1);
+    assert!(clicked(&mut harness, "Select Walk on Bass (scene 2)").is_empty(), "selecting does not launch");
+    assert_eq!(harness.state().state.selected_slot, Some(walk));
+    assert_eq!(harness.state().state.selected, Some(TrackId(2)), "its track is selected with it");
+
+    // A launch selects the clip too, unless Select on launch is off.
+    assert_eq!(
+        clicked(&mut harness, "Launch Chords 1 on Keys (scene 2)"),
+        [Action::new("clip.launch", json!({ "track": 3, "scene": 2 }))]
+    );
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+    harness.state_mut().state.keep_selection_on_launch = true;
+    clicked(&mut harness, "Launch Walk on Bass (scene 2)");
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+
+    // A track's header selects the track and ends the clip's selection.
+    clicked(&mut harness, "Track Drums");
+    assert_eq!((harness.state().state.selected_slot, harness.state().state.selected), (None, Some(TrackId(1))));
+}
+
+#[test]
+fn the_arrows_step_through_the_slots_of_tracks_and_stop_at_the_edges() {
+    use suhina_ui::session_view::{Step, step_slot};
+    let grid = Grid::build(&demo_project(), None);
+    let (drums, bass, vox) = (TrackId(1), TrackId(2), TrackId(4));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Up), Some((bass, 0)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Down), Some((bass, 2)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Left), Some((drums, 1)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Right), Some((TrackId(3), 1)));
+    assert_eq!(step_slot(&grid, (bass, 0), Step::Up), None);
+    assert_eq!(step_slot(&grid, (bass, 5), Step::Down), None);
+    assert_eq!(step_slot(&grid, (drums, 2), Step::Left), None);
+    // Return tracks have no slots, so the last track is the edge.
+    assert_eq!(step_slot(&grid, (vox, 2), Step::Right), None);
+    assert_eq!(step_slot(&grid, (TrackId(10), 0), Step::Down), None, "a return track is not in the grid of slots");
+}
+
+#[test]
+fn a_selected_slot_shows_in_the_detail_area_and_keys_move_and_launch_it() {
+    let mut harness = window(demo_app());
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_none());
+    harness.get_by_label("Select Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some());
+
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 3").is_some());
+    harness.key_press(Key::ArrowRight);
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_some());
+
+    // Enter launches it: here without an audio engine, which the status says.
+    harness.key_press(Key::Enter);
+    harness.run();
+    match harness.state().status() {
+        Status::Error(message) => assert!(message.contains("no audio engine"), "{message}"),
+        other => panic!("expected the launch to be tried, got {other:?}"),
+    }
+
+    // The Arrangement view keeps its own selection.
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_none());
+}
+
+#[test]
+fn with_select_on_launch_off_a_launch_leaves_the_detail_area_alone() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "on by default: a launch selects");
+
+    let ctx = harness.ctx.clone();
+    let settings = suhina_ui::settings::Settings { select_on_launch: false, ..Default::default() };
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.state_mut().set_browser_open(false);
+    harness.get_by_label("Launch Chords 1 on Keys (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "the selection stays");
+    assert!(harness.query_by_label("Clip Chords 1, scene 2").is_none());
 }

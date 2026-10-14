@@ -17,18 +17,27 @@ use crate::widgets::{self, Action, Drag};
 const PITCH: f32 = ROW + 1.0;
 /// Mark sizes inside a slot.
 const CLIP_MARK: f32 = 6.0;
+/// The part of a clip's slot that launches it: the mark and the padding around it.
+const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
 /// How dim a muted track's lane is.
 const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
 
-/// What the view keeps between frames: scrolling, and a value being dragged.
+/// What the view keeps between frames: scrolling, the selection, and a value being dragged.
 #[derive(Debug, Default)]
 pub struct SessionViewState {
     pub scroll: Vec2,
-    /// The track whose header was clicked; the detail area shows its devices.
+    /// The selected track (its header was clicked, or a clip on it selected); the detail area
+    /// shows its devices.
     pub selected: Option<TrackId>,
+    /// The selected clip slot, its track and scene from 0: a click on the clip's name, or a
+    /// launch, selected it. The detail area shows its clip.
+    pub selected_slot: Option<(TrackId, usize)>,
+    /// Launching a clip leaves the selection as it is (Settings › Detail area › Select on
+    /// launch is off); by default a launch selects the clip.
+    pub keep_selection_on_launch: bool,
     /// A column header being dragged to move its track, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
@@ -36,6 +45,39 @@ pub struct SessionViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+}
+
+impl SessionViewState {
+    /// Selects the clip slot at `scene` (from 0) on `track`, and the track with it.
+    pub fn select_slot(&mut self, track: TrackId, scene: usize) {
+        self.selected_slot = Some((track, scene));
+        self.selected = Some(track);
+    }
+}
+
+/// Where a key moves the selected slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// The slot one `step` from `from` (a track and a scene from 0): up and down within the track,
+/// left and right to the next track with clip slots in the same scene. `None` at the edge of the
+/// grid, or when `from` is not in it.
+pub fn step_slot(grid: &Grid, from: (TrackId, usize), step: Step) -> Option<(TrackId, usize)> {
+    let (track, scene) = from;
+    let slotted: Vec<&Column> = grid.columns.iter().filter(|c| c.kind == ColumnKind::Track).collect();
+    let at = slotted.iter().position(|c| c.track == track)?;
+    let scenes = slotted.get(at)?.slots.len();
+    match step {
+        Step::Up => scene.checked_sub(1).filter(|s| *s < scenes).map(|s| (track, s)),
+        Step::Down => Some(scene + 1).filter(|s| *s < scenes).map(|s| (track, s)),
+        Step::Left => at.checked_sub(1).and_then(|i| slotted.get(i)).map(|c| (c.track, scene)),
+        Step::Right => slotted.get(at + 1).map(|c| (c.track, scene)),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +337,7 @@ fn draw_column(
         column,
         progress,
         id,
+        state,
         actions,
     );
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
@@ -341,6 +384,7 @@ fn column_header(
     });
     if response.clicked() {
         state.selected = Some(column.track);
+        state.selected_slot = None;
     }
     let fill = if state.selected == Some(column.track) { theme::control_active() } else { theme::control_background() };
     painter.rect_filled(rect, 0.0, fill);
@@ -368,6 +412,7 @@ fn column_body(
     column: &Column,
     progress: Option<f32>,
     id: Id,
+    state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
     for (scene, slot) in column.slots.iter().enumerate() {
@@ -379,7 +424,17 @@ fn column_body(
             continue;
         }
         let number = scene + 1;
-        let response = match slot.state {
+        let has_clip = !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
+        // A clip on a track: its mark launches it, its name selects it. A group's slot launches
+        // the tracks inside it from anywhere.
+        let selectable = has_clip && column.kind == ColumnKind::Track;
+        let launch_rect = if selectable {
+            Rect::from_min_max(rect.min, Pos2::new((rect.left() + LAUNCH_WIDTH).min(rect.right()), rect.bottom()))
+        } else {
+            rect
+        };
+        let name = if slot.name.is_empty() { "clip" } else { slot.name.as_str() };
+        let launch = match slot.state {
             SlotState::Empty => None,
             SlotState::EmptyStop => Some(widgets::button_area(
                 ui,
@@ -387,22 +442,35 @@ fn column_body(
                 id.with(scene),
                 format!("Stop {} (scene {number})", column.name),
             )),
-            _ => {
-                let name = if slot.name.is_empty() { "clip" } else { slot.name.as_str() };
-                Some(widgets::button_area(
-                    ui,
-                    rect.intersect(clip),
-                    id.with(scene),
-                    format!("Launch {name} on {} (scene {number})", column.name),
-                ))
-            }
+            _ => Some(widgets::button_area(
+                ui,
+                launch_rect.intersect(clip),
+                id.with(scene),
+                format!("Launch {name} on {} (scene {number})", column.name),
+            )),
         };
-        let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
+        let select = selectable.then(|| {
+            let name_rect = Rect::from_min_max(Pos2::new(launch_rect.right(), rect.top()), rect.max);
+            widgets::button_area(
+                ui,
+                name_rect.intersect(clip),
+                id.with(("select", scene)),
+                format!("Select {name} on {} (scene {number})", column.name),
+            )
+        });
+        let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
-        if response.is_some_and(|r| r.clicked()) {
+        if launch.is_some_and(|r| r.clicked()) {
             actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+            if selectable && !state.keep_selection_on_launch {
+                state.select_slot(column.track, scene);
+            }
         }
-        slot_cell(painter, rect, column, slot, hover, pulse, progress);
+        if select.is_some_and(|r| r.clicked()) {
+            state.select_slot(column.track, scene);
+        }
+        let selected = selectable && state.selected_slot == Some((column.track, scene));
+        slot_cell(painter, rect, column, slot, hover, pulse, progress, selected);
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
 
@@ -431,6 +499,7 @@ fn column_body(
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn slot_cell(
     painter: &egui::Painter,
     rect: Rect,
@@ -439,6 +508,7 @@ fn slot_cell(
     hover: f32,
     pulse: f32,
     progress: Option<f32>,
+    selected: bool,
 ) {
     let track_color = rgb(column.color);
     let mark_rect =
@@ -457,7 +527,11 @@ fn slot_cell(
             painter.rect_filled(mark_rect(EMPTY_MARK), 0.0, theme::slot_empty());
         }
         SlotState::Stopped | SlotState::Queued => {
-            let fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
+            let fill = if selected {
+                theme::control_active()
+            } else {
+                motion::mix(theme::control_background(), theme::control_hover(), hover)
+            };
             painter.rect_filled(rect, 0.0, lane(fill, column.mute));
             let (mark, text) = if slot.enabled {
                 (track_color, theme::text_value())
@@ -486,6 +560,11 @@ fn slot_cell(
                 Rect::from_min_size(Pos2::new(rect.left(), rect.bottom() - 2.0), Vec2::new(rect.width() * done, 2.0));
             painter.rect_filled(line, 0.0, theme::accent());
         }
+    }
+    // A selected clip is outlined as a selected arrangement clip is; a queued one keeps its
+    // breathing outline.
+    if selected && slot.state != SlotState::Queued {
+        painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
     }
 }
 
