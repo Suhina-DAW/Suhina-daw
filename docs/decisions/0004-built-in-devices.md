@@ -128,7 +128,7 @@ decision 9.
    tracks routed through it, with no buffer of its own.
 
 11. **Data-only community effects** use the separate `suhina-device-sdk` and `.sd` format
-    ([ADR 0018](0018-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
+    ([ADR 0020](0020-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
     only supported node data; the engine prepares them off-thread and runs them in the same
     real-time-safe chain. Their parameter declarations generate UI controls.
 

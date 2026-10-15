@@ -43,7 +43,7 @@ detail area) goes alongside this list, not after it.
 
 The separate Rust SDK can create data-only composable `.sd` effects from supported nodes. They can
 be dropped onto tracks, are embedded in projects, render in real-time and offline, and expose
-their parameters and signal flow in the device detail panel ([ADR 0018](docs/decisions/0018-device-graph-files.md)).
+their parameters and signal flow in the device detail panel ([ADR 0020](docs/decisions/0020-device-graph-files.md)).
 The SDK also supports MIDI-effect graphs that preserve event timing and monophonic instrument
 graphs that turn timestamped MIDI input into audio; a MIDI effect runs before the track instrument.
 

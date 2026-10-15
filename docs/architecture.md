@@ -111,7 +111,7 @@ as built-in effects; MIDI effects transform note events before the track instrum
 graphs render audio from those events. The detail panel reads the embedded graph to draw its visual node flow and
 parameter controls. The UI caches custom canvases and bounded textures; image decoding and drawing
 expressions run only on the UI thread. Custom controls dispatch parameter commands, with a shared
-gesture id grouping both XY axes into one undo step. See [ADR 0018](decisions/0018-device-graph-files.md).
+gesture id grouping both XY axes into one undo step. See [ADR 0020](decisions/0020-device-graph-files.md).
 
 ```text
 .als ──als::read_file──> Project ──media::load_project_audio──> AudioPool

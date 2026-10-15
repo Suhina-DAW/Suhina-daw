@@ -109,7 +109,7 @@ klingt and JUCE's graph do), now:
    number of the last message its project already held; when a graph built before newer
    messages takes over, the renderer applies those again (it keeps the last 256), so an older
    graph never undoes a newer value.
-   The same message path updates parameters on prepared .sd effects (ADR 0018); changing the
+   The same message path updates parameters on prepared .sd effects (ADR 0020); changing the
    graph structure still rebuilds the renderer.
 4. **Sounding notes follow their track's mix.** Each sine voice remembers its track and
    velocity; at a swap it takes the new graph's volume, pan and mute (and bus, if the track's
