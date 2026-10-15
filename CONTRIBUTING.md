@@ -16,6 +16,12 @@
 - **Documentation:** a change that alters how something works updates the documents that
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
   *Before you finish a task* lists which document covers what.
+- **Parity measurement:** a pull request that adds, changes or removes something a user can do
+  updates its coverage in `scripts/parity/score.py` (and `scripts/parity/devices.json` for a
+  built-in effect or instrument), runs `python scripts/parity/update_report.py` and commits the
+  result, in the same pull request. One that moves no coverage writes `Parity: no change` and the
+  reason in its description. CI warns, without failing, when a change to `crates/`, `devices/` or
+  `apps/` does neither. `AGENTS.md` › *Before you finish a task* has the rule.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
 - **Names:** packages are `suhina-<name>` (`suhina-device-<name>` for devices), used in code as
   `suhina_<name>`; directories have no prefix. `AGENTS.md` › *Crate names* says how a new crate

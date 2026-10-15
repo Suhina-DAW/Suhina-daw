@@ -10,6 +10,7 @@ covers:
   - crates/ui/src/app.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/follow_view.rs
   - crates/engine/src/cpu.rs
 ---
 
@@ -34,10 +35,13 @@ From top to bottom:
      stop returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
-      (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`
+      (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
       reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM
       (its resident memory, in MB or GB), shown always
-    - view switches (Session / Arrangement)
+    - view switches (Session / Arrangement). **Suhina:** the last control at the right end
+      of the bar, with the CPU load and the RAM left of it. In a window too narrow for all
+      of them the RAM, then the CPU load, is left out rather than overlap the position
+      readout; the order stays
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
      collections (user colour tags), library categories and places (user folders); a results
@@ -85,7 +89,7 @@ Each cell is a slot for one clip.
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
 | Empty, without stop button | nothing | nothing |
-| Clip, stopped | clip colour, clip name, launch control | launches the clip |
+| Clip, stopped | clip colour, clip name, launch control | launches the clip; **Suhina:** and selects it |
 | Clip, queued | launch control in a pending (blinking) state until the quantisation point | |
 | Clip, playing | launch control in the playing state, progress through the clip | relaunches |
 | Clip, recording | recording state | |
@@ -125,6 +129,26 @@ the return tracks (so effects stay audible); mute still wins. A click solos one 
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+## Detail area: follow action
+
+**Suhina** (own design): a selected slot clip shows its follow action
+([clip launching](clip-launching.md) › Follow actions) first in the detail area, in a column at
+the left of a row or at the top of the stacked column, with the rest of the detail beside or
+under it. Launching a clip on a track selects it; clicking a track's header selects the track
+instead and hides the section; the Arrangement view shows only its own selection. Top to bottom:
+
+| Control | What it does |
+|---|---|
+| **Follow action** title with an **On / Off** switch | turns the follow action on or off (`enabled`); off, the rest reads as inactive but can still be changed |
+| **Time** | the follow time in bars.beats (bars.beats.sixteenths when it has a part of a beat), dragged up or down in sixteenths (Shift for finer), a double-click sets one bar; dimmed while linked |
+| **Linked** switch | on: the follow time is the clip's length (`linked`) |
+| **Action A** dropdown | nothing, stop, again, previous, next, first, last, any, other, or **Jump to scene N** for each scene |
+| **Chance A** | 0 to 100, dragged; its share shows as a fill; a double-click sets 100 |
+| **Action B**, **Chance B** | as A; a double-click sets chance B to 0 |
+
+Every change runs `clip.setFollowAction` with only what changed, one undo step each. Typing a
+time or a chance is planned, as for every value field.
 
 ## Detail area: device chain
 
