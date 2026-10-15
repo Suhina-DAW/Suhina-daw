@@ -16,6 +16,11 @@ name: Test build links
 # the pull request's thread, `#<number> …`, and the webhook (secret DISCORD_WEBHOOK_TESTING) posts
 # into it, or opens it when there is none. Without them nothing is posted, and a failed post fails
 # nothing else. See docs/releasing.md › Discord.
+#
+# Run by hand (Actions › Test build links › Run workflow, a maintainer only), it posts the builds
+# already linked from open pull requests, or from the numbers given, the same way
+# (scripts/discord_test_build_backfill.py): for pull requests whose build was linked before
+# Discord was set up. An expired build, or a thread that already has the commit, gets nothing.
 
 on:
   workflow_run:
@@ -23,6 +28,13 @@ on:
     types: [completed]
   pull_request_target:
     types: [synchronize]
+  workflow_dispatch:
+    inputs:
+      pull_requests:
+        description: "Pull request numbers to post, e.g. 302 303; empty posts every open pull request"
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -41,7 +53,7 @@ jobs:
         id: link
         with:
           script: |
-            // The maintainers are listed here and in test-build.yml.
+            // The maintainers are listed here, in the backfill job and in test-build.yml.
             const MAINTAINERS = ['juhamikael'];
             const MARKER = '<!-- suhina-test-build -->';
             const { owner, repo } = context.repo;
@@ -166,6 +178,29 @@ jobs:
           DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
           DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
         run: python3 scripts/discord_test_build.py "$BUILD"
+
+  backfill:
+    name: post linked builds to Discord
+    # The maintainers are listed here, in the link job and in test-build.yml.
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["juhamikael"]'), github.triggering_actor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Post the linked builds to Discord
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUESTS: ${{ inputs.pull_requests }}
+          DISCORD_WEBHOOK_TESTING: ${{ secrets.DISCORD_WEBHOOK_TESTING }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
+        run: python3 scripts/discord_test_build_backfill.py
 
   unlabel:
     name: take the label off new commits

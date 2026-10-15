@@ -80,9 +80,14 @@ def payload(content: str, name: str | None = None) -> dict:
     return body
 
 
-def post(webhook: str, discord: Discord, guild: str, forum: str, data: dict) -> None:
+def post(webhook: str, discord: Discord, guild: str, forum: str, data: dict) -> str:
+    return post_to(webhook, locate(discord, guild, forum, data["number"]), data)
+
+
+def post_to(webhook: str, thread: dict | None, data: dict) -> str:
+    """Posts into `thread`, or opens the pull request's thread when it is None. Returns what was
+    done: `posted`, `opened`, `refused` or `nothing`."""
     number = data["number"]
-    thread = locate(discord, guild, forum, number)
     if thread is not None:
         tid = thread["id"]
         try:
@@ -90,16 +95,17 @@ def post(webhook: str, discord: Discord, guild: str, forum: str, data: dict) -> 
         except DiscordError as error:
             # A locked thread refuses the webhook; it is not unarchived either.
             print(f"::warning::Thread {tid} ({thread.get('name')}) refused the post: {error}")
-            return
+            return "refused"
         print(f"Posted the build of #{number} in thread {tid} ({thread.get('name')}).")
-        return
+        return "posted"
     if not built(data):
         print(f"No thread for #{number} and no platform built; nothing posted.")
-        return
+        return "nothing"
     name = thread_name(number, data.get("title", ""))
     reply = send("POST", f"{webhook}?wait=true", "webhook", payload(message(data, True), name))
     # In a forum the new message's channel is the new thread.
     print(f"Opened thread {reply.get('channel_id')} ({name}).")
+    return "opened"
 
 
 def main(argv: list[str]) -> int:

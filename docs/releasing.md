@@ -15,6 +15,7 @@ covers:
   - scripts/discord_post.py
   - scripts/discord_merged.py
   - scripts/discord_test_build.py
+  - scripts/discord_test_build_backfill.py
   - scripts/discord_api.py
 ---
 
@@ -218,6 +219,15 @@ to the comment, and that downloading needs a GitHub sign-in. The first build ope
 (only if some platform built); later builds post *New build is available for testing* in it,
 which unarchives it. An existing thread is never renamed. Discord refuses a post in a locked
 thread; that is logged.
+
+**Builds linked before.** A build linked before the forum was set up, or while a setting was
+missing, reaches Discord only by hand: Actions › Test build links › Run workflow (a maintainer
+only), with pull request numbers (`302 303`) or empty for every open pull request.
+[`scripts/discord_test_build_backfill.py`](../scripts/discord_test_build_backfill.py) reads each
+pull request's test build comment into the same data and posts it the same way, opening the thread
+or posting in it. It skips a pull request with no comment, a build whose artifacts have expired,
+and a thread whose latest 100 messages already name the commit, so running it twice posts nothing
+twice. The run's summary lists what happened to each pull request.
 
 When a pull request is merged, its thread in the testing forum is marked by the bot
 *Suhina GitHub* (`discord.yml`, [`scripts/discord_merged.py`](../scripts/discord_merged.py)). The
