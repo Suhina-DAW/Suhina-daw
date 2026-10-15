@@ -269,3 +269,26 @@ fn a_launched_scene_sets_the_time_signature_the_transport_counts_in() {
     assert_eq!(state["tempo_bpm"], 60.0);
     assert_eq!(state["position"], "2.2");
 }
+
+#[test]
+fn follow_tempo_map_takes_the_transport_back_from_a_scene() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "scene.setTimeSignature", json!({ "scene": 2, "numerator": 3, "denominator": 4 })).unwrap();
+    run(&mut session, "scene.setTempo", json!({ "scene": 2, "bpm": 60 })).unwrap();
+    advance(&mut renderer, 256);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["follows_tempo_map"], true);
+    run(&mut session, "scene.launch", json!({ "scene": 2 })).unwrap();
+    advance(&mut renderer, 2 * SR as usize);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["follows_tempo_map"].clone(), state["tempo_bpm"].clone()), (json!(false), json!(60.0)));
+    // Not an edit: nothing to undo.
+    let undo = session.can_undo();
+    run(&mut session, "transport.followTempoMap", json!({})).unwrap();
+    advance(&mut renderer, 256);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["follows_tempo_map"], true);
+    assert_eq!(state["tempo_bpm"], session.project().transport.tempo_bpm);
+    assert_eq!(state["time_signature"], "4/4");
+    assert_eq!(session.can_undo(), undo);
+}

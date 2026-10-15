@@ -146,6 +146,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
+- tempo and time-signature changes over the song, from the breakpoints of the same envelopes
+  (a reading still to be confirmed by a corpus file; [tempo map](docs/spec/tempo-map.md))
 - MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read, kept and
   played), routing into groups
 - scenes, session clip slots and arrangement clips
@@ -170,6 +172,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   return runs its devices over what it is sent and plays into the main channel or a group, with
   latency compensation on every send; loops are refused (`track.setSend`, `track.setSendMode`,
   `return.add`, `return.remove`, `return.rename`; [spec](docs/spec/sends-and-returns.md)).
+- Tempo and time-signature changes over the song (the tempo map): tempo steps and ramps, and
+  signature changes at bars, saved in the project file and edited with `tempo.addPoint`,
+  `tempo.movePoint`, `tempo.deletePoint` and `timeSignature.add`/`move`/`delete`. Notes, audio
+  clips (stretched or re-pitched), fades, the playhead, launched clips, launch quantisation and
+  the metronome all follow it; a ramp is converted exactly, so nothing drifts. The bar ruler
+  numbers bars through the signature changes and marks every change
+  ([spec](docs/spec/tempo-map.md)). The arrangement loop keeps its beats through a tempo change.
+- A launched scene's tempo or time signature overrides the tempo map until
+  `transport.followTempoMap`, the next start of the transport or an edit to the map
+  ([spec](docs/spec/tempo-map.md#scenes-and-the-tempo-map)).
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits

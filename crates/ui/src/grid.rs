@@ -2,8 +2,8 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TimeSignature, Track, TrackId};
-use suhina_engine::{LauncherMonitor, Meter, Queued};
+use suhina_engine::model::{ChannelRole, Meter, Project, Rgb, TimeSignature, Track, TrackId};
+use suhina_engine::{LauncherMonitor, PlayingMeter, Queued};
 
 use crate::theme;
 
@@ -142,9 +142,11 @@ pub struct Grid {
     /// Beats since the transport started.
     pub beat: f64,
     pub tempo_bpm: f64,
-    /// The time signature playing and where its bars start: the project's, or, while the
-    /// engine plays, the one a launched scene changed it to.
-    pub meter: Meter,
+    /// The bars playing: the project's meter, or, while the engine plays, the time signature a
+    /// launched scene changed it to.
+    pub meter: PlayingMeter,
+    /// The project's meter: bars through its time-signature changes.
+    pub project_meter: Meter,
 }
 
 impl Grid {
@@ -271,15 +273,25 @@ impl Grid {
         };
         let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
         let meter = monitor.map_or(
-            Meter { time_signature: project.transport.time_signature, ..Meter::default() },
+            PlayingMeter { time_signature: project.transport.time_signature, ..PlayingMeter::default() },
             LauncherMonitor::meter,
         );
-        Self { columns, scenes, running, beat, tempo_bpm, meter }
+        Self { columns, scenes, running, beat, tempo_bpm, meter, project_meter: project.transport.meter() }
+    }
+
+    /// The time signature playing: the project meter's at the playhead, or the one a launched
+    /// scene set.
+    pub fn time_signature(&self) -> TimeSignature {
+        if self.meter.follows_map {
+            self.project_meter.position(self.beat).time_signature
+        } else {
+            self.meter.time_signature
+        }
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.
     pub fn position(&self) -> String {
-        let (bar, in_bar) = self.meter.locate(self.beat);
+        let (bar, in_bar) = self.meter.locate(self.beat, &self.project_meter);
         let beat = in_bar.floor() as u64 + 1;
         let sixteenth = ((in_bar.fract()) * 4.0).floor() as u64 + 1;
         format!("{bar}.{beat}.{sixteenth}")
@@ -345,5 +357,12 @@ mod tests {
         assert_eq!(grid.position(), "2.2.3");
         let start = Grid::default();
         assert_eq!(start.position(), "1.1.1");
+        // 4/4 for bar 1, then 3/4: beat 8.5 is in bar 3, on its second beat.
+        use suhina_engine::model::{TimeSignature, TimeSignatureChange};
+        let changes = [TimeSignatureChange { bar: 1, time_signature: TimeSignature { numerator: 3, denominator: 4 } }];
+        let meter = Meter::new(TimeSignature { numerator: 4, denominator: 4 }, &changes);
+        let changing = Grid { beat: 8.5, project_meter: meter, ..Grid::default() };
+        assert_eq!(changing.position(), "3.2.3");
+        assert_eq!(changing.time_signature(), TimeSignature { numerator: 3, denominator: 4 });
     }
 }

@@ -8,7 +8,7 @@ use suhina_model::{
     Marker, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, editing, files, follow, meters, notes, preview};
+use crate::{CommandError, Session, automation, devices, editing, files, follow, meters, notes, preview, tempo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -298,6 +298,77 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[optional("enabled", ParamType::Bool, "true turns looping on, false off (default: the other way)")],
         kind: CommandKind::Edit,
         run: set_loop_enabled,
+    },
+    CommandSpec {
+        id: "tempo.points",
+        label: "List the tempo map: the start tempo and every tempo change (numbered from 1), the start time signature and every time-signature change",
+        params: &[],
+        kind: CommandKind::Read,
+        run: tempo::points,
+    },
+    CommandSpec {
+        id: "tempo.addPoint",
+        label: "Add a tempo change at a beat: a step, or a ramp that glides from the tempo before it (one already on that beat is replaced)",
+        params: &[
+            param("beat", ParamType::Number, "where the change is, in beats from the start, after 0"),
+            param("bpm", ParamType::Number, "the tempo from there, 20 to 999"),
+            optional(
+                "ramp",
+                ParamType::Bool,
+                "glide from the tempo before to this one, reaching it at the beat (default false: a step)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::add_point,
+    },
+    CommandSpec {
+        id: "tempo.movePoint",
+        label: "Move a tempo change to another beat, or change its tempo or whether it ramps",
+        params: &[
+            param("point", ParamType::Integer, "tempo point number, from 1, as in tempo.points"),
+            optional("beat", ParamType::Number, "the new beat, after 0"),
+            optional("bpm", ParamType::Number, "the new tempo, 20 to 999"),
+            optional("ramp", ParamType::Bool, "whether it glides from the tempo before"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::move_point,
+    },
+    CommandSpec {
+        id: "tempo.deletePoint",
+        label: "Remove a tempo change",
+        params: &[param("point", ParamType::Integer, "tempo point number, from 1, as in tempo.points")],
+        kind: CommandKind::Edit,
+        run: tempo::delete_point,
+    },
+    CommandSpec {
+        id: "timeSignature.add",
+        label: "Change the time signature from the start of a bar (one already at that bar is replaced)",
+        params: &[
+            param("bar", ParamType::Integer, "bar number, from 2 (bar 1 has the start signature)"),
+            param("numerator", ParamType::Integer, "beats in a bar, 1 to 99"),
+            param("denominator", ParamType::Integer, "the note value of a beat: 1, 2, 4, 8, 16, 32 or 64"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::add_signature,
+    },
+    CommandSpec {
+        id: "timeSignature.move",
+        label: "Move a time-signature change to another bar, or change its signature",
+        params: &[
+            param("bar", ParamType::Integer, "the bar the change is at, from 2"),
+            optional("to", ParamType::Integer, "the bar to move it to, from 2"),
+            optional("numerator", ParamType::Integer, "beats in a bar, 1 to 99"),
+            optional("denominator", ParamType::Integer, "1, 2, 4, 8, 16, 32 or 64"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::move_signature,
+    },
+    CommandSpec {
+        id: "timeSignature.delete",
+        label: "Remove a time-signature change",
+        params: &[param("bar", ParamType::Integer, "the bar the change is at, from 2")],
+        kind: CommandKind::Edit,
+        run: tempo::delete_signature,
     },
     CommandSpec {
         id: "track.setVolume",
@@ -642,6 +713,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[param("beats", ParamType::Number, "beats from the beginning, 0 … 120000")],
         kind: CommandKind::Transport,
         run: set_position,
+    },
+    CommandSpec {
+        id: "transport.followTempoMap",
+        label: "Play the arrangement's tempo and time signature again after a launched scene's tempo or time signature took over; starting the transport does the same",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: follow_tempo_map,
     },
     CommandSpec {
         id: "transport.setMetronome",
@@ -2435,6 +2513,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
     let meter = monitor.meter();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
+    let project_meter = p.transport.meter();
     let tracks: Vec<Value> = p
         .launcher
         .columns
@@ -2465,15 +2544,19 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         .collect();
     // Rounded once, so the beat and the position agree.
     let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
-    let (bar, into_bar) = meter.locate(beat);
+    // Bars through the time-signature changes while the clock follows the tempo map, or
+    // through the time signature a scene set (`docs/spec/tempo-map.md`).
+    let (bar, into_bar) = meter.locate(beat, &project_meter);
     let position = format!("{bar}.{}", into_bar.floor() as u64 + 1);
+    let signature = if meter.follows_map { project_meter.position(beat).time_signature } else { meter.time_signature };
     Ok(json!({
         "running": running,
         "metronome": monitor_metronome,
         "tempo_bpm": tempo,
         "beat": beat,
-        "time_signature": signature_text(meter.time_signature),
+        "time_signature": signature_text(signature),
         "position": position,
+        "follows_tempo_map": meter.follows_map,
         "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
         "preview": preview_state,
@@ -2743,6 +2826,11 @@ fn set_quantization(session: &mut Session, params: &Value) -> Result<Value, Comm
     let quantization = parse_quantization(text)?;
     send(session, LaunchCommand::SetQuantization(quantization))?;
     Ok(json!({ "quantization": text.trim() }))
+}
+
+fn follow_tempo_map(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::FollowTempoMap)?;
+    Ok(json!({ "follows_tempo_map": true }))
 }
 
 fn back_to_arrangement(session: &mut Session, _: &Value) -> Result<Value, CommandError> {

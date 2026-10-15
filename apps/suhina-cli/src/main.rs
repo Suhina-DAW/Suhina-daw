@@ -559,7 +559,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
     let events = match &device_source {
         Some((session, channel)) => {
             let project = session.project();
-            let beats_per_bar = f64::from(project.transport.time_signature.numerator.max(1));
+            let meter = project.transport.meter();
             let first_clip = || {
                 let track = project.tracks.iter().find(|t| t.channel == Some(*channel))?;
                 project
@@ -573,13 +573,21 @@ fn plugin(args: &[String]) -> Result<(), String> {
                     .min_by(f64::total_cmp)
             };
             let from_beat = match from_bar {
-                Some(bar) => (bar - 1.0).max(0.0) * beats_per_bar,
+                // Bars through the time-signature changes, counted from 1; a fraction is part of
+                // that bar.
+                Some(bar) => {
+                    let bars = (bar - 1.0).clamp(0.0, f64::from(u32::MAX));
+                    let start = meter.bar_start(bars.floor() as u32);
+                    start + bars.fract() * meter.position(start).bar_beats
+                }
                 None => first_clip().unwrap_or(0.0),
             };
             let frames = (stereo.len() / 2) as u64;
             let events = track_notes::events(project, *channel, from_beat, frames, audio.sample_rate);
             if !events.is_empty() {
-                eprintln!("{} note events from bar {:.1}", events.len(), from_beat / beats_per_bar + 1.0);
+                let here = meter.position(from_beat);
+                let bar = f64::from(here.bar) + 1.0 + (from_beat - here.bar_start) / here.bar_beats.max(1e-9);
+                eprintln!("{} note events from bar {bar:.1}", events.len());
             }
             events
         }

@@ -8,6 +8,12 @@ use std::collections::HashSet;
 use std::fmt;
 
 pub mod automation;
+mod tempo;
+
+pub use tempo::{
+    BarPosition, MAX_BPM, MAX_CHANGE_BEAT, MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, MIN_BPM, Meter, TempoMap,
+    TempoPoint, TimeSignatureChange, valid_bpm,
+};
 
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -39,6 +45,9 @@ pub struct Project {
     pub extensions: Extensions,
 }
 
+/// The song's tempo and time signature: `tempo_bpm` and `time_signature` hold from the start,
+/// and the changes take over later in the song (`docs/spec/tempo-map.md`). Convert beats to time
+/// and bars with [`Transport::tempo_map`] and [`Transport::meter`], never with `tempo_bpm` alone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transport {
     pub tempo_bpm: f64,
@@ -48,6 +57,10 @@ pub struct Transport {
     pub loop_range: Option<LoopRange>,
     /// Whether playback repeats the loop region.
     pub loop_enabled: bool,
+    /// Tempo changes after beat 0, in order of beat.
+    pub tempo_changes: Vec<TempoPoint>,
+    /// Time-signature changes after bar 0, in order of bar.
+    pub time_signature_changes: Vec<TimeSignatureChange>,
 }
 
 impl Default for Transport {
@@ -57,6 +70,8 @@ impl Default for Transport {
             time_signature: TimeSignature { numerator: 4, denominator: 4 },
             loop_range: None,
             loop_enabled: false,
+            tempo_changes: Vec::new(),
+            time_signature_changes: Vec::new(),
         }
     }
 }

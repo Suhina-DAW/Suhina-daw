@@ -84,6 +84,14 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   level without reopening. `suhina-cli render --cue cue.wav` writes the cue beside the main mix
   ([spec](spec/cue-output.md)).
 
+- **Tempo map.** `tempo.points` lists the start tempo, the tempo changes and the time-signature
+  changes; `tempo.addPoint {beat, bpm, ramp?}`, `tempo.movePoint` and `tempo.deletePoint` edit the
+  tempo changes (numbered from 1), `timeSignature.add {bar, numerator, denominator}`,
+  `timeSignature.move` and `timeSignature.delete` the signature changes (bars from 1). Renders and
+  the playing engine follow them ([tempo map](spec/tempo-map.md)). A launched scene's tempo or
+  time signature overrides the map for the launcher clock (`launcher.state` reports
+  `follows_tempo_map: false`) until `transport.followTempoMap`, the next `transport.play` after a
+  stop, or an edit to the map ([scenes and the tempo map](spec/tempo-map.md#scenes-and-the-tempo-map)).
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`
   moves the marker to that arrangement clip's start and plays from there. `transport.stop` returns the playhead to the

@@ -54,7 +54,9 @@ Its key ideas:
 `suhina-model` is a DAW-neutral model built on DAWproject's ideas, in three layers:
 
 1. **A common core** of concepts every DAW has:
-   - a transport (tempo, time signature, the arrangement's loop region and whether it is on)
+   - a transport (tempo, time signature, and their changes over the song: tempo steps and ramps,
+     time-signature changes at bars, [tempo map](../spec/tempo-map.md); the arrangement's loop
+     region and whether it is on)
    - **tracks** (structure) and **channels** (mixer strips: volume, pan, mute, solo, sends,
      output, device chain) as separate objects
    - a pool of **clip contents**, each made of **content lanes**; a lane holds notes or audio and

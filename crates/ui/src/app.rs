@@ -2986,7 +2986,7 @@ impl App {
         );
         x = tempo_rect.right() + PAD;
         // The time signature playing, like the tempo: a launched scene may have changed it.
-        let ts = grid.meter.time_signature;
+        let ts = grid.time_signature();
         let signature =
             if self.session().is_some() { format!("{} / {}", ts.numerator, ts.denominator) } else { String::new() };
         let ts_rect = row(x, 40.0);

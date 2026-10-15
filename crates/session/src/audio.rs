@@ -499,6 +499,8 @@ pub(crate) struct Transport {
     marker: f64,
     metronome: bool,
     tempo_bpm: f64,
+    /// The launcher clock followed the tempo map: no scene had taken it off.
+    follows_map: bool,
     quantization: Option<suhina_engine::Quantization>,
     /// Columns that play launched clips or have a launch or stop queued.
     columns: Vec<ColumnState>,
@@ -533,6 +535,7 @@ impl Transport {
             marker: monitor.start_beat(),
             metronome: monitor.metronome(),
             tempo_bpm: monitor.tempo_bpm(),
+            follows_map: monitor.meter().follows_map,
             quantization: player.quantization(),
             columns,
         }
@@ -561,7 +564,9 @@ impl Transport {
         if self.beat.is_finite() && self.beat != self.marker {
             player.send(LaunchCommand::Locate { beat: self.beat })?;
         }
-        if self.tempo_bpm.is_finite() && self.tempo_bpm != player.monitor().tempo_bpm() {
+        // A scene's tempo took the clock off the tempo map: the new output plays it too. On the
+        // map, the new output reads the tempo from the map at the playhead.
+        if !self.follows_map && self.tempo_bpm.is_finite() {
             player.send(LaunchCommand::SetLaunchTempo { bpm: self.tempo_bpm })?;
         }
         for state in &self.columns {

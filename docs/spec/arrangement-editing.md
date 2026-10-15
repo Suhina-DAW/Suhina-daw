@@ -192,7 +192,8 @@ the last frame are both silent. The click guard is the engine's 2 ms linear ramp
 every audio clip, counted the same way, and the fades multiply with it rather than replacing it. The engine works it out per frame from the clip's
 start and end in frames (`audio::Fades`), so fades are sample-accurate and the same in offline
 renders and real-time playback, unwarped (direct reader) or warped (time-stretched): the envelope
-is applied after the stretcher. A fade follows the tempo, since it is in beats. Fades belong to
+is applied after the stretcher. A fade follows the tempo, since it is in beats: through a tempo
+change its length in time is what the [tempo map](tempo-map.md) makes of its beats. Fades belong to
 arrangement clips; a launched clip plays with the click guard only.
 
 When a clip is shortened or split because another clip is placed over it (below), its fades are
@@ -252,7 +253,8 @@ setting, and a second Stop goes to the beginning.
 | `transport.play {from?, track?, index?}` | `from: "marker"` (the default): starts the transport from the marker; nothing happens while it runs. Launching a clip or scene while stopped also starts the arrangement from the marker. `from: "clip"`: `track` and `index` (from `project.clips`) name an arrangement clip; the marker moves to that clip's start and the transport starts there, or, while it runs, jumps there as `transport.setPosition` does. A missing or unknown clip, a track without an arrangement lane, another `from`, or `track`/`index` without `from: "clip"` is an error and changes nothing. |
 | `transport.stop {return?}` | Stops everything at once. `return: "marker"` (the default): the playhead goes back to the marker. `return: "here"`: the marker moves to where the playhead stopped, so the next start carries on from there. Either way, stopping while already stopped moves the marker to beat 0. |
 
-`launcher.state` reports `start_beat` (the marker) next to `beat` and `position` (the playhead).
+`launcher.state` reports `start_beat` (the marker) next to `beat` and `position` (the playhead;
+bars through the time-signature changes, [tempo map](tempo-map.md)).
 
 **A new audio output.** When the output is opened again (`audio.setOutput`, a device that
 reported an error, the chosen device back), the marker stays where it was and, while playing,
@@ -347,7 +349,9 @@ later play again, and audio clips play on from where they are at the loop start,
 sample. The play start marker does not move, so Stop goes back to it as usual. A playhead that is
 already at or past the loop end (the play start marker set there, or a jump there) plays on
 without wrapping; one before the loop start plays into the region and then repeats it. A loop
-region shorter than one sample frame does not repeat.
+region shorter than one sample frame does not repeat. The region is in beats: its ends are turned
+into frames through the [tempo map](tempo-map.md) on every pass, so a tempo change inside the loop
+keeps the loop's length in beats.
 
 Offline, the same path loops (`render_launches`, the oracle for playback). A render of the whole
 arrangement (`suhina-cli render`, the MCP render tools) plays it once from start to end and does
