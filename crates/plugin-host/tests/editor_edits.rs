@@ -57,6 +57,7 @@ fn project() -> Project {
         state: Some(bank(0.25)),
         params: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     Project {
         tracks: vec![Track {
@@ -80,6 +81,7 @@ fn project() -> Project {
             sends: Vec::new(),
             devices: vec![plugin],
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         ..Project::default()
     }
