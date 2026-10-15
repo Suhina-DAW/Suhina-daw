@@ -307,8 +307,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/missing-files.md)).
 - The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
-  toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
-  samples), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
+  toms, cymbals, percussion, bass, tonal, vocal, effect), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
   takes `aspect`), with the kinds' names over their regions and a
   legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
   arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
@@ -316,6 +315,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   It stays readable with up to 200 000 samples: a density view when points crowd, and labels per
   cluster that never overlap. Samples are analysed in the background once and kept
   ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
+- The sample map **recognises kinds by sound**: features read from the sample's onset, with
+  its attack apart from its body, energy in five bands and the fall of a kick's pitch; a
+  classifier learned from the library's own named samples gives each sample its kind before the
+  layout, and the layout keeps each kind in regions of its own, so a tambourine in a folder of
+  kicks lands among the percussion. Right-click a point › **Kind ▸** sets a kind by hand
+  (`soundmap.setKind`); it wins over the name and the sound and is kept
+  ([spec](docs/spec/sample-map.md) › Kinds and colours, #325).
 - A menu bar and a **Settings** dialog over the window (Options › Settings, Ctrl+,; Escape closes
   it) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,

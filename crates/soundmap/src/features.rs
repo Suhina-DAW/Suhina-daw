@@ -170,7 +170,7 @@ fn mono_window(samples: &[f32], channels: u16, sample_rate: u32) -> Option<Vec<f
     let block = ((ONSET_BLOCK_SECONDS * rate) as usize).max(1);
     let levels: Vec<f32> = mono.chunks(block).map(|b| b.iter().fold(0.0f32, |m, s| m.max(s.abs()))).collect();
     let loudest = levels.iter().copied().fold(0.0f32, f32::max);
-    if !(loudest > 0.0) {
+    if loudest.is_nan() || loudest <= 0.0 {
         // Silent, or not a number: the caller refuses it.
         return Some(mono.into_iter().take((WINDOW_SECONDS * rate) as usize).collect());
     }
@@ -309,7 +309,7 @@ fn shape_of(p: &[f32], previous: Option<&[f32]>) -> [f32; 5] {
 /// The power spectrum of the attack: its first [`ATTACK_SECONDS`] under a Hann window of that
 /// length, zero-padded to a frame.
 fn attack_power(signal: &[f32]) -> Vec<f32> {
-    let length = ((ATTACK_SECONDS * RATE as f32) as usize).min(FRAME).max(2);
+    let length = ((ATTACK_SECONDS * RATE as f32) as usize).clamp(2, FRAME);
     let mut planner = RealFftPlanner::<f32>::new();
     let fft: Arc<dyn RealToComplex<f32>> = planner.plan_fft_forward(FRAME);
     let mut input = fft.make_input_vec();
@@ -571,7 +571,7 @@ impl Yin {
 /// The weighted mean and standard deviation of `(value, weight)` pairs.
 fn mean_std(values: impl Iterator<Item = (f32, f32)> + Clone) -> (f32, f32) {
     let (total, sum) = values.clone().fold((0.0f32, 0.0f32), |(w, s), (v, weight)| (w + weight, s + v * weight));
-    if !(total > 0.0) {
+    if total.is_nan() || total <= 0.0 {
         return (0.0, 0.0);
     }
     let mean = sum / total;

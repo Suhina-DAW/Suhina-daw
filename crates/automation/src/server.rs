@@ -516,6 +516,7 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&P
             confine_place(workspace, &mut params)?;
         }
         "soundmap.layout" => confine_place(workspace, &mut params)?,
+        "soundmap.setKind" => confine_file(workspace, &mut params, "item")?,
         "library.search" => {
             if let Some(place) = params.get("place").and_then(Value::as_str)
                 && place != "pinned"
@@ -729,6 +730,7 @@ mod confine_tests {
             ("soundmap.layout", json!({ "place": dir.join("outside").display().to_string() })),
             ("soundmap.similar", json!({ "item": outside.clone() })),
             ("soundmap.info", json!({ "item": outside.clone() })),
+            ("soundmap.setKind", json!({ "item": outside.clone(), "kind": "kick" })),
             ("soundmap.analyse", json!({ "folder": dir.join("outside").display().to_string() })),
             ("project.relinkFiles", json!({ "files": ["a.wav"], "to": [outside.clone()] })),
             ("library.findFiles", json!({ "names": ["a.wav"], "folder": dir.join("outside").display().to_string() })),
