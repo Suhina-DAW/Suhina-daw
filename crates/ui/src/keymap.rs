@@ -106,6 +106,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("selection.duplicate", "Duplicate the selected clip", "Edit"),
     ("selection.delete", "Delete the selected clip", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
 /// Every action a key can be bound to: the window's, then each command that needs no
