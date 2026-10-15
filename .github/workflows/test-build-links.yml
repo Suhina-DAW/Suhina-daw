@@ -5,6 +5,9 @@ name: Test build links
 # new build updates, and takes the `test-build` label off a pull request when someone other than a
 # maintainer pushes to it, so the new commits wait for review before they are built.
 #
+# A run that built nothing (a push that only merged main, see test-build.yml) leaves the comment
+# as it is, so it keeps linking the last real build.
+#
 # test-build.yml from a fork runs as the fork has it, so a build is linked only when a maintainer
 # started its run: their own push, or the label they added. See docs/releasing.md › Test builds.
 
@@ -47,7 +50,7 @@ jobs:
             const builds = jobs.filter((job) => job.name.startsWith('test build ('));
             const ran = builds.filter((job) => !['skipped', 'cancelled'].includes(job.conclusion));
             if (ran.length === 0) {
-              core.info(`Run ${run.id} built nothing.`);
+              core.info(`Run ${run.id} built nothing; the comment keeps linking the last build.`);
               return;
             }
 

@@ -88,6 +88,16 @@ built on every push. A contributor's pull request is built once a maintainer has
 added the `test-build` label; a later push takes the label off, and the new commits are built when
 the label is added again.
 
+## Merging many pull requests
+
+For maintainers. Merge through the merge queue: on each green pull request press **Merge when
+ready**, and the queue tests the queued pull requests together on top of `main`, in groups, and
+merges them in order, so no one presses *Update branch* by hand. To try several pull requests in
+one build before they merge, run Actions › Test build › Run workflow with their numbers
+(`302 303 304`). A push that only merges `main` into a pull request is not built again; its last
+test build stays linked. [`docs/releasing.md` › Merging many pull requests](docs/releasing.md#merging-many-pull-requests)
+says how the queue is set up and what runs in it.
+
 ## Clean-room
 
 Suhina reimplements the *behaviour* of commercial DAWs, Ableton Live in particular, without
