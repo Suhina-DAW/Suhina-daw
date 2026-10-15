@@ -31,7 +31,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
 
-COMMANDS = 138
+COMMANDS = 135
 
 
 
