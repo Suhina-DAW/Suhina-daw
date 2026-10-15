@@ -142,6 +142,30 @@ fn a_library_is_analysed_laid_out_and_kinds_are_found() {
 }
 
 #[test]
+fn a_layout_counts_its_progress_from_0_to_1() {
+    let rows: Vec<features::Features> = (0..64)
+        .map(|i| {
+            let mut row = [0.0; features::FEATURE_COUNT];
+            for (slot, v) in row.iter_mut().zip(noise(i + 1, features::FEATURE_COUNT)) {
+                *slot = v + (i % 4) as f32;
+            }
+            row
+        })
+        .collect();
+    let s = Standardised::new(&rows);
+    let progress = layout::Progress::new();
+    assert_eq!(progress.fraction(), 0.0);
+    let positions = layout::layout_with_progress(&s, 1, &progress);
+    assert_eq!(positions.len(), 64);
+    assert_eq!(progress.fraction(), 1.0);
+    // A clone shares the count; a layout too small for t-SNE ends at 1 as well.
+    let shared = layout::Progress::new();
+    let few = Standardised::new(&rows[..3]);
+    layout::layout_with_progress(&few, 1, &shared.clone());
+    assert_eq!(shared.fraction(), 1.0);
+}
+
+#[test]
 fn the_cache_is_kept_and_follows_changes() {
     let library = Library::new("cache");
     let a = library.write("kick a.wav", &kick(1));
@@ -178,6 +202,30 @@ fn the_cache_is_kept_and_follows_changes() {
     assert!(map.queued.contains(&a.path));
     map.wait();
     assert!(map.analysis(&a).is_some());
+}
+
+#[test]
+fn files_that_cannot_be_read_are_grouped_by_reason_with_examples() {
+    let library = Library::new("failures");
+    let good = library.write("kick.wav", &kick(1));
+    let mut files = vec![good];
+    for i in 0..5 {
+        let name = format!("broken {i}.wav");
+        std::fs::write(library.root.join(&name), b"not audio").unwrap();
+        files.push(library.file(&name));
+    }
+    files.push(library.write("silence.wav", &vec![0.0; 4410]));
+    let mut map = analysed(&library, &files);
+    let laid = map.map(&files, DEFAULT_MAX_SECONDS);
+    assert_eq!(laid.failed, 6);
+    let reasons: Vec<(&str, usize)> = laid.failures.iter().map(|f| (f.reason.as_str(), f.count)).collect();
+    assert_eq!(reasons.len(), 2, "{:?}", laid.failures);
+    // The commonest first; the reason is cut at its first colon, the detail kept whole.
+    assert_eq!(reasons[0].1, 5);
+    assert!(!reasons[0].0.contains(':'));
+    assert_eq!(reasons[1], ("silent", 1));
+    assert_eq!(laid.failures[0].examples.len(), 3);
+    assert!(laid.failures[0].examples.iter().all(|p| p.to_string_lossy().contains("broken")));
 }
 
 #[test]

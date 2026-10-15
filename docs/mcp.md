@@ -180,7 +180,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
+  `preview.setGain {gain}` changes the level of the one playing (in dB, gliding there without a
+  click); `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
   work, through an output of their own that closes before a project opens one (ADR 0011).
   `preview.noteOn {track, key, velocity?}` plays one key through the track's instrument and
   holds it, as the piano roll's key column does, until `preview.noteOff {track, key?}` lets that

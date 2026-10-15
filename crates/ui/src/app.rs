@@ -2575,8 +2575,8 @@ impl App {
     /// left for the view.
     fn browser_panel(&mut self, ui: &mut Ui, area: Rect) -> Rect {
         let (low, high) = crate::settings::BROWSER_WIDTHS;
-        let width = (self.settings.browser_width as f32)
-            .clamp(low as f32, (high as f32).min(area.width() - 240.0).max(low as f32));
+        let widest = (high as f32).min(area.width() * crate::settings::BROWSER_SHARE).max(low as f32);
+        let width = (self.settings.browser_width as f32).clamp(low as f32, widest);
         let left = self.settings.browser_side == Side::Left;
         let (panel, handle, rest) = if left {
             let panel = Rect::from_min_max(area.min, Pos2::new(area.left() + width, area.bottom()));
@@ -2594,7 +2594,7 @@ impl App {
             (panel, handle, Rect::from_min_max(area.min, Pos2::new(handle.left(), area.bottom())))
         };
         if let Some(new) = browser_view::resize_handle(ui, handle, width, left) {
-            let new = new.round().clamp(low as f32, high as f32) as u32;
+            let new = new.round().clamp(low as f32, widest) as u32;
             if new != self.settings.browser_width {
                 self.settings.browser_width = new;
                 self.settings_changed = true;

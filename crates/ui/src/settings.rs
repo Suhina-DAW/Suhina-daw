@@ -162,12 +162,18 @@ impl WarpMode {
     }
 }
 
-/// The browser panel's narrowest and widest, and its width at first.
-pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
+/// The browser panel's narrowest and widest kept in the settings, and its width at first. On
+/// screen it is also never wider than [`BROWSER_SHARE`] of the window.
+pub const BROWSER_WIDTHS: (u32, u32) = (200, 4000);
 pub const BROWSER_WIDTH: u32 = 300;
+/// The most of the window's width the browser panel takes.
+pub const BROWSER_SHARE: f32 = 0.5;
 /// The preview's level, in dB: its range and its default.
 /// The longest sample the sample map shows by default, and the range it may be set to.
 pub const MAP_MAX_SECONDS: u32 = 10;
+/// The size of the sample map's points, in percent of their size at first: its range and default.
+pub const MAP_DOT_SIZES: (u32, u32) = (25, 400);
+pub const MAP_DOT_SIZE: u32 = 100;
 pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
 pub const PREVIEW_VOLUME: i32 = -6;
@@ -229,6 +235,8 @@ pub struct Settings {
     pub map_grid: bool,
     pub map_hover_preview: bool,
     pub map_max_seconds: u32,
+    /// The sample map's point size, in percent (Size in the map's top bar).
+    pub map_dot_size: u32,
     /// The sample map is in a window of its own (`docs/spec/sample-map.md` › Where the map is
     /// shown), and where that window was: its left, top, width and height in points, on the
     /// whole desktop, so a second screen counts.
@@ -290,6 +298,7 @@ impl Default for Settings {
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
+            map_dot_size: MAP_DOT_SIZE,
             map_window: false,
             map_window_rect: None,
             waveform_db: false,
@@ -385,7 +394,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nat_start = {at_start}\nstart_template = {}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\nbackup = {}\nbackup_clean_up = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nat_start = {at_start}\nstart_template = {}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_dot_size = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\nbackup = {}\nbackup_clean_up = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -400,6 +409,7 @@ impl Settings {
             self.warp_mode.param(),
             on(self.map_hover_preview),
             self.map_max_seconds,
+            self.map_dot_size,
             on(self.map_window),
             self.map_window_rect.map_or_else(|| "none".to_string(), |[x, y, w, h]| format!("{x}, {y}, {w}, {h}")),
             self.audio_host,
@@ -493,6 +503,10 @@ impl Settings {
                         .parse::<u32>()
                         .unwrap_or(MAP_MAX_SECONDS)
                         .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
+                }
+                ("map_dot_size", size) if size.parse::<u32>().is_ok() => {
+                    settings.map_dot_size =
+                        size.parse::<u32>().unwrap_or(MAP_DOT_SIZE).clamp(MAP_DOT_SIZES.0, MAP_DOT_SIZES.1);
                 }
                 ("map_window", "on" | "off") => settings.map_window = value == "on",
                 ("map_window_rect", "none") => settings.map_window_rect = None,
@@ -601,6 +615,7 @@ mod tests {
             map_grid: true,
             map_hover_preview: false,
             map_max_seconds: 30,
+            map_dot_size: 250,
             waveform_db: true,
             audio_host: "ASIO".into(),
             audio_device: "Universal Audio Thunderbolt".into(),

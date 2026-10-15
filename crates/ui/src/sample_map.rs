@@ -27,6 +27,9 @@ const LABEL_FADE_ZOOM: f32 = 6.0;
 const TOP_BAR: f32 = 24.0;
 const LEGEND: f32 = 20.0;
 const SIMILAR_WIDTH: f32 = 180.0;
+/// How long the map area must keep one size before the density raster is worked out for it;
+/// until then the last raster is drawn scaled (docs/spec/sample-map.md › Many items).
+const RESIZE_SETTLE_SECONDS: f64 = 0.15;
 
 /// One point, as the browser gives it to the view.
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +97,10 @@ pub enum MapEvent {
     },
     /// The layout switch changed.
     Layout(Layout),
+    /// The point size was changed, in percent.
+    DotSize(u32),
+    /// The preview level was changed, in dB.
+    Volume(i32),
     /// The large-view button.
     ToggleLarge,
     /// The button that moves the map into a window of its own, or back into the browser.
@@ -114,6 +121,16 @@ pub struct MapView {
     centre: [f32; 2],
     hovered: Option<(usize, f64)>,
     previewed: Option<usize>,
+    /// The point the primary button went down on: a drag carries it, not the point under the
+    /// pointer once the drag has begun a few pixels away.
+    pressed: Option<usize>,
+    /// Points are being dragged out of the map: no hover, preview or pan until the drop.
+    dragging_items: bool,
+    /// The points' size as a share of their size at first (Size in the top bar). Positions do
+    /// not change with it, so smaller points stand further apart.
+    pub dot_size: f32,
+    /// The preview level in dB (Volume in the top bar).
+    pub volume: i32,
     /// Kinds the legend shows; the others are dimmed. Empty: all.
     pub legend: HashSet<Kind>,
     /// Shift-drag rectangle, from where it started.
@@ -121,6 +138,8 @@ pub struct MapView {
     similar: Option<(usize, Vec<usize>)>,
     /// Where the points were drawn last frame.
     area: Rect,
+    /// The area the density was last asked for, and since when it has had that size.
+    resized: (Rect, f64),
     /// The waveform of the point the pointer rests on, for its tooltip (the panel reads it).
     pub hover_waveform: Option<(usize, std::sync::Arc<crate::waveform::Peaks>)>,
     /// Counts [`MapView::points_changed`], so what is worked out from the points is kept until
@@ -130,7 +149,8 @@ pub struct MapView {
 }
 
 /// The points the cache was worked out for: [`MapView::points_changed`]'s count, their number and
-/// address, the layout and the view's aspect (the grid's positions follow it).
+/// address, the layout and, in the grid, the view's aspect (the grid's positions follow it; the
+/// cloud's do not, so resizing the cloud keeps the cache).
 type PointsKey = (u64, usize, usize, Layout, u32);
 
 /// What the view works out from the points when they change, not every frame
@@ -144,7 +164,18 @@ struct Cache {
     /// The clusters that get a label, largest first.
     clusters: Vec<Cluster>,
     /// The density raster last drawn and what it was drawn for.
-    density: Option<(DensityKey, egui::TextureHandle)>,
+    density: Option<Density>,
+}
+
+/// A density raster and what it was worked out for.
+#[derive(Clone)]
+struct Density {
+    key: DensityKey,
+    /// The area it covers.
+    area: Rect,
+    /// Where the points were on screen when it was drawn.
+    transform: Transform,
+    texture: egui::TextureHandle,
 }
 
 impl std::fmt::Debug for Cache {
@@ -153,20 +184,52 @@ impl std::fmt::Debug for Cache {
             .field("key", &self.key)
             .field("counts", &self.counts)
             .field("clusters", &self.clusters.len())
-            .field("density", &self.density.as_ref().map(|(_, t)| t.id()))
+            .field("density", &self.density.as_ref().map(|d| d.texture.id()))
             .finish()
     }
 }
 
-/// Everything the density raster depends on; it is drawn again only when one of these changes.
+/// Everything the density raster depends on apart from the size of the area it is drawn in; it
+/// is drawn again at once when one of these changes. A new size waits for the area to settle
+/// ([`density_plan`]).
 #[derive(Debug, Clone, PartialEq)]
 struct DensityKey {
     points: Option<PointsKey>,
-    rect: Rect,
-    scale: f32,
+    zoom: f32,
     centre: [f32; 2],
     legend: Vec<Kind>,
     similar: Option<(usize, Vec<usize>)>,
+    spread: usize,
+}
+
+/// What to do with the density raster this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DensityPlan {
+    /// Draw the last one as it is.
+    Keep,
+    /// Draw the last one scaled into the new area: it is being resized.
+    Scale,
+    /// Work it out again.
+    Build,
+}
+
+/// What to do with the density raster `drawn` (what it was worked out for and in which area)
+/// when `wanted` is asked for in `area`, which has had its size since `since`. A change of the
+/// content builds it at once; a change of the area alone is drawn scaled until the area has
+/// kept its size for [`RESIZE_SETTLE_SECONDS`], so a resize does not work it out every frame.
+fn density_plan(
+    drawn: Option<(&DensityKey, Rect)>,
+    wanted: &DensityKey,
+    area: Rect,
+    since: f64,
+    now: f64,
+) -> DensityPlan {
+    match drawn {
+        Some((key, _)) if key != wanted => DensityPlan::Build,
+        Some((_, rect)) if rect == area => DensityPlan::Keep,
+        Some(_) if now - since < RESIZE_SETTLE_SECONDS => DensityPlan::Scale,
+        _ => DensityPlan::Build,
+    }
 }
 
 impl Default for MapView {
@@ -180,10 +243,15 @@ impl Default for MapView {
             centre: [0.5, 0.5],
             hovered: None,
             previewed: None,
+            pressed: None,
+            dragging_items: false,
+            dot_size: 1.0,
+            volume: crate::settings::PREVIEW_VOLUME,
             legend: HashSet::new(),
             rubber_band: None,
             similar: None,
             area: Rect::NOTHING,
+            resized: (Rect::NOTHING, 0.0),
             revision: 0,
             cache: Cache::default(),
             hover_waveform: None,
@@ -200,7 +268,8 @@ impl MapView {
 
     /// Works out the counts and clusters again when the points changed.
     fn refresh(&mut self, points: &[MapPoint], positions: &[[f32; 2]], aspect: f32) {
-        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect.to_bits()));
+        let aspect = if self.layout == Layout::Grid { aspect.to_bits() } else { 0 };
+        let key = Some((self.revision, points.len(), points.as_ptr() as usize, self.layout, aspect));
         if self.cache.key == key {
             return;
         }
@@ -284,6 +353,12 @@ impl Transform {
     }
 }
 
+/// Where `rect`, on screen under `from`, is under `to`: the same map positions at `to`'s place and
+/// scale, for drawing the last density raster while the area is resized.
+fn moved(rect: Rect, from: Transform, to: Transform) -> Rect {
+    Rect::from_two_pos(to.to_screen(from.to_map(rect.min)), to.to_screen(from.to_map(rect.max)))
+}
+
 /// The width over the height of `rect`; 1 when it has no size.
 fn aspect_of(rect: Rect) -> f32 {
     let aspect = rect.width() / rect.height();
@@ -321,6 +396,17 @@ fn step_similar(of: usize, items: &[usize], from: Option<usize>, down: bool) -> 
         (Some(at), false) => at.checked_sub(1).and_then(list),
         (None, true) => items.first().copied(),
         (None, false) => None,
+    }
+}
+
+/// How many times the density kernel is applied for a point size: none for small points, so
+/// neighbours stand apart; more for large ones, for soft regions. Once at the size at first.
+fn density_spread(dot_size: f32) -> usize {
+    match dot_size {
+        s if s < 0.75 => 0,
+        s if s < 1.5 => 1,
+        s if s < 2.5 => 2,
+        _ => 3,
     }
 }
 
@@ -377,19 +463,39 @@ pub fn kind_colour(kind: Kind) -> Color32 {
     }
 }
 
+/// One part of the status's tooltip: a heading ("4 955 could not be read") and lines under it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatusPart {
+    pub heading: String,
+    pub lines: Vec<String>,
+}
+
+/// Work going on behind the map, shown in a card in the middle of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Busy {
+    pub title: String,
+    pub detail: String,
+    /// From 0 to 1.
+    pub fraction: f32,
+}
+
 /// Draws the map in the space `ui` offers and reports what the user did.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     view: &mut MapView,
     points: &[MapPoint],
     grid: Option<&Grid>,
     status: &str,
+    details: &[StatusPart],
+    busy: Option<&Busy>,
     tags: &[String],
     events: &mut Vec<MapEvent>,
 ) {
     let full = ui.available_rect_before_wrap();
     ui.allocate_rect(full, Sense::hover());
-    let top = Rect::from_min_size(full.min, Vec2::new(full.width(), TOP_BAR));
+    let height = top_bar(ui, full, view, status, details, events);
+    let top = Rect::from_min_size(full.min, Vec2::new(full.width(), height));
     let bottom = Rect::from_min_max(Pos2::new(full.min.x, full.max.y - LEGEND), full.max);
     let mut area = Rect::from_min_max(Pos2::new(full.min.x, top.max.y), Pos2::new(full.max.x, bottom.min.y));
     let side = view.similar.is_some().then(|| {
@@ -398,60 +504,169 @@ pub fn show(
         side
     });
 
-    top_bar(ui, top, view, status, events);
     let aspect = aspect_of(area);
     let positions = positions(points, view.layout, grid, aspect);
     view.refresh(points, &positions, aspect);
     map_area(ui, area, view, &Content { points, positions: &positions, grid, tags }, events);
+    if let Some(busy) = busy {
+        busy_card(ui, area, busy);
+    }
     if let Some(side) = side {
         similar_strip(ui, side, view, points, events);
     }
     legend(ui, bottom, view);
 }
 
-fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &mut Vec<MapEvent>) {
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(theme::PAD, 2.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+/// The status's tooltip: the whole status, then each part with its lines.
+fn status_tooltip(ui: &mut Ui, status: &str, details: &[StatusPart]) {
+    ui.set_max_width(420.0);
+    ui.label(egui::RichText::new(status).color(theme::text_primary()));
+    for part in details {
+        ui.add_space(theme::PAD);
+        ui.label(egui::RichText::new(&part.heading).color(theme::text_primary()));
+        for line in &part.lines {
+            ui.label(egui::RichText::new(line).color(theme::text_secondary()).size(theme::TEXT_SMALL));
+        }
+    }
+}
+
+/// The card in the middle of the map while it is analysed or arranged. It is only painted, so
+/// the map under it, the top bar and the rest of the window keep working.
+fn busy_card(ui: &Ui, area: Rect, busy: &Busy) {
+    const WIDTH: f32 = 240.0;
+    const HEIGHT: f32 = 62.0;
+    const BAR: f32 = 4.0;
+    let width = WIDTH.min(area.width() - 4.0 * theme::PAD);
+    if width < 80.0 || area.height() < HEIGHT + 2.0 * theme::PAD {
+        return;
+    }
+    let card = Rect::from_center_size(area.center(), Vec2::new(width, HEIGHT));
+    let painter = ui.painter().with_clip_rect(area);
+    painter.rect_filled(card, CornerRadius::ZERO, theme::panel_background());
+    painter.rect_stroke(card, CornerRadius::ZERO, Stroke::new(1.0, theme::border_strong()), StrokeKind::Inside);
+    let inner = card.shrink(2.0 * theme::PAD);
+    painter.text(
+        inner.left_top(),
+        egui::Align2::LEFT_TOP,
+        &busy.title,
+        theme::ui_font(theme::TEXT),
+        theme::text_primary(),
     );
+    let bar = Rect::from_min_size(Pos2::new(inner.min.x, inner.center().y - BAR / 2.0), Vec2::new(inner.width(), BAR));
+    painter.rect_filled(bar, CornerRadius::ZERO, theme::control_background());
+    let done = Rect::from_min_size(bar.min, Vec2::new(bar.width() * busy.fraction.clamp(0.0, 1.0), BAR));
+    painter.rect_filled(done, CornerRadius::ZERO, theme::accent());
+    painter.text(
+        inner.left_bottom(),
+        egui::Align2::LEFT_BOTTOM,
+        &busy.detail,
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_secondary(),
+    );
+}
+
+/// The top bar in the top of `full`: the controls, wrapping onto more rows when the map is
+/// narrow, then the status on a row of its own. Returns the bar's height.
+fn top_bar(
+    ui: &mut Ui,
+    full: Rect,
+    view: &mut MapView,
+    status: &str,
+    details: &[StatusPart],
+    events: &mut Vec<MapEvent>,
+) -> f32 {
+    let inner =
+        Rect::from_min_max(full.min + Vec2::new(theme::PAD, 2.0), Pos2::new(full.max.x - theme::PAD, full.max.y));
+    let mut child =
+        ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.spacing_mut().item_spacing.y = 2.0;
+    child.spacing_mut().slider_width = 64.0;
+    child.horizontal_wrapped(|ui| controls(ui, view, events));
+    // The status is cut short with "…" when it does not fit. Its tooltip has all of it and says
+    // why files are missing.
+    let text = egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL);
+    child
+        .add_sized(
+            Vec2::new(inner.width(), theme::TEXT_SMALL + 6.0),
+            egui::Label::new(text).truncate().sense(Sense::hover()),
+        )
+        .on_hover_ui(|ui| status_tooltip(ui, status, details));
+    (child.min_rect().bottom() + 2.0 - full.top()).max(TOP_BAR)
+}
+
+/// Widgets that stay on one row: when less than `width` is left on the current row, they start
+/// the next one.
+fn together(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+    // The room left on this row (a wrapping layout's available width is the whole row's).
+    if ui.max_rect().right() - ui.cursor().left() < width {
+        ui.end_row();
+    }
+    add(ui);
+}
+
+/// The map's controls, left to right in the order they wrap.
+fn controls(ui: &mut Ui, view: &mut MapView, events: &mut Vec<MapEvent>) {
     for (layout, name) in [(Layout::Cloud, "Cloud"), (Layout::Grid, "Grid")] {
-        if child.selectable_label(view.layout == layout, name).clicked() && view.layout != layout {
+        if ui.selectable_label(view.layout == layout, name).clicked() && view.layout != layout {
             view.layout = layout;
             events.push(MapEvent::Layout(layout));
         }
     }
-    child.add_space(theme::PAD);
-    child.label(egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL));
-    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui
-            .button(if view.window { "Dock" } else { "Window" })
-            .on_hover_text(if view.window {
-                "Put the map back into the browser"
-            } else {
-                "Open the map in a window of its own, for another screen"
-            })
+    if ui.button("+").on_hover_text("Zoom in").clicked() {
+        view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
+    }
+    if ui.button("−").on_hover_text("Zoom out").clicked() {
+        view.zoom = (view.zoom / 1.5).max(MIN_ZOOM);
+        view.clamp_centre();
+    }
+    if ui.button("Fit").on_hover_text("Fit all points in view").clicked() {
+        view.fit();
+    }
+    if !view.window
+        && ui
+            .button(if view.large { "Close" } else { "Large" })
+            .on_hover_text("Show the map in the main area")
             .clicked()
-        {
-            events.push(MapEvent::ToggleWindow);
+    {
+        events.push(MapEvent::ToggleLarge);
+    }
+    if ui
+        .button(if view.window { "Dock" } else { "Window" })
+        .on_hover_text(if view.window {
+            "Put the map back into the browser"
+        } else {
+            "Open the map in a window of its own, for another screen"
+        })
+        .clicked()
+    {
+        events.push(MapEvent::ToggleWindow);
+    }
+    // Each label stays with its field: the pair moves to the next row as a whole.
+    together(ui, 90.0, |ui| {
+        ui.label(egui::RichText::new("Size").color(theme::text_secondary()).size(theme::TEXT_SMALL));
+        let mut percent = (view.dot_size * 100.0).round() as u32;
+        let (low, high) = crate::settings::MAP_DOT_SIZES;
+        let size = ui
+            .add_sized(
+                Vec2::new(48.0, ui.spacing().interact_size.y),
+                egui::DragValue::new(&mut percent).range(low..=high).speed(2.0).suffix(" %"),
+            )
+            .on_hover_text("Point size: drag or type. The points stay where they are, so smaller ones stand apart");
+        if size.changed() {
+            view.dot_size = percent as f32 / 100.0;
+            events.push(MapEvent::DotSize(percent));
         }
-        if !view.window
-            && ui
-                .button(if view.large { "Close" } else { "Large" })
-                .on_hover_text("Show the map in the main area")
-                .clicked()
-        {
-            events.push(MapEvent::ToggleLarge);
-        }
-        if ui.button("Fit").on_hover_text("Fit all points in view").clicked() {
-            view.fit();
-        }
-        if ui.button("−").on_hover_text("Zoom out").clicked() {
-            view.zoom = (view.zoom / 1.5).max(MIN_ZOOM);
-            view.clamp_centre();
-        }
-        if ui.button("+").on_hover_text("Zoom in").clicked() {
-            view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
+    });
+    together(ui, 170.0, |ui| {
+        ui.label(egui::RichText::new("Volume").color(theme::text_secondary()).size(theme::TEXT_SMALL));
+        let (low, high) = crate::settings::PREVIEW_VOLUMES;
+        let mut db = view.volume;
+        let volume = ui
+            .add(egui::Slider::new(&mut db, low..=high).suffix(" dB").step_by(1.0))
+            .on_hover_text("The level samples are previewed at; it also changes the one playing");
+        if volume.changed() && db != view.volume {
+            view.volume = db;
+            events.push(MapEvent::Volume(db));
         }
     });
 }
@@ -490,21 +705,35 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     let pointer = response.hover_pos();
     let under = pointer.and_then(|p| hit(&screen, p, HIT_RADIUS.max(cell_size(view, grid, transform) / 2.0)));
 
+    let primary_pressed = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+    if primary_pressed {
+        view.pressed = under;
+    }
     if response.drag_started_by(PointerButton::Primary) {
-        let start = response.interact_pointer_pos();
-        let on = start.and_then(|p| hit(&screen, p, HIT_RADIUS));
+        // Where the button went down, not where the pointer is now: the drag only begins once it
+        // has moved, and in a dense cloud another point is nearest by then.
+        let origin = ui.input(|i| i.pointer.press_origin()).or_else(|| response.interact_pointer_pos());
+        let on = view.pressed.take().or_else(|| origin.and_then(|p| hit(&screen, p, HIT_RADIUS)));
         match on {
             Some(i) => {
                 let selected: Vec<usize> =
                     points.iter().enumerate().filter(|(_, p)| p.selected).map(|(j, _)| j).collect();
                 let items = if points.get(i).is_some_and(|p| p.selected) { selected } else { vec![i] };
                 events.push(MapEvent::StartDrag(items));
+                view.dragging_items = true;
+                view.hovered = None;
             }
-            None if shift => view.rubber_band = start,
+            None if shift => view.rubber_band = origin,
             None => {}
         }
     }
-    if response.dragged_by(PointerButton::Primary) && view.rubber_band.is_none() && under.is_none()
+    if !response.dragged() && !response.drag_started() {
+        view.dragging_items = false;
+    }
+    if response.dragged_by(PointerButton::Primary)
+        && view.rubber_band.is_none()
+        && !view.dragging_items
+        && view.pressed.is_none()
         || response.dragged_by(PointerButton::Middle)
     {
         view.pan(rect, response.drag_delta());
@@ -533,8 +762,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         // all keeps the selection.
         let many = points.iter().filter(|p| p.selected).count() > 1;
         let deferred = |i: usize| many && !ctrl && points.get(i).is_some_and(|p| p.selected);
-        let pressed = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
-        if pressed && let Some(i) = under.filter(|i| !deferred(*i)) {
+        if primary_pressed && let Some(i) = under.filter(|i| !deferred(*i)) {
             events.push(MapEvent::Select { items: vec![i], add: ctrl });
             events.push(MapEvent::Preview(i));
             view.previewed = Some(i);
@@ -587,8 +815,9 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
         }
     });
 
-    // Preview on hover, after the pointer rests.
+    // Preview on hover, after the pointer rests; not while points are dragged out of the map.
     let now = ui.input(|i| i.time);
+    let under = under.filter(|_| !view.dragging_items);
     match (under, view.hovered) {
         (Some(i), Some((j, since))) if i == j => {
             if view.preview_on_hover && view.previewed != Some(i) && now - since >= HOVER_PREVIEW_SECONDS {
@@ -730,25 +959,39 @@ fn draw_points(
         kinds.sort();
         let key = DensityKey {
             points: view.cache.key,
-            rect: area,
-            scale: transform.scale,
-            centre: transform.centre,
+            zoom: view.zoom,
+            centre: view.centre,
             legend: kinds,
             similar: view.similar.clone(),
+            spread: density_spread(view.dot_size),
         };
-        if view.cache.density.as_ref().is_none_or(|(drawn, _)| *drawn != key) {
-            let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
-            let image = crowd::density(screen, colour, area);
-            let handle = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
-            view.cache.density = Some((key, handle));
+        let now = painter.ctx().input(|i| i.time);
+        if view.resized.0 != area {
+            view.resized = (area, now);
         }
-        if let Some((_, handle)) = view.cache.density.as_ref() {
-            let size = handle.size_vec2() * crowd::BIN;
+        let drawn = view.cache.density.as_ref().map(|d| (&d.key, d.area));
+        match density_plan(drawn, &key, area, view.resized.1, now) {
+            DensityPlan::Build => {
+                let colour = |i: usize| points.get(i).filter(|p| !dimmed(i, p)).map(|p| kind_colour(p.kind));
+                let image = crowd::density(screen, colour, area, key.spread);
+                let texture = painter.ctx().load_texture("sample-map-density", image, egui::TextureOptions::LINEAR);
+                view.cache.density = Some(Density { key, area, transform, texture });
+            }
+            DensityPlan::Scale => {
+                // Come back once the size has settled, even if nothing else asks for a frame.
+                let left = RESIZE_SETTLE_SECONDS - (now - view.resized.1);
+                painter.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left.max(0.0)));
+            }
+            DensityPlan::Keep => {}
+        }
+        if let Some(density) = view.cache.density.as_ref() {
+            let drawn = Rect::from_min_size(density.area.min, density.texture.size_vec2() * crowd::BIN);
             let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-            painter.image(handle.id(), Rect::from_min_size(area.min, size), uv, Color32::WHITE);
+            painter.image(density.texture.id(), moved(drawn, density.transform, transform), uv, Color32::WHITE);
         }
     }
     let (radius, opacity) = if crowded { (3.0, 1.0) } else { crowd::dot_style(in_view, area.area()) };
+    let radius = (radius * view.dot_size).clamp(0.75, 24.0);
     let cell = if crowded { 0.0 } else { cell };
     // Dimmed points first, so the others are drawn over them.
     for pass in [true, false] {
@@ -927,6 +1170,54 @@ mod tests {
     }
 
     #[test]
+    fn the_density_waits_for_a_resize_to_settle_but_not_for_a_change_of_content() {
+        let key =
+            DensityKey { points: None, zoom: 1.0, centre: [0.5, 0.5], legend: Vec::new(), similar: None, spread: 1 };
+        let small = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        let large = Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 300.0));
+        assert_eq!(density_plan(None, &key, small, 0.0, 0.0), DensityPlan::Build, "nothing drawn yet");
+        assert_eq!(density_plan(Some((&key, small)), &key, small, 0.0, 9.0), DensityPlan::Keep);
+        assert_eq!(density_plan(Some((&key, small)), &key, large, 1.0, 1.1), DensityPlan::Scale, "being resized");
+        assert_eq!(density_plan(Some((&key, small)), &key, large, 1.0, 1.2), DensityPlan::Build, "settled");
+        let zoomed = DensityKey { zoom: 2.0, ..key.clone() };
+        assert_eq!(density_plan(Some((&key, small)), &zoomed, large, 1.0, 1.0), DensityPlan::Build, "zoomed");
+        let filtered = DensityKey { legend: vec![Kind::Kick], ..key.clone() };
+        assert_eq!(density_plan(Some((&key, small)), &filtered, small, 0.0, 0.0), DensityPlan::Build);
+    }
+
+    #[test]
+    fn a_scaled_raster_keeps_the_points_where_they_are_drawn_now() {
+        let view = MapView::default();
+        let before = view.transform(Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(400.0, 300.0)));
+        let after = view.transform(Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(800.0, 500.0)));
+        let raster = before.rect;
+        let moved = moved(raster, before, after);
+        for p in [[0.2, 0.3], [0.5, 0.5], [0.9, 0.1]] {
+            // Where a point sat in the old raster, as a fraction of it, is where it is drawn now.
+            let old = before.to_screen(p);
+            let fraction = (old - raster.min) / raster.size();
+            let now = moved.min + fraction * moved.size();
+            assert!((now - after.to_screen(p)).length() < 1e-3, "{p:?}: {now:?} against {:?}", after.to_screen(p));
+        }
+    }
+
+    #[test]
+    fn resizing_the_cloud_keeps_the_counts_and_clusters_but_the_grid_works_them_out_again() {
+        let points: Vec<MapPoint> = (0..50).map(|i| point(i as f32 / 50.0, 0.5, Kind::Kick)).collect();
+        let positions: Vec<[f32; 2]> = points.iter().map(|p| p.position).collect();
+        let mut view = MapView::default();
+        view.refresh(&points, &positions, 1.0);
+        let cloud = view.cache.key;
+        view.refresh(&points, &positions, 1.6);
+        assert_eq!(view.cache.key, cloud, "the cloud's positions do not follow the aspect");
+        view.layout = Layout::Grid;
+        view.refresh(&points, &positions, 1.0);
+        let grid = view.cache.key;
+        view.refresh(&points, &positions, 1.6);
+        assert_ne!(view.cache.key, grid, "the grid's positions follow the aspect");
+    }
+
+    #[test]
     fn transform_round_trips_and_zoom_keeps_the_point_under_the_pointer() {
         let rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(400.0, 300.0));
         let mut view = MapView::default();
@@ -1029,7 +1320,7 @@ mod tests {
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "20 samples", &[], events)
+                show(ui, view, &points, None, "20 samples", &[], None, &[], events)
             },
             state,
         );
@@ -1055,6 +1346,161 @@ mod tests {
         );
     }
 
+    /// A drag carries the point the button went down on, even when the pointer is nearer
+    /// another point by the time the drag begins, and nothing is hovered or previewed on the way.
+    #[test]
+    fn a_drag_carries_the_pressed_point_not_the_one_under_the_pointer() {
+        use egui_kittest::Harness;
+        // A row of points 0.02 apart: a few pixels on screen, a dense cloud.
+        let points: Vec<MapPoint> = (0..40).map(|i| point(0.1 + i as f32 * 0.02, 0.5, Kind::Kick)).collect();
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "40 samples", &[], None, &[], events)
+            },
+            state,
+        );
+        harness.run();
+        let view = &harness.state().0;
+        let transform = view.transform(view.area);
+        let first = transform.to_screen([0.1, 0.5]);
+        let far = transform.to_screen([0.1 + 30.0 * 0.02, 0.5]);
+        harness.drag_at(first);
+        harness.run();
+        for step in 1..=10 {
+            harness.hover_at(first + (far - first) * (step as f32 / 10.0));
+            harness.run();
+        }
+        let events = &harness.state().1;
+        let drags: Vec<&MapEvent> = events.iter().filter(|e| matches!(e, MapEvent::StartDrag(_))).collect();
+        assert_eq!(drags, vec![&MapEvent::StartDrag(vec![0])], "{events:?}");
+        let after = events.iter().position(|e| matches!(e, MapEvent::StartDrag(_))).unwrap_or(0);
+        assert!(
+            !events[after..].iter().any(|e| matches!(e, MapEvent::Preview(_) | MapEvent::Select { .. })),
+            "{events:?}"
+        );
+        harness.drop_at(far);
+        harness.run();
+    }
+
+    /// However narrow the map, its controls never lie on top of each other: they wrap onto
+    /// more rows, and the map starts below them.
+    #[test]
+    fn the_controls_wrap_instead_of_overlapping_when_the_map_is_narrow() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let status = "153534 samples, 25947 too long, 4955 could not be read";
+        let mut tops = Vec::new();
+        for width in [180.0, 320.0, 900.0] {
+            let mut harness = Harness::builder().with_size(egui::vec2(width, 400.0)).build_ui_state(
+                |ui, view: &mut MapView| show(ui, view, &points, None, status, &[], None, &[], &mut Vec::new()),
+                MapView::default(),
+            );
+            harness.run();
+            let rects: Vec<(String, Rect)> = ["Cloud", "Grid", "+", "−", "Fit", "Large", "Window", "Size", "Volume"]
+                .iter()
+                .map(|label| (label.to_string(), harness.get_by_label(label).rect()))
+                .collect();
+            for (i, (a, ra)) in rects.iter().enumerate() {
+                assert!(ra.right() <= width + 0.5, "{a} runs off a map {width} wide: {ra:?}");
+                for (b, rb) in rects.iter().skip(i + 1) {
+                    assert!(
+                        !ra.shrink(0.5).intersects(rb.shrink(0.5)),
+                        "{a} and {b} overlap at {width}: {ra:?} {rb:?}"
+                    );
+                }
+            }
+            let lowest = rects.iter().map(|(_, r)| r.bottom()).fold(0.0f32, f32::max);
+            assert!(harness.state().area.top() >= lowest, "the map starts below the controls at {width}");
+            tops.push(harness.state().area.top());
+        }
+        assert!(tops[0] > tops[2], "a narrow map has more rows of controls than a wide one: {tops:?}");
+    }
+
+    #[test]
+    fn the_volume_slider_reports_a_new_level() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 400.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "4 samples", &[], None, &[], events)
+            },
+            state,
+        );
+        harness.run();
+        let slider = harness.get_by_role(egui::accesskit::Role::Slider).rect();
+        // The right end of the slider is the loudest.
+        harness.drag_at(egui::pos2(slider.right() - 1.0, slider.center().y));
+        harness.run();
+        harness.drop_at(egui::pos2(slider.right() - 1.0, slider.center().y));
+        harness.run();
+        let (low, high) = crate::settings::PREVIEW_VOLUMES;
+        assert!(harness.state().1.contains(&MapEvent::Volume(high)), "{:?}", harness.state().1);
+        assert_eq!(harness.state().0.volume, high);
+        assert!(high > low);
+    }
+
+    /// Pointing at the status shows why samples are missing.
+    #[test]
+    fn the_status_tooltip_says_why_samples_are_missing() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let details = vec![StatusPart {
+            heading: "2 could not be read".into(),
+            lines: vec!["2: unsupported codec: adpcm".into(), "    a.wav, b.wav".into()],
+        }];
+        let status = "4 samples, 2 could not be read";
+        let mut harness = Harness::builder().with_size(egui::vec2(600.0, 340.0)).build_ui_state(
+            |ui, view: &mut MapView| show(ui, view, &points, None, status, &details, None, &[], &mut Vec::new()),
+            MapView::default(),
+        );
+        harness.run();
+        assert!(harness.query_by_label("2: unsupported codec: adpcm").is_none());
+        let at = harness.get_by_label(status).rect().center();
+        harness.hover_at(at);
+        for _ in 0..30 {
+            harness.step();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        harness.run();
+        harness.get_by_label("2 could not be read");
+        harness.get_by_label("2: unsupported codec: adpcm");
+        harness.get_by_label("    a.wav, b.wav");
+    }
+
+    /// The card over the map while it is arranged is only painted: a point under it is still
+    /// previewed and selected.
+    #[test]
+    fn the_busy_card_does_not_block_the_map_under_it() {
+        use egui_kittest::Harness;
+        let points: Vec<MapPoint> = (0..20).map(|_| point(0.5, 0.5, Kind::Kick)).collect();
+        let busy = Busy { title: "Arranging the map".into(), detail: "42 %".into(), fraction: 0.42 };
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "20 samples", &[], Some(&busy), &[], events)
+            },
+            state,
+        );
+        harness.run();
+        // Every point is in the middle, under the card.
+        let view = &harness.state().0;
+        let at = view.transform(view.area).to_screen([0.5, 0.5]);
+        harness.drag_at(at);
+        harness.run();
+        harness.drop_at(at);
+        harness.run();
+        assert!(
+            harness.state().1.iter().any(|e| matches!(e, MapEvent::Select { items, .. } if !items.is_empty())),
+            "{:?}",
+            harness.state().1
+        );
+    }
+
     /// The wheel and pinch zoom the map, but not through a dialog over it (#232).
     #[test]
     fn the_wheel_zooms_only_when_no_dialog_is_on_top() {
@@ -1066,7 +1512,7 @@ mod tests {
         let state = (MapView::default(), false);
         let mut harness = Harness::builder().with_size(size).build_ui_state(
             |ui, (view, dialog): &mut (MapView, bool)| {
-                show(ui, view, &points, None, "20 samples", &[], &mut Vec::new());
+                show(ui, view, &points, None, "20 samples", &[], None, &[], &mut Vec::new());
                 if *dialog {
                     egui::Area::new(egui::Id::new("dialog")).order(egui::Order::Foreground).fixed_pos(Pos2::ZERO).show(
                         ui.ctx(),
@@ -1159,7 +1605,7 @@ mod many {
             let started = std::time::Instant::now();
             let mut output = ctx.run_ui(input, |ui| {
                 let mut events = Vec::new();
-                show(ui, &mut view, points, None, "200 000 samples", &[], &mut events);
+                show(ui, &mut view, points, None, "200 000 samples", &[], None, &[], &mut events);
             });
             let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
             // No renderer here takes the density texture.
@@ -1170,6 +1616,51 @@ mod many {
             }
         }
         slowest
+    }
+
+    /// Resizes a 200 000-point map every frame for `frames` frames of 1/60 s, then leaves it
+    /// alone for `settle` frames. Returns the slowest resize frame and how many density rasters
+    /// were worked out after the first frame.
+    fn resize(points: &[MapPoint], frames: usize, settle: usize) -> (std::time::Duration, usize) {
+        let ctx = egui::Context::default();
+        let mut view = MapView::default();
+        let mut slowest = std::time::Duration::ZERO;
+        let mut textures = Vec::new();
+        for frame in 0..1 + frames + settle {
+            let grow = frame.min(frames) as f32 * 6.0;
+            let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0 + grow, 700.0 + grow * 0.5));
+            let input =
+                egui::RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), ..Default::default() };
+            let started = std::time::Instant::now();
+            let mut output = ctx.run_ui(input, |ui| {
+                let mut events = Vec::new();
+                show(ui, &mut view, points, None, "200 000 samples", &[], None, &[], &mut events);
+            });
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            output.textures_delta.clear();
+            if (1..=frames).contains(&frame) {
+                slowest = slowest.max(started.elapsed());
+            }
+            if let Some(density) = view.cache.density.as_ref()
+                && textures.last() != Some(&density.texture.id())
+            {
+                textures.push(density.texture.id());
+            }
+        }
+        (slowest, textures.len().saturating_sub(1))
+    }
+
+    #[test]
+    fn resizing_a_map_of_200_000_points_does_not_draw_the_density_every_frame() {
+        let points = points(200_000);
+        let (slowest, built) = resize(&points, 30, 0);
+        assert_eq!(built, 0, "while the size keeps changing, the last raster is drawn scaled");
+        let (_, built) = resize(&points, 30, 15);
+        assert_eq!(built, 1, "once the size has settled, it is worked out once for it");
+        eprintln!("200 000 points: slowest resize frame {slowest:?}");
+        // 30 frames a second in an optimised build; unoptimised test builds get more room.
+        let budget = std::time::Duration::from_micros(if cfg!(debug_assertions) { 100_000 } else { 33_300 });
+        assert!(slowest < budget, "slowest resize frame {slowest:?}");
     }
 
     #[test]
@@ -1223,7 +1714,9 @@ mod similar_keys {
         let mut view = MapView::default();
         view.show_similar(0, vec![4, 2]);
         let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
-            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| show(ui, view, &points, None, "6 samples", &[], events),
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "6 samples", &[], None, &[], events)
+            },
             (view, Vec::<MapEvent>::new()),
         );
         harness.run();
@@ -1307,7 +1800,7 @@ mod look {
                 |ui, view: &mut MapView| {
                     crate::theme::install(ui.ctx());
                     let mut events = Vec::new();
-                    show(ui, view, &points, Some(&grid), "1 200 samples", &[], &mut events);
+                    show(ui, view, &points, Some(&grid), "1 200 samples", &[], None, &[], &mut events);
                 },
                 view,
             );
@@ -1328,7 +1821,7 @@ mod look {
             |ui, view: &mut MapView| {
                 crate::theme::install(ui.ctx());
                 let mut events = Vec::new();
-                show(ui, view, &points, None, "200 000 samples", &[], &mut events);
+                show(ui, view, &points, None, "200 000 samples", &[], None, &[], &mut events);
             },
             MapView::default(),
         );

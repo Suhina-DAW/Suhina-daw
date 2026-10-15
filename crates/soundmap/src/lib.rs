@@ -76,6 +76,48 @@ pub struct Point {
     pub by_hand: bool,
 }
 
+/// Files of a scope that could not be read for one reason.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Failure {
+    /// The reason, without what follows its first colon ("unsupported codec").
+    pub reason: String,
+    /// The whole reason given for the first of them ("unsupported codec: …").
+    pub detail: String,
+    pub count: usize,
+    /// The first few of them.
+    pub examples: Vec<PathBuf>,
+}
+
+/// How many files a [`Failure`] names.
+const FAILURE_EXAMPLES: usize = 3;
+/// How many reasons are told apart; the rest are counted under the last.
+const FAILURE_REASONS: usize = 12;
+
+/// Counts a failed file under its reason.
+fn add_failure(failures: &mut Vec<Failure>, reason: &str, path: &Path) {
+    let short = reason.split(':').next().unwrap_or(reason).trim();
+    let short = if short.is_empty() { "unknown" } else { short };
+    let index = match failures.iter().position(|f| f.reason == short) {
+        Some(index) => index,
+        None if failures.len() < FAILURE_REASONS => {
+            failures.push(Failure {
+                reason: short.to_string(),
+                detail: reason.to_string(),
+                count: 0,
+                examples: Vec::new(),
+            });
+            failures.len() - 1
+        }
+        None => failures.len() - 1,
+    };
+    if let Some(failure) = failures.get_mut(index) {
+        failure.count += 1;
+        if failure.examples.len() < FAILURE_EXAMPLES {
+            failure.examples.push(path.to_path_buf());
+        }
+    }
+}
+
 /// A scope laid out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Map {
@@ -86,6 +128,8 @@ pub struct Map {
     pub too_long: usize,
     /// Items that could not be read.
     pub failed: usize,
+    /// Why they could not be read, the commonest reason first.
+    pub failures: Vec<Failure>,
     /// Items left out over [`MAX_ITEMS`].
     pub over_limit: usize,
     key: u64,
@@ -333,6 +377,7 @@ impl SoundMap {
         let max_seconds = max_seconds.clamp(MAX_SECONDS_RANGE.0, MAX_SECONDS_RANGE.1);
         let mut chosen: Vec<(&SourceFile, features::Features, Option<Kind>)> = Vec::new();
         let (mut pending, mut too_long, mut failed, mut over_limit) = (0, 0, 0, 0);
+        let mut failures: Vec<Failure> = Vec::new();
         let mut sorted: Vec<&SourceFile> = files.iter().collect();
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
         sorted.dedup_by(|a, b| a.path == b.path);
@@ -347,7 +392,10 @@ impl SoundMap {
                         over_limit += 1;
                     }
                 }
-                Some(Analysis::Failed(_)) => failed += 1,
+                Some(Analysis::Failed(reason)) => {
+                    failed += 1;
+                    add_failure(&mut failures, reason, &file.path);
+                }
                 None => pending += 1,
             }
         }
@@ -357,6 +405,7 @@ impl SoundMap {
         }
         let key = layout_key(chosen.iter().map(|(f, _, kind)| (*f, *kind)));
         let cached = self.cached_layout(key, chosen.len());
+        failures.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.reason.cmp(&b.reason)));
         Prepared {
             items: chosen
                 .into_iter()
@@ -370,6 +419,7 @@ impl SoundMap {
             pending,
             too_long,
             failed,
+            failures,
             over_limit,
             key,
             cached,
@@ -404,6 +454,7 @@ pub struct Prepared {
     pending: usize,
     too_long: usize,
     failed: usize,
+    failures: Vec<Failure>,
     over_limit: usize,
     key: u64,
     cached: Option<Vec<[f32; 2]>>,
@@ -422,6 +473,11 @@ impl Prepared {
 
     /// Finds the kinds, then lays the scope out by sound and kind (or takes the kept layout).
     pub fn compute(self) -> Map {
+        self.compute_with_progress(&layout::Progress::new())
+    }
+
+    /// [`Prepared::compute`], counting how far the layout is in `progress`.
+    pub fn compute_with_progress(self, progress: &layout::Progress) -> Map {
         let features: Vec<features::Features> = self.items.iter().map(|item| item.features).collect();
         let standardised = Standardised::new(&features);
         let evidence: Vec<Option<(Kind, classify::Evidence)>> = self
@@ -438,7 +494,11 @@ impl Prepared {
             None => {
                 let by_kind: Vec<Kind> = kinds.iter().map(|(kind, _)| *kind).collect();
                 let input = Standardised::from_rows(classify::layout_rows(standardised.rows(), &by_kind));
-                layout::layout(&input, scope_seed(self.items.iter().map(|item| item.path.as_path())))
+                layout::layout_with_progress(
+                    &input,
+                    scope_seed(self.items.iter().map(|item| item.path.as_path())),
+                    progress,
+                )
             }
         };
         let points = self
@@ -459,6 +519,7 @@ impl Prepared {
             pending: self.pending,
             too_long: self.too_long,
             failed: self.failed,
+            failures: self.failures,
             over_limit: self.over_limit,
             key: self.key,
             standardised,
