@@ -8,7 +8,8 @@
 //! When the control connection closes, the engine is gone and the process exits.
 //!
 //! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-ins built in for tests
-//! ([`test_clap`], [`test_clap_delay`]), and simple test processors ([`processors`]) that crash or hang on purpose.
+//! ([`test_clap`], [`test_clap_delay`], [`test_clap_ports`]), and simple test processors
+//! ([`processors`]) that crash or hang on purpose.
 //!
 //! A plug-in may report another latency while it runs. Between messages the main thread asks
 //! each instance whether it did (restarting its processing first where the format asks for
@@ -19,6 +20,7 @@ mod processors;
 mod run_loop;
 mod test_clap;
 mod test_clap_delay;
+mod test_clap_ports;
 mod test_vst3;
 mod vst3;
 mod vst3_editor;
@@ -147,7 +149,7 @@ fn describe(file: &str) -> Result<Vec<suhina_plugins::scan::PluginInfo>, String>
         "test:hang" => loop {
             thread::sleep(Duration::from_secs(60));
         },
-        "test:clap" | "test:clap-delay" => clap::describe(file),
+        "test:clap" | "test:clap-delay" | "test:clap-ports" => clap::describe(file),
         "test:vst3" => vst3::describe(file),
         _ if file.to_ascii_lowercase().ends_with(".vst3") => vst3::describe(&format!("vst3:{file}")),
         _ => clap::describe(&format!("clap:{file}")),
@@ -327,7 +329,11 @@ impl Loaded {
 
 fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let served = Served::open(link).map_err(|e| e.to_string())?;
-    if plugin.starts_with("clap:") || plugin == "test:clap" || plugin == "test:clap-delay" {
+    if plugin.starts_with("clap:")
+        || plugin == "test:clap"
+        || plugin == "test:clap-delay"
+        || plugin == "test:clap-ports"
+    {
         return clap::ClapPlugin::load(plugin, served, sample_rate).map(Loaded::Clap);
     }
     if plugin.starts_with("vst3:") || plugin == "test:vst3" {
