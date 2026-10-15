@@ -3,7 +3,7 @@ description: Real-time time-stretching of warped audio, stretch modes and backen
 read_when: warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/stretch.rs
   - crates/stretch/src/lib.rs
@@ -58,8 +58,10 @@ GPL-compatible stretchers usable from Rust (checked 2026-10-11):
    warped ([browser spec](../spec/browser.md) › Warping).
 2. **Stretching happens in real time, in the engine.** Every warped clip placement gets a
    stretch voice when the renderer is built: a `suhina_stretch::Stretch` plus a playlist that
-   says which part of the file plays when and how fast (warp marker segments and loop jumps, at
-   the project tempo). The stretcher reads the playlist as one continuous input stream; each call
+   says which part of the file plays when and how fast (warp marker segments and loop jumps,
+   through the project's tempo map: an arrangement clip's pieces are also cut at every tempo
+   change, and into sixteenths during a ramp, each starting at its exact time;
+   [tempo map](../spec/tempo-map.md)). Launched clips are prepared at the start tempo. The stretcher reads the playlist as one continuous input stream; each call
    covers one stretch of constant speed, and the speed is the ratio of the input it is given to
    the output it makes. It never allocates once built (AGENTS.md rule 3). Where it runs:
    decision 6. Offline rendering runs the same voices (rule 4). A tempo change only means a new

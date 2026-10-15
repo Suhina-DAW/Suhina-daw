@@ -873,9 +873,9 @@ fn mixer_strip(
         Vec2::new(inner.width(), theme::TOGGLE),
     );
     let label = if column.mute { format!("Turn {} on", column.name) } else { format!("Turn {} off", column.name) };
-    // Track on takes two thirds and solo one; on a track that can be armed, solo and arm take a
-    // quarter each.
-    let small = if column.armable { (toggle.width() - 4.0) / 4.0 } else { (toggle.width() - 2.0) / 3.0 };
+    // Track on takes what solo and cue leave (a quarter each); on a track that can be armed,
+    // solo, cue and arm take a fifth each. 2 px apart.
+    let small = if column.armable { (toggle.width() - 6.0) / 5.0 } else { (toggle.width() - 4.0) / 4.0 };
     let toggle = if column.armable {
         let arm = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
         if let Some(action) = widgets::arm_button(
@@ -894,9 +894,16 @@ fn mixer_strip(
     } else {
         toggle
     };
-    let solo = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
+    let cue = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
+    let solo = Rect::from_min_max(
+        Pos2::new(cue.left() - 2.0 - small, toggle.top()),
+        Pos2::new(cue.left() - 2.0, toggle.bottom()),
+    );
     let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
     if let Some(action) = widgets::solo_button(ui, painter, solo, id.with("solo"), track.0, &column.name, column.solo) {
+        actions.push(action);
+    }
+    if let Some(action) = widgets::cue_button(ui, painter, cue, id.with("cue"), track.0, &column.name, column.cue) {
         actions.push(action);
     }
     let response = widgets::button_area(ui, toggle, id.with("on"), label);

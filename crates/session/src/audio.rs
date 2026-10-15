@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use suhina_engine::AudioPool;
 use suhina_model::Project;
 
-use crate::commands::{CommandKind, CommandSpec, ParamType, optional};
+use crate::commands::{CommandKind, CommandSpec, ParamType, optional, param};
 use crate::{CommandError, Player, Projects};
 
 /// Smallest and largest buffer size, in frames, a choice may ask for; the engine renders in
@@ -19,10 +19,14 @@ pub const MIN_BUFFER_FRAMES: u32 = 64;
 pub const MAX_BUFFER_FRAMES: u32 = 4096;
 /// Highest sample rate a choice may ask for.
 pub const MAX_SAMPLE_RATE: u32 = 384_000;
+/// Highest output pair the cue can play on: pair 31 is channels 63 and 64.
+pub const MAX_CUE_PAIR: u16 = 31;
+/// Loudest cue volume, in dB (the engine's `MAX_CUE_GAIN`).
+pub const MAX_CUE_DB: f64 = 12.0;
 
 /// The output the user chose. `None` means the host's or device's own default, so an empty
 /// choice plays on the system's default output as it is set up.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OutputChoice {
     /// A host's name as [`AudioSystem::hosts`] lists it ("WASAPI", "ASIO").
     pub host: Option<String>,
@@ -34,9 +38,42 @@ pub struct OutputChoice {
     /// WASAPI only: take the device for Suhina alone (exclusive mode) when it allows it.
     /// Other programs are not heard on it meanwhile, so it is off unless asked for.
     pub exclusive: bool,
+    /// The output pair of the same device the cue (headphones) plays on: pair 1 is channels 3
+    /// and 4, pair 2 channels 5 and 6, and so on. `None` plays the cue with the main output on
+    /// channels 1 and 2, as a device with two channels must.
+    pub cue_pair: Option<u16>,
+    /// The cue volume, linear (1.0 is 0 dB), from 0 to the engine's `MAX_CUE_GAIN`.
+    pub cue_gain: f32,
     /// The audio input device the tracks' audio inputs hear (ADR 0017): off unless chosen, so
     /// nothing opens a microphone unasked.
     pub input: InputChoice,
+}
+
+impl Default for OutputChoice {
+    fn default() -> Self {
+        Self {
+            host: None,
+            device: None,
+            sample_rate: None,
+            buffer_frames: None,
+            exclusive: false,
+            cue_pair: None,
+            cue_gain: 1.0,
+            input: InputChoice::Off,
+        }
+    }
+}
+
+/// The channels, counted from 1, of output pair `pair` (1 is channels 3 and 4); the main output
+/// is pair 0.
+pub fn cue_channels(pair: u16) -> (u32, u32) {
+    let first = u32::from(pair) * 2 + 1;
+    (first, first + 1)
+}
+
+/// A gain in dB, rounded to a hundredth; silence is `None` (JSON null).
+fn gain_db(gain: f32) -> Option<f64> {
+    (gain > 0.0).then(|| (20.0 * f64::from(gain).log10() * 100.0).round() / 100.0)
 }
 
 /// The audio input device chosen, on the output's host.
@@ -79,8 +116,21 @@ impl OutputChoice {
             "sample_rate": self.sample_rate,
             "buffer_frames": self.buffer_frames,
             "exclusive": self.exclusive,
+            "cue_pair": self.cue_pair,
+            "cue_db": gain_db(self.cue_gain),
             "input": self.input.as_text(),
         })
+    }
+
+    /// The same device and format as this choice, with the cue's pair and volume of `cue`.
+    pub fn with_cue_of(&self, cue: &OutputChoice) -> Self {
+        Self { cue_pair: cue.cue_pair, cue_gain: cue.cue_gain, ..self.clone() }
+    }
+
+    /// The same device and format without the cue's settings, to compare two choices by the
+    /// device they open.
+    pub fn device_only(&self) -> Self {
+        Self { cue_pair: None, cue_gain: 1.0, ..self.clone() }
     }
 
     /// This choice with the parts `params` gives changed (`audio.setOutput`): an empty text or
@@ -128,6 +178,9 @@ impl OutputChoice {
         if let Some(exclusive) = params.get("exclusive") {
             next.exclusive = exclusive.as_bool().ok_or("exclusive must be true or false")?;
         }
+        if let Some(pair) = number("cue_pair", u32::from(MAX_CUE_PAIR))? {
+            next.cue_pair = pair.and_then(|p| u16::try_from(p).ok());
+        }
         if let Some(input) = params.get("input") {
             next.input = InputChoice::from_text(input.as_str().ok_or("input must be a text")?);
         }
@@ -148,6 +201,57 @@ impl OutputChoice {
             (Some(_), None) => true,
             (Some(host), Some(device)) => host.devices.iter().any(|d| same(&d.name, device)),
         }
+    }
+
+    /// This choice with the cue volume `params.db` gives (`output.setCueVolume`): from silence
+    /// (-inf, or below -150) to [`MAX_CUE_DB`].
+    pub fn with_cue_volume(&self, params: &Value) -> Result<Self, CommandError> {
+        let db = match params.get("db") {
+            Some(Value::String(s)) if s.trim().eq_ignore_ascii_case("-inf") => f64::NEG_INFINITY,
+            Some(v) => v.as_f64().ok_or("db must be a number, or \"-inf\" for silence")?,
+            None => return Err("db must be a number, or \"-inf\" for silence".into()),
+        };
+        if db.is_nan() || db > MAX_CUE_DB {
+            return Err(format!("db must be at most +{MAX_CUE_DB}, got {db}").into());
+        }
+        let cue_gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) as f32 };
+        Ok(Self { cue_gain, ..self.clone() })
+    }
+
+    /// Checks that the chosen cue pair is one of `device_channels` (when the device is known):
+    /// the main output's channels 1 and 2 are not a cue pair of their own.
+    pub fn check_cue_pair(&self, device_channels: Option<u16>) -> Result<(), CommandError> {
+        let (Some(pair), Some(channels)) = (self.cue_pair, device_channels) else { return Ok(()) };
+        let (_, last) = cue_channels(pair);
+        if last > u32::from(channels) {
+            let most = channels / 2;
+            let offer = if most >= 2 {
+                format!("pairs 1 to {} (channels 3/4 to {}/{})", most - 1, most * 2 - 1, most * 2)
+            } else {
+                "none: the cue plays with the main output (pair 0)".to_string()
+            };
+            return Err(format!(
+                "the device has {channels} output channels, so pair {pair} (channels {}/{last}) is not there; it has {offer}",
+                last - 1
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// The channels the device this choice names has, as `hosts` lists it (the default host
+    /// and device when it names none); `None` when it is not listed.
+    pub fn device_channels(&self, hosts: &[HostInfo]) -> Option<u16> {
+        let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+        let host = match &self.host {
+            Some(name) => hosts.iter().find(|h| same(&h.name, name)),
+            None => hosts.iter().find(|h| h.default),
+        }?;
+        let device = match &self.device {
+            Some(name) => host.devices.iter().find(|d| same(&d.name, name)),
+            None => host.devices.iter().find(|d| d.default),
+        }?;
+        Some(device.channels)
     }
 }
 
@@ -218,6 +322,11 @@ pub struct OutputInfo {
     /// The chosen host or device was not there when the output opened, so another one (the
     /// default) plays in its place until it is back.
     pub fallback: bool,
+    /// The output channels the device is opened with.
+    pub channels: u16,
+    /// The pair the cue plays on (1 is channels 3 and 4), or `None` when it plays with the main
+    /// output.
+    pub cue_pair: Option<u16>,
     /// The audio input device open beside it, and its channels (ADR 0017).
     pub input: Option<String>,
     pub input_channels: u16,
@@ -240,6 +349,8 @@ impl OutputInfo {
             "underruns": self.underruns,
             "failed": self.failed,
             "fallback": self.fallback,
+            "channels": self.channels,
+            "cue_pair": self.cue_pair,
             "input": self.input,
             "input_channels": self.input_channels,
             "input_underruns": self.input_underruns,
@@ -249,8 +360,15 @@ impl OutputInfo {
     /// One line for the window: device, host, rate and buffer.
     pub fn describe(&self) -> String {
         let mode = if self.exclusive && self.host == "WASAPI" { ", exclusive" } else { "" };
+        let cue = match self.cue_pair {
+            Some(pair) => {
+                let (first, second) = cue_channels(pair);
+                format!(", cue on {first}/{second}")
+            }
+            None => String::new(),
+        };
         format!(
-            "{} ({}{mode}, {} Hz, {} frames)",
+            "{} ({}{mode}, {} Hz, {} frames{cue})",
             self.device,
             self.host,
             self.sample_rate,
@@ -329,6 +447,20 @@ static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
         run: set_output,
     },
     CommandSpec {
+        id: "output.setCuePair",
+        label: "Choose the output pair of the same device the cue plays on: previews and tracks whose cue is on are heard there (headphones) and not on the main output's channels 1 and 2. Pair 0 plays the cue with the main output. Reopens the output, keeping the transport where it is",
+        params: &[param("pair", ParamType::Integer, "1 for channels 3/4, 2 for 5/6 … up to 31; 0 for the main output")],
+        kind: CommandKind::Audio,
+        run: set_cue_pair,
+    },
+    CommandSpec {
+        id: "output.setCueVolume",
+        label: "Set the cue volume: the level of previews and cued tracks on the cue, from silence to +12 dB. The main output does not change, except for previews while the cue plays with it",
+        params: &[param("db", ParamType::Number, "dB, -inf (or below -150) for silence, at most +12; 0 is unity")],
+        kind: CommandKind::Audio,
+        run: set_cue_volume,
+    },
+    CommandSpec {
         id: "audio.info",
         label: "Say what the active project plays on now: host, device, sample rate, buffer frames, the engine's block, measured latency, the longest a key on a MIDI controller takes to be heard, whether a track is armed (which keeps less queued) and underruns, and whether it plays in place of a chosen device that is not there",
         params: &[],
@@ -393,6 +525,36 @@ fn set_output(projects: &mut Projects, params: &Value) -> Result<Value, CommandE
     Ok(result)
 }
 
+fn set_cue_pair(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    if params.get("pair").is_none() {
+        return Err("pair must be a whole number from 0 (the main output) to 31".into());
+    }
+    let choice = projects.output_choice().with_params(&json!({ "cue_pair": params.get("pair") }))?;
+    // Checked against the device when there is an audio system; else only chosen, as
+    // `audio.setOutput` chooses.
+    if let Some(system) = projects.audio_system() {
+        choice.check_cue_pair(choice.device_channels(&system.hosts()))?;
+    }
+    projects.set_output_choice(choice);
+    let notice = projects.reopen_output()?;
+    let mut result = info(projects, &Value::Null)?;
+    result["notice"] = json!(notice);
+    Ok(result)
+}
+
+fn set_cue_volume(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let choice = projects.output_choice().with_cue_volume(params)?;
+    let gain = choice.cue_gain;
+    projects.set_output_choice(choice);
+    // The playing output takes the new volume at once; nothing is reopened.
+    if let Ok(session) = projects.session_mut(None)
+        && let Ok(player) = session.player_mut()
+    {
+        player.send(suhina_engine::LaunchCommand::SetCue { gain: Some(gain), separate: None })?;
+    }
+    Ok(json!({ "cue_db": gain_db(gain) }))
+}
+
 fn info(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
     let chosen = projects.output_choice().to_json();
     let playing = projects.session_mut(None).ok().and_then(|s| s.player()).and_then(Player::output_info);
@@ -416,6 +578,8 @@ pub(crate) struct Transport {
     marker: f64,
     metronome: bool,
     tempo_bpm: f64,
+    /// The launcher clock followed the tempo map: no scene had taken it off.
+    follows_map: bool,
     quantization: Option<suhina_engine::Quantization>,
     /// Columns that play launched clips or have a launch or stop queued.
     columns: Vec<ColumnState>,
@@ -450,6 +614,7 @@ impl Transport {
             marker: monitor.start_beat(),
             metronome: monitor.metronome(),
             tempo_bpm: monitor.tempo_bpm(),
+            follows_map: monitor.meter().follows_map,
             quantization: player.quantization(),
             columns,
         }
@@ -478,7 +643,9 @@ impl Transport {
         if self.beat.is_finite() && self.beat != self.marker {
             player.send(LaunchCommand::Locate { beat: self.beat })?;
         }
-        if self.tempo_bpm.is_finite() && self.tempo_bpm != player.monitor().tempo_bpm() {
+        // A scene's tempo took the clock off the tempo map: the new output plays it too. On the
+        // map, the new output reads the tempo from the map at the playhead.
+        if !self.follows_map && self.tempo_bpm.is_finite() {
             player.send(LaunchCommand::SetLaunchTempo { bpm: self.tempo_bpm })?;
         }
         for state in &self.columns {
@@ -509,7 +676,7 @@ mod tests {
             sample_rate: Some(48_000),
             buffer_frames: Some(256),
             exclusive: false,
-            input: InputChoice::Off,
+            ..OutputChoice::default()
         };
         let same = start.with_params(&json!({})).unwrap();
         assert_eq!(same, start);
@@ -571,6 +738,8 @@ mod tests {
             ..OutputInfo::default()
         };
         assert_eq!(info.describe(), "Speakers (WASAPI, exclusive, 44100 Hz, 512 frames)");
+        let cued = OutputInfo { cue_pair: Some(1), ..info.clone() };
+        assert_eq!(cued.describe(), "Speakers (WASAPI, exclusive, 44100 Hz, 512 frames, cue on 3/4)");
         assert_eq!(info.to_json()["latency_ms"], json!(23.46));
     }
 }

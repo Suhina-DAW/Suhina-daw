@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use suhina_model::{AudioRegion, Clip, FadeShape};
+use suhina_model::{AudioRegion, Clip, FadeShape, TempoMap};
 
 /// File sample rates the direct reader plays; a file outside them is not read (a rate of 0 would
 /// freeze on one frame). Wider than [`STRETCH_SAMPLE_RATES`], since the direct reader is where a
@@ -166,6 +166,22 @@ impl Fades {
         }
     }
 
+    /// The fades of `clip` through the tempo map in frames: their length follows the tempo where
+    /// they are. At a constant tempo exactly [`Fades::new`].
+    pub(crate) fn on_map(clip: &Clip, map: &TempoMap, sample_rate: u32) -> Self {
+        if map.is_constant() {
+            return Self::new(clip, map.start_per_beat(), sample_rate);
+        }
+        let (fade_in, fade_out) = clip.fitted_fades();
+        let end = clip.start + clip.length;
+        let frames = |f: f64| if f.is_finite() { f.max(0.0) } else { 0.0 };
+        Self {
+            fade_in: frames(map.span(clip.start, fade_in)),
+            fade_out: frames(map.span(end - fade_out, fade_out)),
+            ..Self::new(clip, map.start_per_beat(), sample_rate)
+        }
+    }
+
     /// The gain `since_start` frames after the clip starts and `until_end` frames before it
     /// ends (the end is the frame after the last), 0 … 1. The ramps count the frames before and
     /// after this one, so the first and the last frame are both 0. Never allocates.
@@ -193,12 +209,15 @@ pub(crate) fn start_beat(offset: f64, loop_range: Option<(f64, f64)>) -> f64 {
     }
 }
 
-/// The project timing an audio event is resolved against.
-#[derive(Debug, Clone, Copy)]
+/// The project timing an audio event is resolved against: the start tempo, and the tempo map in
+/// frames when the tempo changes (`None` for a constant tempo, or a clip placed outside the
+/// arrangement's time).
+#[derive(Debug, Clone)]
 pub(crate) struct Timing {
     pub frames_per_beat: f64,
     pub tempo_bpm: f64,
     pub sample_rate: u32,
+    pub map: Option<Arc<TempoMap>>,
 }
 
 /// One audio clip placement, resolved to frames.
@@ -222,6 +241,9 @@ pub(crate) struct AudioEvent {
     /// Seconds added to the file position: an unwarped clip that was playing when the tempo
     /// changed carries on from where it was (ADR 0005).
     shift: f64,
+    /// A warped clip on an arrangement whose tempo changes: the map in frames, and the clip's
+    /// start beat. Its clip beat at a frame comes from the map, so it stays on the grid.
+    beats: Option<(Arc<TempoMap>, f64)>,
 }
 
 impl AudioEvent {
@@ -232,7 +254,7 @@ impl AudioEvent {
         timing: Timing,
         gains: (f32, f32),
     ) -> Option<Self> {
-        let Timing { frames_per_beat, tempo_bpm, sample_rate } = timing;
+        let Timing { frames_per_beat, tempo_bpm, sample_rate, map: tempo } = timing;
         let finite = [clip.start, clip.length, clip.offset, frames_per_beat, tempo_bpm].iter().all(|v| v.is_finite());
         if !finite
             || clip.length <= 0.0
@@ -252,14 +274,25 @@ impl AudioEvent {
             (linear, if rate.is_finite() && rate > 0.0 { rate } else { 1.0 })
         };
         let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
-        let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+        let to_frame = |beats: f64| match &tempo {
+            Some(map) => crate::tempo::frame_of(map, beats),
+            None => (beats.max(0.0) * frames_per_beat).round() as u64,
+        };
+        let fades = match &tempo {
+            Some(map) => Fades::on_map(clip, map, sample_rate),
+            None => Fades::new(clip, frames_per_beat, sample_rate),
+        };
+        let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
+        // An unwarped clip plays at its file's speed whatever the tempo: only its start and end
+        // follow the map.
+        let beats = tempo.filter(|m| region.warped && !m.is_constant()).map(|m| (m, clip.start));
         let loop_range = clip
             .loop_range
             .filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start)
             .map(|r| (r.start, r.end));
         Some(Self {
-            start: to_frame(clip.start),
-            end: to_frame(clip.start + clip.length),
+            start,
+            end,
             frames_per_beat,
             offset: start_beat(clip.offset, loop_range),
             loop_range,
@@ -268,9 +301,10 @@ impl AudioEvent {
             data,
             gain_left: gains.0 * gain,
             gain_right: gains.1 * gain,
-            fades: Fades::new(clip, frames_per_beat, sample_rate),
+            fades,
             warped: region.warped,
             shift: 0.0,
+            beats,
         })
     }
 
@@ -283,10 +317,19 @@ impl AudioEvent {
         self.warped
     }
 
+    /// Project beats from the clip's start to frame `position`: through the tempo map for a
+    /// warped clip on a changing tempo, otherwise at the start tempo (an unwarped clip's beats
+    /// are its file's seconds at that tempo).
+    fn elapsed(&self, position: u64) -> f64 {
+        match &self.beats {
+            Some((map, start_beat)) => crate::tempo::beats_since(map, self.start, *start_beat, position),
+            None => position.saturating_sub(self.start) as f64 / self.frames_per_beat,
+        }
+    }
+
     /// The file position, in seconds, played at frame `position` (inside `start..end`).
     pub(crate) fn file_seconds(&self, position: u64) -> f64 {
-        let since_start = position.saturating_sub(self.start) as f64;
-        self.map.seconds(self.clip_beat(since_start / self.frames_per_beat)) + self.shift
+        self.map.seconds(self.clip_beat(self.elapsed(position))) + self.shift
     }
 
     /// Makes the clip play file position `seconds` at frame `position`, and on from there.
@@ -311,7 +354,7 @@ impl AudioEvent {
         let since_start = position.saturating_sub(self.start) as f64;
         let until_end = self.end.saturating_sub(position) as f64;
         let fade = self.fades.gain(since_start, until_end);
-        let seconds = self.map.seconds(self.clip_beat(since_start / self.frames_per_beat)) + self.shift;
+        let seconds = self.map.seconds(self.clip_beat(self.elapsed(position))) + self.shift;
         let (left, right) = self.data.stereo_at(seconds);
         (left * self.gain_left * fade, right * self.gain_right * fade)
     }
@@ -387,7 +430,7 @@ mod tests {
             clip,
             region,
             ramp(),
-            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR },
+            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR, map: None },
             (1.0, 1.0),
         )
         .unwrap()
@@ -414,7 +457,7 @@ mod tests {
     /// stretcher refuses them (#164).
     #[test]
     fn a_zero_tempo_or_an_unplayable_sample_rate_is_no_event() {
-        let timing = |tempo_bpm: f64| Timing { frames_per_beat: 24_000.0, tempo_bpm, sample_rate: SR };
+        let timing = |tempo_bpm: f64| Timing { frames_per_beat: 24_000.0, tempo_bpm, sample_rate: SR, map: None };
         let c = clip(2.0, 0.0, None);
         assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(0.0), (1.0, 1.0)).is_none());
         assert!(AudioEvent::new(&c, &region(false, &[], 0.0), ramp(), timing(-120.0), (1.0, 1.0)).is_none());
@@ -440,7 +483,7 @@ mod tests {
             &clip(2.0, 0.0, None),
             &warped,
             stereo,
-            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR },
+            Timing { frames_per_beat: 60.0 / 120.0 * f64::from(SR), tempo_bpm: 120.0, sample_rate: SR, map: None },
             (1.0, 1.0),
         )
         .unwrap();
@@ -540,7 +583,7 @@ mod tests {
                 &clip(0.0, 0.0, None),
                 &region(false, &[], 0.0),
                 ramp(),
-                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR, map: None },
                 (1.0, 1.0)
             )
             .is_none()
@@ -550,7 +593,7 @@ mod tests {
                 &clip(f64::NAN, 0.0, None),
                 &region(false, &[], 0.0),
                 ramp(),
-                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR, map: None },
                 (1.0, 1.0)
             )
             .is_none()
@@ -561,7 +604,7 @@ mod tests {
                 &clip(1.0, 0.0, None),
                 &region(false, &[], 0.0),
                 empty,
-                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR },
+                Timing { frames_per_beat: fpb, tempo_bpm: 120.0, sample_rate: SR, map: None },
                 (1.0, 1.0)
             )
             .is_none()

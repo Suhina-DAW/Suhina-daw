@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 50] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 52] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -111,6 +111,8 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 50] = [
     ),
     ("selection.duplicate", "Duplicate the selected clip, or the selected notes in the piano roll", "Edit"),
     ("selection.delete", "Delete the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.split", "Split the selected clip at the playhead", "Edit"),
+    ("selection.consolidate", "Consolidate the selected clip into a new one", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
     ("selection.launch", "Launch the selected clip slot", "Session"),
     ("selection.up", "Select the clip slot above", "Session"),
@@ -239,7 +241,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 51] = [
+const DEFAULTS: [(&str, &[&str]); 53] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -264,6 +266,8 @@ const DEFAULTS: [(&str, &[&str]); 51] = [
     ("selection.paste", &["Ctrl+V"]),
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
+    ("selection.split", &["Ctrl+E"]),
+    ("selection.consolidate", &["Ctrl+J"]),
     ("selection.group", &["Ctrl+G"]),
     ("selection.launch", &["Enter"]),
     ("selection.up", &["Up"]),
@@ -517,7 +521,7 @@ mod tests {
     fn every_default_is_an_action_and_there_are_no_conflicts() {
         let known = actions();
         for (id, _) in DEFAULTS {
-            assert!(known.iter().any(|a| a.id == id), "{id}");
+            assert!(known.iter().any(|a| a.id == *id), "{id}");
         }
         assert!(Keymap::default().conflicts().is_empty());
         for id in ["view.zoomIn", "view.zoomOut", "view.zoomReset"] {

@@ -194,6 +194,8 @@ pub struct ArrangementViewState {
     gain_drag: Option<((TrackId, usize), f64)>,
     fade_drag: Option<FadeDrag>,
     curve_drag: Option<CurveDrag>,
+    /// The beat a clip was last right-clicked on, where its menu's Split here cuts.
+    split_at: Option<f64>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
@@ -241,6 +243,7 @@ impl Default for ArrangementViewState {
             gain_drag: None,
             fade_drag: None,
             curve_drag: None,
+            split_at: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
@@ -705,12 +708,13 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     let grid = Grid::new(state.grid, state.beat_width, bar_beats);
     let last_beat = f64::from((state.scroll.x + time.width()) / state.beat_width);
 
-    // Ruler: bar numbers, a line at each labelled bar.
+    // Ruler: bar numbers through the time-signature changes, a line at each labelled bar.
     painter.rect_filled(ruler, 0.0, theme::panel_background());
+    let meter = &timeline.meter;
     let bar_width = bar_beats as f32 * state.beat_width;
     let label_every = [1u32, 2, 4, 8, 16, 32, 64].into_iter().find(|n| *n as f32 * bar_width >= 40.0).unwrap_or(128);
-    let first_bar = (first_beat / bar_beats).floor() as u32;
-    let last_bar = (last_beat / bar_beats).ceil() as u32;
+    let first_bar = meter.position(first_beat).bar;
+    let last_bar = meter.position(last_beat).bar.saturating_add(1);
     let ruler_painter = painter.with_clip_rect(ruler);
     // The grid covers the tracks and the fixed rows, not the empty space below the tracks.
     let tracks_bottom = (lanes_area.top() - state.scroll.y + content_height).min(lanes_area.bottom());
@@ -722,27 +726,63 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         if bar % label_every != 0 {
             continue;
         }
-        let x = x_of(f64::from(bar) * bar_beats).round() + 0.5;
+        let x = x_of(meter.bar_start(bar)).round() + 0.5;
         ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::border()));
         let label = Rect::from_min_max(Pos2::new(x + 3.0, ruler.top()), Pos2::new(x + 40.0, ruler.bottom()));
         widgets::text_in(
             &ruler_painter,
             label,
             Align2::LEFT_CENTER,
-            &(bar + 1).to_string(),
+            &(u64::from(bar) + 1).to_string(),
             theme::mono_font(theme::TEXT_SMALL),
             theme::text_secondary(),
         );
     }
     // Grid in the lanes: a line at every step of the grid the control bar's value sets, coarser
-    // when zoomed out; bar lines stronger than the lines between them.
-    let max_lines = (time.width() / MIN_GRID_SPACING).ceil().max(1.0) as usize * 2 + 4;
-    for (beat, on_bar) in grid.lines(first_beat, last_beat, max_lines) {
-        let x = x_of(beat).round() + 0.5;
-        let stroke = theme::hairline(if on_bar { theme::border() } else { theme::panel_background() });
-        for band in grid_bands.iter().filter(|b| b.span() > 0.0) {
-            grid_painter.vline(x, *band, stroke);
+    // when zoomed out; bar lines stronger than the lines between them. When the time signature
+    // changes, the bars come from the meter instead: a line at every bar and, zoomed in, at
+    // every beat.
+    if meter.is_constant() {
+        let max_lines = (time.width() / MIN_GRID_SPACING).ceil().max(1.0) as usize * 2 + 4;
+        for (beat, on_bar) in grid.lines(first_beat, last_beat, max_lines) {
+            let x = x_of(beat).round() + 0.5;
+            let stroke = theme::hairline(if on_bar { theme::border() } else { theme::panel_background() });
+            for band in grid_bands.iter().filter(|b| b.span() > 0.0) {
+                grid_painter.vline(x, *band, stroke);
+            }
         }
+    } else {
+        for bar in first_bar..=last_bar {
+            let start = meter.bar_start(bar);
+            let this_bar_beats = meter.position(start).bar_beats;
+            let x = x_of(start).round() + 0.5;
+            for band in grid_bands.iter().filter(|b| b.span() > 0.0) {
+                if bar_width >= 6.0 || bar % label_every == 0 {
+                    grid_painter.vline(x, *band, theme::hairline(theme::border()));
+                }
+                if state.beat_width >= 10.0 {
+                    for beat in 1..this_bar_beats.ceil() as u32 {
+                        let x = x_of(start + f64::from(beat)).round() + 0.5;
+                        grid_painter.vline(x, *band, theme::hairline(theme::panel_background()));
+                    }
+                }
+            }
+        }
+    }
+    // Tempo and time-signature changes: a line in the accent colour and what changes, after
+    // room for the bar number.
+    for mark in timeline.marks.iter().filter(|m| m.beat >= first_beat - 64.0 && m.beat <= last_beat) {
+        let x = x_of(mark.beat).round() + 0.5;
+        ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::accent()));
+        let label = Rect::from_min_max(Pos2::new(x + 30.0, ruler.top()), Pos2::new(x + 140.0, ruler.bottom()));
+        widgets::text_in(
+            &ruler_painter,
+            label,
+            Align2::LEFT_CENTER,
+            &mark.text,
+            theme::mono_font(theme::TEXT_TINY),
+            theme::accent(),
+        );
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border()));
     painter.rect_filled(loop_row, 0.0, theme::panel_background());
@@ -1437,7 +1477,20 @@ fn clip_box<'a>(
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
     let stack = if clip.audio { state.stack_audio } else { state.stack_midi };
-    response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, stack, actions));
+    // A right-click remembers the beat under the pointer, for the menu's Split here.
+    if response.secondary_clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let raw = clip.start + f64::from((pointer.x - x_of(clip.start)) / state.beat_width);
+        let on_grid = snapped(raw);
+        let free = ui.input(|i| i.modifiers.alt) || on_grid <= clip.start || on_grid >= clip.start + clip.length;
+        state.split_at = Some(if free { raw } else { on_grid });
+    }
+    let split_at = state.split_at;
+    response.context_menu(|ui| {
+        menus::clip_menu(ui, lane.track, clip.index, stack, actions);
+        menus::clip_edit_menu(ui, lane.track, clip.index, (clip.start, clip.length), split_at, actions);
+    });
     if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
         state.selected = Some(key);
     }
@@ -2074,12 +2127,12 @@ fn track_header(
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
     let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
     let solo = Rect::from_min_size(Pos2::new(toggle.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
-    // A track that can be armed has its arm button after solo, as wide.
-    let arm = lane
-        .armable
-        .then(|| Rect::from_min_size(Pos2::new(solo.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW)));
+    let cue = Rect::from_min_size(Pos2::new(solo.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
+    // A track that can be armed has its arm button after cue, as wide.
+    let arm =
+        lane.armable.then(|| Rect::from_min_size(Pos2::new(cue.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW)));
     let square =
-        Rect::from_min_size(Pos2::new(arm.unwrap_or(solo).right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
+        Rect::from_min_size(Pos2::new(arm.unwrap_or(cue).right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     let color = if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) };
     if lane.kind == ColumnKind::Group {
         // A group's colour mark is its fold arrow.
@@ -2112,6 +2165,11 @@ fn track_header(
     if solo.intersects(clip)
         && let Some(action) =
             widgets::solo_button(ui, painter, solo, id.with("solo"), lane.track.0, &lane.name, lane.solo)
+    {
+        actions.push(action);
+    }
+    if cue.intersects(clip)
+        && let Some(action) = widgets::cue_button(ui, painter, cue, id.with("cue"), lane.track.0, &lane.name, lane.cue)
     {
         actions.push(action);
     }

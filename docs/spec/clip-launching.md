@@ -78,9 +78,10 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    **Suhina:** the new time signature's first bar starts at the launch moment, so bar
    quantisation and the metronome's bar click count from there; note-value quantisation stays on
    the beat grid from beat 0. The bar number keeps rising across the change (a bar cut short by
-   it counts as one). Stopping the transport keeps the tempo and time signature a scene set and
-   counts bars from the start again; editing the project's own tempo or time signature replaces
-   them.
+   it counts as one). A scene's tempo or time signature overrides the project's tempo map until
+   `transport.followTempoMap`, the next start of the transport, or an edit to the tempo map or
+   time signature ([tempo map](tempo-map.md#scenes-and-the-tempo-map)). Stopping the transport
+   keeps them, with bars counted from the start again, until the transport starts.
 6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
    quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
    transport stops everything at once, and clears queued launches. A jump of the playhead
@@ -200,7 +201,9 @@ an accessibility tool) is a press.
    quantisation: **global** (default; the launcher's value, followed as it changes), **none**,
    or any of the global values. The stop of a gate or toggle clip waits for the same grid.
    **Suhina:** a scene launch launches each clip on its own grid; the track's own stop button,
-   "stop all clips" and a scene's tempo keep the global grid.
+   "stop all clips" and a scene's tempo keep the global grid. A clip's bars are counted as the
+   global quantisation's are: through the time-signature changes of the
+   [tempo map](tempo-map.md), or from where a scene changed the time signature.
 4. **Scenes.** A clip launched by a scene starts like a triggered clip, whatever its mode: a
    scene has no release, and launching it again relaunches its row. Legato and the clip's
    quantisation apply. **(hypothesis)**
@@ -280,12 +283,17 @@ The project file keeps them under the launcher ([Suhina format](suhina-format.md
   boundary. `clip.setFades {track, scene, …}` sets a slot clip's fades, with the same parameters
   and checks as for an arrangement clip (`scene` instead of `index`); one undo step.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
-  0003): each one's stretcher is prepared for the project tempo when the project opens and
-  rewound at every launch.
+  0003): each one's stretcher is prepared for the project's start tempo when the project opens
+  and rewound at every launch; where the tempo map is at another tempo they are re-pitched.
+- **Tempo map.** While no scene tempo applies, the launcher clock reads its beat from the
+  project's [tempo map](tempo-map.md), so launched clips stay on the arrangement's grid through
+  tempo changes and ramps, and bar quantisation waits for the next bar line of the meter.
 - **Tempo changes** from a scene affect the launcher clock. Warped audio clips follow the new
   tempo by reading faster or slower (re-pitch), since their stretchers are prepared for the
-  project tempo; unwarped audio clips keep playing at the speed of their file. The arrangement
-  keeps its frame positions for now; a tempo map for the arrangement comes later.
+  project tempo; unwarped audio clips keep playing at the speed of their file. A scene tempo
+  takes the launcher clock off the project's [tempo map](tempo-map.md#scenes-and-the-tempo-map)
+  until `transport.followTempoMap`, the next start or an edit to the map; the arrangement's clips
+  keep following the map.
 - **Commands.** Every action is a command (`clip.launch`, `clip.release`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,

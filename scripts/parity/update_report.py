@@ -151,7 +151,7 @@ GAPS = [
     ("Browser and file management depth", "Browser, files, project (ch 4, 5)",
      "collections, tag editor, project folders, collect files, unused files, packs, cloud"),
     ("Views and clip editing", "Views and editing (ch 6-10, 16)",
-     "MIDI note editor, clip view panels, split, consolidate"),
+     "MIDI note editor, clip view panels, time selections"),
     ("MIDI tools, MPE, grooves, tuning", "Generative/transform (ch 11-15)",
      "transformation and generative tools, MPE editing, groove pool, tuning systems"),
     ("Automation and clip envelopes", "Automation, envelopes (ch 26, 27)",
@@ -159,7 +159,7 @@ GAPS = [
     ("Recording, bounce, comping", "Recording, bounce, comp (ch 19-22)",
      "audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce"),
     ("Mixing, routing, I/O", "Mixing, routing, I/O (ch 17, 18, 38)",
-     "crossfader, cue, meters, inputs and monitoring, resampling"),
+     "crossfader, inputs and monitoring, resampling"),
     ("Outside a DAW's own scope", "Outside scope (ch 28, 32-37, 41)",
      "video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out"),
 ]

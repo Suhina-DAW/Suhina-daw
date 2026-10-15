@@ -77,6 +77,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices,

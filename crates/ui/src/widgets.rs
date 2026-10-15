@@ -113,6 +113,25 @@ pub fn solo_button(
     ))
 }
 
+/// A track's cue button ("C"): draws it in `rect` and returns the command a click asks for,
+/// which turns the track's cue on or off, so it is also heard on the cue output (headphones).
+pub fn cue_button(
+    ui: &Ui,
+    painter: &Painter,
+    rect: Rect,
+    id: egui::Id,
+    track: u32,
+    name: &str,
+    cue: bool,
+) -> Option<Action> {
+    let label = if cue { format!("Stop cueing {name}") } else { format!("Cue {name} on the headphones") };
+    let response = button_area(ui, rect, id, label);
+    let (fill, text) = toggle_colors(ui, &response, cue);
+    painter.rect_filled(rect, 0.0, fill);
+    text_in(painter, rect, Align2::CENTER_CENTER, "C", theme::ui_font(theme::TEXT_SMALL), text);
+    response.clicked().then(|| Action::new("track.setCue", serde_json::json!({ "track": track, "cue": !cue })))
+}
+
 /// A track's arm button (components › Arm): a ring off, a filled red dot on its dark red
 /// background when armed. Returns the command a click asks for: a click arms the track alone;
 /// with Ctrl (Cmd) held it is added to the tracks armed already. Arming a track that plays

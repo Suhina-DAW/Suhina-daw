@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 157
+COMMANDS = 170
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -38,7 +38,7 @@ CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
      "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
-     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive; "
+     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; "
      "a change or a device back after unplugging keeps playback and launched clips going; "
      "input device, MIDI inputs on/off), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
@@ -59,16 +59,18 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.49, "partial",
+    (6, "Arrangement View", 22, 0.59, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
      "overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to "
      "triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades "
      "and ruler clicks (Alt for off the grid), nested groups folded and unfolded, "
      "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
-     "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "
-     "command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, "
-     "consolidate, crop, crossfades, linked-track editing, the time commands."),
+     "sample-accurately; imported from Live Sets), split at the playhead or a clicked beat, consolidate "
+     "(MIDI joined, audio rendered to a file), time-signature changes (commands; the ruler counts bars "
+     "through them and marks them). A clip's loop range is read and drawn but no "
+     "command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, "
+     "time selections, crop, crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.62, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
      "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
@@ -81,12 +83,15 @@ CHAPTERS = [
      "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "
      "tool icons with the note clipboard, and the quantise controls in the clip column. No loop "
      "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
-    (9, "Audio Clips, Tempo, and Warping", 18, 0.35, "partial",
+    (9, "Audio Clips, Tempo, and Warping", 18, 0.38, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
      "six warp modes in the model, tempo detect for the browser. One stretch algorithm serves "
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
-     "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
-     "of long samples, warp-marker editing, quantise audio, tempo automation."),
+     "outside 0.25x-4x fall back to Re-pitch. Tempo changes over the song (steps and ramps, a tempo "
+     "map every clip follows, read from a set's tempo envelope; a scene tempo overrides it until "
+     "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
+     "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
+     "automation envelope."),
     (10, "Editing MIDI", 41, 0.33, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
      "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase and Slice "
@@ -118,14 +123,14 @@ CHAPTERS = [
      "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
      "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
      "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.52, "partial",
+    (18, "Mixing", 18, 0.57, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
-     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level "
-     "meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks "
-     "imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement "
-     "headers."),
+     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level "
+     "meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output "
+     "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
+     "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
      "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
      "recording, no overdub, no count-in, no capture MIDI."),
