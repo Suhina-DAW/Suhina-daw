@@ -25,7 +25,7 @@ const CLIP: f32 = 3.0;
 pub const WIDTH: f32 = BAR * 2.0 + GAP;
 
 /// What the meters show this frame, read from the playing engine.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Meters {
     pub main: Level,
     pub tracks: Vec<(TrackId, Level)>,
@@ -41,9 +41,9 @@ impl Meters {
         self.tracks.iter().find(|(t, _)| *t == track).map(|(_, l)| *l).unwrap_or_default()
     }
 
-    /// Whether any meter shows something, so the window keeps drawing while they move.
+    /// Whether any meter shows a level, so the window keeps drawing while they fall.
     pub fn moving(&self) -> bool {
-        let lit = |l: &Level| l.peak.iter().any(|&p| p > 0.0) || l.clipped;
+        let lit = |l: &Level| l.peak.iter().any(|&p| p > 0.0);
         lit(&self.main) || self.tracks.iter().any(|(_, l)| lit(l))
     }
 }

@@ -66,8 +66,9 @@ Sizes and tokens are in [components](../design/components.md) › Meter.
   the bar turns `meter.hot`. The clip indicator is a light at the top (or right end) in
   `recording` while lit; a click anywhere on the meter turns it off. Each meter is named for
   screen readers, "Drums level: −12.0 dB" or "Main level: silent, clipped".
-- The window draws continuously while any meter shows something, so falling meters reach the
-  bottom.
+- The window draws again whenever the levels change, and looks for new levels every 50 ms for
+  0.3 s after they last changed while a meter shows something, so falling meters reach the
+  bottom; an engine that stopped rendering leaves the window at rest.
 
 ## Commands
 
