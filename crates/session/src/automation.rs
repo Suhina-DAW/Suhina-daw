@@ -234,6 +234,121 @@ pub(crate) fn delete_point(session: &mut Session, params: &Value) -> Result<Valu
     Ok(json!({ "param": target.param, "points": left }))
 }
 
+/// The point indices `params["points"]` names: each once, each on a lane of `count` points.
+fn point_list(params: &Value, count: usize) -> Result<Vec<usize>, CommandError> {
+    let list = params.get("points").and_then(Value::as_array).ok_or("points must be a list of point indices")?;
+    if list.is_empty() {
+        return Err("points must name at least one point".into());
+    }
+    let mut indices = Vec::with_capacity(list.len().min(count));
+    for item in list {
+        let index = item
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or("points must be point indices, from 0, as in automation.list")?;
+        if index >= count {
+            return Err(format!("the lane has no point {index}; it has {count}").into());
+        }
+        if indices.contains(&index) {
+            return Err(format!("point {index} is named twice").into());
+        }
+        indices.push(index);
+    }
+    Ok(indices)
+}
+
+/// An optional number in `params[name]`.
+fn optional_number(params: &Value, name: &str) -> Result<Option<f64>, CommandError> {
+    match params.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => number(params, name).map(Some),
+    }
+}
+
+impl Target {
+    /// A lane value moved by `delta` in the unit of the parameter's set command, kept in range.
+    fn shift(&self, session: &Session, value: f64, delta: f64) -> Result<f64, CommandError> {
+        match self.kind {
+            // Silence stays silent; a level never goes past the fader's top.
+            Kind::Volume => match to_db(value) {
+                None => Ok(0.0),
+                Some(db) => self.store(session, (db + delta).min(6.0)),
+            },
+            Kind::Plain => {
+                let (min, max) = mixer_range(&self.param).unwrap_or((value, value));
+                self.store(session, (value + delta).clamp(min, max))
+            }
+            Kind::Builtin(_) | Kind::Plugin(_) => self.store(session, value + delta),
+        }
+    }
+}
+
+/// Moves several points of one lane together, by `beats` and by `value` (in the unit of the
+/// parameter's set command), in one undo step. Values are kept in the parameter's range; beats
+/// must stay inside the arrangement.
+pub(crate) fn move_points(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let target = target(session, params)?;
+    let beats = optional_number(params, "beats")?.unwrap_or(0.0);
+    let delta = optional_number(params, "value")?.unwrap_or(0.0);
+    let curve = curve(params)?;
+    if beats == 0.0 && delta == 0.0 && curve.is_none() {
+        return Err("give beats or value to move the points by, or a curve".into());
+    }
+    let mut points = target.lane(session)?.points.clone();
+    let indices = point_list(params, points.len())?;
+    let mut moved = Vec::with_capacity(indices.len());
+    for &index in &indices {
+        let mut point = *points.get(index).ok_or("the point is missing")?;
+        point.beat += beats;
+        if !(0.0..=MAX_START_BEAT).contains(&point.beat) {
+            return Err(
+                format!("point {index} would move to beat {}, outside 0 to {MAX_START_BEAT}", point.beat).into()
+            );
+        }
+        if delta != 0.0 {
+            point.value = target.shift(session, point.value, delta)?;
+        }
+        point.curve = curve.unwrap_or(point.curve);
+        moved.push(point);
+    }
+    // The points left in place, then the moved ones in the order given, each after any point
+    // already at its beat; `None` marks a point that stayed.
+    let mut sorted: Vec<_> = indices.iter().copied().collect();
+    sorted.sort_unstable();
+    for index in sorted.into_iter().rev() {
+        points.remove(index);
+    }
+    let mut tagged: Vec<(AutomationPoint, Option<usize>)> = points.into_iter().map(|p| (p, None)).collect();
+    for (order, point) in moved.into_iter().enumerate() {
+        let at = tagged.partition_point(|(p, _)| p.beat <= point.beat);
+        tagged.insert(at, (point, Some(order)));
+    }
+    let mut now = vec![0; indices.len()];
+    for (index, (_, tag)) in tagged.iter().enumerate() {
+        if let Some(slot) = tag.and_then(|order| now.get_mut(order)) {
+            *slot = index;
+        }
+    }
+    target.lane(session)?.points = tagged.into_iter().map(|(p, _)| p).collect();
+    Ok(json!({ "param": target.param, "points": now }))
+}
+
+/// Deletes several points of one lane in one undo step; the lane goes with its last point.
+pub(crate) fn delete_points(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let target = target(session, params)?;
+    let lane = target.lane(session)?;
+    let mut indices = point_list(params, lane.points.len())?;
+    indices.sort_unstable();
+    for index in indices.into_iter().rev() {
+        lane.points.remove(index);
+    }
+    let left = lane.points.len();
+    if left == 0 {
+        target.lanes(session)?.retain(|l| !target.matches(l));
+    }
+    Ok(json!({ "param": target.param, "points": left }))
+}
+
 pub(crate) fn clear(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let has_param = params.get("param").is_some_and(|v| !v.is_null());
     if has_param {
