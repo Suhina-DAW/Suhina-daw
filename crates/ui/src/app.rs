@@ -23,7 +23,7 @@ use crate::loading_dialog;
 use crate::motion;
 use crate::project_dialog::{self, AboutChoice, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PlayFrom, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
@@ -563,6 +563,25 @@ impl App {
     /// `transport.stop`, with where the playhead goes from the settings.
     fn stop_action(&self) -> Action {
         Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
+    }
+
+    /// Play as the Play button and the play/stop key start it: from the start of the clip
+    /// selected in the Arrangement view when the setting **Play from** says so (or `selected`
+    /// asks for it whatever the setting), from the play start marker otherwise.
+    fn play_action(&self, selected: bool) -> Action {
+        let clip =
+            (selected || self.settings.play_from == PlayFrom::Clip).then(|| self.selected_arrangement_clip()).flatten();
+        match clip {
+            Some((track, index)) => {
+                Action::new("transport.play", json!({ "from": "clip", "track": track.0, "index": index }))
+            }
+            None => Action::new("transport.play", json!({})),
+        }
+    }
+
+    /// The clip selected in the Arrangement view, while that view is shown.
+    fn selected_arrangement_clip(&self) -> Option<(TrackId, usize)> {
+        if self.shown == View::Arrangement { self.arrangement.selected_clip() } else { None }
     }
 
     pub fn status(&self) -> &Status {
@@ -1756,8 +1775,9 @@ impl App {
             }
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
-                actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
+                actions.push(if running { self.stop_action() } else { self.play_action(false) });
             }
+            "transport.playFromSelection" => actions.push(self.play_action(true)),
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
                 // Points selected on an automation lane are deleted before any clip.
                 if action == "selection.delete"
@@ -2470,7 +2490,7 @@ impl App {
         let play = row(x, 28.0);
         let response = widgets::button_area(ui, play, Id::new("play"), "Play");
         if response.clicked() {
-            actions.push(Action::new("transport.play", json!({})));
+            actions.push(self.play_action(false));
         }
         let running = motion::toward(ui.ctx(), response.id.with("running"), grid.running, motion::VALUE);
         let hover = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));

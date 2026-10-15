@@ -1,12 +1,15 @@
 ---
 description: How the claim bot moves an issue's card on the project board, holds work, and is set up
-read_when: claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed
+read_when: claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed, project sync, board out of date, cards missing from the board
 type: howto
 status: current
 last_verified: 2026-10-15
 covers:
   - .github/workflows/claim.yml
   - scripts/claim_bot_test.py
+  - .github/workflows/project-sync.yml
+  - scripts/project_sync.py
+  - scripts/test_project_sync.py
 ---
 
 # The claim bot
@@ -73,8 +76,44 @@ Actions → New repository secret):
 - **Classic:** the scopes `project` and `public_repo` (and `repo`, if the repository ever becomes
   private).
 
-Both kinds expire, and a fine-grained token expires within a year. Put that date where the release
-process keeps its reminders ([`releasing.md`](releasing.md)).
+Both kinds expire, and a fine-grained token expires within a year. Its date is kept here and where
+the release process keeps its reminders ([`releasing.md`](releasing.md) › Reminders):
+
+- `PROJECT_TOKEN` expires: fill in
+
+## Project sync
+
+The claim bot moves one card when someone comments. Cards drift anyway: an issue nobody put on the
+board, a pull request merged without its card moving, claims made while the bot was off.
+[`scripts/project_sync.py`](../scripts/project_sync.py) brings the whole board up to date, and
+[`.github/workflows/project-sync.yml`](../.github/workflows/project-sync.yml) runs it with the same
+`PROJECT_TOKEN`. It reads the repository's open issues and open pull requests and every card, then:
+
+| The repository says | The card |
+|---|---|
+| An open issue or open pull request with no card | Added, in `Backlog` unless a row below gives it another Status |
+| An open issue with an open pull request that closes it (`Closes #N`, `Fixes #N` or a linked pull request) or says `Part of #N` | `In review` |
+| An open issue that is assigned, or whose newest `/claim` is not followed by an `/unclaim`, with no such pull request | `In progress`; a held card (`Do not start yet`) stays held |
+| A closed issue, or a merged pull request | `Done` |
+| Anything else | Keeps its Status |
+
+A `/claim` or `/unclaim` that the bot refused (its answer matches one of the refusals listed in
+`REFUSALS` and `REFUSED_ANYWHERE` at the top of the script) does not count. Only Status is written: Priority and Phase are
+left for a maintainer, cards are never deleted, and cards of other repositories and draft cards are
+not touched.
+
+To run it: **Actions → Project sync → Run workflow**, first with **apply** unchecked. That dry run
+writes nothing; its log, and the run's summary page, list every card it would add or move with the
+reason. Read it, then run it again with **apply** checked to write exactly that. It can be run
+whenever the board drifts. When it fails, the log names what it could not read or which Status
+option the board lacks, and nothing was written if it stopped before its first change.
+
+From a checkout, with a token of your own that may read the board:
+
+```sh
+PROJECT_TOKEN=... python3 scripts/project_sync.py            # dry run
+PROJECT_TOKEN=... python3 scripts/project_sync.py --apply    # write
+```
 
 ## When it fails
 
@@ -91,9 +130,10 @@ maintainer who finds such a pull request abandoned closes it, or moves the card 
 
 ```sh
 python scripts/claim_bot_test.py
+python -m unittest discover -s scripts -p 'test_project_sync.py'
 ```
 
-The script runs the workflow's script against mocked API clients, because a wrong branch would write
+The first runs the workflow's script against mocked API clients, because a wrong branch would write
 to the board instead of failing a test: every command is answered for each state a card can be in
 (free, without a status, held, taken, in review, absent from the board), for `/unclaim` by the
 claimer and by a maintainer, for `/claim @login` by a maintainer (for someone new, for someone
@@ -102,3 +142,8 @@ already assigned, on a held or taken card) and by a contributor, and for the mis
 hold, a name that is not a GitHub login, assignees newer than the event). It needs Node.js on the
 PATH — the CI `docs` job runs it on every change — writes its two files under `target/claim-bot-test/`
 and removes them again.
+
+The second, which the CI `docs` job runs with the other script tests, runs the project sync against
+recorded GraphQL answers, with no network: every row of the table above, refused commands, paging,
+a dry run that writes nothing, and a missing Status option that stops the run before its first
+write.

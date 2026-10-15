@@ -6,7 +6,6 @@ status: draft
 last_verified: 2026-10-13
 covers:
   - scripts/parity/**
-  - .github/workflows/parity-notice.yml
 ---
 
 <!-- parity:begin title --># Parity with Ableton Live 12 (status check, 2026-10-13)<!-- parity:end -->
@@ -125,9 +124,9 @@ documented behaviour that exists today.
 | 1 | Welcome to Live | 1 | — | n/a | Front matter. |
 | 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 52 % | partial | Release and nightly packages for Windows, macOS and Linux; Help > About names the build (version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
-| 4 | Working with the Browser | 60 | 49 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity; samples and MIDI files dragged from the system's file manager land like a browser drag (exact placement waits for pointer positions from the windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups from the formats' own categories) or in a flat list sortable by name, vendor, type, format and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
+| 4 | Working with the Browser | 60 | 49 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity with kinds recognised from the sound and set by hand; samples and MIDI files dragged from the system's file manager land like a browser drag (exact placement waits for pointer positions from the windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups from the formats' own categories) or in a flat list sortable by name, vendor, type, format and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
 | 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
-| 6 | Arrangement View | 22 | 35 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
+| 6 | Arrangement View | 22 | 35 % | partial | Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
 | 7 | Session View | 13 | 52 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. A launched clip is selected and the detail area shows its follow-action controls. Missing scene view/editing depth, select-on-launch options. |
 | 8 | Clip View | 34 | 8 % | started | Detail area shows clip properties; the MIDI clip editor is a spec only (docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels. |
 | 9 | Audio Clips, Tempo, and Warping | 18 | 35 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, tempo automation. |
@@ -143,7 +142,7 @@ documented behaviour that exists today.
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its running plug-ins' state as heard; no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
-| 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). |
+| 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, resampling) exists in crates/separation with a test backend; no model and nothing a user can run yet. |
 | 23 | Working with Instruments and Effects (Device View) | 34 | 30 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
 | 24 | Using Plug-Ins | 12 | 62 % | partial | CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3, parameters set and automated from the engine. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
@@ -370,7 +369,7 @@ Two observations the numbers make plain:
 | Reading Live Sets, `.suhina`, project files | M1, M3 |
 | Playback, audio clips, time-stretching | M2, M5 |
 | Commands, CLI, MCP, undo | M3 |
-| Clip launching, scenes, quantisation, follow actions | M4 (launch modes still to do) |
+| Clip launching, scenes, quantisation, follow actions | M4 (follow actions still to do) |
 | CLAP and VST3 hosting, latency, editors | M6 |
 | Other formats (DAWproject, `.flp`) | M7 |
 | Session and Arrangement views, browser, sample map, settings, installers | M8 |
@@ -458,13 +457,3 @@ figures:
 | `scripts/parity/charts.py` | the two figures, into `docs/research/` |
 | `scripts/parity/update_report.py` | the marked parts of this document, from `score.py` and `devices.json` |
 | `scripts/parity/run.py --pdf <file>` | all five in order |
-
-**Keeping it current.** Every pull request that adds, changes or removes something a user can do
-updates the coverage it moves in `score.py` (and `devices.json` for a built-in effect or
-instrument) and runs `update_report.py`, in the same pull request; one that moves no coverage says
-`Parity: no change` and why in its description
-([AGENTS.md › Before you finish a task](../../AGENTS.md#4-before-you-finish-a-task)).
-`scripts/parity/pr_notice.py`, run by
-[`.github/workflows/parity-notice.yml`](../../.github/workflows/parity-notice.yml), warns on a pull
-request that changes `crates/`, `devices/` or `apps/` and does neither. It is a warning, not a
-failure.
