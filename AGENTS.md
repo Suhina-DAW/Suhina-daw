@@ -85,7 +85,8 @@ crates/
   separation L2 stem separation: chunking, weighted overlap-add and resampling around an inference backend
              trait, and a deterministic test backend (a band splitter); no model or commands yet (#146)
   session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002), the
-           attached player, each project's decoded audio and previews (ADR 0011)
+           attached player, each project's decoded audio and previews (ADR 0011), backups
+           (autosave and the offer after a crash, ADR 0010)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)
   output   L3 the audio device: lists hosts and devices (cpal; ASIO with the `asio` feature), opens the one
            chosen (WASAPI exclusive through `wasapi`), plays an engine in blocks of the chosen buffer

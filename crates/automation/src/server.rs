@@ -463,10 +463,10 @@ fn project_audio(session: &Session, project: &Project) -> (suhina_media::AudioPo
     (have, warnings)
 }
 
-/// The file `project.save` without a path would write: the source of the project it runs in.
-/// `None` for every other command.
+/// The file `project.save` without a path would write, and whose folder `project.autosave`
+/// writes into: the source of the project it runs in. `None` for every other command.
 fn save_source(projects: &mut Projects, target: Option<ProjectId>, id: &str) -> Option<PathBuf> {
-    if id != "project.save" {
+    if id != "project.save" && id != "project.autosave" {
         return None;
     }
     projects.session_mut(target).ok()?.source().map(Path::to_path_buf)
@@ -480,6 +480,7 @@ fn save_source(projects: &mut Projects, target: Option<ProjectId>, id: &str) -> 
 fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&Path>) -> Result<Value, String> {
     match id {
         "project.save" => confine_save(workspace, &mut params, source)?,
+        "project.autosave" => confine_autosave(workspace, &params, source)?,
         "clip.addFiles" => {
             if let Some(paths) = params.get_mut("paths").and_then(Value::as_array_mut) {
                 for path in paths.iter_mut() {
@@ -576,6 +577,25 @@ fn confine_save(workspace: &Workspace, params: &mut Value, source: Option<&Path>
     let text = path.to_str().ok_or("the path is not valid text")?;
     let target = workspace.writable(text, overwrite)?;
     params["path"] = json!(display_path(&target));
+    Ok(())
+}
+
+/// `project.autosave` writes a backup into `.backup` beside the project's file
+/// (`docs/spec/backups.md`), so `now: true` needs that folder below the write root; backups before
+/// critical operations would write there unasked, so agents cannot choose them.
+fn confine_autosave(workspace: &Workspace, params: &Value, source: Option<&Path>) -> Result<(), String> {
+    if params.get("interval").and_then(Value::as_str).is_some_and(|i| i.trim() == "critical") {
+        return Err("agents cannot choose backups before critical operations; use now: true".into());
+    }
+    if params.get("now") == Some(&Value::Bool(true)) {
+        let source = source.ok_or("over MCP only a project with a file below the write root can be backed up")?;
+        let folder = source.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        workspace.writable_folder(folder)?;
+        let backups = folder.join(suhina_session::backup::FOLDER);
+        if std::fs::symlink_metadata(&backups).is_ok() {
+            workspace.writable_folder(&backups)?;
+        }
+    }
     Ok(())
 }
 
@@ -746,6 +766,34 @@ mod confine_tests {
         let voice = confine(&workspace, "library.info", json!({ "item": "bank.syx#4" }), None).unwrap();
         assert!(voice["item"].as_str().unwrap().ends_with("bank.syx#4"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn project_autosave_writes_only_below_the_write_root_and_never_unasked() {
+        let (dir, read_only) = roots("autosave");
+        std::fs::create_dir_all(dir.join("out")).unwrap();
+        let workspace = Workspace::new(Some(&dir.join("inside")), Some(&dir.join("out"))).unwrap();
+        let autosave =
+            |w: &Workspace, params: Value, source: Option<&Path>| confine(w, "project.autosave", params, source);
+        let inside = dir.join("inside").join("song.suhina");
+        let out = dir.join("out").join("song.suhina");
+        // Reporting is always fine.
+        assert!(autosave(&read_only, json!({}), Some(&inside)).is_ok());
+        assert!(autosave(&workspace, json!({ "interval": "5m", "clean_up": false }), None).is_ok());
+        // Backups before critical operations would write beside the project unasked.
+        assert!(autosave(&workspace, json!({ "interval": "critical" }), Some(&out)).is_err());
+        // Now writes beside the project's file, which must be below the write root.
+        assert!(autosave(&workspace, json!({ "now": true }), None).is_err(), "no file of its own");
+        assert!(autosave(&workspace, json!({ "now": true }), Some(&inside)).is_err());
+        assert!(autosave(&read_only, json!({ "now": true }), Some(&out)).is_err());
+        assert!(autosave(&workspace, json!({ "now": true }), Some(&out)).is_ok());
+        #[cfg(unix)]
+        {
+            // A .backup that leads outside is refused.
+            std::os::unix::fs::symlink(dir.join("inside"), dir.join("out").join(".backup")).unwrap();
+            assert!(autosave(&workspace, json!({ "now": true }), Some(&out)).is_err());
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

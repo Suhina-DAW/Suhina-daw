@@ -4,6 +4,7 @@
 
 pub mod audio;
 mod automation;
+pub mod backup;
 mod blank;
 mod commands;
 mod devices;
@@ -246,6 +247,8 @@ pub struct Session {
     /// Set when a continued edit could not reach the playing engine; [`Session::catch_up_player`]
     /// sends the project again.
     player_behind: bool,
+    /// When the project was last backed up and where (`backup.rs`).
+    pub(crate) backup: backup::SessionBackups,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -271,6 +274,7 @@ impl Session {
             decoded: Vec::new(),
             open_step: None,
             player_behind: false,
+            backup: backup::SessionBackups::default(),
         }
     }
 
@@ -525,6 +529,27 @@ impl Session {
         Ok((session, warnings))
     }
 
+    /// Opens a backup (`docs/spec/backups.md` › The offer on start) as an unsaved project tied
+    /// to `file`, the project file it is a backup of: saving writes `file`, and the backup is
+    /// left as it is. Without `file` (a project never saved) it opens untitled.
+    pub fn recover(backup: &Path, file: Option<&Path>) -> Result<(Self, Vec<String>), CommandError> {
+        if !suhina_project_file::is_project_file(backup) {
+            return Err(format!("{} is not a Suhina project", backup.display()).into());
+        }
+        let (mut session, warnings) = Self::open(backup)?;
+        session.source = file.map(Path::to_path_buf);
+        // The changes since the project file was saved are in the backup only.
+        session.changes = 1;
+        // ...and the backup holds them, so it is not written again until something changes.
+        session.backup.backed_at = 1;
+        Ok((session, warnings))
+    }
+
+    /// The newest backup of the project written in this run.
+    pub fn last_backup(&self) -> Option<&backup::Backup> {
+        self.backup.last.as_ref()
+    }
+
     /// The folder the project's relative audio paths start from, as the audio is loaded.
     pub fn audio_folder(&self) -> Option<&Path> {
         self.audio_folder.as_deref()
@@ -560,13 +585,9 @@ impl Session {
             name.push(suhina_project_file::EXTENSION);
             path.set_file_name(name);
         }
-        let (mut project, states) = self.heard();
-        let from = match &self.audio_folder {
-            Some(folder) => folder.clone(),
-            None => std::env::current_dir().unwrap_or_default(),
-        };
         let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-        suhina_project_file::rebase_audio(&mut project, &from, &to);
+        let (mut project, states) = self.heard();
+        suhina_project_file::rebase_audio(&mut project, &self.audio_from(), &to);
         suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
         if !copy {
             self.source = Some(path.clone());
@@ -574,6 +595,23 @@ impl Session {
             self.plugins.saved(&states);
         }
         Ok(path)
+    }
+
+    /// The project as it would be saved into `folder`: with the running plug-ins' state as it
+    /// is now ([`Session::project_as_heard`]) and audio paths relative to `folder`.
+    pub(crate) fn snapshot(&mut self, folder: &Path) -> Project {
+        let mut project = self.project_as_heard();
+        suhina_project_file::rebase_audio(&mut project, &self.audio_from(), folder);
+        project
+    }
+
+    /// The folder the project's relative audio paths start from: its audio folder, or the
+    /// current one.
+    fn audio_from(&self) -> PathBuf {
+        match &self.audio_folder {
+            Some(folder) => folder.clone(),
+            None => std::env::current_dir().unwrap_or_default(),
+        }
     }
 
     pub fn project(&self) -> &Project {

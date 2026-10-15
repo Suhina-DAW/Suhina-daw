@@ -46,6 +46,8 @@ pub struct About {
     /// empty.
     pub projects_default: String,
     pub templates_default: String,
+    /// The active project's newest backup, as Settings › General shows it: when and where.
+    pub last_backup: String,
 }
 
 /// The plug-in library as the page shows it, read through the `plugins.*` commands.
@@ -312,6 +314,26 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                     outcome.changed = true;
                 }
             }
+            y += 8.0;
+            section(&mut y, "Backups");
+            let r = row(&mut y);
+            label(&painter, r, "Backups", "When a copy of each changed project is written to .backup beside it");
+            let options: Vec<(String, suhina_session::backup::Interval)> =
+                suhina_session::backup::Interval::ALL.iter().map(|i| (i.title(), *i)).collect();
+            if let Some(choice) = choice_dropdown(ui, &painter, r, "Backups", &options, &settings.backup) {
+                settings.backup = choice;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Clean up backups", "Keep the newest 20 backups of each project and delete older ones");
+            if let Some(on) =
+                segmented(ui, &painter, control_rect(r, 2), "Clean up backups", &on_off, settings.backup_clean_up)
+            {
+                settings.backup_clean_up = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Last backup", &about.last_backup);
             y += 8.0;
             section(&mut y, "Dropping files");
             let r = row(&mut y);

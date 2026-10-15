@@ -90,6 +90,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   project keeps its own file. `project.info` reports `unsaved_changes`, which a change made only in
   a plug-in's editor sets too, within about a minute (two state reads that agree). `project_open` opens
   `.suhina` (and older `.locr`) files as well as Live Sets.
+- **Backups.** `project.autosave { now?, interval?, clean_up? }` reports where the active
+  project's backups go, its last one and whether one is due ([spec](spec/backups.md));
+  `now: true` writes one into `.backup` beside the project's file, which must be below the write
+  root. Agents cannot choose `interval: "critical"`, which would write there unasked; the server
+  writes no timed backups.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,

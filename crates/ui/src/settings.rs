@@ -226,6 +226,10 @@ pub struct Settings {
     /// The size of the whole window, in percent (`ZOOMS`): everything is drawn this much larger
     /// or smaller.
     pub zoom: u32,
+    /// When backups of changed projects are written, and whether old ones are deleted
+    /// (`docs/spec/backups.md`).
+    pub backup: suhina_session::backup::Interval,
+    pub backup_clean_up: bool,
 }
 
 impl Default for Settings {
@@ -265,6 +269,8 @@ impl Default for Settings {
             audio_buffer: 0,
             audio_exclusive: false,
             zoom: ZOOM,
+            backup: suhina_session::backup::Interval::default(),
+            backup_clean_up: true,
         }
     }
 }
@@ -339,7 +345,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\nbackup = {}\nbackup_clean_up = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -361,6 +367,8 @@ impl Settings {
             self.audio_buffer,
             on(self.audio_exclusive),
             self.zoom,
+            self.backup.name(),
+            on(self.backup_clean_up),
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
@@ -465,6 +473,10 @@ impl Settings {
                 ("piano_roll_top", "track") => settings.piano_roll_top = PianoRollTop::Track,
                 ("piano_roll_top", "window") => settings.piano_roll_top = PianoRollTop::Window,
                 ("piano_roll_grid", "own" | "control_bar") => settings.piano_grid_follows = value == "control_bar",
+                ("backup", when) if suhina_session::backup::Interval::parse(when).is_some() => {
+                    settings.backup = suhina_session::backup::Interval::parse(when).unwrap_or_default();
+                }
+                ("backup_clean_up", "on" | "off") => settings.backup_clean_up = value == "on",
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -537,6 +549,8 @@ mod tests {
             zoom: 130,
             map_window: true,
             map_window_rect: Some([-1600, 40, 900, 700]),
+            backup: suhina_session::backup::Interval::Minutes(240),
+            backup_clean_up: false,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
@@ -629,6 +643,17 @@ map_window_rect = 10, 20, 800, 600
         let (settings, warnings) = Settings::from_text("play_from = selection\n");
         assert_eq!((settings.play_from, warnings.len()), (PlayFrom::Marker, 1));
         assert!(Settings::default().to_text().contains("play_from = marker\n"));
+    }
+
+    #[test]
+    fn every_backup_choice_is_kept_and_others_keep_the_default() {
+        for interval in suhina_session::backup::Interval::ALL {
+            let settings = Settings { backup: interval, ..Settings::default() };
+            assert_eq!(Settings::from_text(&settings.to_text()).0.backup, interval);
+        }
+        let (settings, warnings) = Settings::from_text("backup = 7m\nbackup_clean_up = maybe\n");
+        assert_eq!((settings.backup, settings.backup_clean_up), (suhina_session::backup::Interval::Minutes(5), true));
+        assert_eq!(warnings.len(), 2);
     }
 
     #[test]

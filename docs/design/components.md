@@ -91,7 +91,7 @@ the view with the detail area, status bar.
 | Browser | 300 px wide by default, dragged from 200 to 600 px by a 4 px handle at its inner edge (`border`, `border.strong` under the pointer); left of the view, or right (Settings › Interface › Browser); Ctrl+B and View › Show browser hide and show it. See Browser below |
 | Detail splitter | 6 px, `control.background`, a 32 × 2 grip in `text.hint` in the middle; the cursor shows which way it moves |
 | Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view, and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
-| Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`). There is no separate info view |
+| Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`), followed by " · backed up 14:05" once the active project has been backed up in this run. There is no separate info view |
 
 ## Browser
 
@@ -263,6 +263,9 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
 | General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
+| General › Backups | Backups | A 260 px dropdown: Before critical operations, Every minute, Every 5 minutes (default), 10, 15, 30 or 60 minutes, Every 4 hours, Never ([spec](../spec/backups.md)) |
+| General › Backups | Clean up backups | On (default): the newest 20 backups of each project are kept; Off |
+| General › Backups | Last backup | The active project's newest backup, its time and file, as the row's note; "None written for this project yet" |
 | General › Dropping files | Several files | One track (default), One each; Ctrl while dropping does the other ([browser spec](../spec/browser.md) › Files) |
 | General › Dropping files | Warp mode | Rhythmic (default), Tonal, Texture, Smooth, High quality, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Play from | Marker (default): Play and Space start from the play start marker; Selected clip: from the start of the clip selected in the Arrangement view, the marker moving there ([spec](../spec/arrangement-editing.md) › Play position) |
@@ -342,6 +345,12 @@ before closing it?" (or "opening another project in its place", "quitting") in 1
 `text.primary`, and Cancel, Don't save and Save (Enter) at the bottom right; Escape cancels.
 Quitting asks about each project with changes in turn; Save on a project without a file shows
 the save prompt first, and cancelling it cancels the close.
+
+On start, a backup a crash left that is newer than its project file shows a 520 px "Backup found"
+dialog in the same style ([spec](../spec/backups.md) › The offer on start): "Suhina closed before
+*name* was saved." and "A backup from *date time* is newer than the project file." in 11 px
+`text.primary`, and Ignore, Show the folder and Open the backup (Enter) at the bottom right, 120 ×
+18 px each; Escape and Close ignore it. Several backups are offered one after another.
 
 ## Device panel
 

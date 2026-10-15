@@ -204,6 +204,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   change turned off is turned on again from its header; each edit one undo step through the
   `automation.*` commands ([#420](https://github.com/suhina-daw/suhina-daw/issues/420),
   [spec](docs/spec/automation.md#in-the-arrangement-view)).
+- Backups: each project with unsaved changes is copied to `.backup/` beside its file (a project
+  never saved: to the settings folder) every 5 minutes by default, at another interval, before
+  critical operations (closing, quitting, relinking, adding files, loading a plug-in, deleting a
+  track) or never, written on a background thread, the newest 20 kept; after a crash the
+  next start offers the backup back, to open as an unsaved project tied to its file
+  (`project.autosave`, Settings › General › Backups, [spec](docs/spec/backups.md)).
 - Still to do: more commands (notes, [#200](https://github.com/suhina-daw/suhina-daw/issues/200);
   clips), MCP resources.
 

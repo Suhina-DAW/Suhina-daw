@@ -58,6 +58,8 @@ pub struct Projects {
     /// When the audio system was last asked whether the chosen device is back, while the
     /// output plays in its place.
     output_watched: Option<std::time::Instant>,
+    /// Backups of the open projects: the settings and the thread that writes them.
+    pub(crate) backups: crate::backup::Backups,
 }
 
 /// How often an output whose device reported an error is opened again.
@@ -266,7 +268,14 @@ impl Projects {
 
     /// Closes `id` and returns its session. If it was active, the tab to its right becomes
     /// active (or the one to its left when it was the last).
+    /// Closing is a critical operation: with backups before critical operations, a project with
+    /// unsaved changes is backed up first.
     pub fn close(&mut self, id: ProjectId) -> Result<Session, CommandError> {
+        if self.get(id).is_none() {
+            return Err(unknown_project(id));
+        }
+        self.back_up_critical(id);
+        self.backups_after_close(id);
         let index = self.open.iter().position(|o| o.id == id).ok_or_else(|| unknown_project(id))?;
         let closed = self.open.remove(index);
         if self.active == Some(id) {
@@ -430,19 +439,28 @@ impl Projects {
         // A command may need a plug-in that has started meanwhile, or add one.
         self.poll_plugins();
         let target = project.or(self.active);
+        if let Some(target) = target
+            && crate::backup::CRITICAL_COMMANDS.contains(&id)
+        {
+            self.back_up_critical(target);
+        }
         let result = self.session_mut(project)?.execute(id, params);
         self.poll_plugins();
         if let Ok(value) = &result {
             crate::library::record_use(&mut self.files, id, params, value);
         }
-        // A project saved under a new name is shown by it.
+        // A project saved under a new name is shown by it; its backups need no offering.
         if id == "project.save"
             && let Ok(saved) = &result
             && saved.get("copy") == Some(&Value::Bool(false))
-            && let Some(open) = self.open.iter_mut().find(|o| Some(o.id) == target)
-            && let Some(stem) = open.session.source().and_then(|s| s.file_stem())
+            && let Some(target) = target
         {
-            open.name = stem.to_string_lossy().into_owned();
+            if let Some(open) = self.open.iter_mut().find(|o| o.id == target)
+                && let Some(stem) = open.session.source().and_then(|s| s.file_stem())
+            {
+                open.name = stem.to_string_lossy().into_owned();
+            }
+            self.backups_after_save(target);
         }
         result
     }
@@ -473,6 +491,7 @@ fn projects_commands() -> impl Iterator<Item = &'static CommandSpec<Projects>> {
         .chain(crate::library_commands())
         .chain(crate::sound_map_commands())
         .chain(crate::audio_commands())
+        .chain(crate::backup::backup_commands())
 }
 
 /// `docs/commands.md`: every command in the order of [`all_commands`], as `suhina-cli commands
