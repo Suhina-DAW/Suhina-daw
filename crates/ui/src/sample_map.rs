@@ -39,6 +39,8 @@ pub struct MapPoint {
     pub position: [f32; 2],
     pub kind: Kind,
     pub guessed: bool,
+    /// The kind was set by hand.
+    pub by_hand: bool,
     /// Used by a clip of the active project.
     pub in_use: bool,
     pub selected: bool,
@@ -85,6 +87,11 @@ pub enum MapEvent {
         on: bool,
     },
     ShowInFolder(usize),
+    /// Set its kind by hand, or (`None`) give it back to its name and sound.
+    SetKind {
+        item: usize,
+        kind: Option<Kind>,
+    },
     /// The layout switch changed.
     Layout(Layout),
     /// The large-view button.
@@ -570,6 +577,9 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
                     }
                 });
             }
+            if let Some(point) = points.get(i) {
+                ui.menu_button("Kind", |ui| kind_menu(ui, i, point, events));
+            }
             if ui.button("Show in folder").clicked() {
                 events.push(MapEvent::ShowInFolder(i));
                 ui.close();
@@ -638,8 +648,7 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
     draw_labels(&painter, view, transform);
 
     if let Some(point) = under.and_then(|i| points.get(i)) {
-        let kind =
-            if point.guessed { format!("{} (guessed)", point.kind.label()) } else { point.kind.label().to_string() };
+        let kind = kind_text(point);
         response.on_hover_ui_at_pointer(|ui| {
             ui.label(egui::RichText::new(&point.name).color(theme::text_primary()));
             ui.label(egui::RichText::new(kind).color(theme::text_secondary()));
@@ -660,6 +669,31 @@ fn map_area(ui: &mut Ui, rect: Rect, view: &mut MapView, content: &Content<'_>, 
 }
 
 /// The side of a grid cell on screen (0 in the cloud).
+/// A point's kind as its tooltip says it.
+fn kind_text(point: &MapPoint) -> String {
+    match (point.by_hand, point.guessed) {
+        (true, _) => format!("{} (set by hand)", point.kind.label()),
+        (false, true) => format!("{} (guessed)", point.kind.label()),
+        (false, false) => point.kind.label().to_string(),
+    }
+}
+
+/// The point menu's **Kind** submenu: **Automatic** (the name and the sound decide), then every
+/// kind, the one set by hand marked.
+fn kind_menu(ui: &mut Ui, item: usize, point: &MapPoint, events: &mut Vec<MapEvent>) {
+    if ui.radio(!point.by_hand, "Automatic").on_hover_text("From its name and its sound").clicked() {
+        events.push(MapEvent::SetKind { item, kind: None });
+        ui.close();
+    }
+    ui.separator();
+    for kind in Kind::ALL {
+        if ui.radio(point.by_hand && point.kind == kind, kind.label()).clicked() {
+            events.push(MapEvent::SetKind { item, kind: Some(kind) });
+            ui.close();
+        }
+    }
+}
+
 fn cell_size(view: &MapView, grid: Option<&Grid>, transform: Transform) -> f32 {
     match (view.layout, grid) {
         (Layout::Grid, Some(grid)) => transform.scale / grid.columns.max(grid.rows).max(1) as f32,
@@ -882,6 +916,7 @@ mod tests {
             position: [x, y],
             kind,
             guessed: false,
+            by_hand: false,
             in_use: false,
             selected: false,
             matches: true,
@@ -1096,6 +1131,7 @@ mod many {
                     ],
                     kind,
                     guessed: false,
+                    by_hand: false,
                     in_use: i % 5_000 == 0,
                     selected: i == 3,
                     matches: true,
@@ -1174,6 +1210,7 @@ mod similar_keys {
             position: [x, y],
             kind: Kind::Kick,
             guessed: false,
+            by_hand: false,
             in_use: false,
             selected: false,
             matches: true,
@@ -1250,6 +1287,7 @@ mod look {
                     ],
                     kind: *kind,
                     guessed: i % 7 == 0,
+                    by_hand: false,
                     in_use: i == 3 && k % 2 == 0,
                     selected: false,
                     matches: true,

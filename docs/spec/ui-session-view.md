@@ -123,7 +123,10 @@ One knob per return track (A, B, …). Return tracks show pre/post toggles on th
 ### Mixer (toggleable, resizable height)
 
 Per track, top to bottom: pan, volume with numeric field and meter, track on/off (shows the
-track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
+track number), solo, arm (MIDI and audio tracks). Pan and volume are dragged up or down and
+double-clicked to reset; the change is heard while dragging, and one drag is one undo step
+(`track.setPan`, `track.setVolume` with `continue`). The Arrangement view's track headers work
+the same. **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
