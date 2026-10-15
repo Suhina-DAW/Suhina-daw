@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 use suhina_engine::model::{Arrangement, ArrangementLane, Project};
-use suhina_engine::{AudioPool, Plugins, Renderer, render_offline_with_plugins};
+use suhina_engine::{AudioPool, Plugins, Renderer, render_offline_with_cue, render_offline_with_plugins};
 use suhina_session::{CommandKind, OfflinePlugins, Player, PluginEnv, Session, commands, start_offline};
 
 /// Longest launch-script render, in seconds.
@@ -42,22 +42,49 @@ pub fn render_wav(
     sample_rate: u32,
     plugins: Option<&PluginEnv>,
 ) -> Result<RenderSummary, String> {
+    render_wavs(project, audio, path, None, sample_rate, plugins)
+}
+
+/// Like [`render_wav`], and, with `cue`, the cue bus beside the main mix to a second WAV file
+/// of the same length: the tracks whose cue is on, after their own volume and pan, at unity
+/// cue volume. The main mix is the same either way.
+pub fn render_wavs(
+    project: &Project,
+    audio: &AudioPool,
+    path: &Path,
+    cue: Option<&Path>,
+    sample_rate: u32,
+    plugins: Option<&PluginEnv>,
+) -> Result<RenderSummary, String> {
     let mut started = offline_plugins(project, plugins, sample_rate);
     let running = std::mem::take(&mut started.plugins);
-    let samples = render_offline_with_plugins(project, audio, sample_rate, 512, running).map_err(|e| e.to_string())?;
-    let spec =
-        hound::WavSpec { channels: 2, sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("{}: {e}", path.display()))?;
-    for sample in &samples {
-        writer.write_sample(*sample).map_err(|e| format!("{}: {e}", path.display()))?;
-    }
-    writer.finalize().map_err(|e| format!("{}: {e}", path.display()))?;
+    let samples = match cue {
+        None => render_offline_with_plugins(project, audio, sample_rate, 512, running).map_err(|e| e.to_string())?,
+        Some(cue_path) => {
+            let (main, cued) = render_offline_with_cue(project, audio, sample_rate, 512, running, 1.0, true)
+                .map_err(|e| e.to_string())?;
+            write_wav(cue_path, &cued, sample_rate)?;
+            main
+        }
+    };
+    write_wav(path, &samples, sample_rate)?;
     Ok(RenderSummary {
         seconds: samples.len() as f64 / 2.0 / f64::from(sample_rate),
         sample_rate,
         peak: samples.iter().fold(0.0f32, |m, s| m.max(s.abs())),
         plugins: started.notices,
     })
+}
+
+/// Writes interleaved stereo `samples` to a 32-bit float WAV file at `path`.
+fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), String> {
+    let spec =
+        hound::WavSpec { channels: 2, sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("{}: {e}", path.display()))?;
+    for sample in samples {
+        writer.write_sample(*sample).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    writer.finalize().map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// One step of a launch script: the command `id` with `params`, run when the render reaches
@@ -267,6 +294,34 @@ mod tests {
             silent_run = if loud { 0 } else { silent_run.saturating_add(1) };
         }
         result
+    }
+
+    fn samples(path: &Path) -> Vec<f32> {
+        hound::WavReader::open(path).unwrap().samples::<f32>().map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn the_cue_renders_beside_the_main_mix() {
+        let (main_path, cue_path) = (temp_wav("cue-main"), temp_wav("cue-bus"));
+        let mut song = scene_as_arrangement(&project(), 0).unwrap();
+        let alone = temp_wav("cue-alone");
+        render_wav(&song, &AudioPool::new(), &alone, SR, None).unwrap();
+        // Nothing cued: the cue file is silent and the main mix the same.
+        render_wavs(&song, &AudioPool::new(), &main_path, Some(&cue_path), SR, None).unwrap();
+        assert_eq!(samples(&main_path), samples(&alone));
+        assert!(samples(&cue_path).iter().all(|s| *s == 0.0));
+        assert_eq!(samples(&cue_path).len(), samples(&main_path).len());
+        // The track cued: on the cue as in the mix.
+        song.channels[0].cue = true;
+        render_wavs(&song, &AudioPool::new(), &main_path, Some(&cue_path), SR, None).unwrap();
+        let same = samples(&main_path).iter().zip(samples(&alone)).all(|(a, b)| (a - b).abs() < 1e-6);
+        assert!(same && samples(&main_path).len() == samples(&alone).len());
+        let (main, cue) = (samples(&main_path), samples(&cue_path));
+        assert!(cue.iter().any(|s| s.abs() > 0.1));
+        assert!(main.iter().zip(&cue).all(|(m, c)| (m - c).abs() < 1e-5));
+        for path in [main_path, cue_path, alone] {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     #[test]

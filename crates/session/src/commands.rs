@@ -392,6 +392,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_solo,
     },
     CommandSpec {
+        id: "track.setCue",
+        label: "Turn a track's cue on or off: a cued track is also heard on the cue output (headphones, output.setCuePair), after its own volume and pan, while the main mix stays as it is",
+        params: &[TRACK, param("cue", ParamType::Bool, "true cues the track")],
+        kind: CommandKind::Edit,
+        run: set_cue,
+    },
+    CommandSpec {
         id: "clip.move",
         label: "Move an arrangement clip to a new start position, and to another track if asked; it replaces what it covers unless stacked",
         params: &[
@@ -1343,6 +1350,12 @@ fn set_solo(session: &mut Session, params: &Value) -> Result<Value, CommandError
         }
     }
     Ok(json!({ "solo": solo }))
+}
+
+fn set_cue(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let cue = params.get("cue").and_then(Value::as_bool).ok_or("cue must be true or false")?;
+    channel_param(session, params)?.cue = cue;
+    Ok(json!({ "cue": cue }))
 }
 
 fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

@@ -71,6 +71,8 @@ pub struct Column {
     pub stop_queued: bool,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (`track.setCue`).
+    pub cue: bool,
     pub volume_db: f64,
     /// The track's place in the project's track order, as `track.move` counts it, and how many
     /// groups it is inside.
@@ -165,6 +167,7 @@ impl Grid {
                 stop_queued: queued == Some(Queued::Stop),
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
+                cue: channel.is_some_and(|c| c.cue),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
