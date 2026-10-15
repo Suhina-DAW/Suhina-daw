@@ -380,6 +380,9 @@ struct Started {
     /// Which start of the device this answers; an older one is dropped.
     generation: u64,
     result: Result<(Plugin, PluginAudio, Option<String>), String>,
+    /// Its state read just after it started, for later reads to be compared with (a plug-in may
+    /// report a state it was given in a form of its own); `None` when it did not answer.
+    first_state: Option<SavedState>,
 }
 
 /// What a plug-in's control half did on a thread of its own, coming back.
@@ -812,11 +815,13 @@ impl Rack {
     /// whether what the graphs need to know changed (a latency).
     fn receive(&mut self, player: &mut Player, notices: &mut Vec<String>) -> bool {
         let mut changed = false;
-        let mut started_now = Vec::new();
         while let Ok(started) = self.receiver.try_recv() {
             let Some(instance) = self.instances.get_mut(&started.key) else { continue };
             if instance.generation != started.generation {
                 continue;
+            }
+            if let Some(state) = &started.first_state {
+                self.edits.read(started.key, state);
             }
             let name = instance.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
             match started.result {
@@ -837,18 +842,12 @@ impl Rack {
                         Err(e) => instance.status = PluginStatus::Failed(e.0),
                     }
                     instance.control = Some(control);
-                    started_now.push(started.key);
                 }
                 Err(why) => {
                     notices.push(format!("{name} could not start: {why}"));
                     instance.status = PluginStatus::Failed(why);
                 }
             }
-        }
-        // Its state as it runs, for later reads to be compared with (a plug-in may report a
-        // state it was given in a form of its own).
-        for key in started_now {
-            let _busy_then_next_time = self.lend(key, read_state);
         }
         changed
     }
@@ -920,7 +919,7 @@ impl Rack {
         let spawned = std::thread::Builder::new().name("suhina-plugin-restart".into()).spawn(move || {
             let mut control = control;
             let result = control.restart().map(|audio| (control, audio, None)).map_err(|e| e.to_string());
-            let _gone = sender.send(Started { key, generation, result });
+            let _gone = sender.send(Started { key, generation, result, first_state: None });
         });
         spawned.map(|_| ()).map_err(|e| CommandError(format!("could not restart the plug-in: {e}")))
     }
@@ -1074,11 +1073,13 @@ fn read_state(control: &mut Plugin) -> Done {
 fn spawn_start(sender: Sender<Started>, key: u64, generation: u64, launch: Launch, state: Option<SavedState>) {
     let fallback = sender.clone();
     let spawned = std::thread::Builder::new().name("suhina-plugin-start".into()).spawn(move || {
-        let result = start(launch, state).map_err(|e| e.to_string());
-        let _gone = sender.send(Started { key, generation, result });
+        let mut result = start(launch, state).map_err(|e| e.to_string());
+        let first_state = result.as_mut().ok().and_then(|(plugin, _, _)| plugin.save_state().ok());
+        let _gone = sender.send(Started { key, generation, result, first_state });
     });
     if let Err(e) = spawned {
-        let _gone = fallback.send(Started { key, generation, result: Err(format!("no thread to start it on: {e}")) });
+        let result = Err(format!("no thread to start it on: {e}"));
+        let _gone = fallback.send(Started { key, generation, result, first_state: None });
     }
 }
 
