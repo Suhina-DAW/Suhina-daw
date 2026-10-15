@@ -123,8 +123,9 @@ stops driving the launcher clock.
   next bar line, as launches quantised to bars do; the bar number keeps rising across the change.
 - **What the override covers:** the launcher clock and everything on it: launched clips, launch
   quantisation, the metronome, and the tempo, signature and position the control bar and
-  `launcher.state` show. Arrangement clips are on the timeline and keep their places: their notes
-  and audio stay where the map puts them.
+  `launcher.state` show. Arrangement clips are not retimed to a scene's tempo: they are on the
+  timeline, and their notes and audio stay where the map puts them while a scene's tempo plays.
+  Retiming the arrangement to a scene's tempo would be a separate feature.
 - **Back on the map.** The map drives the clock again
   - with `transport.followTempoMap` (a transport command, not an edit: nothing is undone),
   - when the transport starts again after a stop (a scene launched to start it takes the clock
