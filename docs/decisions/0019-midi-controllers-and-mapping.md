@@ -6,7 +6,7 @@ status: draft
 last_verified: 2026-10-15
 ---
 
-# 0018: MIDI controllers and mapping
+# 0019: MIDI controllers and mapping
 
 - **Status:** proposed
 - **Date:** 2026-10-15

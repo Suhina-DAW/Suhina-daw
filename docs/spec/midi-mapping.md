@@ -8,7 +8,7 @@ last_verified: 2026-10-15
 
 # MIDI controllers and mapping
 
-- **Sources:** Suhina's own design ([ADR 0018](../decisions/0018-midi-controllers-and-mapping.md)),
+- **Sources:** Suhina's own design ([ADR 0019](../decisions/0019-midi-controllers-and-mapping.md)),
   and the MIDI 1.0 specification for what the messages are (control change, note on and off,
   pitch bend, program change, 14-bit controller pairs).
 - **Status:** planned. Nothing here is implemented; the split into work is in the pull request
@@ -54,7 +54,7 @@ A value that means no change (0 in `twos` and `sign`, 64 in `offset`) is ignored
 ## Targets
 
 A command can be a target when its registry entry describes its **value**
-([ADR 0018](../decisions/0018-midi-controllers-and-mapping.md) decision 2). The first set:
+([ADR 0019](../decisions/0019-midi-controllers-and-mapping.md) decision 2). The first set:
 
 | Target | Command | Value kind |
 |---|---|---|
