@@ -241,7 +241,7 @@ fn number(ui: &mut DeviceUi, id: &str, bounds: [f32; 4], decimals: usize, log: b
             format: if id == "cutoff" { TextFormat::Frequency } else { TextFormat::Number },
             color,
             center,
-            bordered: false,
+            bordered: true,
             prefix: String::new(),
             suffix: String::new(),
         }),
@@ -349,7 +349,7 @@ fn build_panel(parameters: &[Parameter]) -> DeviceUi {
         number(&mut ui, &format!("offset_{side}"), [x, 98., 100., 24.], 1, false, TEXT, false);
         when(&mut ui, &sync, 1);
     }
-    button(&mut ui, "link", None, "↔", [122., 60., 34., 24.]);
+    button(&mut ui, "link", None, "↔", [122., 48., 34., 24.]);
     if let Some(c) = ui.controls.last_mut() {
         c.name = "Link channels".into();
         c.tooltip = "Link both channels; enabling copies the left timing to the right".into();

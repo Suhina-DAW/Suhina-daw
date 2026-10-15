@@ -143,9 +143,12 @@ and non-finite results evaluate to zero, like other drawing expressions. These s
 log-frequency band response in the Delay panel without changing DSP processing. Its plotted
 high-pass and low-pass losses use a two-pole magnitude model at every sampled frequency.
 Parameter text is fitted to its control's clip area, down to 8 logical pixels, and percent
-readouts omit the space before the unit. Delay offsets have explicit text labels.
-Keyboard and mouse focus use short grey corner brackets around the complete custom control;
-rotary controls include their caption inside that area. Starting a drag requests keyboard focus.
+readouts omit the space before the unit. Delay offsets have explicit text labels. Left-aligned Number widgets inset their text by four
+logical pixels. Menu and ValueMenu widgets have a frame and inset their arrow four pixels
+from the right edge; menu labels and arrows are vertically centered.
+Keyboard and mouse focus use short white corner brackets around the complete custom control;
+rotary controls include their caption inside that area. Pressing a control immediately requests keyboard focus and shows the corner brackets, including
+before a drag crosses its movement threshold. Delay numeric fields use framed Number widgets.
 
 ## Choice menus
 
@@ -170,7 +173,8 @@ Delay uses independent SDK UI nodes throughout its 944 by 168 logical-pixel pane
 Including the host header and padding, it fits a 200-pixel device slot.
 Time and Feedback occupy the left; Tone and Motion follow, with Mix at the far right. The only graph is Tone's filter response. All sections stay visible.
 
-Left and Right timing columns flank the link icon in Time. Beats/ms buttons switch between
+Left and Right timing columns flank the link icon in Time; the link button shares the
+vertical center of the timing menus. Beats/ms buttons switch between
 explicit note-length menus and millisecond fields. Link mirrors timing edits; each column has a synchronized offset field. Freeze sits
 below Feedback and Ping Pong below Mix. Repitch/Fade/Jump remain in Time. Tone exposes filter enable,
 centre frequency and octave width; Motion exposes rate mode/value, waveform,

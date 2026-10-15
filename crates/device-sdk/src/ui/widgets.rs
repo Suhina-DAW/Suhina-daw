@@ -73,7 +73,7 @@ fn number(ui: &mut DeviceUi, id: &str, b: [f32; 4], decimals: usize, log: bool, 
         gesture: UiGesture::Drag,
         x: None,
         y: Some(UiBinding { parameter: id.into(), logarithmic: log }),
-        drawing: vec![readout(id, if center { b[2] / 2. } else { 0. }, 0., decimals, color, center)],
+        drawing: vec![readout(id, if center { b[2] / 2. } else { 4. }, 0., decimals, color, center)],
     });
 }
 fn knob(ui: &mut DeviceUi, id: &str, label: &str, b: [f32; 4], log: bool) {
@@ -274,8 +274,8 @@ impl Widget {
                         }
                     }
                     if *bordered {
-                        c.drawing.insert(0, rect(0., 0., w.into(), height, [112, 112, 112, 255]));
-                        c.drawing.insert(1, rect(1., 1., (w - 2.).into(), height - 2., [30, 30, 30, 255]));
+                        c.drawing.insert(0, rect(0., 0., w.into(), height, RIM));
+                        c.drawing.insert(1, rect(1., 1., (w - 2.).into(), height - 2., [46, 45, 42, 255]));
                     }
                     if !suffix.is_empty() {
                         c.drawing.push(text(20., 0., suffix, *color, false));
@@ -415,13 +415,13 @@ impl Widget {
                     rect(1., 1., (w - 2.).into(), height - 2., [46, 45, 42, 255]),
                 ];
                 drawings.extend(choices.iter().map(|(value, label)| {
-                    conditional_text((w - 12.) / 2., (height - 10.) / 2., label, ACCENT, equal(id, *value))
+                    conditional_text((w - 16.) / 2., (height - 10.) / 2., label, ACCENT, equal(id, *value))
                 }));
                 drawings.push(Draw::Path {
                     points: vec![
-                        [(w - 10.).into(), (height / 2. - 2.).into()],
-                        [(w - 6.).into(), (height / 2. + 1.).into()],
-                        [(w - 2.).into(), (height / 2. - 2.).into()],
+                        [(w - 12.).into(), (height / 2. - 2.).into()],
+                        [(w - 8.).into(), (height / 2. + 1.).into()],
+                        [(w - 4.).into(), (height / 2. - 2.).into()],
                     ],
                     color: ACCENT,
                     width: 1.,
@@ -431,17 +431,19 @@ impl Widget {
                 return drawings;
             }
             Self::Menu => {
-                let mut label = readout(id, 0., 0., 0, ACCENT, false);
+                let mut label = readout(id, 4., (height - 10.) / 2., 0, ACCENT, false);
                 if let Draw::Text { format, .. } = &mut label {
                     *format = TextFormat::Choice;
                 }
                 return vec![
+                    rect(0., 0., w.into(), height, RIM),
+                    rect(1., 1., (w - 2.).into(), height - 2., [46, 45, 42, 255]),
                     label,
                     Draw::Path {
                         points: vec![
-                            [(w - 6.).into(), 4.0.into()],
-                            [(w - 3.).into(), 7.0.into()],
-                            [w.into(), 4.0.into()],
+                            [(w - 12.).into(), (height / 2. - 2.).into()],
+                            [(w - 8.).into(), (height / 2. + 1.).into()],
+                            [(w - 4.).into(), (height / 2. - 2.).into()],
                         ],
                         color: ACCENT,
                         width: 1.,

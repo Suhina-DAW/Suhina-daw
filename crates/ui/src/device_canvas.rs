@@ -283,7 +283,7 @@ pub(crate) fn show(
         } else {
             response
         };
-        if response.clicked() || response.drag_started() {
+        if response.is_pointer_button_down_on() || response.clicked() || response.drag_started() {
             response.request_focus();
         }
         let focused = response.has_focus();
@@ -491,10 +491,10 @@ pub(crate) fn show(
             info.current_text_value = Some(descriptions.join(", "));
             info
         });
-        if focused {
+        if focused || response.is_pointer_button_down_on() || response.dragged() {
             let r = bounds.shrink(0.5);
             let leg = 3.0_f32.min(r.width() * 0.25).min(r.height() * 0.25);
-            let stroke = Stroke::new(1., crate::theme::accent());
+            let stroke = Stroke::new(1., Color32::WHITE);
             for (corner, dx, dy) in [
                 (r.left_top(), 1., 1.),
                 (r.right_top(), -1., 1.),

@@ -669,3 +669,38 @@ fn delay_uses_independent_widgets_and_rejects_invalid_widget_contracts() {
     }
     assert!(bad.validate().is_err());
 }
+
+#[test]
+fn delay_controls_have_padding_frames_and_aligned_centres() {
+    use suhina_device_sdk::ui::Draw;
+    let graph = examples::build("delay").unwrap();
+    let canvas = graph.ui.as_ref().unwrap();
+    let control = |id: &str| canvas.controls.iter().find(|c| c.id == id).unwrap();
+    let lookup = |_: &str, _: bool, _: bool| 0.;
+    let link = control("link_99");
+    let timing = control("division_left");
+    assert_eq!(link.bounds[1] + link.bounds[3] / 2., timing.bounds[1] + timing.bounds[3] / 2.);
+    assert!(
+        canvas
+            .controls
+            .iter()
+            .filter_map(|c| c.widget.as_ref())
+            .all(|w| !matches!(w, suhina_device_sdk::ui::Widget::Number { bordered: false, .. }))
+    );
+    let offset = control("offset_left").drawings();
+    assert!(offset.iter().any(|d| matches!(d, Draw::Text { position, .. } if position[0].evaluate(&lookup) == 4.)));
+    for id in ["division_left", "division_right", "mod_rate_mode_99"] {
+        let c = control(id);
+        let drawings = c.drawings();
+        assert!(matches!(drawings[0], Draw::Rect { .. }), "{id}");
+        let points = drawings
+            .iter()
+            .find_map(|d| match d {
+                Draw::Path { points, .. } => Some(points),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(points.last().unwrap()[0].evaluate(&lookup), c.bounds[2] - 4.);
+        assert_eq!(points[0][1].evaluate(&lookup), c.bounds[3] / 2. - 2.);
+    }
+}
