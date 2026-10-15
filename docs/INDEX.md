@@ -53,6 +53,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [Extensions](spec/extensions.md) | spec | planned | extension, add-on, optional component, extension manifest, extension.json, model weights, licence shown to the user, extensions.add, extensions.list, missing extension, inference runtime | How Suhina uses an optional component it does not ship — the manifest and the licence it must carry, adding and listing one, what the user sees, and what happens when an extension is missing, crashes or hangs |
 | [FL Studio project (`.flp`) format](spec/flp-format.md) | spec | draft | reading .flp, FL Studio project, FLhd, FLdt, event stream, event id, varint, LEB128, UTF-16 strings, version event 199, flp reader errors | The FL Studio project (.flp) container and event stream as read by crates/flp, a draft spec where most statements are hypotheses |
+| [Level meters](spec/level-meters.md) | spec | current | level meter, meters, peak, RMS, clip indicator, clipping, peak hold, mixer.levels, mixer.resetClip, MeterMonitor, track header meter, mixer strip meter, dBFS | What the level meters measure (tracks, groups, returns, the main output), their ballistics, the clip indicator, where the window shows them and the commands that read and reset them |
 | [MIDI controllers and mapping](spec/midi-mapping.md) | spec | planned | MIDI learn, MIDI mapping, map a knob, mapping mode, controller profile, controllers folder, controller_mappings, takeover, pick up, relative encoder, 14-bit CC, mapping.add, mapping.learn, controllers.list, gesture, controller feedback | What a MIDI controller can do in Suhina - sources, targets, ranges, takeover, relative encoders, gestures and undo, the controller profile file, mappings saved in a project, the mapping mode and MIDI learn, the commands, and how malformed input is treated |
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
 | [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them |
@@ -126,6 +127,8 @@ Change this code, and check these documents.
 | `crates/engine/src/follow_tests.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/launcher.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/meters.rs` | [Level meters](spec/level-meters.md) |
+| `crates/engine/src/meters_tests.rs` | [Level meters](spec/level-meters.md) |
 | `crates/engine/src/plugin.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/plugin_params.rs` | [Automation](spec/automation.md) |
 | `crates/engine/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
@@ -172,6 +175,7 @@ Change this code, and check these documents.
 | `crates/session/src/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/src/lib.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/library.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
+| `crates/session/src/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/session/src/notes.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
 | `crates/session/src/plugins.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
@@ -183,6 +187,8 @@ Change this code, and check these documents.
 | `crates/session/tests/automation.rs` | [Automation](spec/automation.md) |
 | `crates/session/tests/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/session/tests/meters.rs` | [Level meters](spec/level-meters.md) |
+| `crates/session/tests/scenes.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
@@ -200,7 +206,8 @@ Change this code, and check these documents.
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
-| `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
+| `crates/ui/src/meter.rs` | [Components](design/components.md), [Level meters](spec/level-meters.md) |
 | `crates/ui/src/missing_files.rs` | [Architecture](architecture.md), [Components](design/components.md), [Missing files](spec/missing-files.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/piano_roll.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
@@ -218,6 +225,7 @@ Change this code, and check these documents.
 | `crates/ui/src/waveform/tests.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/automation_lanes.rs` | [Automation](spec/automation.md) |
+| `crates/ui/tests/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/ui/tests/waveforms.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/themes/**` | [Design brief](design/brief.md) |
 | `devices/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
