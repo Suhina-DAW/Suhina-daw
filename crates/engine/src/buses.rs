@@ -11,6 +11,7 @@ use suhina_model::{ChannelId, ChannelRole, Project, TrackId};
 
 use crate::chain::Chain;
 use crate::plugin::{Delay, Plugins};
+use crate::sends::{self, SendOut};
 use crate::{MAX_LATENCY_SECONDS, track_gains};
 
 /// The most channels a route is followed through, so a routing cycle cannot loop forever.
@@ -34,6 +35,17 @@ pub(crate) fn build(
         .iter()
         .filter_map(|track| Chain::build(project, track.id, column_of(track.id), (0.0, 0.0), sample_rate, plugins))
         .collect();
+
+    // Sends (see `sends`): every track with a heard send, and every return fed by one, has a
+    // chain, so the send has a buffer to read and one to add to.
+    let planned = sends::plan(project);
+    for track in &project.tracks {
+        if chains.iter().all(|c| c.track != track.id)
+            && planned.iter().any(|p| p.source == track.id || p.target == track.id)
+        {
+            chains.push(Chain::passthrough(track.id, column_of(track.id)));
+        }
+    }
 
     // A bus: a track with a chain that some other channel plays into.
     let channel_of = |track: TrackId| project.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel);
@@ -68,15 +80,33 @@ pub(crate) fn build(
                 chains.push(Chain::passthrough(track.id, column_of(track.id)));
             }
         }
-        // Deepest first: a chain with more buses after it comes before them.
-        chains.sort_by_key(|c| std::cmp::Reverse(buses_after(c.track).len()));
     }
+    // Every chain before the bus it plays into and the returns it sends to.
+    let chains = sends::order(chains, |c| {
+        buses_after(c.track)
+            .first()
+            .map(|(bus, _)| *bus)
+            .into_iter()
+            .chain(planned.iter().filter(|p| p.source == c.track).map(|p| p.target))
+            .collect()
+    });
+    let mut chains = chains;
 
     let targets: Vec<Option<(usize, ChannelId)>> = chains
         .iter()
         .map(|c| {
             let (bus, channel) = *buses_after(c.track).first()?;
             Some((chains.iter().position(|o| o.track == bus)?, channel))
+        })
+        .collect();
+    let send_targets: Vec<Vec<(usize, TrackId, (f32, f32))>> = chains
+        .iter()
+        .map(|c| {
+            planned
+                .iter()
+                .filter(|p| p.source == c.track)
+                .filter_map(|p| Some((chains.iter().position(|o| o.track == p.target)?, p.target, p.gains)))
+                .collect()
         })
         .collect();
     for (chain, target) in chains.iter_mut().zip(&targets) {
@@ -87,14 +117,15 @@ pub(crate) fn build(
         chain.target = target.map(|(index, _)| index);
     }
     for index in 0..chains.len() {
-        let fed = targets.iter().any(|t| t.is_some_and(|(target, _)| target == index));
+        let fed = targets.iter().any(|t| t.is_some_and(|(target, _)| target == index))
+            || send_targets.iter().flatten().any(|(target, _, _)| *target == index);
         if let Some(chain) = chains.get_mut(index) {
             chain.is_bus = fed;
         }
     }
 
-    // Latency compensation. A chain's sources start without delay; a bus's input is the latest
-    // of the chains that feed it, each delayed to it; everything reaching the output is delayed
+    // Latency compensation. A chain's sources start without delay; a bus's or a return's input
+    // is the latest of the chains that feed it, each delayed to it; everything reaching the output is delayed
     // to the latest path, bounded so a plug-in that reports nonsense cannot take all memory.
     let max_latency = sample_rate.saturating_mul(MAX_LATENCY_SECONDS);
     let mut arrive = vec![0u32; chains.len()];
@@ -105,10 +136,12 @@ pub(crate) fn build(
         if let Some(slot) = arrive.get_mut(i) {
             *slot = at;
         }
-        if let Some(Some((target, _))) = targets.get(i)
-            && let Some(slot) = input.get_mut(*target)
-        {
-            *slot = (*slot).max(at);
+        let fed = targets.get(i).copied().flatten().map(|(target, _)| target).into_iter();
+        let sent = send_targets.get(i).into_iter().flatten().map(|(target, _, _)| *target);
+        for target in fed.chain(sent) {
+            if let Some(slot) = input.get_mut(target) {
+                *slot = (*slot).max(at);
+            }
         }
     }
     let latency = (0..chains.len())
@@ -117,11 +150,22 @@ pub(crate) fn build(
         .max()
         .unwrap_or(0);
     for (i, chain) in chains.iter_mut().enumerate() {
+        let arrived = arrive.get(i).copied().unwrap_or(0);
         let to = match targets.get(i) {
             Some(Some((target, _))) => input.get(*target).copied().unwrap_or(0),
             _ => latency,
         };
-        chain.delay = Delay::new(to.saturating_sub(arrive.get(i).copied().unwrap_or(0)) as usize);
+        chain.delay = Delay::new(to.saturating_sub(arrived) as usize);
+        let sends = send_targets
+            .get(i)
+            .into_iter()
+            .flatten()
+            .map(|&(target, track, gains)| {
+                let delay = input.get(target).copied().unwrap_or(0).saturating_sub(arrived);
+                SendOut::new(target, track, gains, delay as usize)
+            })
+            .collect();
+        chain.set_sends(sends);
     }
     (chains, latency)
 }

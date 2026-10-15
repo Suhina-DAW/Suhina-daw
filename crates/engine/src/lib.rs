@@ -21,6 +21,9 @@ mod plugin_tests;
 mod preview;
 #[cfg(test)]
 mod preview_tests;
+mod sends;
+#[cfg(test)]
+mod sends_tests;
 mod stretch;
 mod swap;
 
@@ -529,15 +532,8 @@ impl Renderer {
                 chain.collect(frames);
             }
         }
-        // In order, so a bus has every chain that plays into it before it runs.
-        for i in 0..self.graph.chains.len() {
-            let (done, later) = self.graph.chains.split_at_mut(i + 1);
-            let Some(chain) = done.last_mut() else { continue };
-            match chain.target.and_then(|t| t.checked_sub(i + 1)).and_then(|t| later.get_mut(t)) {
-                Some(bus) => chain.finish(bus.input(frames), frames, &context),
-                None => chain.finish(out, frames, &context),
-            }
-        }
+        // In order, so a bus or a return has every chain that plays into it before it runs.
+        sends::finish(&mut self.graph.chains, out, frames, &context);
         // The preview comes after every track and the main channel's mix (ADR 0011).
         self.preview.finish(out, frames, &mut self.graph.chains);
         self.block_frame = 0;
