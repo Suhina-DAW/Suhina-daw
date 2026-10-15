@@ -310,3 +310,163 @@ fn the_wheel_scrolls_and_ctrl_zooms() {
     wheel(&mut h, vec2(0.0, 60.0), Modifiers::COMMAND | Modifiers::SHIFT);
     assert!(h.state().piano_roll().key_height > height);
 }
+
+/// Clicks note `index`, which selects it alone and gives the piano roll the keyboard.
+fn pick(h: &mut Harness<'static, App>, index: usize) {
+    let at = note_rect(h, &notes(h)[index]).center();
+    click(h, at, Modifiers::NONE);
+    h.run();
+}
+
+fn key(h: &mut Harness<'static, App>, modifiers: Modifiers, key: Key) {
+    h.key_press_modifiers(modifiers, key);
+    h.run();
+}
+
+#[test]
+fn ctrl_a_selects_every_note_and_escape_clears() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    pick(&mut h, 0);
+    key(&mut h, Modifiers::COMMAND, Key::A);
+    assert_eq!(selected(&h), (0..before.len()).collect::<Vec<_>>());
+    key(&mut h, Modifiers::NONE, Key::Escape);
+    assert!(selected(&h).is_empty());
+    assert_eq!(notes(&h), before);
+    assert!(!h.state().session().unwrap().can_undo(), "selecting is no undo step");
+}
+
+#[test]
+fn arrows_move_the_selection_by_a_grid_step_a_semitone_or_an_octave() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let first = before[0];
+    pick(&mut h, 0);
+    // The grid is an eighth: half a beat.
+    key(&mut h, Modifiers::NONE, Key::ArrowRight);
+    assert_eq!(notes(&h)[0].time, first.time + 0.5);
+    key(&mut h, Modifiers::NONE, Key::ArrowLeft);
+    assert_eq!(notes(&h)[0].time, first.time);
+    key(&mut h, Modifiers::NONE, Key::ArrowUp);
+    assert_eq!(notes(&h)[0].key, first.key + 1);
+    key(&mut h, Modifiers::NONE, Key::ArrowDown);
+    assert_eq!(notes(&h)[0].key, first.key);
+    key(&mut h, Modifiers::SHIFT, Key::ArrowUp);
+    assert_eq!(notes(&h)[0].key, first.key + 12);
+    key(&mut h, Modifiers::SHIFT, Key::ArrowDown);
+    assert_eq!(notes(&h)[0], first);
+    // The other notes stayed; each key was one undo step.
+    assert_eq!(&notes(&h)[1..], &before[1..]);
+    undo(&mut h);
+    assert_eq!(notes(&h)[0].key, first.key + 12);
+    assert_eq!(selected(&h), [0]);
+}
+
+#[test]
+fn shift_left_and_right_change_the_selections_length_by_a_grid_step() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let first = notes(&h)[0];
+    pick(&mut h, 0);
+    key(&mut h, Modifiers::SHIFT, Key::ArrowRight);
+    key(&mut h, Modifiers::SHIFT, Key::ArrowRight);
+    assert!((notes(&h)[0].duration - first.duration - 1.0).abs() < 1e-9);
+    key(&mut h, Modifiers::SHIFT, Key::ArrowLeft);
+    assert!((notes(&h)[0].duration - first.duration - 0.5).abs() < 1e-9);
+    // Never shorter than a step by the keys.
+    for _ in 0..40 {
+        h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowLeft);
+        h.step();
+    }
+    h.run();
+    let length = notes(&h)[0].duration;
+    assert!(length >= 0.5 - 1e-9 && length < 1.0, "{length}");
+}
+
+#[test]
+fn copy_and_paste_put_the_notes_after_the_selection_and_select_them() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    pick(&mut h, 1);
+    key(&mut h, Modifiers::COMMAND, Key::C);
+    assert_eq!(notes(&h), before, "copy changes nothing");
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    let after = notes(&h);
+    assert_eq!(after.len(), before.len() + 1);
+    let pasted = after[before.len()];
+    assert_eq!((pasted.time, pasted.key), (before[1].time + before[1].duration, before[1].key));
+    assert_eq!(selected(&h), [before.len()]);
+    // Again: after the pasted note, which is now the selection.
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    assert_eq!(notes(&h)[before.len() + 1].time, pasted.time + pasted.duration);
+    undo(&mut h);
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+}
+
+#[test]
+fn cut_removes_the_notes_and_paste_brings_them_back() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let clips = |h: &Harness<'static, App>| h.state().session().unwrap().project().arrangement.lanes[0].clips.len();
+    let count = clips(&h);
+    pick(&mut h, 0);
+    key(&mut h, Modifiers::COMMAND, Key::X);
+    assert_eq!(notes(&h), &before[1..]);
+    assert_eq!(clips(&h), count, "the clip stays");
+    assert!(selected(&h).is_empty());
+    // Nothing selected: the paste goes where the command puts it, right after the cut note.
+    key(&mut h, Modifiers::COMMAND, Key::V);
+    let back = *notes(&h).last().unwrap();
+    assert_eq!((back.time, back.key), (before[0].time + before[0].duration, before[0].key));
+    undo(&mut h);
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+}
+
+#[test]
+fn ctrl_d_duplicates_the_selection_right_after_it() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    pick(&mut h, 0);
+    let at = note_rect(&h, &before[1]).center();
+    click(&mut h, at, Modifiers::SHIFT);
+    h.run();
+    key(&mut h, Modifiers::COMMAND, Key::D);
+    let after = notes(&h);
+    assert_eq!(after.len(), before.len() + 2);
+    let span = (before[0].time + before[0].duration).max(before[1].time + before[1].duration)
+        - before[0].time.min(before[1].time);
+    assert_eq!(after[before.len()].time, before[0].time + span);
+    assert_eq!(after[before.len() + 1].time, before[1].time + span);
+    assert_eq!(selected(&h), [before.len(), before.len() + 1]);
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+}
+
+#[test]
+fn the_keys_leave_the_notes_alone_when_the_piano_roll_does_not_have_the_keyboard() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    pick(&mut h, 0);
+    // A click outside the piano roll (on the clip in the arrangement) takes the keyboard away.
+    h.get_by_label(CLIP).click();
+    h.run();
+    assert!(!h.state().piano_roll().focused);
+    for (modifiers, k) in [
+        (Modifiers::NONE, Key::ArrowRight),
+        (Modifiers::NONE, Key::ArrowUp),
+        (Modifiers::SHIFT, Key::ArrowRight),
+        (Modifiers::COMMAND, Key::A),
+    ] {
+        key(&mut h, modifiers, k);
+    }
+    assert_eq!(notes(&h), before);
+    assert!(!h.state().session().unwrap().can_undo());
+}

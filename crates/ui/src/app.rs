@@ -957,6 +957,8 @@ impl App {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
+                // A hidden piano roll does not keep the keyboard.
+                self.piano_roll.focused = false;
                 inner
             };
             // A drag from the browser: the views say what is under the pointer.
@@ -1151,6 +1153,17 @@ impl App {
         let (track, index) = clip?;
         let quantization = suhina_session::parse_quantization(self.quantization).ok()?;
         piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)
+    }
+
+    /// What a key does in the piano roll, when it shows a clip and has the keyboard.
+    fn piano_key(&mut self, action: &str) -> Option<Action> {
+        if self.shown != View::Arrangement {
+            return None;
+        }
+        let clip = self.piano_clip(self.arrangement.selected_clip())?;
+        let playhead = self.timeline.as_ref().map_or(0.0, |(_, t)| t.beat);
+        let copied = self.session().and_then(Session::copied_notes);
+        self.piano_roll.key_action(action, &clip, playhead, copied)
     }
 
     /// The piano roll's state: its zoom, scroll and selected notes.
@@ -1638,7 +1651,9 @@ impl App {
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        let pressed = ui.input_mut(|i| self.keymap.pressed(i));
+        // The piano roll's own keys only while it has the keyboard.
+        let notes = self.piano_roll.focused;
+        let pressed = ui.input_mut(|i| self.keymap.pressed(i, |id| notes || !crate::keymap::piano_roll_only(id)));
         for action in pressed {
             self.do_action(&action, actions);
         }
@@ -1698,6 +1713,14 @@ impl App {
             }
             // Delete in the piano roll deletes its selected notes, not the clip.
             "selection.delete" if let Some(delete) = self.piano_roll.delete_selected() => actions.push(delete),
+            // Copy, cut, paste and duplicate in the piano roll act on its notes, when it has some
+            // to act on; its own keys act only there.
+            "selection.copy" | "selection.cut" | "selection.paste" | "selection.duplicate"
+                if let Some(edit) = self.piano_key(action) =>
+            {
+                actions.push(edit)
+            }
+            _ if crate::keymap::piano_roll_only(action) => actions.extend(self.piano_key(action)),
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
                 let Some((track, index)) = self.arrangement.selected_clip() else { return };
                 let id = match action {
@@ -1966,7 +1989,7 @@ impl App {
             let keys = if embedded || ui.ctx().egui_wants_keyboard_input() {
                 Vec::new()
             } else {
-                ui.input_mut(|i| keymap.pressed(i))
+                ui.input_mut(|i| keymap.pressed(i, |id| !crate::keymap::piano_roll_only(id)))
             };
             ui.input(|i| MapWindowFrame {
                 changed,
