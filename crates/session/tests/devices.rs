@@ -197,6 +197,58 @@ fn sd_effects_load_into_tracks_and_expose_their_parameters() {
     let _ = std::fs::remove_file(path);
 }
 
+#[test]
+fn sd_midi_effects_and_instruments_insert_on_midi_tracks_in_chain_order() {
+    let mut midi_effect =
+        suhina_device_sdk::DeviceGraph::new("test.transpose", "Transpose", suhina_device_sdk::DeviceRole::MidiEffect);
+    midi_effect.nodes = vec![
+        suhina_device_sdk::Node::new("in", suhina_device_sdk::NodeKind::MidiInput),
+        suhina_device_sdk::Node::new("transpose", suhina_device_sdk::NodeKind::MidiTranspose { semitones: 12 }),
+        suhina_device_sdk::Node::new("out", suhina_device_sdk::NodeKind::MidiOutput),
+    ];
+    midi_effect.connections = vec![
+        suhina_device_sdk::Connection::new("in", "transpose"),
+        suhina_device_sdk::Connection::new("transpose", "out"),
+    ];
+    let midi_path = std::env::temp_dir().join(format!("suhina-test-{}-midi.sd", std::process::id()));
+    std::fs::write(&midi_path, midi_effect.to_sd().expect("valid MIDI effect")).expect("write test file");
+    let mut session = Session::new(project());
+    assert_eq!(run(&mut session, "device.addSd", json!({ "track": 1, "path": midi_path })).unwrap()["device"], 0);
+    assert_eq!(run(&mut session, "device.add", json!({ "track": 1, "id": "fm-synth" })).unwrap()["device"], 1);
+    assert_eq!(run(&mut session, "track.devices", json!({ "track": 1 })).unwrap()[0]["role"], "midi_effect");
+    assert_eq!(
+        session.project().channels[0].devices[0]
+            .state
+            .as_ref()
+            .map(|s| String::from_utf8_lossy(s).contains("midi_effect")),
+        Some(true)
+    );
+
+    let mut instrument =
+        suhina_device_sdk::DeviceGraph::new("test.instrument", "Instrument", suhina_device_sdk::DeviceRole::Instrument);
+    instrument.nodes = vec![
+        suhina_device_sdk::Node::new("gate", suhina_device_sdk::NodeKind::MidiGate),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    instrument.connections = vec![suhina_device_sdk::Connection::new("gate", "out")];
+    let instrument_path = std::env::temp_dir().join(format!("suhina-test-{}-instrument.sd", std::process::id()));
+    std::fs::write(&instrument_path, instrument.to_sd().expect("valid instrument")).expect("write test file");
+    let mut blank = project();
+    blank.channels[0].devices.clear();
+    let mut session = Session::new(blank);
+    assert_eq!(run(&mut session, "device.addSd", json!({ "track": 1, "path": instrument_path })).unwrap()["device"], 0);
+    assert_eq!(run(&mut session, "track.devices", json!({ "track": 1 })).unwrap()[0]["role"], "instrument");
+    assert_eq!(
+        session.project().channels[0].devices[0]
+            .state
+            .as_ref()
+            .map(|s| String::from_utf8_lossy(s).contains("instrument")),
+        Some(true)
+    );
+    let _ = std::fs::remove_file(midi_path);
+    let _ = std::fs::remove_file(instrument_path);
+}
+
 /// A catalog with one installed effect and one instrument, as a scan would have found them.
 fn plugin_env() -> std::sync::Arc<suhina_session::PluginEnv> {
     use suhina_plugins::scan::{Catalog, PluginInfo};

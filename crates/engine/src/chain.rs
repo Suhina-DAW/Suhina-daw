@@ -37,6 +37,8 @@ pub(crate) const CHAIN_INPUT_GAIN: f32 = 0.25;
 pub(crate) enum Slot {
     Device(Box<dyn Device>),
     Sd(suhina_device_sdk::PreparedEffect),
+    InstrumentSd(suhina_device_sdk::PreparedEffect),
+    MidiSd(suhina_device_sdk::PreparedMidiEffect),
     Plugin(PluginSlot),
 }
 
@@ -72,6 +74,7 @@ pub(crate) struct Chain {
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
     span_events: Vec<(usize, NoteEvent)>,
+    midi_scratch: Vec<(usize, NoteEvent)>,
     /// The current block's: when plug-ins must have answered (`None` offline), and the
     /// transport.
     deadline: Option<Instant>,
@@ -116,31 +119,66 @@ impl Chain {
                     let Some(bytes) = stored.state.as_deref() else { continue };
                     let Ok(text) = std::str::from_utf8(bytes) else { continue };
                     let Ok(graph) = suhina_device_sdk::DeviceGraph::from_sd(text) else { continue };
-                    if !stored.enabled || graph.role != suhina_device_sdk::DeviceRole::Effect {
+                    if !stored.enabled {
                         continue;
                     }
-                    let Ok(mut effect) = graph.compile_at(f64::from(sample_rate)) else { continue };
-                    let values: Vec<f64> = graph
-                        .parameters
-                        .iter()
-                        .map(|parameter| {
-                            stored
-                                .params
+                    let slot = match graph.role {
+                        suhina_device_sdk::DeviceRole::Effect => {
+                            let Ok(mut effect) = graph.compile_at(f64::from(sample_rate)) else { continue };
+                            let values: Vec<f64> = graph
+                                .parameters
                                 .iter()
-                                .find(|value| value.id == parameter.id)
-                                .map_or(parameter.default, |value| value.value.clamp(parameter.min, parameter.max))
-                        })
-                        .collect();
-                    for (index, value) in values.iter().copied().enumerate() {
-                        effect.set_parameter(index, value);
-                    }
+                                .map(|parameter| {
+                                    stored
+                                        .params
+                                        .iter()
+                                        .find(|value| value.id == parameter.id)
+                                        .map_or(parameter.default, |value| {
+                                            value.value.clamp(parameter.min, parameter.max)
+                                        })
+                                })
+                                .collect();
+                            for (index, value) in values.iter().copied().enumerate() {
+                                effect.set_parameter(index, value);
+                            }
+                            params.push(values);
+                            Slot::Sd(effect)
+                        }
+                        suhina_device_sdk::DeviceRole::MidiEffect => {
+                            let Ok(effect) = graph.compile_midi() else { continue };
+                            params.push(Vec::new());
+                            Slot::MidiSd(effect)
+                        }
+                        suhina_device_sdk::DeviceRole::Instrument => {
+                            let Ok(mut instrument) = graph.compile_instrument_at(f64::from(sample_rate)) else {
+                                continue;
+                            };
+                            let values: Vec<f64> = graph
+                                .parameters
+                                .iter()
+                                .map(|parameter| {
+                                    stored
+                                        .params
+                                        .iter()
+                                        .find(|value| value.id == parameter.id)
+                                        .map_or(parameter.default, |value| {
+                                            value.value.clamp(parameter.min, parameter.max)
+                                        })
+                                })
+                                .collect();
+                            for (index, value) in values.iter().copied().enumerate() {
+                                instrument.set_parameter(index, value);
+                            }
+                            params.push(values);
+                            Slot::InstrumentSd(instrument)
+                        }
+                    };
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     use std::hash::{Hash, Hasher};
                     bytes.hash(&mut hasher);
-                    slots.push(Slot::Sd(effect));
+                    slots.push(slot);
                     positions.push(position);
                     ids.push(format!("sd:{}:{:016x}", graph.id, hasher.finish()));
-                    params.push(values);
                     continue;
                 }
                 DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. } => {
@@ -189,12 +227,12 @@ impl Chain {
             ids.push(id.clone());
             params.push(values);
         }
-        let instrument = match slots.first() {
-            Some(Slot::Device(device)) => device.info().role == Role::Instrument,
-            Some(Slot::Plugin(slot)) => slot.instrument,
-            Some(Slot::Sd(_)) => false,
-            None => false,
-        };
+        let instrument = slots.iter().any(|slot| match slot {
+            Slot::Device(device) => device.info().role == Role::Instrument,
+            Slot::Plugin(slot) => slot.instrument,
+            Slot::InstrumentSd(_) => true,
+            Slot::Sd(_) | Slot::MidiSd(_) => false,
+        });
         (!slots.is_empty()).then(|| Self {
             track,
             column,
@@ -211,6 +249,7 @@ impl Chain {
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
+            midi_scratch: Vec::with_capacity(MAX_PENDING),
             deadline: None,
             context: ProcessContext::default(),
             done: 0,
@@ -240,6 +279,7 @@ impl Chain {
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::new(),
             span_events: Vec::new(),
+            midi_scratch: Vec::new(),
             deadline: None,
             context: ProcessContext::default(),
             done: 0,
@@ -287,7 +327,8 @@ impl Chain {
             return true;
         }
         let to = frames.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, .. } = self;
+        let Self { slots, buffer, pending, span_events, midi_scratch, done, deadline, context, stage, waiting, .. } =
+            self;
         let from = (*done).min(to);
         while let Some(slot) = slots.get_mut(*stage) {
             match slot {
@@ -309,6 +350,24 @@ impl Chain {
                         }
                         effect.process_context(&sd_context, span);
                     }
+                }
+                Slot::InstrumentSd(instrument) => {
+                    span_events.clear();
+                    let last = (to - from).saturating_sub(1);
+                    span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
+                        let mut sd_context = *context;
+                        if sd_context.playing {
+                            sd_context.beat += from as f64 * sd_context.tempo / (60.0 * instrument.sample_rate());
+                        }
+                        instrument.process_instrument_context(&sd_context, span_events, span);
+                    }
+                }
+                Slot::MidiSd(effect) => {
+                    midi_scratch.resize(pending.len(), (0, NoteEvent::AllNotesOff));
+                    let count = effect.process(pending, midi_scratch);
+                    midi_scratch.truncate(count);
+                    std::mem::swap(pending, midi_scratch);
                 }
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
@@ -438,7 +497,7 @@ impl Chain {
     /// event over at its frame.
     fn run(&mut self, frame: usize) {
         let to = frame.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, .. } = self;
+        let Self { slots, buffer, pending, span_events, midi_scratch, done, deadline, context, .. } = self;
         let from = (*done).min(to);
         for slot in slots.iter_mut() {
             match slot {
@@ -460,6 +519,24 @@ impl Chain {
                         }
                         effect.process_context(&sd_context, span);
                     }
+                }
+                Slot::InstrumentSd(instrument) => {
+                    span_events.clear();
+                    let last = (to - from).saturating_sub(1);
+                    span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
+                        let mut sd_context = *context;
+                        if sd_context.playing {
+                            sd_context.beat += from as f64 * sd_context.tempo / (60.0 * instrument.sample_rate());
+                        }
+                        instrument.process_instrument_context(&sd_context, span_events, span);
+                    }
+                }
+                Slot::MidiSd(effect) => {
+                    midi_scratch.resize(pending.len(), (0, NoteEvent::AllNotesOff));
+                    let count = effect.process(pending, midi_scratch);
+                    midi_scratch.truncate(count);
+                    std::mem::swap(pending, midi_scratch);
                 }
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
@@ -498,7 +575,7 @@ impl Chain {
             if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
                 *slot = device.param(param).unwrap_or(value);
             }
-        } else if let Some(Slot::Sd(effect)) = self.slots.get_mut(index) {
+        } else if let Some(Slot::Sd(effect) | Slot::InstrumentSd(effect)) = self.slots.get_mut(index) {
             effect.set_parameter(param, value);
             if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
                 *slot = value;
@@ -521,11 +598,12 @@ impl Chain {
                         device.set_param(index, value);
                     }
                 }
-                (Slot::Sd(effect), _) => {
+                (Slot::Sd(effect) | Slot::InstrumentSd(effect), _) => {
                     for (index, &value) in values.iter().enumerate() {
                         effect.set_parameter(index, value);
                     }
                 }
+                (Slot::MidiSd(_), _) => {}
                 (Slot::Plugin(running), Slot::Plugin(fresh)) => {
                     running.enabled = fresh.enabled;
                     running.instrument = fresh.instrument;
@@ -550,6 +628,8 @@ impl Chain {
             Slot::Plugin(plugin) => Some(plugin),
             Slot::Device(_) => None,
             Slot::Sd(_) => None,
+            Slot::InstrumentSd(_) => None,
+            Slot::MidiSd(_) => None,
         })
     }
 

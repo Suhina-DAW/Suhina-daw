@@ -159,6 +159,58 @@ fn an_sd_gain_graph_runs_in_the_offline_device_chain() {
 }
 
 #[test]
+fn an_sd_midi_effect_transposes_notes_before_the_instrument() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.transpose", "Transpose", suhina_device_sdk::DeviceRole::MidiEffect);
+    graph.nodes = vec![
+        suhina_device_sdk::Node::new("in", suhina_device_sdk::NodeKind::MidiInput),
+        suhina_device_sdk::Node::new("up", suhina_device_sdk::NodeKind::MidiTranspose { semitones: 12 }),
+        suhina_device_sdk::Node::new("out", suhina_device_sdk::NodeKind::MidiOutput),
+    ];
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("in", "up"), suhina_device_sdk::Connection::new("up", "out")];
+    let mut transpose = device("sd", &[]);
+    transpose.kind = DeviceKind::Sd;
+    transpose.state = graph.to_sd().ok().map(String::into_bytes);
+    let notes = vec![note(0.0, 1.0, 48)];
+    let original = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let shifted = render_offline(&project(notes, 1.0, vec![transpose, device("fm-synth", &[])]), SR, 512).unwrap();
+    let expected =
+        render_offline(&project(vec![note(0.0, 1.0, 60)], 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    assert!(peak(&shifted) > 1e-3);
+    assert!(max_diff(&expected, &shifted) < 1e-6);
+    assert!(max_diff(&original, &shifted) > 1e-3);
+}
+
+#[test]
+fn an_sd_instrument_renders_from_timestamped_note_events() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.gated-tone", "Gated Tone", suhina_device_sdk::DeviceRole::Instrument);
+    graph.nodes = vec![
+        suhina_device_sdk::Node::new("gate", suhina_device_sdk::NodeKind::MidiGate),
+        suhina_device_sdk::Node::new("frequency", suhina_device_sdk::NodeKind::Constant { value: 440.0 }),
+        suhina_device_sdk::Node::new(
+            "osc",
+            suhina_device_sdk::NodeKind::Oscillator { shape: suhina_device_sdk::Waveform::Sine },
+        ),
+        suhina_device_sdk::Node::new("amp", suhina_device_sdk::NodeKind::Multiply),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    graph.connections = vec![
+        suhina_device_sdk::Connection::ports("frequency", "out", "osc", "frequency"),
+        suhina_device_sdk::Connection::ports("gate", "out", "amp", "a"),
+        suhina_device_sdk::Connection::ports("osc", "out", "amp", "b"),
+        suhina_device_sdk::Connection::new("amp", "out"),
+    ];
+    let mut instrument = device("sd", &[]);
+    instrument.kind = DeviceKind::Sd;
+    instrument.state = graph.to_sd().ok().map(String::into_bytes);
+    let audio = render_offline(&project(vec![note(0.0, 0.1, 60)], 1.0, vec![instrument]), SR, 512).unwrap();
+    assert!(audio.iter().any(|sample| sample.abs() > 0.01));
+    assert!(audio.iter().skip(BEAT / 10 * 2).all(|sample| sample.abs() < 1e-6));
+}
+
+#[test]
 fn unknown_and_disabled_devices_pass_the_sound_through() {
     let notes = vec![note(0.0, 1.0, 60)];
     let plain = render_offline(&project(notes.clone(), 1.0, vec![]), SR, 512).unwrap();

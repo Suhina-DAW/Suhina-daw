@@ -6,6 +6,18 @@ use suhina_device_sdk::{
 mod examples;
 
 fn graph(kind: K) -> DeviceGraph {
+    if matches!(kind, K::MidiTranspose { .. }) {
+        let mut g = DeviceGraph::new("org.test.graph", "Graph", DeviceRole::MidiEffect);
+        g.nodes = vec![N::new("in", K::MidiInput), N::new("node", kind), N::new("out", K::MidiOutput)];
+        g.connections = vec![C::new("in", "node"), C::new("node", "out")];
+        return g;
+    }
+    if matches!(kind, K::MidiKey | K::MidiVelocity | K::MidiGate) {
+        let mut g = DeviceGraph::new("org.test.graph", "Graph", DeviceRole::Instrument);
+        g.nodes = vec![N::new("node", kind), N::audio_output("out")];
+        g.connections = vec![C::new("node", "out")];
+        return g;
+    }
     let mut g = DeviceGraph::new("org.test.graph", "Graph", DeviceRole::Effect);
     g.parameters.push(Parameter::new("amount", "Amount", (0.0, 2.0), 0.5));
     g.nodes = vec![N::audio_input("in"), N::new("node", kind), N::audio_output("out")];
@@ -30,7 +42,7 @@ fn graph(kind: K) -> DeviceGraph {
 fn every_catalog_node_round_trips_resets_and_ignores_host_block_size() {
     let mut kinds = NODE_CATALOG
         .iter()
-        .filter(|info| !matches!(info.kind, "audio_input" | "audio_output"))
+        .filter(|info| !matches!(info.kind, "audio_input" | "audio_output" | "midi_input" | "midi_output"))
         .map(|info| serde_json::from_str::<K>(info.example).unwrap())
         .collect::<Vec<_>>();
     kinds.extend([
@@ -46,6 +58,14 @@ fn every_catalog_node_round_trips_resets_and_ignores_host_block_size() {
         let g = graph(kind.clone());
         let restored = DeviceGraph::from_sd(&g.to_sd().unwrap()).unwrap();
         assert_eq!(g, restored);
+        if g.role == DeviceRole::MidiEffect {
+            assert!(g.compile_midi().is_ok());
+            continue;
+        }
+        if g.role == DeviceRole::Instrument {
+            assert!(g.compile_instrument_at(48_000.0).is_ok());
+            continue;
+        }
         for sr in [8000.0, 44100.0, 48000.0, 96000.0, 384000.0] {
             let mut effect = g.compile_at(sr).unwrap();
             let input = (0..2048).flat_map(|n| [(n as f32 * 0.03).sin(), -(n as f32 * 0.05).cos()]).collect::<Vec<_>>();

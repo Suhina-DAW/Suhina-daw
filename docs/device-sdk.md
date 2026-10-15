@@ -1,6 +1,6 @@
 ---
-description: Author data-only effects in Rust or with AI agents, discover nodes and validate a portable .sd file
-read_when: make an effect, SDK tutorial, AI agent device authoring, .sd example, node discovery
+description: Author data-only effects, MIDI effects and instruments in Rust or with AI agents
+read_when: make an effect, MIDI effect or instrument, SDK tutorial, .sd example, node discovery
 type: howto
 status: current
 last_verified: 2026-10-15
@@ -16,16 +16,30 @@ covers:
   - crates/device-sdk/examples/validate.rs
   - crates/device-sdk/examples/ui_controls.rs
   - crates/device-sdk/examples/custom_panel.rs
+  - crates/device-sdk/examples/midi_transpose.rs
+  - crates/device-sdk/examples/gated_instrument.rs
   - crates/session/src/commands.rs
   - crates/session/src/devices.rs
 ---
 
-# Author an SDK effect
+# Author a data-only SDK device
 
-The deliverable is one `.sd` file. It can be dropped onto a track and is embedded in the project.
+The deliverable is one `.sd` file. It can be added to a track and is embedded in the project.
 An author writes Rust that assembles a graph from supported nodes; Suhina runs the graph as data.
 Use [the format specification](spec/sd-device-format.md) and [node reference](spec/sdk-nodes.md).
-Only stereo audio effects execute. Parameters, nodes and device ids are stable saved identifiers.
+Audio effects, MIDI effects and monophonic instruments execute. Parameters, nodes and device ids
+are stable saved identifiers.
+
+Generate the MIDI examples with:
+
+```sh
+cargo run -p suhina-device-sdk --example midi_transpose -- target/sdk-examples/midi-transpose.sd
+cargo run -p suhina-device-sdk --example gated_instrument -- target/sdk-examples/gated-instrument.sd
+```
+
+The transpose graph runs before the instrument and preserves each event's frame offset. The
+instrument example maps MIDI key to oscillator frequency, then uses gate and velocity to shape
+the audio output. The instrument is monophonic: a new note takes over from the currently held note.
 
 ## Start with a working effect
 

@@ -265,7 +265,20 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     name: d.name.clone(),
                     kind: match &d.kind {
                         DeviceKind::Builtin(_) => "Suhina".into(),
-                        DeviceKind::Sd => "AudioEffect".into(),
+                        DeviceKind::Sd => d
+                            .state
+                            .as_deref()
+                            .and_then(|state| std::str::from_utf8(state).ok())
+                            .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+                            .map(|graph| {
+                                match graph.role {
+                                    suhina_device_sdk::DeviceRole::Effect => "AudioEffect",
+                                    suhina_device_sdk::DeviceRole::Instrument => "Instrument",
+                                    suhina_device_sdk::DeviceRole::MidiEffect => "MIDI Effect",
+                                }
+                                .to_owned()
+                            })
+                            .unwrap_or_else(|| "AudioEffect".into()),
                         DeviceKind::Clap { .. } => "CLAP".into(),
                         DeviceKind::Vst3 { .. } => "VST3".into(),
                         DeviceKind::Vst2 { .. } => "VST2".into(),

@@ -188,7 +188,15 @@ pub(crate) fn add_track(session: &mut Session, params: &Value) -> Result<Value, 
     // What the device is decides the kind when none is given.
     let device_role = match (device, preset, sd) {
         (_, Some(_), _) => Some(Role::Instrument),
-        (_, _, Some(_)) => Some(Role::Effect),
+        (_, _, Some(path)) => {
+            let graph = suhina_device_sdk::DeviceGraph::read_file(Path::new(path)).map_err(|e| e.to_string())?;
+            Some(match graph.role {
+                suhina_device_sdk::DeviceRole::Effect => Role::Effect,
+                suhina_device_sdk::DeviceRole::Instrument | suhina_device_sdk::DeviceRole::MidiEffect => {
+                    Role::Instrument
+                }
+            })
+        }
         (Some(id), None, None) => {
             match suhina_device_registry::info(id) {
                 Some(info) => Some(info.role),

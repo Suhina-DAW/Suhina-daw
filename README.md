@@ -168,8 +168,8 @@ is an [issue](https://github.com/suhina-daw/suhina-daw/issues) in this repositor
 Something missing or a bug? Open an issue with one of the forms, or ask on
 [Discord](https://discord.com/invite/e5JAZYMU).
 
-Community audio effects can be authored with the Rust device SDK and shared as one `.sd`
-file, then dropped onto a track. See the [authoring guide](docs/device-sdk.md) and
+Community audio effects, MIDI effects and monophonic instruments can be authored with the Rust
+device SDK and shared as one `.sd` file, then added to a track. See the [authoring guide](docs/device-sdk.md) and
 [node reference](docs/spec/sdk-nodes.md), including node discovery for AI agents.
 
 ## Documentation

@@ -1,5 +1,5 @@
 //! Graph trust boundary and dependency scheduling, never called on the audio thread.
-use crate::{DeviceGraph, DeviceSdkError, MAX_DELAY_FRAMES, MAX_TEXT_BYTES, NodeKind};
+use crate::{DeviceGraph, DeviceRole, DeviceSdkError, MAX_DELAY_FRAMES, MAX_TEXT_BYTES, NodeKind};
 use std::collections::HashSet;
 
 impl DeviceGraph {
@@ -7,14 +7,37 @@ impl DeviceGraph {
         let mut ids = HashSet::new();
         let mut inputs = 0;
         let mut outputs = 0;
+        let midi = self.role == DeviceRole::MidiEffect;
+        let instrument = self.role == DeviceRole::Instrument;
+        let mut midi_sources = 0;
         for node in &self.nodes {
             let fail = |message: &str| DeviceSdkError(format!("node {:?}: {message}", node.id));
             if node.id.is_empty() || node.id.len() > MAX_TEXT_BYTES || !ids.insert(&node.id) {
                 return Err(fail("id must be unique and 1..128 bytes"));
             }
+            if midi && !matches!(node.kind, NodeKind::MidiInput | NodeKind::MidiOutput | NodeKind::MidiTranspose { .. })
+            {
+                return Err(fail(
+                    "only midi_input, midi_transpose and midi_output are supported in midi_effect graphs",
+                ));
+            }
+            if instrument && matches!(node.kind, NodeKind::MidiKey | NodeKind::MidiVelocity | NodeKind::MidiGate) {
+                midi_sources += 1;
+            } else if !instrument
+                && matches!(node.kind, NodeKind::MidiKey | NodeKind::MidiVelocity | NodeKind::MidiGate)
+            {
+                return Err(fail("MIDI value nodes are only valid in instrument graphs"));
+            }
             match &node.kind {
-                NodeKind::AudioInput => inputs += 1,
+                NodeKind::AudioInput if !instrument => inputs += 1,
+                NodeKind::AudioInput => return Err(fail("instrument graphs have no audio_input")),
                 NodeKind::AudioOutput => outputs += 1,
+                NodeKind::MidiInput if midi => inputs += 1,
+                NodeKind::MidiOutput if midi => outputs += 1,
+                NodeKind::MidiTranspose { .. } if midi => {}
+                NodeKind::MidiInput | NodeKind::MidiOutput | NodeKind::MidiTranspose { .. } => {
+                    return Err(fail("MIDI nodes are only valid in midi_effect graphs"));
+                }
                 NodeKind::Gain { parameter } | NodeKind::Parameter { parameter } => {
                     if !self.parameters.iter().any(|p| p.id == *parameter) {
                         return Err(fail(&format!("unknown parameter {parameter:?}")));
@@ -31,8 +54,33 @@ impl DeviceGraph {
                 _ => {}
             }
         }
-        if inputs != 1 || outputs != 1 {
-            return Err(DeviceSdkError("exactly one audio_input and audio_output are required".into()));
+        if inputs != usize::from(!instrument) || outputs != 1 {
+            return Err(DeviceSdkError(if midi {
+                "exactly one midi_input and midi_output are required".into()
+            } else if instrument {
+                "instrument graphs have no audio_input and require exactly one audio_output".into()
+            } else {
+                "exactly one audio_input and audio_output are required".into()
+            }));
+        }
+        if instrument && midi_sources == 0 {
+            return Err(DeviceSdkError("an instrument graph needs at least one MIDI value node".into()));
+        }
+        if midi {
+            let midi_input = self.nodes.iter().position(|n| n.kind == NodeKind::MidiInput);
+            let midi_output = self.nodes.iter().position(|n| n.kind == NodeKind::MidiOutput);
+            for (index, node) in self.nodes.iter().enumerate() {
+                let incoming = self.connections.iter().filter(|edge| edge.to == node.id).count();
+                let outgoing = self.connections.iter().filter(|edge| edge.from == node.id).count();
+                let expected_in = usize::from(Some(index) != midi_input);
+                let expected_out = usize::from(Some(index) != midi_output);
+                if incoming != expected_in || outgoing != expected_out {
+                    return Err(DeviceSdkError(format!(
+                        "node {:?}: MIDI graph must be a single chain from midi_input to midi_output",
+                        node.id
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -54,8 +102,8 @@ impl DeviceGraph {
                 .ok_or_else(|| error(format!("connection to missing node {:?}", edge.to)))?;
             let source = &self.nodes[from];
             let dest = &self.nodes[to];
-            if source.kind == NodeKind::AudioOutput {
-                return Err(error(format!("node {:?}: audio_output cannot feed another node", source.id)));
+            if matches!(source.kind, NodeKind::AudioOutput | NodeKind::MidiOutput) {
+                return Err(error(format!("node {:?}: output cannot feed another node", source.id)));
             }
             if !source.kind.info().outputs.contains(&edge.from_port.as_str()) {
                 return Err(error(format!("node {:?}: unknown output port {:?}", source.id, edge.from_port)));
@@ -98,8 +146,10 @@ impl DeviceGraph {
                 .collect::<Vec<_>>();
             return Err(error(format!("cycle without a delay input through nodes {blocked:?}")));
         }
-        let Some(output) = self.nodes.iter().position(|n| n.kind == NodeKind::AudioOutput) else {
-            return Err(error("missing audio_output".into()));
+        let output_kind =
+            if self.role == DeviceRole::MidiEffect { NodeKind::MidiOutput } else { NodeKind::AudioOutput };
+        let Some(output) = self.nodes.iter().position(|n| n.kind == output_kind) else {
+            return Err(error("missing graph output".into()));
         };
         let mut reachable = vec![false; self.nodes.len()];
         reachable[output] = true;

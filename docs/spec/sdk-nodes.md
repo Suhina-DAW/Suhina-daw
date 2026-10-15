@@ -3,9 +3,10 @@ description: Every executable SDK node, ports, defaults, formulas, state and rea
 read_when: SDK node reference, node ports, DSP primitives, graph authoring, AI device development
 type: spec
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/device-sdk/src/nodes.rs
+  - crates/device-sdk/src/midi.rs
   - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/examples/catalog.rs
   - crates/device-sdk/tests/graphs.rs
@@ -14,14 +15,15 @@ covers:
 
 # SDK node reference
 
-All ports carry one stereo pair per sample frame, in f64 internally. Audio and control signals
-share this representation: a constant or parameter broadcasts its value to both channels.
+Audio and control ports carry one stereo pair per sample frame, in f64 internally. Audio and
+control signals share this representation: a constant or parameter broadcasts its value to both channels.
 Frequency, Q, filter gain, delay time, oscillator rate and balance read the left control channel.
 Arithmetic, comparisons, smoothing and envelope controls operate independently per channel.
 Every node has `out` (stereo), `left` (left broadcast) and `right` (right broadcast) outputs.
 Connections select one of these source ports and one of the inputs below. Each input accepts
 at most one connection; use add/mix to sum signals. Required inputs have no default.
 Values are finite and limited to the f32 range after each node; non-finite results become zero.
+MIDI event ports carry timestamped `NoteEvent` values and are only used in MIDI-effect graphs.
 An odd final sample in a stereo buffer is cleared. No node allocates or performs I/O while processing.
 
 The Rust API is `Node::new(id, NodeKind::Variant { configuration })` and
@@ -108,4 +110,10 @@ The JSON catalog uses the same records and includes a minimal configuration exam
 | `tempo` / `Tempo` | None | Broadcasts current transport tempo in beats/minute, limited to 1..1000. |
 | `beat` / `Beat` | None | Broadcasts transport beat, advanced each frame while playing. |
 | `playing` / `Playing` | None | Broadcasts transport running flag as 0 or 1. |
+| `midi_input` / `MidiInput` | None | Incoming MIDI events for a MIDI-effect graph. |
+| `midi_output` / `MidiOutput` | `in` (required, midi) | Emits processed MIDI events from a MIDI-effect graph. |
+| `midi_transpose` / `MidiTranspose` | `in` (required, midi) | Transposes note-on and note-off events by semitones; keys outside 0..127 are dropped. |
+| `midi_key` / `MidiKey` | None | Instrument signal containing the current MIDI key, or 0 when no key is held. |
+| `midi_velocity` / `MidiVelocity` | None | Instrument signal containing the current note velocity from 0 to 1. |
+| `midi_gate` / `MidiGate` | None | Instrument signal set to 1 while a note is held and 0 otherwise. |
 <!-- sdk-nodes:end -->

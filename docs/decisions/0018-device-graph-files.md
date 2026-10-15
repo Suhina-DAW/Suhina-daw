@@ -22,7 +22,7 @@ covers:
 ## Context
 
 Issue #300 asks for a Rust SDK that can create a shareable `.sd` device file. The file describes
-the device and signal flow as data, without embedding Rust source. Version 2 loads composable effect graphs into tracks and draws their nodes and parameter
+the device and signal flow as data, without embedding Rust source. Version 2 loads composable device graphs into tracks and draws their nodes and parameter
 controls in the detail panel. Version 1 gain graphs remain readable.
 
 ## Decision
@@ -33,30 +33,30 @@ controls in the detail panel. Version 1 gain graphs remain readable.
    prepares supported graphs for processing.
 3. Version 2 supports sample-rate stereo signal graphs: branching, explicit input/output ports,
    arithmetic, channel operations, modulation, filters, envelope detection and delays. Delayed
-   input edges break feedback cycles; undelayed cycles are rejected. Instrument role remains
-   representable, but only effects execute. Version 1 linear gain files stay readable.
+   input edges break feedback cycles; undelayed cycles are rejected. MIDI-effect graphs are a
+   single event chain with sample-offset-preserving MIDI nodes; instrument graphs receive MIDI
+   events and render audio with MIDI value source nodes. Version 1 linear gain files stay readable.
    The [node reference](../spec/sdk-nodes.md) specifies every supported node.
 4. Graph validation and compilation happen off the audio thread. Prepared processing uses fixed
    graph state and does not allocate. Validation caps file size, nodes, parameters, connections and total delay history.
    Delay history is budgeted at 384 kHz so accepted files fit every supported sample rate.
-5. `device.addSd` loads a validated effect onto a track, and the browser accepts `.sd` files as
-   effects. The project embeds the graph JSON in the device state, independent of the source file.
-   The engine compiles it while building the renderer and swaps graphs through the existing edit
-   path.
+5. `device.addSd` loads a validated effect onto a track according to its role. The project embeds
+   the graph JSON in the device state, independent of the source file. The engine compiles it while
+   building the renderer and swaps graphs through the existing edit path.
 6. Parameter declarations generate slider, logarithmic slider, integer and toggle controls in the device detail panel. The panel also
    draws the graph's visible nodes as a read-only signal-flow view. SDK authors can hide
    implementation nodes with `visible: false`; hidden nodes still run. Editing node connections in
-   the UI is deferred. The panel labels these as `AudioEffect` to distinguish them from plug-ins.
+   the UI is deferred. Panels label the graph's role as `AudioEffect`, `MIDI Effect` or `Instrument`.
 
 ## Consequences
 
-- SDK authors compose effects from supported DSP primitives and distribute one self-contained
+- SDK authors compose effects, MIDI effects and monophonic instruments from supported primitives and distribute one self-contained
   `.sd` file, with generated parameter UI and a read-only node list.
 - Node contracts are available in the SDK's JSON catalog and the read command `devices.sdNodes`
   through MCP command dispatch. The same catalog generates the node reference table;
   tests reject stale documentation. [The authoring guide](../device-sdk.md) includes AI workflows.
 - The graph runs in offline and real-time chains without loading community Rust code.
-- Executable custom DSP, instruments, spectral processing, oversampling and
+- Executable custom DSP, polyphonic instruments, spectral processing, oversampling and
   graph editing remain outside this data-only effect implementation. Delay memory and node
   counts are bounded, but graph admission is not a hardware CPU deadline guarantee.
 

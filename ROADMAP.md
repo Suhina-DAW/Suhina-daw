@@ -44,6 +44,8 @@ detail area) goes alongside this list, not after it.
 The separate Rust SDK can create data-only composable `.sd` effects from supported nodes. They can
 be dropped onto tracks, are embedded in projects, render in real-time and offline, and expose
 their parameters and signal flow in the device detail panel ([ADR 0018](docs/decisions/0018-device-graph-files.md)).
+The SDK also supports MIDI-effect graphs that preserve event timing and monophonic instrument
+graphs that turn timestamped MIDI input into audio; a MIDI effect runs before the track instrument.
 
 Instruments and effects that ship with Suhina. They run inside the engine (rule 5 covers
 third-party plug-ins only), so they follow the real-time and never-crash rules like the engine
@@ -139,6 +141,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 - SDK effects use arithmetic, stereo operations, modulation, filters, envelope detection and
   delayed feedback; a node catalog and examples support authoring by people and AI agents
   ([guide](docs/device-sdk.md)).
+- SDK MIDI effects process timestamped note events, and monophonic instrument graphs turn MIDI key,
+  velocity and gate signals into audio ([node reference](docs/spec/sdk-nodes.md)).
 
 ### M0 Foundation
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;

@@ -10,9 +10,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 mod graph;
+mod midi;
 mod nodes;
 mod runtime;
 pub mod ui;
+pub use midi::PreparedMidiEffect;
 pub use nodes::{FilterMode, NODE_CATALOG, NodeInfo, NodeKind, PortInfo, Waveform, node_reference_markdown};
 pub use runtime::PreparedEffect;
 pub use suhina_device_api::ProcessContext;
@@ -43,6 +45,7 @@ pub struct DeviceGraph {
 pub enum DeviceRole {
     Effect,
     Instrument,
+    MidiEffect,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -386,8 +389,26 @@ impl DeviceGraph {
     pub fn compile_at(&self, sample_rate: f64) -> Result<PreparedEffect, DeviceSdkError> {
         self.validate()?;
         if self.role != DeviceRole::Effect {
-            return Err(DeviceSdkError("only effect graphs execute".into()));
+            return Err(DeviceSdkError("compile_at prepares audio-effect graphs only".into()));
         }
+        PreparedEffect::new(self, sample_rate)
+    }
+
+    /// Compiles a MIDI-event graph off the audio thread.
+    pub fn compile_midi(&self) -> Result<PreparedMidiEffect, DeviceSdkError> {
+        if self.role != DeviceRole::MidiEffect {
+            return Err(DeviceSdkError("compile_midi prepares midi_effect graphs only".into()));
+        }
+        self.validate()?;
+        PreparedMidiEffect::new(self)
+    }
+
+    /// Compiles an instrument graph. MIDI events are supplied with their frame offsets at render time.
+    pub fn compile_instrument_at(&self, sample_rate: f64) -> Result<PreparedEffect, DeviceSdkError> {
+        if self.role != DeviceRole::Instrument {
+            return Err(DeviceSdkError("compile_instrument_at prepares instrument graphs only".into()));
+        }
+        self.validate()?;
         PreparedEffect::new(self, sample_rate)
     }
 }
@@ -665,10 +686,64 @@ mod tests {
     }
 
     #[test]
-    fn instrument_role_is_serializable_but_not_executable_yet() {
-        let mut graph = gain_graph();
-        graph.role = DeviceRole::Instrument;
-        assert!(DeviceGraph::from_sd(&graph.to_sd().unwrap_or_default()).is_ok());
+    fn non_audio_roles_are_serializable_but_not_audio_effects() {
+        let mut graph = DeviceGraph::new("org.test.instrument", "Instrument", DeviceRole::Instrument);
+        graph.nodes = vec![Node::new("gate", NodeKind::MidiGate), Node::audio_output("out")];
+        graph.connections = vec![Connection::new("gate", "out")];
+        let encoded = graph.to_sd().expect("valid instrument graph serializes");
+        assert_eq!(DeviceGraph::from_sd(&encoded).map(|g| g.role), Ok(DeviceRole::Instrument));
         assert!(graph.compile().is_err());
+    }
+
+    #[test]
+    fn midi_effect_transposes_events_and_preserves_frames_and_controls() {
+        use suhina_device_api::NoteEvent;
+        let mut graph = DeviceGraph::new("org.test.transpose", "Transpose", DeviceRole::MidiEffect);
+        graph.nodes = vec![
+            Node::new("in", NodeKind::MidiInput),
+            Node::new("shift", NodeKind::MidiTranspose { semitones: 12 }),
+            Node::new("out", NodeKind::MidiOutput),
+        ];
+        graph.connections = vec![Connection::new("in", "shift"), Connection::new("shift", "out")];
+        let encoded = graph.to_sd().expect("valid MIDI graph serializes");
+        assert_eq!(DeviceGraph::from_sd(&encoded).map(|g| g.role), Ok(DeviceRole::MidiEffect));
+        let prepared = graph.compile_midi().expect("valid MIDI graph");
+        let input = [
+            (5, NoteEvent::On { key: 60, velocity: 0.75 }),
+            (9, NoteEvent::Off { key: 60, velocity: 0.25 }),
+            (12, NoteEvent::Controller { number: 64, value: 1.0 }),
+            (16, NoteEvent::On { key: 120, velocity: 1.0 }),
+        ];
+        let mut output = [(0, NoteEvent::AllNotesOff); 4];
+        let count = prepared.process(&input, &mut output);
+        assert_eq!(count, 3);
+        assert_eq!(output[0], (5, NoteEvent::On { key: 72, velocity: 0.75 }));
+        assert_eq!(output[1], (9, NoteEvent::Off { key: 72, velocity: 0.25 }));
+        assert_eq!(output[2], (12, NoteEvent::Controller { number: 64, value: 1.0 }));
+    }
+
+    #[test]
+    fn instrument_graph_reads_midi_gate_at_exact_event_frames() {
+        use suhina_device_api::NoteEvent;
+        let mut graph = DeviceGraph::new("org.test.instrument", "Gated Tone", DeviceRole::Instrument);
+        graph.nodes = vec![
+            Node::new("gate", NodeKind::MidiGate),
+            Node::new("frequency", NodeKind::Constant { value: 440.0 }),
+            Node::new("osc", NodeKind::Oscillator { shape: Waveform::Sine }),
+            Node::new("amp", NodeKind::Multiply),
+            Node::audio_output("out"),
+        ];
+        graph.connections = vec![
+            Connection::ports("frequency", "out", "osc", "frequency"),
+            Connection::ports("gate", "out", "amp", "a"),
+            Connection::ports("osc", "out", "amp", "b"),
+            Connection::new("amp", "out"),
+        ];
+        let mut instrument = graph.compile_instrument_at(48_000.0).expect("valid instrument graph");
+        let events = [(0, NoteEvent::On { key: 60, velocity: 1.0 }), (16, NoteEvent::Off { key: 60, velocity: 0.5 })];
+        let mut audio = [0.0; 64];
+        instrument.process_instrument_context(&ProcessContext::default(), &events, &mut audio);
+        assert!(audio[..32].iter().any(|sample| sample.abs() > 0.01));
+        assert!(audio[32..].iter().all(|sample| *sample == 0.0));
     }
 }

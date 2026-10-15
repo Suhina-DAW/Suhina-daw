@@ -12,6 +12,13 @@ use crate::{CommandError, ParamEdit, Session};
 /// Devices one track may hold.
 const MAX_DEVICES: usize = 64;
 
+fn sd_role(device: &Device) -> Option<suhina_device_sdk::DeviceRole> {
+    (device.kind == DeviceKind::Sd).then_some(())?;
+    let bytes = device.state.as_deref()?;
+    let text = std::str::from_utf8(bytes).ok()?;
+    suhina_device_sdk::DeviceGraph::from_sd(text).ok().map(|graph| graph.role)
+}
+
 /// The built-in effects and instruments with their parameters.
 pub(crate) fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(Value::Array(suhina_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
@@ -22,8 +29,8 @@ pub(crate) fn sd_nodes(_: &mut Session, _: &Value) -> Result<Value, CommandError
     Ok(json!({
         "format": suhina_device_sdk::FORMAT,
         "version": suhina_device_sdk::VERSION,
-        "roles": ["effect"],
-        "signal": "stereo f64 at sample rate; control values broadcast to both channels",
+        "roles": ["effect", "midi_effect", "instrument"],
+        "signal": "audio graphs process stereo f64 at sample rate; midi_effect graphs process timestamped NoteEvent streams",
         "limits": {
             "file_bytes": suhina_device_sdk::MAX_FILE_BYTES,
             "nodes": suhina_device_sdk::MAX_NODES,
@@ -150,6 +157,11 @@ fn device_json(index: usize, device: &Device) -> Value {
         "name": device.name,
         "kind": kind,
         "id": id,
+        "role": graph.as_ref().map(|graph| match graph.role {
+            suhina_device_sdk::DeviceRole::Effect => "effect",
+            suhina_device_sdk::DeviceRole::Instrument => "instrument",
+            suhina_device_sdk::DeviceRole::MidiEffect => "midi_effect",
+        }),
         "enabled": device.enabled,
         "known": kind != "builtin" || info.is_some(),
         "params": params,
@@ -210,18 +222,20 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
     }
     let instrument = info.role == Role::Instrument;
-    let has_instrument = channel
+    let has_instrument = channel.devices.iter().any(|device| match &device.kind {
+        DeviceKind::Builtin(id) => suhina_device_registry::info(id).is_some_and(|info| info.role == Role::Instrument),
+        DeviceKind::Sd => sd_role(device) == Some(suhina_device_sdk::DeviceRole::Instrument),
+        _ => false,
+    });
+    let midi_prefix = channel
         .devices
-        .first()
-        .and_then(|d| match &d.kind {
-            DeviceKind::Builtin(id) => suhina_device_registry::info(id),
-            _ => None,
-        })
-        .is_some_and(|i| i.role == Role::Instrument);
+        .iter()
+        .take_while(|device| sd_role(device) == Some(suhina_device_sdk::DeviceRole::MidiEffect))
+        .count();
     let position = match params.get("position") {
         None => {
             if instrument {
-                0
+                midi_prefix
             } else {
                 channel.devices.len()
             }
@@ -235,10 +249,10 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
     if instrument && has_instrument {
         return Err("the track has an instrument already; remove it first".into());
     }
-    if instrument && position != 0 {
-        return Err("an instrument goes first in a track's chain (position 0)".into());
+    if instrument && position != midi_prefix {
+        return Err(format!("an instrument goes after the track's {midi_prefix} MIDI effects").into());
     }
-    if has_instrument && position == 0 {
+    if has_instrument && !instrument && position <= midi_prefix {
         return Err("position 0 is the track's instrument; effects go after it".into());
     }
     let device = Device {
@@ -259,19 +273,63 @@ pub(crate) fn add_sd(session: &mut Session, params: &Value) -> Result<Value, Com
     let path = params.get("path").and_then(Value::as_str).ok_or("path must be a .sd file path")?;
     let graph = suhina_device_sdk::DeviceGraph::read_file(std::path::Path::new(path)).map_err(|e| e.to_string())?;
     if graph.role != suhina_device_sdk::DeviceRole::Effect {
-        return Err("only effect .sd files can be added to tracks yet".into());
+        let track = track_id(&session.project, params)?;
+        if session.project.tracks.iter().find(|t| t.id == track).is_some_and(|t| !t.content.notes) {
+            return Err("a MIDI effect goes on a MIDI track".into());
+        }
     }
     let channel = channel_param(session, params)?;
     if channel.devices.len() >= MAX_DEVICES {
         return Err(format!("a track holds at most {MAX_DEVICES} devices").into());
     }
+    if graph.role == suhina_device_sdk::DeviceRole::Instrument
+        && channel.devices.iter().any(|device| match &device.kind {
+            DeviceKind::Builtin(id) => {
+                suhina_device_registry::info(id).is_some_and(|info| info.role == Role::Instrument)
+            }
+            DeviceKind::Sd => sd_role(device) == Some(suhina_device_sdk::DeviceRole::Instrument),
+            _ => false,
+        })
+    {
+        return Err("the track already has an instrument; remove it first".into());
+    }
+    let instrument_position = channel.devices.iter().position(|device| match &device.kind {
+        DeviceKind::Builtin(id) => suhina_device_registry::info(id).is_some_and(|info| info.role == Role::Instrument),
+        DeviceKind::Sd => device
+            .state
+            .as_deref()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+            .is_some_and(|graph| graph.role == suhina_device_sdk::DeviceRole::Instrument),
+        _ => false,
+    });
+    let midi_prefix = channel
+        .devices
+        .iter()
+        .take_while(|device| {
+            device.kind == DeviceKind::Sd
+                && device
+                    .state
+                    .as_deref()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+                    .is_some_and(|graph| graph.role == suhina_device_sdk::DeviceRole::MidiEffect)
+        })
+        .count();
+    let max_position = if graph.role == suhina_device_sdk::DeviceRole::MidiEffect {
+        instrument_position.unwrap_or(channel.devices.len())
+    } else if graph.role == suhina_device_sdk::DeviceRole::Instrument {
+        midi_prefix
+    } else {
+        channel.devices.len()
+    };
     let position = match params.get("position") {
-        None => channel.devices.len(),
+        None => max_position,
         Some(value) => value
             .as_u64()
             .and_then(|n| usize::try_from(n).ok())
-            .filter(|&n| n <= channel.devices.len())
-            .ok_or_else(|| format!("position must be from 0 to {}", channel.devices.len()))?,
+            .filter(|&n| n <= max_position)
+            .ok_or_else(|| format!("position must be from 0 to {max_position}"))?,
     };
     let values: Vec<DeviceParam> =
         graph.parameters.iter().map(|parameter| DeviceParam::new(parameter.id.clone(), parameter.default)).collect();

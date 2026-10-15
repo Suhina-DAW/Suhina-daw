@@ -8,12 +8,15 @@ covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
   - crates/device-sdk/src/graph.rs
+  - crates/device-sdk/src/midi.rs
   - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/examples/gain.rs
   - crates/model/src/lib.rs
   - crates/project-file/src/lib.rs
   - crates/session/src/devices.rs
   - crates/engine/src/chain.rs
+  - crates/engine/src/chain_tests.rs
+  - crates/session/src/devices.rs
   - crates/ui/src/detail_view.rs
   - crates/media/src/info.rs
 ---
@@ -41,7 +44,11 @@ list of nodes, not an editor of the connections. Sequential arrows appear only f
 Connections have `from`, `to`, `from_port` (default `out`) and `to_port` (default `in`).
 Ports carry stereo sample-rate signals; source ports `left` and `right` broadcast one channel.
 Constants and parameters broadcast control values. Each input accepts at most one connection;
-branching is allowed, summing requires add/mix. Exactly one audio input and output is required,
+branching is allowed, summing requires add/mix. `effect` graphs require one audio input and
+output. `instrument` graphs have no audio input, require one audio output, and use timestamped
+MIDI events as control inputs. `midi_effect` graphs use one `midi_input` and one `midi_output` in
+a single chain; `midi_transpose` changes note-on/off keys and drops keys outside 0..127, preserving
+each event's sample offset. Exactly one role-appropriate input/output is required,
 and every node must contribute to the output. Missing references, duplicate ids, invalid ports,
 missing required inputs and cycles are rejected with node/port diagnostics. Only the `in` port
 of sample_delay/delay breaks a cycle; its input is written after all current-frame evaluations.
@@ -89,15 +96,21 @@ The graph can be created with the SDK example and then inserted on a track:
 cargo run -p suhina-device-sdk --example gain -- path/to/gain.sd
 ```
 
-The browser lists `.sd` files under Effects as `AudioEffect`. Drop one onto a track, run `device.addSd` through MCP,
-or pass it to `track.add {sd}`; dropping one into empty space creates an audio track with the effect.
+The browser currently lists `.sd` files under Effects as `AudioEffect`. Drop one onto a track or
+run `device.addSd` through MCP. Audio effects work on audio or MIDI tracks; MIDI effects and
+instruments require a MIDI track. Dropping an `.sd` into empty space or calling `track.add`
+with `sd` creates an audio track for an audio effect and a MIDI track for an instrument or MIDI effect.
 The complete validated graph is
 stored in the project with the device, so the original `.sd` file is not needed after insertion.
 Parameter values are project state and can be changed with `device.setParam` or the generated
 sliders in the detail panel. The `AudioEffect` panel reserves space for each slider's value so
 controls stay inside narrow device cards.
 
-Only effects execute. Instrument role remains representable but cannot be inserted or rendered.
+All three roles execute. Instrument graphs expose `midi_key`, `midi_velocity` and `midi_gate`
+signals to the existing audio nodes to generate sound. This initial instrument runtime is
+monophonic: the latest note controls the graph, and note-off releases its gate. MIDI effects go
+before the track instrument; their event buffers are prepared with the chain, so processing does
+not allocate on the audio thread.
 The `.sd` file contains data only. FFT, sample assets, oversampled nonlinear processing and
 freely arranged graph editing are not implemented; accepted graphs need none of these to load.
 

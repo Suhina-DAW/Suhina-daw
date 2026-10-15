@@ -36,6 +36,7 @@ pub struct PreparedEffect {
     started: bool,
     sample_rate: f64,
     output: usize,
+    midi: [f64; 3],
 }
 
 fn finite(value: f64) -> f64 {
@@ -117,6 +118,7 @@ impl PreparedEffect {
             targets: graph.parameters.iter().map(|p| p.default).collect(),
             remaining: vec![0; graph.parameters.len()],
             started: false,
+            midi: [0.0; 3],
         })
     }
 
@@ -160,6 +162,7 @@ impl PreparedEffect {
     /// Clear DSP history without changing parameters or allocating.
     pub fn reset(&mut self) {
         self.values.fill([0.0; 2]);
+        self.midi = [0.0; 3];
         self.parameter_values.copy_from_slice(&self.targets);
         self.remaining.fill(0);
         self.started = false;
@@ -235,6 +238,9 @@ impl PreparedEffect {
                     (Tempo, _) => output = [tempo; 2],
                     (Beat, _) => output = [beat; 2],
                     (Playing, _) => output = [f64::from(context.playing); 2],
+                    (MidiKey, _) => output = [self.midi[0]; 2],
+                    (MidiVelocity, _) => output = [self.midi[1]; 2],
+                    (MidiGate, _) => output = [self.midi[2]; 2],
                     (Noise { .. }, State::Random(seed)) => {
                         *seed ^= *seed << 13;
                         *seed ^= *seed >> 17;
@@ -404,5 +410,45 @@ impl PreparedEffect {
             beat += beat_step;
         }
         remainder.fill(0.0);
+    }
+
+    /// Render an instrument graph from timestamped MIDI events into its audio buffer.
+    pub fn process_instrument_context(
+        &mut self,
+        context: &ProcessContext,
+        events: &[(usize, suhina_device_api::NoteEvent)],
+        buffer: &mut [f32],
+    ) {
+        let frames = buffer.len() / 2;
+        let mut offset = 0;
+        for &(frame, event) in events {
+            let at = frame.min(frames).max(offset);
+            if let Some(span) = buffer.get_mut(offset * 2..at * 2) {
+                let mut span_context = *context;
+                if span_context.playing {
+                    span_context.beat += offset as f64 * span_context.tempo / (60.0 * self.sample_rate);
+                }
+                self.process_context(&span_context, span);
+            }
+            match event {
+                suhina_device_api::NoteEvent::On { key, velocity }
+                    if key <= 127 && velocity.is_finite() && velocity > 0.0 =>
+                {
+                    self.midi = [f64::from(key), f64::from(velocity.clamp(0.0, 1.0)), 1.0];
+                }
+                suhina_device_api::NoteEvent::On { .. } => self.midi[2] = 0.0,
+                suhina_device_api::NoteEvent::Off { key, .. } if f64::from(key) == self.midi[0] => self.midi[2] = 0.0,
+                suhina_device_api::NoteEvent::AllNotesOff => self.midi[2] = 0.0,
+                _ => {}
+            }
+            offset = at;
+        }
+        if let Some(span) = buffer.get_mut(offset * 2..frames * 2) {
+            let mut span_context = *context;
+            if span_context.playing {
+                span_context.beat += offset as f64 * span_context.tempo / (60.0 * self.sample_rate);
+            }
+            self.process_context(&span_context, span);
+        }
     }
 }

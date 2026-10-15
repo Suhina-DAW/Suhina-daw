@@ -17,5 +17,13 @@ serde_json.workspace = true
 name = "gain"
 path = "examples/gain.rs"
 
+[[example]]
+name = "midi_transpose"
+path = "examples/midi_transpose.rs"
+
+[[example]]
+name = "gated_instrument"
+path = "examples/gated_instrument.rs"
+
 [lints]
 workspace = true
