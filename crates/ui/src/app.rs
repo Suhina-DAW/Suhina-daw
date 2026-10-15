@@ -1727,6 +1727,13 @@ impl App {
                 actions.push(Action::new("track.group", json!({ "tracks": tracks })));
                 self.arrangement.selected_tracks.clear();
             }
+            "marker.addAtPlayhead" => {
+                // Where the playhead is while playing; stopped, where playback would start.
+                let monitor = self.session().and_then(|s| s.player()).map(|p| p.monitor());
+                let beat = monitor.map_or(0.0, |m| if m.running() { m.beat() } else { m.start_beat() });
+                let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
+                actions.push(Action::new("marker.add", json!({ "beat": beat })));
+            }
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
         }

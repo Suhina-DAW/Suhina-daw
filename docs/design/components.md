@@ -1,9 +1,9 @@
 ---
 description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
-read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
+read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -162,13 +162,14 @@ part is empty (the main track's strip is planned). From top to bottom:
 ## Arrangement view
 
 The timeline on one side, the track header column on the other (right by default). From top to
-bottom: the ruler, the track lanes (scrolling), and fixed rows for the return tracks and the main
+bottom: the ruler, the marker row, the track lanes (scrolling), and fixed rows for the return tracks and the main
 track along the bottom edge.
 
 | Part | Spec |
 |---|---|
 | Bar ruler | 20 px, `panel.background`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `border`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart. A click sets the play start marker (`transport.setPosition`) to the beat under the pointer, on the clip grid of that zoom, Alt for free ([spec](../spec/arrangement-editing.md) › Play position) |
 | Play start marker | A 9 × 6 px triangle in `text.primary`, pointing down, its tip on the ruler's lower edge at the marker's beat |
+| Marker row | 16 px under the ruler, `panel.background`, a 1 px `border` between them. Each marker: a 1 px `text.secondary` line at its beat and a tag to its right (`control.background`, `control.hoverBackground` hovered, `control.activeBackground` dragged) with its name in 10 px `text.value`, 3 px in; the tag is as wide as the name, 9–120 px, and ends 1 px before the next marker. Click jumps (`marker.jump`), drag moves (`marker.move`, on the ruler's grid, Alt for free), right-click opens its menu (name field and Rename, Jump to marker, Delete marker); a right-click on the ruler or an empty part of the row offers Add marker here ([spec](../spec/arrangement-editing.md#markers)) |
 | Loop brace | (planned) a 14 px row under the ruler; 6 px bar `control.activeBackground` with 1 px `text.hint` inset |
 | Zoom and moving | 8 px per beat by default, 1–400 px; Ctrl and the wheel zoom around the pointer, Alt and the wheel make every track lane taller or shorter (within 20–400 px) keeping the lane under the pointer in place, the wheel scrolls; holding the middle button down over the timeline moves it freely both ways (the cursor grabs), also over a clip, which stays where it is: clips, fades, fields and headers are dragged with the left button only |
 | Grid lines | In the lanes and the fixed rows (not the empty space below the lanes): a 1 px `border` at each bar, and a 1 px `panel.background` line at each beat once beats are 10 px apart |

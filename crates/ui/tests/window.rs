@@ -306,6 +306,73 @@ fn render_a_block(renderer: &mut suhina_engine::Renderer) {
     renderer.process(&mut [0.0f32; 2 * 64]);
 }
 
+/// Markers under the ruler: M adds one at the play start marker, a right-click on the marker row
+/// adds one there on the grid, a click on a marker jumps to it, its menu deletes it.
+#[test]
+fn markers_are_added_jumped_to_and_deleted_from_the_marker_row() {
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let monitor = renderer.monitor();
+    let markers = |h: &Harness<'static, App>| -> Vec<(f64, String)> {
+        h.state()
+            .session()
+            .map_or(Vec::new(), |s| s.project().arrangement.markers.iter().map(|m| (m.beat, m.name.clone())).collect())
+    };
+    // The play start marker to bar 5 (beat 16), then M adds a marker there.
+    let ruler = harness.get_by_label("Ruler").rect();
+    let at = egui::pos2(ruler.left() + 130.0, ruler.center().y);
+    harness.hover_at(at);
+    harness.run();
+    harness.drag_at(at);
+    harness.drop_at(at);
+    harness.run();
+    render_a_block(&mut renderer);
+    harness.key_press(Key::M);
+    harness.run();
+    assert_eq!(markers(&harness), [(16.0, "Marker 1".to_string())]);
+
+    // A right-click in the middle of the row offers a marker on the bar there (8 points a beat).
+    let row = harness.get_by_label("Markers").rect();
+    let bar = ((f64::from(row.center().x - row.left()) / 8.0) / 4.0).round() * 4.0;
+    assert!(bar > 16.0, "{bar}");
+    harness.get_by_label("Markers").click_secondary();
+    harness.run();
+    harness.get_by_label("Add marker here").click();
+    harness.run();
+    assert_eq!(markers(&harness), [(16.0, "Marker 1".to_string()), (bar, "Marker 2".to_string())]);
+
+    // A click on a marker moves the play start marker there.
+    harness.get_by_label("Marker Marker 2").click();
+    harness.run();
+    render_a_block(&mut renderer);
+    assert_eq!(monitor.start_beat(), bar);
+
+    // Its menu deletes it, and undo brings it back.
+    harness.get_by_label("Marker Marker 1").click_secondary();
+    harness.run();
+    harness.get_by_label("Delete marker").click();
+    harness.run();
+    assert_eq!(markers(&harness), [(bar, "Marker 2".to_string())]);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(markers(&harness).len(), 2);
+
+    // Dragged two bars to the right (64 points), it lands on the bar grid there.
+    let from = harness.get_by_label("Marker Marker 1").rect().left_center() + egui::vec2(4.0, 0.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + egui::vec2(30.0, 0.0));
+    harness.run();
+    harness.hover_at(from + egui::vec2(64.0, 0.0));
+    harness.run();
+    harness.drop_at(from + egui::vec2(64.0, 0.0));
+    harness.run();
+    assert_eq!(markers(&harness)[0], (24.0, "Marker 1".to_string()));
+}
+
 #[test]
 fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     let mut renderer =

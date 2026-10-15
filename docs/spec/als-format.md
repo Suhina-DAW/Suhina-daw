@@ -1,9 +1,9 @@
 ---
-description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices
-read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
+description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices, locators
+read_when: reading .als, importer, XML element, warp markers, locators, arrangement markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/als/src/lib.rs
   - crates/als/src/devices.rs
@@ -184,6 +184,23 @@ switch is unavailable in Live.
 Adding the first clip to an empty track renamed the track after the clip (`4-Audio` →
 `4-loopwerk-demo`), stored in `Name/EffectiveName` and `Name/MemorizedFirstClipName`.
 
+## Locators
+
+The named positions on the arrangement's timeline (locators) import as arrangement markers
+([arrangement editing](arrangement-editing.md#markers)). Live's published Live Object Model
+documentation describes a locator (`CuePoint`) as a name and a time in beats. Where the set
+stores them is a **hypothesis** until [corpus series 10](als-corpus.md#series-10-locators)
+proves it:
+
+| What | Where | Notes |
+|---|---|---|
+| The locators | `LiveSet/Locators/Locators/Locator`, one per locator | **(hypothesis)** Order not relied on: the importer sorts by time. |
+| Position | `Time@Value` | Beats from the start of the arrangement, as everywhere else **(hypothesis)**. |
+| Name | `Name@Value` | Any text, may be empty **(hypothesis)**. |
+
+The importer reads only these two values. A locator without a `Time`, or with a negative one, is
+skipped with a warning. A set without `Locators` has no markers.
+
 ## Devices
 
 Corpus: series 3, files `40`–`44` (Simpler, EQ Eight, and two third-party plug-ins, an effect and an
@@ -298,4 +315,5 @@ These change without any musical edit:
 - CLAP plug-ins, Audio Units, racks.
 - Max for Live devices: how the set refers to the `.amxd` file, what Collect All and Save does
   with it, where parameter values are stored ([corpus series 8](als-corpus.md#series-8-max-devices)).
+- Locators: where they are stored and what else a locator carries ([corpus series 10](als-corpus.md#series-10-locators)).
 - Sets saved by older Live versions.

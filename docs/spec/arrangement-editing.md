@@ -1,9 +1,9 @@
 ---
-description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), and named markers on the timeline
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -16,6 +16,7 @@ covers:
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
+  - crates/ui/src/keymap.rs
 ---
 
 # Arrangement editing
@@ -181,6 +182,36 @@ pass the setting **Stop** (Settings › General): **Marker** (default) or **Stay
 **From the command line** (`suhina-cli play --launcher`): `stop` returns to the marker,
 `stop here` stays, `pos <beats>` moves the marker. Agents pass `return` themselves; without it,
 Stop returns to the marker.
+
+## Markers
+
+A **marker** is a named position on the arrangement's timeline (other DAWs call it a locator or
+a cue): a beat from 0 on and a name. Playback jumps to it. A project keeps its markers in beat
+order; two can share a beat, and the one added later comes after. A marker is named by its index
+in that order, as `project.markers` lists it, so moving one can change its index (the command
+returns the new one).
+
+| Command | Does |
+|---|---|
+| `project.markers` | Lists the markers: `index`, `beat`, `name`. `project.info` counts them. |
+| `marker.add {beat, name?}` | Adds a marker at `beat` (0 … 120 000). Without a name it is "Marker n", n the first number from the marker count up that no marker uses. Returns its index. |
+| `marker.move {index, beat}` | Moves a marker to `beat`; it goes after any marker already there. Returns its new index. |
+| `marker.rename {index, name}` | Renames it; the name is trimmed and may not be empty. |
+| `marker.delete {index}` | Deletes it. |
+| `marker.jump {index}` | A transport command, not an edit: runs as `transport.setPosition` at the marker's beat. Stopped, the play start marker moves there; playing, playback jumps there at once. Needs the audio engine, as every transport command does. |
+
+The four edits are one undo step each; a bad index, beat or name is an error and changes nothing.
+The project file keeps markers in `arrangement.markers` ([format](suhina-format.md)); a Live Set's
+locators import as markers ([.als format](als-format.md) › Locators).
+
+**In the Arrangement view** markers sit in a row of their own under the ruler: a line at the
+marker's beat with its name in a tag beside it, cut short where the next marker starts. A click on
+a marker runs `marker.jump`. Dragging it moves it (`marker.move` when let go) on the same grid a
+ruler click uses (Alt held: free). A right-click on a marker opens its menu: a field with its name
+and **Rename** (or Enter), **Jump to marker**, **Delete marker**. A right-click on the ruler or on
+an empty part of the marker row offers **Add marker here**, on that grid. The key **M** (the action
+`marker.addAtPlayhead`, in the keymap) adds a marker where the playhead is while playing, and at the
+play start marker while stopped.
 
 ## Tracks
 

@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 98
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -51,10 +51,11 @@ CHAPTERS = [
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
      "relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.35, "partial",
+    (6, "Arrangement View", 22, 0.40, "partial",
      "Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and "
-     "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
-     "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
+     "fade shapes, grid snap, markers (locators: add, move, rename, delete, jump; imported from Live "
+     "Sets). A clip's loop range is read and drawn but no command sets it. Missing previous/next "
+     "marker, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.50, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "

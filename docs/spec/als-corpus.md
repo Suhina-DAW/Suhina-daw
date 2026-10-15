@@ -1,9 +1,9 @@
 ---
 description: How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces
-read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
+read_when: making test sets, locators, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/als/tests/corpus.rs
   - scripts/test-signal.py
@@ -490,6 +490,32 @@ length, 48 kHz, 32-bit float, no normalising, no dither) as `501-bounce.wav` and
 
 `corpus/als/README.md`, as in the Log section at the end, plus the fade preference from Setup, the exact fade
 lengths Live shows, and the answer for 504.
+
+## Series 10: locators
+
+Shows where a Live Set stores the arrangement's locators (named positions on the timeline) and
+what each one holds, so the importer can read them into arrangement markers. Until then
+`als-format.md` › Locators lists the structure as a hypothesis.
+
+### Setup
+
+1. Start from `00-base.als` (series 1) and Save As `corpus/als/600-locators-base.als`.
+2. Switch to Arrangement View. Set the arrangement grid to one bar, so locators land on bars.
+
+### Files (600–604)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 600 | `600-locators-base.als` | No edit. |
+| 601 | `601-locator-bar-5.als` | Put the insert marker at bar 5 and add a locator there (Create › Add Locator). |
+| 602 | `602-locator-renamed.als` | Rename that locator to `Verse`. |
+| 603 | `603-locator-bar-2.als` | Put the insert marker at bar 2 and add a second locator there, so the second one added is the earlier one. |
+| 604 | `604-locator-moved.als` | Drag the `Verse` locator from bar 5 to bar 9. |
+
+### Log
+
+`corpus/als/README.md`, as in the Log section at the end, plus the default name Live gave each new
+locator.
 
 ## Tips from the first run
 

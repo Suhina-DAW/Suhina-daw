@@ -151,7 +151,7 @@ GAPS = [
     ("Browser and file management depth", "Browser, files, project (ch 4, 5)",
      "collections, tag editor, project folders, collect files, unused files, packs, cloud"),
     ("Views and clip editing", "Views and editing (ch 6-10, 16)",
-     "MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions"),
+     "MIDI note editor, clip view panels, loop brace, split, consolidate, follow actions"),
     ("MIDI tools, MPE, grooves, tuning", "Generative/transform (ch 11-15)",
      "transformation and generative tools, MPE editing, groove pool, tuning systems"),
     ("Automation and clip envelopes", "Automation, envelopes (ch 26, 27)",

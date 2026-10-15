@@ -58,6 +58,9 @@ const GAIN_FIELD: Vec2 = Vec2::new(44.0, 12.0);
 const GAIN_FIELD_INSET: f32 = 12.0;
 /// The play start marker on the ruler: a triangle this wide and tall, pointing down.
 const MARKER: Vec2 = Vec2::new(9.0, 6.0);
+/// The row of arrangement markers under the ruler, and the widest a marker's name tag gets.
+const MARKER_ROW: f32 = 16.0;
+const MARKER_TAG_MAX: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -169,6 +172,12 @@ pub struct ArrangementViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// A marker being dragged: its index and where the pointer is, in beats before snapping.
+    marker_drag: Option<(usize, f64)>,
+    /// The beat a right-click on the ruler or the marker row would add a marker at.
+    marker_menu_beat: f64,
+    /// The name being typed for a marker in its menu.
+    marker_name: Option<(usize, String)>,
 }
 
 impl Default for ArrangementViewState {
@@ -192,6 +201,9 @@ impl Default for ArrangementViewState {
             track_drop: None,
             panning: false,
             drop: None,
+            marker_drag: None,
+            marker_menu_beat: 0.0,
+            marker_name: None,
         }
     }
 }
@@ -397,14 +409,16 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     };
     let time = Rect::from_x_y_ranges(time_x, area.y_range());
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
+    let marker_row =
+        Rect::from_min_size(Pos2::new(time.left(), ruler.bottom() + 1.0), Vec2::new(time.width(), MARKER_ROW));
     // Return tracks and the main track are fixed rows along the bottom.
     let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
     let fixed_rows = returns.len() + usize::from(timeline.main_volume_db.is_some());
     let fixed_height = fixed_rows as f32 * (ROW + 1.0);
-    let fixed_top = (area.bottom() - fixed_height).max(ruler.bottom() + 1.0);
+    let fixed_top = (area.bottom() - fixed_height).max(marker_row.bottom() + 1.0);
     let fixed = Rect::from_min_max(Pos2::new(area.left(), fixed_top), area.max);
     let lanes_area =
-        Rect::from_min_max(Pos2::new(area.left(), ruler.bottom() + 1.0), Pos2::new(area.right(), fixed_top - 1.0));
+        Rect::from_min_max(Pos2::new(area.left(), marker_row.bottom() + 1.0), Pos2::new(area.right(), fixed_top - 1.0));
     let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
 
     // Zoom around the pointer with Ctrl and the wheel, lane heights with Alt and the wheel; the
@@ -496,7 +510,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             }
         }
     }
-    painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border_strong()));
+    painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border()));
+    painter.rect_filled(marker_row, 0.0, theme::panel_background());
+    painter.hline(area.x_range(), marker_row.bottom() + 0.5, theme::hairline(theme::border_strong()));
 
     // A click on the ruler moves the play start marker there, on the clip grid (Alt: free); while
     // playing, playback jumps there (`docs/spec/arrangement-editing.md` › Play position).
@@ -512,6 +528,27 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             json!({ "beats": ruler_beat(raw, bar_beats, state.beat_width, free) }),
         ));
     }
+    let beat_at = |x: f32, free: bool, state: &ArrangementViewState| {
+        ruler_beat(f64::from((x - time.left() + state.scroll.x) / state.beat_width), bar_beats, state.beat_width, free)
+    };
+    // A right-click on the ruler or the marker row offers a marker there.
+    let row_response = ui.interact(marker_row, Id::new("arrangement-marker-row"), Sense::click());
+    row_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Markers"));
+    for response in [&ruler_response, &row_response] {
+        if response.secondary_clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let free = ui.input(|i| i.modifiers.alt);
+            state.marker_menu_beat = beat_at(pointer.x, free, state);
+        }
+        response.context_menu(|ui| {
+            if ui.button("Add marker here").clicked() {
+                actions.push(Action::new("marker.add", json!({ "beat": state.marker_menu_beat })));
+                ui.close();
+            }
+        });
+    }
+    marker_flags(ui, timeline, state, actions, marker_row, &x_of);
     // The marker: a small triangle hanging from the ruler's lower edge.
     let marker_x = x_of(timeline.start_beat).round() + 0.5;
     if (time.left()..=time.right()).contains(&marker_x) {
@@ -524,7 +561,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
 
     // Header column top, beside the ruler: right-click moves the headers to the other side.
-    let corner = Rect::from_x_y_ranges(headers, ruler.y_range());
+    let corner = Rect::from_x_y_ranges(headers, egui::Rangef::new(ruler.top(), marker_row.bottom()));
     painter.rect_filled(corner, 0.0, theme::panel_background());
     let corner_response = ui.interact(corner, Id::new("arrangement-header-corner"), Sense::click());
     corner_response.context_menu(|ui| {
@@ -758,6 +795,117 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         if x >= time.left() && x <= time.right() {
             painter.vline(x, time.y_range(), theme::hairline(theme::accent()));
         }
+    }
+}
+
+/// The markers in the row under the ruler: each a line at its beat with its name beside it. A
+/// click jumps there, a drag moves it (on the clip grid; Alt: free), a right-click renames or
+/// deletes it (`docs/spec/arrangement-editing.md` › Markers).
+fn marker_flags(
+    ui: &Ui,
+    timeline: &Timeline,
+    state: &mut ArrangementViewState,
+    actions: &mut Vec<Action>,
+    row: Rect,
+    x_of: &dyn Fn(f64) -> f32,
+) {
+    let painter = ui.painter_at(row);
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let shown_beat = |state: &ArrangementViewState, index: usize, beat: f64| match state.marker_drag {
+        Some((i, raw)) if i == index => {
+            let free = ui.input(|input| input.modifiers.alt);
+            let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
+            ruler_beat(raw, bar_beats, state.beat_width, free)
+        }
+        _ => beat,
+    };
+    for (n, marker) in timeline.markers.iter().enumerate() {
+        let beat = shown_beat(state, marker.index, marker.beat);
+        let x = x_of(beat).round() + 0.5;
+        // The tag ends where the next marker starts, so names never cover each other.
+        let next = timeline.markers.get(n + 1).map_or(f32::INFINITY, |m| x_of(shown_beat(state, m.index, m.beat)));
+        let width = (widgets::text_width(ui, &marker.name, font.clone()) + 2.0 * 3.0 + 2.0)
+            .clamp(MARKER.x, MARKER_TAG_MAX)
+            .min((next - x - 1.0).max(MARKER.x));
+        let tag = Rect::from_min_max(Pos2::new(x, row.top() + 1.0), Pos2::new(x + width, row.bottom() - 1.0));
+        if tag.right() < row.left() || tag.left() > row.right() {
+            continue;
+        }
+        let id = Id::new(("arrangement-marker", marker.index));
+        let response = ui.interact(tag.expand2(Vec2::new(2.0, 0.0)), id, Sense::click_and_drag());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Marker {}", marker.name))
+        });
+        let fill = if state.marker_drag.is_some_and(|(i, _)| i == marker.index) {
+            theme::control_active()
+        } else if response.hovered() {
+            theme::control_hover()
+        } else {
+            theme::control_background()
+        };
+        painter.rect_filled(tag, 0.0, fill);
+        painter.vline(x, row.y_range(), theme::hairline(theme::text_secondary()));
+        widgets::text_in(
+            &painter,
+            tag.shrink2(Vec2::new(3.0, 0.0)).translate(Vec2::new(1.0, 0.0)),
+            Align2::LEFT_CENTER,
+            &marker.name,
+            font.clone(),
+            theme::text_value(),
+        );
+
+        if response.clicked() {
+            actions.push(Action::new("marker.jump", json!({ "index": marker.index })));
+        }
+        if response.drag_started_by(egui::PointerButton::Primary) {
+            state.marker_drag = Some((marker.index, marker.beat));
+        }
+        if response.dragged_by(egui::PointerButton::Primary)
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some((i, raw)) = state.marker_drag.as_mut()
+            && *i == marker.index
+        {
+            // Where the pointer is, in beats, unsnapped: snapping happens as it is shown.
+            *raw = f64::from((pointer.x - row.left() + state.scroll.x) / state.beat_width);
+        }
+        if response.drag_stopped() && state.marker_drag.is_some_and(|(i, _)| i == marker.index) {
+            let to = shown_beat(state, marker.index, marker.beat);
+            state.marker_drag = None;
+            if to != marker.beat {
+                actions.push(Action::new("marker.move", json!({ "index": marker.index, "beat": to })));
+            }
+        }
+        if response.secondary_clicked() {
+            state.marker_name = Some((marker.index, marker.name.clone()));
+        }
+        response.context_menu(|ui| {
+            let Some((index, name)) = state.marker_name.as_mut().filter(|(i, _)| *i == marker.index) else {
+                ui.close();
+                return;
+            };
+            let index = *index;
+            let field = ui.add(egui::TextEdit::singleline(name).hint_text("Marker name").desired_width(140.0));
+            let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button("Rename").clicked() || entered {
+                let name = name.trim().to_string();
+                if !name.is_empty() && name != marker.name {
+                    actions.push(Action::new("marker.rename", json!({ "index": index, "name": name })));
+                }
+                ui.close();
+            }
+            if ui.button("Jump to marker").clicked() {
+                actions.push(Action::new("marker.jump", json!({ "index": index })));
+                ui.close();
+            }
+            if ui.button("Delete marker").clicked() {
+                actions.push(Action::new("marker.delete", json!({ "index": index })));
+                ui.close();
+            }
+        });
+    }
+    // A drag that lost its marker (the project changed under it) ends.
+    if state.marker_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+        state.marker_drag = None;
     }
 }
 
