@@ -27,6 +27,7 @@ fn project() -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: output.map(ChannelId),
         sends: Vec::new(),
         devices: Vec::new(),

@@ -129,12 +129,17 @@ fn chevron(painter: &egui::Painter, center: Pos2, open: bool, color: Color32) {
     painter.add(egui::Shape::line(points, Stroke::new(1.1, color)));
 }
 
-fn play_glyph(painter: &egui::Painter, center: Pos2, playing: bool, color: Color32) {
+pub(crate) fn play_glyph(painter: &egui::Painter, center: Pos2, playing: bool, color: Color32, size: f32) {
     if playing {
-        painter.rect_filled(Rect::from_center_size(center, Vec2::splat(7.0)), 0.0, color);
+        painter.rect_filled(Rect::from_center_size(center, Vec2::splat(size)), 0.0, color);
     } else {
+        let s = size / 7.0;
         painter.add(egui::Shape::convex_polygon(
-            vec![center + Vec2::new(-3.0, -4.0), center + Vec2::new(4.0, 0.0), center + Vec2::new(-3.0, 4.0)],
+            vec![
+                center + Vec2::new(-3.0 * s, -4.0 * s),
+                center + Vec2::new(4.0 * s, 0.0),
+                center + Vec2::new(-3.0 * s, 4.0 * s),
+            ],
             color,
             Stroke::NONE,
         ));
@@ -602,6 +607,7 @@ fn results_view(
                 lead.center(),
                 playing,
                 if button.hovered() { theme::text_primary() } else { theme::text_secondary() },
+                7.0,
             );
             if button.clicked() {
                 play = Some(index);
@@ -1108,6 +1114,7 @@ fn preview_strip(
         play.center(),
         playing_this,
         if playing_this { theme::accent() } else { theme::text_primary() },
+        7.0,
     );
     if response.clicked() {
         if playing_this {

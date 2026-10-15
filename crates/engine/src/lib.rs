@@ -14,6 +14,9 @@ mod chain;
 #[cfg(test)]
 mod chain_tests;
 mod cpu;
+mod cue;
+#[cfg(test)]
+mod cue_tests;
 #[cfg(test)]
 mod fade_cost_tests;
 #[cfg(test)]
@@ -48,6 +51,10 @@ mod sends;
 mod sends_tests;
 mod stretch;
 mod swap;
+mod tempo;
+#[cfg(test)]
+mod tempo_tests;
+mod track_render;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -60,10 +67,12 @@ pub use audio::{AudioData, AudioPool};
 use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
+pub use cue::MAX_CUE_GAIN;
 pub use input::MAX_INPUT_CHANNELS;
 use launcher::Launcher;
 pub use launcher::{
-    ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
+    ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, PlayingMeter, Quantization, Queued,
+    SceneShift,
 };
 pub use live::{LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, port_id};
 pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
@@ -78,7 +87,8 @@ use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
 use suhina_device_api::ProcessContext;
 pub use suhina_model as model;
-use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TempoMap, TrackId};
+pub use track_render::render_track;
 
 /// The most frames a plug-in is asked to process at once: the size of a device chain's block.
 pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;
@@ -217,9 +227,12 @@ pub(crate) struct Graph {
     ahead: AheadReader,
     length: u64,
     launcher: Launcher,
-    frames_per_beat: f64,
+    /// The tempo map counted in frames: every beat of this graph is placed through it
+    /// (`docs/spec/tempo-map.md`).
+    tempo: Arc<TempoMap>,
     /// The span playback repeats, in beats (`Transport::looping`): the transport turns them
-    /// into frames as it plays, so the loop follows the tempo.
+    /// into frames through the tempo map as it plays, so the loop keeps its beats when the
+    /// tempo changes.
     loop_beats: Option<(f64, f64)>,
     /// Device chains of the tracks that have devices (ADR 0004).
     chains: Vec<Chain>,
@@ -271,6 +284,8 @@ pub struct Renderer {
     plugin_info: HashMap<u64, PluginSlotInfo>,
     /// The browser's preview voice (ADR 0011).
     preview: preview::Preview,
+    /// The cue bus: cued tracks and the preview, for headphones (`cue.rs`).
+    cue: cue::Cue,
     /// Notes played on a MIDI controller, and the armed tracks that hear them (ADR 0017).
     live: live::Live,
     /// The audio input device's frames, for the tracks that hear it (ADR 0017).
@@ -309,7 +324,7 @@ impl Renderer {
             .launcher
             .monitor
             .frames_per_beat
-            .store(graph.frames_per_beat.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            .store(graph.tempo.start_per_beat().to_bits(), std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
             sample_rate,
             graph,
@@ -333,6 +348,7 @@ impl Renderer {
             offline: false,
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
+            cue: cue::Cue::new(),
             live: live::Live::new(),
             input: input::Input::new(),
             cpu: cpu::CpuMeter::new(),
@@ -448,13 +464,26 @@ impl Renderer {
     }
 
     /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
-    /// Commands from a [`Controller`] are applied first. Never allocates.
+    /// Commands from a [`Controller`] are applied first. Never allocates. The cue bus is
+    /// rendered too but not given out; see [`Renderer::process_with_cue`].
     pub fn process(&mut self, out: &mut [f32]) {
+        self.process_parts(out, None);
+    }
+
+    /// Like [`Renderer::process`], and writes the cue bus, the same number of frames of
+    /// interleaved stereo, into `cue` (overwriting it; frames `cue` has no room for are not
+    /// written, and frames past `out`'s are left alone). Never allocates.
+    pub fn process_with_cue(&mut self, out: &mut [f32], cue: &mut [f32]) {
+        self.process_parts(out, Some(cue));
+    }
+
+    fn process_parts(&mut self, out: &mut [f32], cue: Option<&mut [f32]>) {
         // The CPU load is measured only in real time: an offline render runs flat out.
         let measured = if self.offline { None } else { Some(Instant::now()) };
         self.receive_swap();
         self.receive_plugins();
         let mut rest = out;
+        let mut cue_rest = cue;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
         loop {
@@ -463,17 +492,19 @@ impl Renderer {
                 Some(at) if at < self.position + frames => {
                     let split = ((at.saturating_sub(self.position) * 2) as usize).min(rest.len());
                     let (before, after) = rest.split_at_mut(split);
+                    let (cue_before, cue_after) = split_cue(cue_rest, split);
                     if !before.is_empty() {
-                        self.process_block(before);
+                        self.process_block(before, cue_before);
                     }
                     self.apply_swap();
                     rest = after;
+                    cue_rest = cue_after;
                 }
                 _ => break,
             }
         }
         if !rest.is_empty() {
-            self.process_block(rest);
+            self.process_block(rest, cue_rest);
         }
         self.publish_position();
         if let Some(started) = measured {
@@ -481,7 +512,7 @@ impl Renderer {
         }
     }
 
-    fn process_block(&mut self, mut out: &mut [f32]) {
+    fn process_block(&mut self, mut out: &mut [f32], mut cue: Option<&mut [f32]>) {
         // Device chains hold at most MAX_BLOCK frames; longer blocks are rendered in pieces. A
         // piece also ends at the loop end, where the transport wraps to the loop start, so the
         // wrap lands on its exact frame. Commands are applied first: they can start the
@@ -492,7 +523,9 @@ impl Renderer {
             let frames = (out.len() / 2).min(MAX_BLOCK);
             let frames = self.frames_to_loop_end().map_or(frames, |to_end| frames.min(to_end.max(1)));
             let (chunk, rest) = std::mem::take(&mut out).split_at_mut(frames * 2);
-            self.process_chunk(chunk);
+            let (cue_chunk, cue_after) = split_cue(cue, chunk.len());
+            self.process_chunk(chunk, cue_chunk);
+            cue = cue_after;
             out = rest;
         }
     }
@@ -508,8 +541,9 @@ impl Renderer {
         Some(Instant::now() + Duration::from_secs_f64(seconds))
     }
 
-    fn process_chunk(&mut self, out: &mut [f32]) {
+    fn process_chunk(&mut self, out: &mut [f32], cue: Option<&mut [f32]>) {
         let frames = out.len() / 2;
+        self.cue.begin(frames);
         let deadline = if self.graph.chains.is_empty() { None } else { self.deadline(frames) };
         for chain in &mut self.graph.chains {
             chain.begin(frames, deadline);
@@ -539,7 +573,7 @@ impl Renderer {
         self.graph.ahead.service();
         let context = ProcessContext {
             tempo: self.graph.launcher.tempo_bpm(),
-            beat: self.graph.launcher.beat_and_bar().0,
+            beat: self.graph.launcher.beat(),
             playing: self.running,
         };
         // Plug-in parameter events (set values, automation) are planned before any of the
@@ -562,8 +596,8 @@ impl Renderer {
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
-            let (beat, bar_beats, bar_origin) = self.graph.launcher.beat_and_bar();
-            let click = self.metronome.frame(self.running, beat, bar_beats, bar_origin);
+            let launcher = &self.graph.launcher;
+            let click = self.metronome.frame(self.running, launcher.beat(), |index| launcher.starts_bar(index));
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running
@@ -659,10 +693,21 @@ impl Renderer {
             }
         }
         // In order, so a bus or a return has every chain that plays into it before it runs.
-        sends::finish(&mut self.graph.chains, out, frames, &context);
+        sends::finish(&mut self.graph.chains, out, &mut self.cue.bus, frames, &context);
         self.graph.levels.finish(&self.graph.chains, frames, &mut self.meters);
-        // The preview comes after every track and the main channel's mix (ADR 0011).
-        self.preview.finish(out, frames, &mut self.graph.chains);
+        // The preview comes after every track and the main channel's mix (ADR 0011), into the
+        // cue bus, and into the main output too while the cue plays with it.
+        if let Some(preview) = self.cue.preview.get_mut(..frames * 2) {
+            self.preview.finish(preview, frames, &mut self.graph.chains);
+        }
+        self.cue.finish(out, frames);
+        if let Some(cue) = cue
+            && let Some(bus) = self.cue.bus.get(..frames * 2)
+        {
+            for (to, from) in cue.iter_mut().zip(bus) {
+                *to = *from;
+            }
+        }
         self.meters.measure(meters::Meter::Main, out, frames);
         self.block_frame = 0;
     }
@@ -856,7 +901,11 @@ impl Graph {
         let neutral = automation::neutral(project);
         let project = neutral.as_ref().unwrap_or(project);
 
-        let frames_per_beat = 60.0 / bpm * f64::from(sample_rate);
+        let tempo = Arc::new(project.transport.tempo_map(f64::from(sample_rate)));
+        let frames_per_beat = tempo.start_per_beat();
+        // Audio events follow the map only when it changes, so a constant tempo plays exactly as
+        // it always did.
+        let changing = (!tempo.is_constant()).then(|| Arc::clone(&tempo));
         let column_of = |track: TrackId| {
             project
                 .launcher
@@ -885,7 +934,7 @@ impl Graph {
                         LaneData::Notes(_) => collect_notes(
                             clip,
                             content_lane,
-                            frames_per_beat,
+                            &tempo,
                             (track, gain_left, gain_right, column, bus, meter),
                             &mut events,
                         ),
@@ -896,10 +945,11 @@ impl Graph {
                             // the stretcher cannot handle, are re-pitched.
                             if region.warped
                                 && region.stretch != suhina_model::StretchMode::Repitch
-                                && let Some(voice) = StretchVoice::new(clip, region, data.clone(), bpm, sample_rate)
+                                && let Some(voice) =
+                                    StretchVoice::on_map(clip, region, data.clone(), &tempo, sample_rate)
                             {
                                 let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
-                                let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                let to_frame = |beats: f64| tempo::frame_of(&tempo, beats);
                                 let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
                                 stretch_voices.push((voice, start, end.saturating_sub(start)));
                                 stretch_events.push(StretchEvent {
@@ -907,14 +957,15 @@ impl Graph {
                                     end,
                                     gain_left: gains.0 * gain,
                                     gain_right: gains.1 * gain,
-                                    fades: Fades::new(clip, frames_per_beat, sample_rate),
+                                    fades: Fades::on_map(clip, &tempo, sample_rate),
                                     column,
                                     bus,
                                     meter,
                                 });
                                 continue;
                             }
-                            let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
+                            let timing =
+                                audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate, map: changing.clone() };
                             audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
                                 |event| ArrangedAudio {
                                     event,
@@ -941,7 +992,12 @@ impl Graph {
             .max()
             .unwrap_or(0)
             .max(notes_end);
-        let tail = if chains.is_empty() { 0 } else { (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64 };
+        // A passthrough chain (a cued track's, or one into a bus) adds no tail of its own.
+        let tail = if chains.iter().all(|c| !c.has_devices()) {
+            0
+        } else {
+            (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64
+        };
         let length = if length > 0 { length + tail + u64::from(latency) } else { 0 };
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
@@ -970,8 +1026,8 @@ impl Graph {
             stretch_events,
             ahead: AheadReader::new(stretch_voices, sample_rate),
             length,
-            launcher: Launcher::new(project, audio, sample_rate, &chains),
-            frames_per_beat,
+            launcher: Launcher::new(project, audio, sample_rate, &chains, Arc::clone(&tempo)),
+            tempo,
             loop_beats: project.transport.looping().map(|r| (r.start, r.end)),
             routes: project
                 .tracks
@@ -986,6 +1042,18 @@ impl Graph {
             latency,
             direct_delay: Delay::new(latency as usize),
         }))
+    }
+}
+
+/// Splits an optional cue buffer at `at` samples, as the main buffer is split; past its end
+/// both parts are empty.
+fn split_cue(cue: Option<&mut [f32]>, at: usize) -> (Option<&mut [f32]>, Option<&mut [f32]>) {
+    match cue {
+        Some(cue) => {
+            let (before, after) = cue.split_at_mut(at.min(cue.len()));
+            (Some(before), Some(after))
+        }
+        None => (None, None),
     }
 }
 
@@ -1027,6 +1095,35 @@ pub fn render_offline_with_plugins(
         renderer.process(block);
     }
     Ok(out)
+}
+
+/// Renders the whole arrangement offline like [`render_offline_with_plugins`], and the cue bus
+/// beside it: the main mix and the cue, both interleaved stereo of the same length. `cue_gain`
+/// is the cue volume (linear) and `separate` whether the cue has outputs of its own (then the
+/// preview is heard only on the cue, as on the device).
+pub fn render_offline_with_cue(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    block_frames: usize,
+    plugins: Plugins,
+    cue_gain: f32,
+    separate: bool,
+) -> Result<(Vec<f32>, Vec<f32>), RenderError> {
+    let mut renderer = Renderer::with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
+    renderer.handle(LaunchCommand::SetCue { gain: Some(cue_gain), separate: Some(separate) });
+    let total = usize::try_from(renderer.length())
+        .ok()
+        .and_then(|frames| frames.checked_mul(2))
+        .ok_or(RenderError::TooLong { seconds: renderer.length() as f64 / f64::from(sample_rate) })?;
+    let mut out = vec![0.0f32; total];
+    let mut cue = vec![0.0f32; total];
+    let block = block_frames.max(1).saturating_mul(2);
+    for (main, cued) in out.chunks_mut(block).zip(cue.chunks_mut(block)) {
+        renderer.process_with_cue(main, cued);
+    }
+    Ok((out, cue))
 }
 
 /// Renders `seconds` of the project offline, starting with the transport stopped and applying
@@ -1147,7 +1244,7 @@ fn heard_with_solo(project: &Project, channel: &suhina_model::Channel, chain: &[
 fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
-    frames_per_beat: f64,
+    map: &TempoMap,
     (track, gain_left, gain_right, column, bus, meter): (TrackId, f32, f32, u32, u32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
@@ -1155,7 +1252,7 @@ fn collect_notes(
     if !(clip.length.is_finite() && clip.length > 0.0 && clip.start.is_finite() && clip.offset.is_finite()) {
         return;
     }
-    let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+    let to_frame = |beats: f64| tempo::frame_of(map, beats);
 
     // Each pass maps the content range [from, to) to the clip position `at`.
     let mut push_range = |from: f64, to: f64, at: f64| {
@@ -1244,6 +1341,7 @@ mod tests {
                     pan: 0.0,
                     mute: false,
                     solo: false,
+                    cue: false,
                     output: None,
                     sends: Vec::new(),
                     devices: Vec::new(),

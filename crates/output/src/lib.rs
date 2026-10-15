@@ -13,6 +13,12 @@
 //! commands reach the renderer through its lock-free command queue, and stretched clips are
 //! rendered ahead on a worker thread of their own (ADR 0003).
 //!
+//! The ring carries four samples a frame: the main output's left and right, then the cue's
+//! (the engine's cue bus, [`Renderer::process_with_cue`]). The device's callback writes the
+//! main pair to channels 1 and 2 and, when the chosen cue pair is on the device
+//! ([`OutputChoice::cue_pair`]), the cue to that pair; otherwise the cue plays with the main
+//! output (the engine adds the preview there) and is not written.
+//!
 //! Hosts are cpal's (WASAPI shared on Windows, ASIO with the `asio` feature, ALSA, JACK,
 //! CoreAudio), and WASAPI exclusive mode through the `wasapi` crate. A stream is opened and
 //! closed on the audio owner's thread, never on the render or device thread. The buffer size
@@ -33,13 +39,16 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 use suhina_engine::model::Project;
-use suhina_engine::{AudioPool, Controller, Plugins, Renderer};
+use suhina_engine::{AudioPool, Controller, LaunchCommand, Plugins, Renderer};
 pub use suhina_realtime::Priority;
 use suhina_realtime::RealTime;
 use suhina_session::Player;
 use suhina_session::audio::{
     AudioSystem, HostInfo, LiveOutput, MAX_BUFFER_FRAMES, MIN_BUFFER_FRAMES, Opened, OutputChoice, OutputInfo,
 };
+
+/// Samples per frame in the ring: the main output's left and right, then the cue's.
+pub(crate) const RING_CHANNELS: usize = 4;
 
 /// Frames the engine renders per block when no buffer size is chosen.
 pub const ENGINE_BLOCK: usize = 1024;
@@ -153,10 +162,10 @@ impl Progress {
     }
 }
 
-/// Fills `out` (interleaved stereo) from the ring, with silence, counted as an underrun, for
-/// what is not there yet. Never allocates.
+/// Fills `out` (whole frames of [`RING_CHANNELS`] samples) from the ring, with silence, counted
+/// as an underrun, for what is not there yet. Never allocates.
 pub(crate) fn read_ring(ring: &mut Ring, out: &mut [f32], progress: &Progress) {
-    let ready = ring.slots().min(out.len()) / 2 * 2;
+    let ready = ring.slots().min(out.len()) / RING_CHANNELS * RING_CHANNELS;
     match ring.read_chunk(ready) {
         Ok(chunk) => {
             for (sample, slot) in chunk.into_iter().zip(out.iter_mut()) {
@@ -204,6 +213,40 @@ fn block_for(chosen: Option<u32>, overridden: Option<&str>) -> usize {
 fn ring_target(block: usize, device_frames: usize, live: bool) -> usize {
     let device = device_frames.min(MAX_DEVICE_FRAMES);
     if live { (LIVE_RING_BLOCKS * block).max(device) } else { (RING_BLOCKS * block).max(device + block) }
+}
+
+/// The first channel (counted from 0) the cue is written to on a device with `channels`
+/// output channels, for the chosen cue `pair` (1 is channels 3 and 4): `None` when no pair is
+/// chosen or the device does not have it, so the cue plays with the main output.
+pub(crate) fn cue_channel(pair: Option<u16>, channels: u16) -> Option<usize> {
+    let first = usize::from(pair.filter(|p| *p > 0)?) * 2;
+    (first + 2 <= usize::from(channels)).then_some(first)
+}
+
+/// The channel count to open a device with so that the cue `pair` fits: the default's when it
+/// is enough, else the fewest of `offered` (the counts the device offers at the rate) that
+/// hold the pair; `None` when none does.
+pub(crate) fn channels_for_cue(pair: u16, default: u16, offered: &[u16]) -> Option<u16> {
+    let needed = u32::from(pair) * 2 + 2;
+    if u32::from(default) >= needed {
+        return Some(default);
+    }
+    offered.iter().copied().filter(|c| u32::from(*c) >= needed).min()
+}
+
+/// The sample for `channel` of a device with `channels` channels, from a ring frame (main left
+/// and right, cue left and right): mono gets the main output's average, channels 1 and 2 the
+/// main output, the cue's pair from `cue` the cue, the rest silence.
+pub(crate) fn channel_sample(frame: &[f32; RING_CHANNELS], channels: usize, channel: usize, cue: Option<usize>) -> f32 {
+    let [left, right, cue_left, cue_right] = *frame;
+    match channel {
+        _ if channels == 1 => (left + right) * 0.5,
+        0 => left,
+        1 => right,
+        c if Some(c) == cue => cue_left,
+        c if cue.is_some_and(|first| c == first + 1) => cue_right,
+        _ => 0.0,
+    }
 }
 
 /// The device's side of a playing stream.
@@ -294,6 +337,8 @@ enum Backend {
     Exclusive {
         device: Option<String>,
         buffer: Option<u32>,
+        /// The chosen cue pair; whether the device has it is known once it is opened.
+        cue_pair: Option<u16>,
     },
 }
 
@@ -306,6 +351,11 @@ pub struct Output {
     channels: u16,
     block: usize,
     exclusive: bool,
+    /// The first device channel (from 0) the cue is written to, or `None` when it plays with
+    /// the main output.
+    cue: Option<usize>,
+    /// The cue volume, linear.
+    cue_gain: f32,
     /// What could not be had as chosen.
     notices: Vec<String>,
 }
@@ -357,14 +407,25 @@ impl Output {
             // The device is asked for this period itself, so it stays within what the engine
             // renders in; the device aligns it further, or refuses it and says why (`exclusive`).
             let buffer = choice.buffer_frames.map(|frames| frames.clamp(MIN_BUFFER_FRAMES, MAX_BUFFER_FRAMES));
+            let channels = default.channels().max(1);
+            let cue = cue_channel(choice.cue_pair, channels);
+            if let Some(pair) = choice.cue_pair.filter(|_| cue.is_none()) {
+                notices.push(cue_missing(&device_name, pair, channels));
+            }
             return Ok(Self {
-                backend: Backend::Exclusive { device: Some(device_name.clone()), buffer },
+                backend: Backend::Exclusive {
+                    device: Some(device_name.clone()),
+                    buffer,
+                    cue_pair: cue.and(choice.cue_pair),
+                },
                 host: host_name,
                 device_name,
                 sample_rate,
-                channels: default.channels().max(1),
+                channels,
                 block: engine_block(choice.buffer_frames),
                 exclusive: true,
+                cue,
+                cue_gain: choice.cue_gain,
                 notices,
             });
         }
@@ -386,6 +447,31 @@ impl Output {
                 None => notices.push(format!(
                     "{device_name} does not play at {rate} Hz; it plays at {} Hz",
                     supported.sample_rate()
+                )),
+            }
+        }
+        // A cue pair past the format's channels: the same rate and format with more channels.
+        if let Some(pair) = choice.cue_pair.filter(|p| cue_channel(Some(*p), supported.channels()).is_none()) {
+            let rate = supported.sample_rate();
+            let format = supported.sample_format();
+            let fitting: Vec<cpal::SupportedStreamConfigRange> = device
+                .supported_output_configs()
+                .map(|configs| {
+                    configs.filter(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&rate)).collect()
+                })
+                .unwrap_or_default();
+            let offered: Vec<u16> = fitting.iter().map(cpal::SupportedStreamConfigRange::channels).collect();
+            let wider = channels_for_cue(pair, supported.channels(), &offered).and_then(|channels| {
+                let same = |c: &&cpal::SupportedStreamConfigRange| c.channels() == channels;
+                let found = fitting.iter().filter(same).find(|c| c.sample_format() == format);
+                found.or_else(|| fitting.iter().find(same)).and_then(|c| c.try_with_sample_rate(rate))
+            });
+            match wider {
+                Some(config) => supported = config,
+                None => notices.push(cue_missing(
+                    &device_name,
+                    pair,
+                    offered.iter().copied().max().unwrap_or(supported.channels()),
                 )),
             }
         }
@@ -414,8 +500,15 @@ impl Output {
             channels: config.channels,
             block: engine_block(buffer),
             exclusive,
+            cue: cue_channel(choice.cue_pair, config.channels),
+            cue_gain: choice.cue_gain,
             notices,
         })
+    }
+
+    /// The pair the cue plays on (1 is channels 3 and 4), or `None` with the main output.
+    pub fn cue_pair(&self) -> Option<u16> {
+        self.cue.and_then(|first| u16::try_from(first / 2).ok())
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -443,8 +536,12 @@ impl Output {
             #[cfg(windows)]
             Backend::Exclusive { .. } => "exclusive".to_string(),
         };
+        let cue = match self.cue {
+            Some(first) => format!(", cue on {}/{}", first + 1, first + 2),
+            None => String::new(),
+        };
         format!(
-            "{} ({}, {} Hz, {} channels, {mode}, {}-frame blocks)",
+            "{} ({}, {} Hz, {} channels, {mode}, {}-frame blocks{cue})",
             self.device_name, self.host, self.sample_rate, self.channels, self.block
         )
     }
@@ -454,12 +551,12 @@ impl Output {
     fn open_device(&self, ring: Ring, progress: &Arc<Progress>) -> Result<DeviceStream, String> {
         match &self.backend {
             Backend::Cpal { device, config, format } => {
-                let (device, config) = (device, *config);
+                let (device, config, cue) = (device, *config, self.cue);
                 let stream = match format {
-                    cpal::SampleFormat::F32 => build::<f32>(device, config, ring, progress),
-                    cpal::SampleFormat::I16 => build::<i16>(device, config, ring, progress),
-                    cpal::SampleFormat::I32 => build::<i32>(device, config, ring, progress),
-                    cpal::SampleFormat::U16 => build::<u16>(device, config, ring, progress),
+                    cpal::SampleFormat::F32 => build::<f32>(device, config, cue, ring, progress),
+                    cpal::SampleFormat::I16 => build::<i16>(device, config, cue, ring, progress),
+                    cpal::SampleFormat::I32 => build::<i32>(device, config, cue, ring, progress),
+                    cpal::SampleFormat::U16 => build::<u16>(device, config, cue, ring, progress),
                     other => {
                         return Err(format!(
                             "audio output {device} uses sample format {other}, which is not supported yet"
@@ -469,8 +566,9 @@ impl Output {
                 Ok(DeviceStream::Cpal(stream))
             }
             #[cfg(windows)]
-            Backend::Exclusive { device, buffer } => {
-                exclusive::open(device.clone(), self.sample_rate, *buffer, ring, progress).map(DeviceStream::Exclusive)
+            Backend::Exclusive { device, buffer, cue_pair } => {
+                exclusive::open(device.clone(), self.sample_rate, *buffer, *cue_pair, ring, progress)
+                    .map(DeviceStream::Exclusive)
             }
         }
     }
@@ -493,10 +591,12 @@ impl Output {
     fn play(
         &self,
         device: DeviceStream,
-        renderer: Renderer,
+        mut renderer: Renderer,
         producer: rtrb::Producer<f32>,
         progress: &Arc<Progress>,
     ) -> Result<Stream, String> {
+        // The cue's volume, and whether it has outputs of its own, apply from the first block.
+        renderer.handle(LaunchCommand::SetCue { gain: Some(self.cue_gain), separate: Some(self.cue.is_some()) });
         if let Some(frames) = device.buffer_frames() {
             progress.set_callback_frames(frames as usize);
         }
@@ -528,7 +628,7 @@ impl Output {
 
 /// A ring for blocks of `block` frames: room for the target and a device buffer more.
 fn ring(block: usize) -> (rtrb::Producer<f32>, Ring) {
-    rtrb::RingBuffer::<f32>::new((ring_target(block, MAX_DEVICE_FRAMES, false) + block) * 2)
+    rtrb::RingBuffer::<f32>::new((ring_target(block, MAX_DEVICE_FRAMES, false) + block) * RING_CHANNELS)
 }
 
 /// The render thread: runs the engine a block at a time whenever the ring holds less than its
@@ -546,27 +646,29 @@ fn render_ahead(
     let mut realtime = RealTime::join(frames, renderer.sample_rate());
     let _unheard = joined.try_send((realtime.priority(), realtime.notice()));
     let mut block = vec![0.0f32; frames * 2];
+    let mut cue = vec![0.0f32; frames * 2];
     let capacity = ring.buffer().capacity();
     progress.block.store(frames, Ordering::Relaxed);
     while !stop.load(Ordering::Acquire) {
-        let queued = (capacity - ring.slots()) / 2;
+        let queued = (capacity - ring.slots()) / RING_CHANNELS;
         // Arming shrinks the queue as the device drains it, and disarming fills it again: no
         // jump either way.
         let live = renderer.live_armed();
         progress.live.store(live, Ordering::Relaxed);
         let target = ring_target(frames, progress.callback_frames(), live);
-        if queued >= target || ring.slots() < block.len() {
+        if queued >= target || ring.slots() < frames * RING_CHANNELS {
             std::thread::park_timeout(RENDER_WAIT);
             realtime.waited();
             continue;
         }
         let started = Instant::now();
-        renderer.process(&mut block);
+        renderer.process_with_cue(&mut block, &mut cue);
         // A device that takes faster than it plays, or a project too heavy to render in time,
         // keeps the thread from waiting: it rests rather than outlive its real-time limit.
         realtime.worked(started.elapsed());
-        if let Ok(chunk) = ring.write_chunk_uninit(block.len()) {
-            chunk.fill_from_iter(block.iter().copied());
+        if let Ok(chunk) = ring.write_chunk_uninit(frames * RING_CHANNELS) {
+            let frames = block.as_chunks::<2>().0.iter().zip(cue.as_chunks::<2>().0);
+            chunk.fill_from_iter(frames.flat_map(|([l, r], [cl, cr])| [*l, *r, *cl, *cr]));
         }
     }
     renderer
@@ -609,8 +711,9 @@ fn open_fitting(choice: &OutputChoice) -> Result<(Output, DeviceStream, rtrb::Pr
     if choice.exclusive {
         tries.push(OutputChoice { exclusive: false, ..choice.clone() });
     }
-    if *choice != OutputChoice::default() {
-        tries.push(OutputChoice::default());
+    // The default output keeps the cue's settings; it may have the cue's pair too.
+    if choice.device_only() != OutputChoice::default() {
+        tries.push(OutputChoice::default().with_cue_of(choice));
     }
     let mut notices = Vec::new();
     let mut last = String::from("no audio output");
@@ -678,6 +781,8 @@ struct Live {
     block: usize,
     exclusive: bool,
     fallback: bool,
+    channels: u16,
+    cue_pair: Option<u16>,
     /// The input device open beside it: its name, channels and the engine's count of blocks
     /// that found too little input.
     input: Option<(String, usize, Arc<AtomicU64>)>,
@@ -698,6 +803,8 @@ impl LiveOutput for Live {
             underruns: self.progress.underruns(),
             failed: self.progress.failed(),
             fallback: self.fallback,
+            channels: self.channels,
+            cue_pair: self.cue_pair,
             input: self.input.as_ref().map(|(name, _, _)| name.clone()),
             input_channels: self
                 .input
@@ -778,6 +885,8 @@ pub fn open_chosen(
                         block: output.block,
                         exclusive: output.exclusive,
                         fallback: in_place_of(&choice, &output.host, &output.device_name),
+                        channels: output.channels,
+                        cue_pair: output.cue_pair(),
                         input: input.as_ref().map(|i| (i.name.clone(), i.channels, Arc::clone(&i.underruns))),
                     };
                     let notice = (!output.notices.is_empty()).then(|| output.notices.join("; "));
@@ -900,6 +1009,7 @@ impl AudioSystem for DeviceOutput {
 fn build<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
+    cue: Option<usize>,
     mut ring: Ring,
     progress: &Arc<Progress>,
 ) -> Result<cpal::Stream, String>
@@ -908,7 +1018,7 @@ where
 {
     let channels = usize::from(config.channels);
     let sample_rate = config.sample_rate;
-    let mut scratch = vec![0.0f32; MAX_DEVICE_FRAMES * 2];
+    let mut scratch = vec![0.0f32; MAX_DEVICE_FRAMES * RING_CHANNELS];
     let on_data = Arc::clone(progress);
     let on_error = Arc::clone(progress);
 
@@ -918,14 +1028,14 @@ where
             move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
                 let timestamp = info.timestamp();
                 let device_delay = timestamp.playback.duration_since(timestamp.callback);
-                let queued = ring.slots() / 2;
+                let queued = ring.slots() / RING_CHANNELS;
                 on_data.set_callback_frames(data.len() / channels.max(1));
                 on_data.set_latency(measure_latency(queued, device_delay, sample_rate));
                 for block in data.chunks_mut(MAX_DEVICE_FRAMES * channels) {
                     let frames = block.len() / channels;
-                    let Some(stereo) = scratch.get_mut(..frames * 2) else { return };
-                    read_ring(&mut ring, stereo, &on_data);
-                    write_frames(block, channels, stereo);
+                    let Some(ringed) = scratch.get_mut(..frames * RING_CHANNELS) else { return };
+                    read_ring(&mut ring, ringed, &on_data);
+                    write_frames(block, channels, ringed, cue);
                     on_data.add_frames(frames);
                 }
             },
@@ -944,27 +1054,25 @@ where
         .map_err(|e| format!("could not open audio output {device}: {e}"))
 }
 
-/// Writes interleaved stereo into a device buffer with any channel count: mono gets the average,
-/// channels beyond the first two get silence.
-fn write_frames<T: SizedSample + FromSample<f32>>(out: &mut [T], channels: usize, stereo: &[f32]) {
-    for (frame, [left, right]) in out.chunks_mut(channels).zip(stereo.as_chunks::<2>().0) {
-        let mut samples = frame.iter_mut();
-        if channels == 1 {
-            if let Some(mono) = samples.next() {
-                *mono = T::from_sample((left + right) * 0.5);
-            }
-            continue;
-        }
-        if let Some(l) = samples.next() {
-            *l = T::from_sample(*left);
-        }
-        if let Some(r) = samples.next() {
-            *r = T::from_sample(*right);
-        }
-        for rest in samples {
-            *rest = T::from_sample(0.0f32);
+/// Writes ring frames (main left and right, cue left and right) into a device buffer with any
+/// channel count, as [`channel_sample`] maps them: the main output on channels 1 and 2 (mono
+/// gets the average), the cue on its pair from channel `cue`, silence on the rest.
+fn write_frames<T: SizedSample + FromSample<f32>>(out: &mut [T], channels: usize, ringed: &[f32], cue: Option<usize>) {
+    if channels == 0 {
+        return;
+    }
+    for (frame, ring_frame) in out.chunks_mut(channels).zip(ringed.as_chunks::<RING_CHANNELS>().0) {
+        for (channel, sample) in frame.iter_mut().enumerate() {
+            *sample = T::from_sample(channel_sample(ring_frame, channels, channel, cue));
         }
     }
+}
+
+/// Says that `device`, with `channels` output channels, has no cue `pair`, so the cue plays
+/// with the main output.
+fn cue_missing(device: &str, pair: u16, channels: u16) -> String {
+    let (first, second) = suhina_session::audio::cue_channels(pair);
+    format!("{device} has {channels} output channels, not {first}/{second}; the cue plays with the main output")
 }
 
 #[cfg(test)]

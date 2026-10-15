@@ -32,10 +32,10 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 3. **Recording and inputs:** audio and MIDI recording, audio inputs, monitoring, count-in
    ([#263](https://github.com/suhina-daw/suhina-daw/issues/263); arming and playing from MIDI
    controllers work).
-4. **Cue, and the rest of the mixer:** sends and return tracks play and level meters are done;
-   the cue output follows.
+4. **The crossfader and track delay:** sends and return tracks play, level meters are done and
+   the cue output works.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
-   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
+   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)).
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
 7. **Launching from live MIDI notes** (the rest of M4, [#264](https://github.com/suhina-daw/suhina-daw/issues/264)).
 
@@ -148,6 +148,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
+- tempo and time-signature changes over the song, from the breakpoints of the same envelopes
+  (a reading still to be confirmed by a corpus file; [tempo map](docs/spec/tempo-map.md))
 - MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read, kept and
   played), routing into groups
 - scenes, session clip slots and arrangement clips
@@ -172,6 +174,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   return runs its devices over what it is sent and plays into the main channel or a group, with
   latency compensation on every send; loops are refused (`track.setSend`, `track.setSendMode`,
   `return.add`, `return.remove`, `return.rename`; [spec](docs/spec/sends-and-returns.md)).
+- Tempo and time-signature changes over the song (the tempo map): tempo steps and ramps, and
+  signature changes at bars, saved in the project file and edited with `tempo.addPoint`,
+  `tempo.movePoint`, `tempo.deletePoint` and `timeSignature.add`/`move`/`delete`. Notes, audio
+  clips (stretched or re-pitched), fades, the playhead, launched clips, launch quantisation and
+  the metronome all follow it; a ramp is converted exactly, so nothing drifts. The bar ruler
+  numbers bars through the signature changes and marks every change
+  ([spec](docs/spec/tempo-map.md)). The arrangement loop keeps its beats through a tempo change.
+- A launched scene's tempo or time signature overrides the tempo map until
+  `transport.followTempoMap`, the next start of the transport or an edit to the map
+  ([spec](docs/spec/tempo-map.md#scenes-and-the-tempo-map)).
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
@@ -222,12 +234,18 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - One clip per track; a clip loops until it is stopped or replaced, a clip without a loop plays
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
-- A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- A track that launched a clip leaves its arrangement clips until "back to arrangement": in
+  the Arrangement view its lane dims, and while any track plays launched clips the ruler shows
+  a **Back to arrangement** icon at its right end, which returns every track to the arrangement.
 - Scenes are edited with commands and from the scene button's right-click menu: insert,
   duplicate (with copies of its clips), delete, rename, and a tempo and time signature that
   apply when the scene launches (bars and the metronome count in the new time signature from
   there). Playing clips stay with their row when scenes are inserted or deleted while playing
   ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
+- A slot's mark is the shape its click does: a play triangle in the track colour while stopped,
+  a stop square while playing — a playing trigger clip's click stops it, and a playing scene's
+  row stops on its button's click (`scene.stop`). The Delete key takes a selected slot's clip
+  off its slot.
 - A sample dropped into a slot loops over the whole file even when its tempo is not known (it
   plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
 - An arrangement clip goes into a clip slot, and a slot's clip onto the arrangement, as a copy
@@ -482,11 +500,21 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
   tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
   volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
+- A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
+  **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
+  up, `output.setCuePair`) at their own volume (`output.setCueVolume`), while the main outputs
+  stay as they are; `suhina-cli render --cue` writes the cue beside the mix
+  ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).
+- Arrangement clips split and consolidate: Ctrl+E cuts the selected clip at the playhead and
+  a clip's right-click menu has Split here (`clip.split`, the second part playing on from where
+  the clip was); Ctrl+J or Consolidate turns a range of one track into one clip, MIDI by joining
+  the notes, audio by rendering the clips without devices to a WAV file next to the project
+  (`clip.consolidate`, [spec](docs/spec/arrangement-editing.md#splitting)).
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.

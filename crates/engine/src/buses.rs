@@ -58,6 +58,17 @@ pub(crate) fn build(
         }
     }
 
+    // A track whose cue is on has a chain too, a passthrough when it has no devices, so its
+    // sound is there on its own to add to the cue bus.
+    for track in &project.tracks {
+        if cued(project, track.id)
+            && chains.iter().all(|c| c.track != track.id)
+            && track_gains(project, track.id).is_some()
+        {
+            chains.push(Chain::passthrough(track.id, column_of(track.id)));
+        }
+    }
+
     // A bus: a track with a chain that some other channel plays into.
     let channel_of = |track: TrackId| project.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel);
     let feeds = |channel: ChannelId| project.channels.iter().any(|c| c.id != channel && c.output == Some(channel));
@@ -126,6 +137,7 @@ pub(crate) fn build(
         let post = gains_until(project, chain.track, target.map(|(_, ch)| ch), !is_bus).unwrap_or((0.0, 0.0));
         chain.set_post(post);
         chain.target = target.map(|(index, _)| index);
+        chain.set_cue(if cued(project, chain.track) { cue_gains(project, chain.track, !is_bus) } else { None });
         let frames_per_beat = 60.0 / project.transport.tempo_bpm * f64::from(sample_rate);
         chain.mix = automation::channel_of(project, chain.track)
             .and_then(|channel| MixLanes::new(channel, frames_per_beat, !is_bus));
@@ -185,6 +197,27 @@ pub(crate) fn build(
         chain.set_sends(sends);
     }
     (chains, latency)
+}
+
+/// Whether `track`'s channel has its cue on.
+fn cued(project: &Project, track: TrackId) -> bool {
+    let channel = project.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel);
+    project.channels.iter().any(|c| Some(c.id) == channel && c.cue)
+}
+
+/// The gains a cued track is heard at on the cue bus: its own channel's volume and, when `pan`,
+/// pan, but not the groups' or the main channel's, so the main mix's level does not change
+/// what is heard on the cue. `None` when the track is not heard (muted, or another is soloed).
+/// Scaled like `track_gains`.
+pub(crate) fn cue_gains(project: &Project, track: TrackId, pan: bool) -> Option<(f32, f32)> {
+    track_gains(project, track)?;
+    let channel_id = project.tracks.iter().find(|t| t.id == track)?.channel?;
+    let channel = project.channels.iter().find(|c| c.id == channel_id)?;
+    let volume = if channel.volume.is_finite() { channel.volume.max(0.0) } else { 0.0 };
+    let pan = if pan && channel.pan.is_finite() { channel.pan.clamp(-1.0, 1.0) } else { 0.0 };
+    let angle = (pan + 1.0) * std::f64::consts::FRAC_PI_4;
+    let scale = volume * std::f64::consts::SQRT_2 * 0.25;
+    Some(((angle.cos() * scale) as f32, (angle.sin() * scale) as f32))
 }
 
 /// A track's equal-power pan (when `pan`) and the volume of every channel from its own up to,

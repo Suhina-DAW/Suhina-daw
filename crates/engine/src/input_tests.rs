@@ -39,6 +39,7 @@ fn tracks_with_inputs(tracks: &[(u32, InputChannels, Monitor)]) -> Project {
                 pan: 0.0,
                 mute: false,
                 solo: false,
+                cue: false,
                 output: None,
                 sends: Vec::new(),
                 devices: Vec::new(),

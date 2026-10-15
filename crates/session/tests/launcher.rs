@@ -30,6 +30,7 @@ fn project() -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
@@ -656,4 +657,51 @@ fn a_loop_turned_on_while_playing_repeats_its_span() {
     advance(&mut renderer, BEAT);
     advance(&mut renderer, 1);
     assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["position"], "1.3");
+}
+
+#[test]
+fn a_slot_clip_is_deleted_by_scene_and_undo_brings_it_back() {
+    let mut session = Session::new(project());
+    run(&mut session, "clip.create", json!({ "track": 3, "scene": 2 })).unwrap();
+    // Deleted by scene: the slot is empty again.
+    let deleted = run(&mut session, "clip.delete", json!({ "track": 3, "scene": 2 })).unwrap();
+    assert_eq!(deleted["deleted"], json!(2));
+    let column = session.project().launcher.columns.iter().find(|c| c.track == TrackId(3)).unwrap();
+    assert!(column.slots[1].clip.is_none());
+    // An empty slot is refused, and so is an index next to the scene.
+    assert!(run(&mut session, "clip.delete", json!({ "track": 3, "scene": 2 })).is_err());
+    assert!(run(&mut session, "clip.delete", json!({ "track": 3, "scene": 2, "index": 0 })).is_err());
+    // One undo puts the clip back.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let column = session.project().launcher.columns.iter().find(|c| c.track == TrackId(3)).unwrap();
+    assert!(column.slots[1].clip.is_some());
+}
+
+#[test]
+fn stopping_a_scene_stops_its_rows_clips_and_leaves_the_empty_slots_tracks() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "scene.launch", json!({ "scene": 2 })).unwrap();
+    advance(&mut renderer, 100);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["tracks"][0]["playing"]["scene"], 2);
+    assert_eq!(state["tracks"][1]["playing"]["clip"], "Line");
+
+    // The stop queues on every track with a clip in the row, and fires at the next bar.
+    let stopped = run(&mut session, "scene.stop", json!({ "scene": 2 })).unwrap();
+    assert_eq!(stopped["queued"], "stop");
+    // The command reaches the engine with the next audio block.
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["tracks"][0]["queued"], "stop");
+    assert_eq!(state["tracks"][1]["queued"], "stop");
+    advance(&mut renderer, 4 * BEAT);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["tracks"][0]["playing"], Value::Null);
+    assert_eq!(state["tracks"][1]["playing"], Value::Null);
+    // Scene 2's slot on track 3 is empty without a stop button: it never played and is not
+    // touched now either.
+    assert_eq!(state["tracks"][2]["playing"], Value::Null);
+    assert_eq!(state["tracks"][2]["queued"], Value::Null);
+    // A scene that does not exist is refused.
+    assert!(run(&mut session, "scene.stop", json!({ "scene": 99 })).is_err());
 }

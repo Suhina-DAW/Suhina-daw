@@ -121,6 +121,7 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: vec![

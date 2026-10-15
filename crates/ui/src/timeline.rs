@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use suhina_engine::LauncherMonitor;
 
-use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Meter, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, default_track_colour, gain_to_db};
 use crate::waveform::Waveforms;
@@ -99,6 +99,8 @@ pub struct Lane {
     pub position: usize,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (`track.setCue`).
+    pub cue: bool,
     /// The track plays notes, so it can be armed (ADR 0017), and whether it is: the session
     /// knows, not the project, so [`Timeline::build`] leaves it false.
     pub armable: bool,
@@ -113,6 +115,10 @@ pub struct Lane {
     pub pan: f64,
     /// The group track this track plays into; `None` is the main output.
     pub output: Option<TrackId>,
+    /// The track's column in the launcher, for the engine's per-track state.
+    pub column: Option<usize>,
+    /// The track plays launched clips instead of its arrangement clips.
+    pub overrides: bool,
     pub clips: Vec<ClipBox>,
 }
 
@@ -147,6 +153,11 @@ pub struct Timeline {
     /// Where the last clip ends, in beats.
     pub end: f64,
     pub bar_beats: f64,
+    /// Bars through the time-signature changes; the ruler numbers bars with it.
+    pub meter: Meter,
+    /// Tempo and time-signature changes, as the ruler marks them (`docs/spec/tempo-map.md` ›
+    /// The Arrangement).
+    pub marks: Vec<RulerMark>,
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
@@ -156,6 +167,9 @@ pub struct Timeline {
     pub markers: Vec<MarkerFlag>,
     /// The loop region, when the project has one (on or off).
     pub loop_brace: Option<LoopBrace>,
+    /// Any lane's track plays launched clips instead of its arrangement clips: the
+    /// arrangement view dims its lanes and shows Back to arrangement.
+    pub overrides: bool,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
     /// The parameters each track's automation lanes can show, with their points.
@@ -175,11 +189,49 @@ impl Lane {
     }
 }
 
+/// A change marked on the ruler: where it is and what it says ("140 bpm", "→ 140 bpm" for a ramp,
+/// "3/4"); a tempo and a signature change on one beat share one mark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RulerMark {
+    pub beat: f64,
+    pub text: String,
+}
+
+/// The ruler's marks for `project`'s tempo and time-signature changes, in beat order.
+fn ruler_marks(project: &Project, meter: &Meter) -> Vec<RulerMark> {
+    let bpm = |bpm: f64| {
+        let rounded = (bpm * 100.0).round() / 100.0;
+        if rounded.fract() == 0.0 { format!("{rounded:.0} bpm") } else { format!("{rounded} bpm") }
+    };
+    let tempo = project
+        .transport
+        .tempo_changes
+        .iter()
+        .filter(|p| p.beat.is_finite() && p.beat > 0.0)
+        .map(|p| (p.beat, if p.ramp { format!("→ {}", bpm(p.bpm)) } else { bpm(p.bpm) }));
+    let signatures = meter.changes().map(|(_, beat, ts)| (beat, format!("{}/{}", ts.numerator, ts.denominator)));
+    let mut all: Vec<(f64, String)> = tempo.chain(signatures).collect();
+    all.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut marks: Vec<RulerMark> = Vec::new();
+    for (beat, text) in all {
+        match marks.last_mut() {
+            Some(last) if last.beat == beat => {
+                last.text.push_str("  ");
+                last.text.push_str(&text);
+            }
+            _ => marks.push(RulerMark { beat, text }),
+        }
+    }
+    marks
+}
+
 impl Timeline {
     pub fn build(project: &Project, monitor: Option<&LauncherMonitor>) -> Self {
         let ts = project.transport.time_signature;
         let bar_beats =
             if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
+        let meter = project.transport.meter();
+        let marks = ruler_marks(project, &meter);
         let mut lanes = Vec::new();
         let mut returns = Vec::new();
         for (position, track) in project.tracks.iter().enumerate() {
@@ -234,6 +286,7 @@ impl Timeline {
                 position,
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
+                cue: channel.is_some_and(|c| c.cue),
                 armable: kind == ColumnKind::Track && (track.content.notes || track.content.audio),
                 armed: false,
                 midi_input: track.midi_input.clone(),
@@ -246,6 +299,8 @@ impl Timeline {
                     .and_then(|c| c.output)
                     .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
                     .map(|t| t.id),
+                column: project.launcher.columns.iter().position(|c| c.track == track.id),
+                overrides: false,
                 clips,
             };
             if kind == ColumnKind::Return { returns.push(lane) } else { lanes.push(lane) }
@@ -282,11 +337,14 @@ impl Timeline {
             main_volume_db,
             end,
             bar_beats,
+            meter,
+            marks,
             running: false,
             beat: 0.0,
             start_beat: 0.0,
             markers,
             loop_brace,
+            overrides: false,
             waveforms: Arc::default(),
             automation: crate::automation_lanes::Params::build(project),
         };
@@ -302,6 +360,15 @@ impl Timeline {
         self.running = running;
         self.beat = beats(beat);
         self.start_beat = beats(start);
+        // Which tracks play launched clips instead of their arrangement clips: their lanes
+        // dim, and the arrangement shows Back to arrangement while any does.
+        for lane in &mut self.lanes {
+            lane.overrides = lane
+                .column
+                .and_then(|column| monitor.and_then(|m| m.column(column)))
+                .is_some_and(|s| s.overrides_arrangement);
+        }
+        self.overrides = self.lanes.iter().any(|l| l.overrides);
     }
 }
 
@@ -520,6 +587,22 @@ pub fn note_marks(content: &ClipContent, clip: &Clip) -> Vec<NoteMark> {
 mod tests {
     use super::*;
     use crate::demo::demo_project;
+
+    #[test]
+    fn the_ruler_marks_tempo_and_time_signature_changes() {
+        use suhina_engine::model::{TempoPoint, TimeSignature, TimeSignatureChange};
+        let mut project = demo_project();
+        project.transport.tempo_changes =
+            vec![TempoPoint { beat: 16.0, bpm: 140.0, ramp: false }, TempoPoint { beat: 32.0, bpm: 97.5, ramp: true }];
+        project.transport.time_signature_changes =
+            vec![TimeSignatureChange { bar: 4, time_signature: TimeSignature { numerator: 7, denominator: 8 } }];
+        let timeline = Timeline::build(&project, None);
+        let marks: Vec<(f64, &str)> = timeline.marks.iter().map(|m| (m.beat, m.text.as_str())).collect();
+        // Bar 5 (counted from 1) starts on beat 16, where the tempo changes too.
+        assert_eq!(marks, [(16.0, "140 bpm  7/8"), (32.0, "→ 97.5 bpm")]);
+        assert_eq!(timeline.meter.bar_start(5), 19.5);
+        assert!(Timeline::build(&demo_project(), None).marks.is_empty());
+    }
 
     #[test]
     fn lanes_follow_the_tracks_with_returns_last() {

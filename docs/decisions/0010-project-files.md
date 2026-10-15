@@ -118,7 +118,9 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
 - Readers keep accepting `.locr` and `"format": "locr"` (`suhina_project_file::is_project_file`,
   tested); a `.locr` file saved again keeps its name but names the new format inside.
 - Every new field in the model needs its line in `suhina-project-file` and in the round-trip test; a
-  field that changes meaning needs a new version.
+  field that changes meaning needs a new version. A new field that older files lack is read as
+  empty and written only when it holds something, so the version stays (the transport's
+  `tempo_changes` and `time_signature_changes`, [tempo map](../spec/tempo-map.md)).
 - Large note-heavy projects are bigger than a binary format would make them.
 - A crash loses at most the work since the last backup (decision 11). A project's `.backup`
   folder grows by one file per backup; with clean-up on it holds at most 20 per project.

@@ -95,7 +95,9 @@ decision 9.
    block (sine voices, audio clips, stretched and launched clips) goes into the chain's buffer
    at a centred unity gain instead of the output; the devices run over it in order, and then
    the track's pan and volume (and those of the channels it feeds) apply, so the fader is
-   after the devices. A muted track, or one a solo leaves out, keeps its chain at a gain of
+   after the devices. A track whose cue is on also has a chain (a passthrough one without
+   devices), which adds its output to the cue bus too ([cue spec](../spec/cue-output.md)).
+   A muted track, or one a solo leaves out, keeps its chain at a gain of
    zero, so its devices (and plug-ins, which would otherwise be let go of) keep running and
    sound again at once. Every device gets the block's own transport (tempo, beat, playing),
    also when its chain runs in the stages plug-ins share (ADR 0006, decision 4). When the

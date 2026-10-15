@@ -191,7 +191,7 @@ pub struct PageState {
 }
 
 /// What the user did on the page this frame.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Outcome {
     pub changed: bool,
     pub close: bool,
@@ -200,7 +200,8 @@ pub struct Outcome {
     pub keymap_changed: bool,
     /// The most colour tags the browser may have, as chosen.
     pub tag_limit: Option<usize>,
-    /// The audio output was chosen anew: the app runs `audio.setOutput` with it.
+    /// The audio output was chosen anew: the app runs `audio.setOutput` with it, or
+    /// `output.setCuePair` or `output.setCueVolume` when only the cue changed.
     pub audio_output: Option<suhina_session::OutputChoice>,
     /// The audio devices should be listed again.
     pub audio_refresh: bool,
@@ -1190,8 +1191,8 @@ fn plugin_section(
 }
 
 /// Settings › Audio: host, device, sample rate and buffer size as dropdowns of what the driver
-/// allows, exclusive mode, and what plays now with its latency and underruns. Returns a new
-/// choice, and whether the devices should be listed again.
+/// allows, exclusive mode, the cue's output pair and volume, and what plays now with its
+/// latency and underruns. Returns a new choice, and whether the devices should be listed again.
 fn audio_page(
     ui: &mut Ui,
     painter: &egui::Painter,
@@ -1352,6 +1353,42 @@ fn audio_page(
     }));
     if let Some(input) = choice_dropdown(ui, painter, r, "Input", &options, &choice.input) {
         picked = choice.with_params(&serde_json::json!({ "input": input.as_text() })).ok();
+    }
+
+    *y += 8.0;
+    section(y, "Cue");
+    // The cue's output pair: the device's pairs after the main output's.
+    let r = row(y);
+    let channels = device.map_or(2, |d| d.channels);
+    let note = match choice.cue_pair {
+        Some(pair) if choice.check_cue_pair(device.map(|d| d.channels)).is_err() => {
+            let (first, second) = suhina_session::audio::cue_channels(pair);
+            format!("The device has no {first}/{second}; the cue plays with the main output")
+        }
+        _ if channels < 4 => "The device has two outputs: previews play with the main output".to_string(),
+        _ => "Where previews and cued tracks (C) play, such as headphones".to_string(),
+    };
+    label(painter, r, "Cue output", &note);
+    let mut options: Vec<(String, Option<u16>)> = vec![("Same as main (1/2)".to_string(), None)];
+    let pairs = (channels / 2).saturating_sub(1).min(suhina_session::audio::MAX_CUE_PAIR);
+    options.extend((1..=pairs).map(|pair| {
+        let (first, second) = suhina_session::audio::cue_channels(pair);
+        (format!("Outputs {first}/{second}"), Some(pair))
+    }));
+    if let Some(pair) = choice.cue_pair.filter(|p| *p > pairs) {
+        let (first, second) = suhina_session::audio::cue_channels(pair);
+        options.push((format!("Outputs {first}/{second} (not there)"), Some(pair)));
+    }
+    if let Some(pair) = choice_dropdown(ui, painter, r, "Cue output", &options, &choice.cue_pair) {
+        picked = choice.with_params(&serde_json::json!({ "cue_pair": pair.unwrap_or(0) })).ok();
+    }
+    // The cue volume.
+    let r = row(y);
+    label(painter, r, "Cue volume", "How loud the cue plays; the main output does not change");
+    let options = [("-12 dB", -12), ("-6 dB", -6), ("0 dB", 0), ("+6 dB", 6)];
+    let db = settings.audio_cue_volume;
+    if let Some(db) = segmented(ui, painter, control_rect(r, 4), "Cue volume", &options, db) {
+        picked = choice.with_cue_volume(&serde_json::json!({ "db": db })).ok();
     }
 
     *y += 8.0;

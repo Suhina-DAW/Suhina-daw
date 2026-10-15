@@ -452,6 +452,7 @@ pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> Rect {
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
     let column = clip_properties(ui, &painter, area, info, stacked);
+    clip_for_readers(ui, column, info);
     if stacked {
         Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
     } else {

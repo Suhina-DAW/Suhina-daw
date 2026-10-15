@@ -146,6 +146,7 @@ fn a_groups_volume_lane_scales_the_tracks_routed_into_it() {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),

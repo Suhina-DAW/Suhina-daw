@@ -234,6 +234,8 @@ pub const MAP_DOT_SIZES: (u32, u32) = (25, 400);
 pub const MAP_DOT_SIZE: u32 = 100;
 pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
+/// The cue volumes a settings file may hold, in dB; the lowest is silence.
+pub const CUE_VOLUMES: (i32, i32) = (-60, 12);
 pub const PREVIEW_VOLUME: i32 = -6;
 /// The size of the whole window, in percent: the smallest and largest, the default, and how much
 /// one Zoom in or Zoom out changes it.
@@ -314,6 +316,11 @@ pub struct Settings {
     pub audio_buffer: u32,
     /// WASAPI exclusive mode; off, so other programs stay heard.
     pub audio_exclusive: bool,
+    /// The output pair the cue plays on (`output.setCuePair`): 1 is channels 3 and 4; 0 plays
+    /// it with the main output.
+    pub audio_cue_pair: u16,
+    /// The cue volume in dB (`output.setCueVolume`); the lowest of [`CUE_VOLUMES`] is silence.
+    pub audio_cue_volume: i32,
     /// The audio input device (Settings › Audio, `audio.setOutput`'s `input`): "off" (the
     /// default), "default" or a device's name.
     pub audio_input: String,
@@ -371,6 +378,8 @@ impl Default for Settings {
             audio_sample_rate: 0,
             audio_buffer: 0,
             audio_exclusive: false,
+            audio_cue_pair: 0,
+            audio_cue_volume: 0,
             audio_input: "off".into(),
             midi_inputs_off: Vec::new(),
             zoom: ZOOM,
@@ -390,6 +399,12 @@ impl Settings {
             sample_rate: (self.audio_sample_rate > 0).then_some(self.audio_sample_rate),
             buffer_frames: (self.audio_buffer > 0).then_some(self.audio_buffer),
             exclusive: self.audio_exclusive,
+            cue_pair: (self.audio_cue_pair > 0).then_some(self.audio_cue_pair),
+            cue_gain: if self.audio_cue_volume <= CUE_VOLUMES.0 {
+                0.0
+            } else {
+                10f64.powf(f64::from(self.audio_cue_volume) / 20.0) as f32
+            },
             input: suhina_session::InputChoice::from_text(&self.audio_input),
         }
     }
@@ -401,6 +416,12 @@ impl Settings {
         self.audio_sample_rate = choice.sample_rate.unwrap_or(0);
         self.audio_buffer = choice.buffer_frames.unwrap_or(0);
         self.audio_exclusive = choice.exclusive;
+        self.audio_cue_pair = choice.cue_pair.unwrap_or(0);
+        self.audio_cue_volume = if choice.cue_gain > 0.0 {
+            ((20.0 * f64::from(choice.cue_gain).log10()).round() as i32).clamp(CUE_VOLUMES.0, CUE_VOLUMES.1)
+        } else {
+            CUE_VOLUMES.0
+        };
         self.audio_input = choice.input.as_text().to_string();
     }
 
@@ -458,7 +479,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nat_start = {at_start}\nstart_template = {}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nmixer_controls = {mixer}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_dot_size = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\npiano_roll_toolbar = {piano_toolbar}\nbackup = {}\nbackup_clean_up = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nat_start = {at_start}\nstart_template = {}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nmixer_controls = {mixer}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_dot_size = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_cue_pair = {}\naudio_cue_volume = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\npiano_roll_toolbar = {piano_toolbar}\nbackup = {}\nbackup_clean_up = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -481,6 +502,8 @@ impl Settings {
             self.audio_sample_rate,
             self.audio_buffer,
             on(self.audio_exclusive),
+            self.audio_cue_pair,
+            self.audio_cue_volume,
             self.audio_input,
             self.zoom,
             self.backup.name(),
@@ -605,6 +628,12 @@ impl Settings {
                     settings.audio_buffer = frames.parse().unwrap_or(0);
                 }
                 ("audio_exclusive", "on" | "off") => settings.audio_exclusive = value == "on",
+                ("audio_cue_pair", pair) if pair.parse::<u16>().is_ok_and(|p| p <= MAX_CUE_PAIR) => {
+                    settings.audio_cue_pair = pair.parse().unwrap_or(0);
+                }
+                ("audio_cue_volume", db) if db.parse::<i32>().is_ok() => {
+                    settings.audio_cue_volume = db.parse::<i32>().unwrap_or(0).clamp(CUE_VOLUMES.0, CUE_VOLUMES.1);
+                }
                 ("piano_roll_top", "track") => settings.piano_roll_top = PianoRollTop::Track,
                 ("piano_roll_top", "window") => settings.piano_roll_top = PianoRollTop::Window,
                 ("piano_roll_grid", "own" | "control_bar") => settings.piano_grid_follows = value == "control_bar",
@@ -632,7 +661,7 @@ impl Settings {
     }
 }
 
-use suhina_session::audio::{MAX_BUFFER_FRAMES, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
+use suhina_session::audio::{MAX_BUFFER_FRAMES, MAX_CUE_PAIR, MAX_SAMPLE_RATE, MIN_BUFFER_FRAMES};
 
 /// Reads a window's place, `left, top, width, height` in points. A position far off any screen
 /// or a size outside [`WINDOW_SIZES`] is refused, so a broken file cannot open a window nowhere.
@@ -698,6 +727,8 @@ mod tests {
             audio_sample_rate: 48_000,
             audio_buffer: 256,
             audio_exclusive: true,
+            audio_cue_pair: 2,
+            audio_cue_volume: -6,
             audio_input: "Line In (Interface)".into(),
             midi_inputs_off: vec!["Keys, port 1".into(), "Pads:Pads MIDI 1 20:0".into()],
             zoom: 130,
@@ -755,10 +786,23 @@ mod tests {
         assert_eq!(settings.output_choice().input, suhina_session::InputChoice::Default);
         assert_eq!(Settings::from_text("audio_input = \n").0.audio_input, "off");
 
-        let (settings, warnings) =
-            Settings::from_text("audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\n");
+        let (settings, warnings) = Settings::from_text(
+            "audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\naudio_cue_pair = 40\n",
+        );
         assert_eq!(settings, Settings::default());
-        assert_eq!(warnings.len(), 3);
+        assert_eq!(warnings.len(), 4);
+
+        // The cue: its pair, and its volume within range, lowest is silence.
+        let (settings, warnings) = Settings::from_text("audio_cue_pair = 1\naudio_cue_volume = 40\n");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let choice = settings.output_choice();
+        assert_eq!(choice.cue_pair, Some(1));
+        assert!((choice.cue_gain - 10f32.powf(12.0 / 20.0)).abs() < 1e-5);
+        let mut back = Settings::default();
+        back.set_output_choice(&choice);
+        assert_eq!((back.audio_cue_pair, back.audio_cue_volume), (1, 12));
+        let silent = Settings::from_text("audio_cue_volume = -100\n").0.output_choice();
+        assert_eq!(silent.cue_gain, 0.0);
     }
 
     #[test]
