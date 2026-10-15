@@ -1,12 +1,15 @@
 ---
-description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar icons and tools, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, duplicate key
+description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key
 type: spec
 status: draft
 last_verified: 2026-10-15
 covers:
   - crates/ui/src/piano_roll.rs
+  - crates/ui/src/midi_tools.rs
+  - crates/ui/src/detail_view.rs
   - crates/session/src/notes.rs
+  - crates/session/src/note_tools.rs
   - crates/session/src/preview.rs
 ---
 
@@ -175,7 +178,7 @@ pull up.
   zoomed so the whole clip fits the width.
 - **Built:** while the **right** mouse button is held down over the grid, each wheel step chooses
   the next tool, or with the wheel turned the other way the previous one, in the order Select →
-  Draw → Paint → Erase → Slice, stopping at the first and the last tool (no wrapping round)
+  Draw → Paint → Erase → Slice → Mute, stopping at the first and the last tool (no wrapping round)
   (› Drawing notes for the tools). The wheel never scrolls or zooms while the right button is
   held, nor afterwards with what is left of the wheel's smoothed movement: scrolling comes back
   once the button is up and the wheel has stopped.

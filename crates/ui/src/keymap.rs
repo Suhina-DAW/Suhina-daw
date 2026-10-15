@@ -1,8 +1,8 @@
 //! Keyboard shortcuts: which keys run which action, kept in a file the user can edit
-//! (`keymap.json`: an action id to a list of keys such as `"Ctrl+Shift+Z"`, and the name of the
-//! `preset` the keys came from). An action is a
-//! session command that needs no parameters, an action on the selection (which the window turns
-//! into a command), or something the window itself does.
+//! (`keymap.json`: an action id to a list of keys such as `"Ctrl+Shift+Z"`, the four mouse
+//! switches the Mouse-first preset sets, and the name of the `preset` they came from). An action
+//! is a session command that needs no parameters, an action on the selection (which the window
+//! turns into a command), or something the window itself does.
 
 use std::collections::BTreeMap;
 
@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 43] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 44] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -128,6 +128,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 43] = [
     ("pianoRoll.tool3", "Choose the Paint tool", PIANO_ROLL),
     ("pianoRoll.tool4", "Choose the Erase tool", PIANO_ROLL),
     ("pianoRoll.tool5", "Choose the Slice tool", PIANO_ROLL),
+    ("pianoRoll.tool6", "Choose the Mute tool", PIANO_ROLL),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
@@ -161,11 +162,96 @@ pub fn actions() -> Vec<Action> {
     all
 }
 
-/// The keys bound to each action, and the preset the user chose.
+/// One of the four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own
+/// (Settings › General › Piano roll, › Keymap presets in `docs/spec/ui-clip-editor.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseSwitch {
+    /// In the Select tool, a press on an empty spot of the grid draws a note there.
+    LeftDraws,
+    /// A right-click on a note deletes it, and a right-button drag deletes the notes it passes.
+    RightDeletes,
+    /// A right-click with Shift held slices the notes under a short drag.
+    ShiftRightSplits,
+    /// The right button held with Alt plays the clip from the spot under the pointer.
+    AltRightPlays,
+}
+
+impl MouseSwitch {
+    pub const ALL: [Self; 4] = [Self::LeftDraws, Self::RightDeletes, Self::ShiftRightSplits, Self::AltRightPlays];
+
+    /// The name the Settings row shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::LeftDraws => "Left click draws",
+            Self::RightDeletes => "Right click deletes a note",
+            Self::ShiftRightSplits => "Shift+right click splits",
+            Self::AltRightPlays => "Alt+right plays from the point",
+        }
+    }
+
+    /// The key the keymap file keeps the switch under.
+    pub fn json_key(self) -> &'static str {
+        match self {
+            Self::LeftDraws => "mouseLeftDraws",
+            Self::RightDeletes => "mouseRightDeletes",
+            Self::ShiftRightSplits => "mouseShiftRightSplits",
+            Self::AltRightPlays => "mouseAltRightPlays",
+        }
+    }
+
+    /// The switch `key` names; `None` when it is not one of the four (a hand-edited file).
+    pub fn from_json_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|switch| switch.json_key() == key)
+    }
+}
+
+/// The four mouse switches, kept with the keys in `keymap.json`. All off is what Select-first
+/// and Draw-first leave; Mouse-first turns every one of them on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MouseSettings {
+    pub left_draws: bool,
+    pub right_deletes: bool,
+    pub shift_right_splits: bool,
+    pub alt_right_plays: bool,
+}
+
+impl MouseSettings {
+    /// Every switch on, as the Mouse-first preset sets them.
+    pub const ALL_ON: Self =
+        Self { left_draws: true, right_deletes: true, shift_right_splits: true, alt_right_plays: true };
+
+    /// Whether `switch` is on.
+    pub fn get(self, switch: MouseSwitch) -> bool {
+        match switch {
+            MouseSwitch::LeftDraws => self.left_draws,
+            MouseSwitch::RightDeletes => self.right_deletes,
+            MouseSwitch::ShiftRightSplits => self.shift_right_splits,
+            MouseSwitch::AltRightPlays => self.alt_right_plays,
+        }
+    }
+
+    /// Turns `switch` on or off, leaving the other three as they are.
+    pub fn set(&mut self, switch: MouseSwitch, on: bool) {
+        match switch {
+            MouseSwitch::LeftDraws => self.left_draws = on,
+            MouseSwitch::RightDeletes => self.right_deletes = on,
+            MouseSwitch::ShiftRightSplits => self.shift_right_splits = on,
+            MouseSwitch::AltRightPlays => self.alt_right_plays = on,
+        }
+    }
+
+    /// Whether every switch is on.
+    pub fn all_on(self) -> bool {
+        self == Self::ALL_ON
+    }
+}
+
+/// The keys bound to each action, the four mouse switches, and the preset the user chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
     preset: Preset,
+    mouse: MouseSettings,
 }
 
 /// A set of keys for a way of working, chosen in Settings › Shortcuts (› Keymap presets in
@@ -178,16 +264,20 @@ pub enum Preset {
     /// Drawing notes first: duplicate is Ctrl+B (which the browser's Ctrl+B gives up) and a
     /// right-click on a note deletes it in the Draw and Paint tools.
     DrawFirst,
+    /// Working with the mouse: Select-first's keys with every mouse switch on, so the left button
+    /// draws in the Select tool and the right button deletes, splits and plays.
+    MouseFirst,
 }
 
 impl Preset {
-    pub const ALL: [Self; 2] = [Self::SelectFirst, Self::DrawFirst];
+    pub const ALL: [Self; 3] = [Self::SelectFirst, Self::DrawFirst, Self::MouseFirst];
 
     /// The name the menu and the keymap file use.
     pub fn name(self) -> &'static str {
         match self {
             Self::SelectFirst => "Select-first",
             Self::DrawFirst => "Draw-first",
+            Self::MouseFirst => "Mouse-first",
         }
     }
 
@@ -201,27 +291,33 @@ impl Preset {
         match self {
             Self::SelectFirst => "Duplicate is Ctrl+D; a right-click on a note does nothing",
             Self::DrawFirst => "Duplicate is Ctrl+B; in Draw and Paint a right-click on a note deletes it",
+            Self::MouseFirst => "Every mouse switch is on; the left button draws in Select",
         }
     }
 
     /// Whether a right-click on a note deletes it in the Draw and Paint tools.
     pub fn right_click_deletes(self) -> bool {
-        self == Self::DrawFirst
+        matches!(self, Self::DrawFirst | Self::MouseFirst)
     }
 
     /// The key the preset gives the duplicate action, as the Shortcuts list shows it.
     pub fn duplicate_key(self) -> &'static str {
         match self {
-            Self::SelectFirst => "Ctrl+D",
+            Self::SelectFirst | Self::MouseFirst => "Ctrl+D",
             Self::DrawFirst => "Ctrl+B",
         }
+    }
+
+    /// The mouse switches the preset sets: all four with Mouse-first, none with the others.
+    pub fn mouse(self) -> MouseSettings {
+        if self == Self::MouseFirst { MouseSettings::ALL_ON } else { MouseSettings::default() }
     }
 }
 
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 43] = [
+const DEFAULTS: [(&str, &[&str]); 44] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -265,11 +361,12 @@ const DEFAULTS: [(&str, &[&str]); 43] = [
     ("pianoRoll.tool3", &["3"]),
     ("pianoRoll.tool4", &["4"]),
     ("pianoRoll.tool5", &["5"]),
+    ("pianoRoll.tool6", &["6"]),
 ];
 
 impl Default for Keymap {
     fn default() -> Self {
-        Self { bindings: bindings_for(&DEFAULTS), preset: Preset::default() }
+        Self { bindings: bindings_for(&DEFAULTS), preset: Preset::default(), mouse: MouseSettings::default() }
     }
 }
 
@@ -283,8 +380,10 @@ fn bindings_for(defaults: &[(&str, &[&str])]) -> BTreeMap<String, Vec<Shortcut>>
 
 impl Keymap {
     /// Reads a keymap file over the defaults: an action listed there takes the keys listed
-    /// (an empty list unbinds it), `preset` names the set the keys came from. Unknown actions,
-    /// keys and presets are skipped with a warning; an unknown preset leaves the default one.
+    /// (an empty list unbinds it), `preset` names the set the keys came from and the four
+    /// `mouse*` entries are its mouse switches. Unknown actions, keys, presets and mouse entries
+    /// are skipped with a warning; an unknown preset leaves the default one, and a file without
+    /// the switches leaves every one of them off.
     pub fn from_json(text: &str) -> (Self, Vec<String>) {
         let mut keymap = Self::default();
         let mut warnings = Vec::new();
@@ -306,8 +405,19 @@ impl Keymap {
             if id == PRESET_KEY {
                 continue;
             }
+            if let Some(switch) = MouseSwitch::from_json_key(&id) {
+                match keys.as_bool() {
+                    Some(on) => keymap.mouse.set(switch, on),
+                    None => warnings.push(format!("keymap: {keys} for {id} is not true or false")),
+                }
+                continue;
+            }
             if !known.iter().any(|a| a.id == id) {
-                warnings.push(format!("keymap: {id} is not an action"));
+                if id.starts_with("mouse") {
+                    warnings.push(format!("keymap: {id} is not a mouse switch"));
+                } else {
+                    warnings.push(format!("keymap: {id} is not an action"));
+                }
                 continue;
             }
             let texts: Vec<&str> = match &keys {
@@ -330,7 +440,7 @@ impl Keymap {
         (keymap, warnings)
     }
 
-    /// Every binding and the preset, as the keymap file keeps them.
+    /// Every binding, the four mouse switches and the preset, as the keymap file keeps them.
     pub fn to_json(&self) -> String {
         let mut map: serde_json::Map<String, Value> = self
             .bindings
@@ -338,6 +448,9 @@ impl Keymap {
             .map(|(id, keys)| (id.clone(), json!(keys.iter().map(Shortcut::text).collect::<Vec<_>>())))
             .collect();
         map.insert(PRESET_KEY.to_string(), json!(self.preset.name()));
+        for switch in MouseSwitch::ALL {
+            map.insert(switch.json_key().to_string(), json!(self.mouse.get(switch)));
+        }
         serde_json::to_string_pretty(&Value::Object(map)).unwrap_or_default()
     }
 
@@ -346,8 +459,20 @@ impl Keymap {
         self.preset
     }
 
-    /// Puts the keys of `preset` back: every default, with the preset's own changes. Keys changed
-    /// by hand go back to the preset's; everything else keeps what it has.
+    /// The four mouse switches, as they are now: a switch changed by hand keeps the preset's name.
+    pub fn mouse(&self) -> MouseSettings {
+        self.mouse
+    }
+
+    /// Turns one mouse switch on or off. The preset keeps its name and nothing else changes, so
+    /// the switches say what the mouse does and the preset says where they started.
+    pub fn set_mouse(&mut self, switch: MouseSwitch, on: bool) {
+        self.mouse.set(switch, on);
+    }
+
+    /// Puts the keys of `preset` back: every default, with the preset's own changes, and its four
+    /// mouse switches. Keys and switches changed by hand go back to the preset's; everything else
+    /// keeps what it has.
     pub fn set_preset(&mut self, preset: Preset) {
         let defaults = Self::default();
         let mut bindings = defaults.bindings;
@@ -359,6 +484,7 @@ impl Keymap {
         }
         self.bindings = bindings;
         self.preset = preset;
+        self.mouse = preset.mouse();
     }
 
     pub fn keys(&self, action: &str) -> &[Shortcut] {
@@ -498,10 +624,16 @@ mod tests {
         assert!(known.iter().any(|a| a.id == "transport.play"), "commands without parameters are actions");
         assert!(!known.iter().any(|a| a.id == "track.setVolume"), "commands that need parameters are not");
         // The piano roll's tools have their number keys and their own labels.
-        for (index, id) in
-            ["pianoRoll.tool1", "pianoRoll.tool2", "pianoRoll.tool3", "pianoRoll.tool4", "pianoRoll.tool5"]
-                .into_iter()
-                .enumerate()
+        for (index, id) in [
+            "pianoRoll.tool1",
+            "pianoRoll.tool2",
+            "pianoRoll.tool3",
+            "pianoRoll.tool4",
+            "pianoRoll.tool5",
+            "pianoRoll.tool6",
+        ]
+        .into_iter()
+        .enumerate()
         {
             let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
             assert_eq!(action.group, PIANO_ROLL);
@@ -512,6 +644,16 @@ mod tests {
     }
 
     #[test]
+    fn the_sixth_tool_is_the_mute_tool_on_the_six_key() {
+        let known = actions();
+        let action =
+            known.iter().find(|a| a.id == "pianoRoll.tool6").unwrap_or_else(|| panic!("the Mute tool is an action"));
+        assert_eq!((action.label.as_str(), action.group), ("Choose the Mute tool", PIANO_ROLL));
+        assert!(piano_roll_only("pianoRoll.tool6"), "read only while the piano roll has the keyboard");
+        assert_eq!(Keymap::default().label("pianoRoll.tool6").as_deref(), Some("6"));
+    }
+
+    #[test]
     fn the_presets_set_their_keys_and_are_kept_in_the_file() {
         for preset in Preset::ALL {
             let mut keymap = Keymap::default();
@@ -519,7 +661,8 @@ mod tests {
             assert_eq!(keymap.preset(), preset);
             assert!(keymap.conflicts().is_empty(), "{preset:?} has no key bound twice");
             assert_eq!(keymap.label("selection.duplicate").as_deref(), Some(preset.duplicate_key()));
-            assert_eq!(preset.right_click_deletes(), preset == Preset::DrawFirst);
+            assert_eq!(preset.right_click_deletes(), matches!(preset, Preset::DrawFirst | Preset::MouseFirst));
+            assert_eq!(keymap.mouse(), preset.mouse(), "{preset:?} sets its mouse switches");
             // Every other key is the default's: the preset only changes what it names.
             for (id, _) in DEFAULTS {
                 if id != "selection.duplicate" && id != "view.browser" {
@@ -535,6 +678,80 @@ mod tests {
     }
 
     #[test]
+    fn the_three_presets_and_their_mouse_switches_round_trip_through_the_file() {
+        for preset in Preset::ALL {
+            let mut keymap = Keymap::default();
+            keymap.set_preset(preset);
+            let text = keymap.to_json();
+            assert!(text.contains(&format!("\"preset\": \"{}\"", preset.name())), "{text}");
+            for switch in MouseSwitch::ALL {
+                assert!(text.contains(switch.json_key()), "{} is in the file", switch.name());
+            }
+            let (again, warnings) = Keymap::from_json(&text);
+            assert_eq!((again.mouse(), warnings.len()), (preset.mouse(), 0), "{preset:?}");
+            assert_eq!(again, keymap, "{preset:?}");
+        }
+    }
+
+    #[test]
+    fn mouse_first_turns_the_switches_on_and_the_other_presets_off() {
+        let mut keymap = Keymap::default();
+        assert_eq!(keymap.mouse(), MouseSettings::default(), "the default keymap leaves them off");
+        for preset in [Preset::SelectFirst, Preset::DrawFirst] {
+            keymap.set_mouse(MouseSwitch::RightDeletes, true);
+            keymap.set_preset(preset);
+            assert_eq!(keymap.mouse(), MouseSettings::default(), "{preset:?} turns every switch off");
+            assert!(!keymap.mouse().all_on());
+        }
+        keymap.set_preset(Preset::MouseFirst);
+        for switch in MouseSwitch::ALL {
+            assert!(keymap.mouse().get(switch), "{} is on with Mouse-first", switch.name());
+        }
+        assert!(keymap.mouse().all_on());
+        assert!(keymap.preset().right_click_deletes(), "and a right-click on a note deletes it");
+    }
+
+    #[test]
+    fn the_mouse_switches_are_read_from_the_file_and_nonsense_is_warned_about() {
+        let (keymap, warnings) = Keymap::from_json(r#"{ "mouseRightDeletes": true, "mouseLeftDraws": false }"#);
+        assert_eq!((keymap.mouse().right_deletes, keymap.mouse().left_draws), (true, false));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        // A file without them takes all four off.
+        let (none, warnings) = Keymap::from_json(r#"{ "edit.undo": ["Alt+Z"] }"#);
+        assert_eq!((none.mouse(), warnings.len()), (MouseSettings::default(), 0));
+        assert_eq!(none.label("edit.undo").as_deref(), Some("Alt+Z"));
+        // A value that is not true or false is skipped with a warning, as a bad key is.
+        let (bad, warnings) = Keymap::from_json(r#"{ "mouseRightDeletes": "yes" }"#);
+        assert_eq!((bad.mouse().right_deletes, warnings.len()), (false, 1));
+        assert!(warnings[0].contains("mouseRightDeletes"), "{}", warnings[0]);
+        // A mouse entry that is not one of the four is skipped, with a warning naming it.
+        let (other, warnings) = Keymap::from_json(r#"{ "mouseMiddlePans": true }"#);
+        assert_eq!((other.mouse(), warnings.len()), (MouseSettings::default(), 1));
+        assert!(warnings[0].contains("mouseMiddlePans"), "{}", warnings[0]);
+    }
+
+    #[test]
+    fn a_mouse_switch_changed_by_hand_keeps_the_presets_name_and_the_others() {
+        let mut keymap = Keymap::default();
+        keymap.set_preset(Preset::MouseFirst);
+        keymap.set_mouse(MouseSwitch::RightDeletes, false);
+        assert_eq!(keymap.preset(), Preset::MouseFirst, "the preset's name stays");
+        assert!(!keymap.mouse().right_deletes);
+        for switch in MouseSwitch::ALL {
+            if switch != MouseSwitch::RightDeletes {
+                assert!(keymap.mouse().get(switch), "{} stays on", switch.name());
+            }
+        }
+        // What was turned off by hand goes through the file as it is.
+        let (again, warnings) = Keymap::from_json(&keymap.to_json());
+        assert_eq!((again.preset(), again.mouse().right_deletes, warnings.len()), (Preset::MouseFirst, false, 0));
+        assert!(again.mouse().left_draws, "the other three are still on");
+        // Choosing Mouse-first again turns it back on.
+        keymap.set_preset(Preset::MouseFirst);
+        assert!(keymap.mouse().all_on());
+    }
+
+    #[test]
     fn a_preset_chosen_again_puts_keys_changed_by_hand_back() {
         let mut keymap = Keymap::default();
         keymap.set_preset(Preset::DrawFirst);
@@ -545,6 +762,14 @@ mod tests {
         keymap.set_preset(Preset::SelectFirst);
         assert_eq!(keymap.label("selection.duplicate").as_deref(), Some("Ctrl+D"));
         assert_eq!(keymap.label("view.browser").as_deref(), Some("Ctrl+B"));
+        // The mouse switches come back the same way: choosing the preset again puts a switch
+        // changed by hand back, and another preset turns every one of them off.
+        keymap.set_preset(Preset::MouseFirst);
+        keymap.set_mouse(MouseSwitch::LeftDraws, false);
+        keymap.set_preset(Preset::MouseFirst);
+        assert!(keymap.mouse().all_on(), "a switch changed by hand comes back with the preset");
+        keymap.set_preset(Preset::SelectFirst);
+        assert_eq!(keymap.mouse(), MouseSettings::default());
     }
 
     #[test]

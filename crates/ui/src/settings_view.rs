@@ -4,10 +4,10 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, Preset, Shortcut, actions};
+use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
 use crate::motion;
 use crate::settings::{
-    DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn,
+    DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn, ToolbarSize,
 };
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
@@ -394,6 +394,41 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.piano_grid_follows = choice;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Toolbar size",
+                "The toolbar's box, its gaps and the icon strokes inside it, scaled together",
+            );
+            let options: Vec<(&str, ToolbarSize)> = ToolbarSize::ALL.iter().map(|s| (s.name(), *s)).collect();
+            if let Some(size) =
+                segmented(ui, &painter, control_rect(r, 3), "Toolbar size", &options, settings.toolbar_size)
+            {
+                settings.toolbar_size = size;
+                outcome.changed = true;
+            }
+            // The four mouse switches of the Mouse-first preset: their own rows, kept in the
+            // keymap rather than in the settings, so they are saved beside the keys.
+            for switch in MouseSwitch::ALL {
+                let r = row(&mut y);
+                label(&painter, r, switch.name(), "");
+                let options = [("Off", false), ("On", true)];
+                let current = keymap.mouse().get(switch);
+                if let Some(on) = segmented(ui, &painter, control_rect(r, 2), switch.name(), &options, current) {
+                    keymap.set_mouse(switch, on);
+                    outcome.keymap_changed = true;
+                }
+            }
+            let note = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), 14.0));
+            widgets::text_in(
+                &painter,
+                note,
+                Align2::LEFT_CENTER,
+                "Kept in keymap.json with the keys; turning one off leaves the preset's name",
+                theme::ui_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
         }
         Page::Interface => {
             section(&mut y, "Interface");
@@ -831,8 +866,9 @@ fn shortcuts_page(
         changed = true;
     }
 
-    // The preset: two sets of keys, one for drawing notes first and one for selecting first. A
-    // choice sets the keys it names; single keys can still be changed below.
+    // The preset: three sets of keys, one for drawing notes first, one for selecting first and
+    // one for working with the mouse. A choice sets the keys and the switches it names; single
+    // keys can still be changed below.
     let mut top = head.bottom() + 4.0;
     let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
     let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
@@ -845,8 +881,11 @@ fn shortcuts_page(
         theme::text_primary(),
     );
     let current = keymap.preset();
-    let control =
-        Rect::from_min_size(Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()), Vec2::new(160.0, SEGMENT));
+    // 64 px a part, as the measurements give every segmented control in Settings.
+    let control = Rect::from_min_size(
+        Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()),
+        Vec2::new(64.0 * Preset::ALL.len() as f32, SEGMENT),
+    );
     let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
     if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
         keymap.set_preset(picked);
@@ -1170,7 +1209,7 @@ fn audio_page(
     (picked, response.clicked())
 }
 
-/// A segmented control for the keymap preset: the two sets of keys, with the chosen one lit.
+/// A segmented control for the keymap preset: the sets of keys, with the chosen one lit.
 /// Returns the preset clicked, if it is not the current one.
 fn preset_segmented(
     ui: &Ui,

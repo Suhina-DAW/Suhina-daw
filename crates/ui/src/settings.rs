@@ -51,6 +51,55 @@ pub enum PianoRollTop {
     Window,
 }
 
+/// How large the piano roll's toolbar is drawn: the toolbar's height, every button's box and the
+/// gaps and icon strokes inside it scale together, and the rest of the editor does not
+/// (`docs/spec/ui-clip-editor.md` › Layout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolbarSize {
+    /// 100 %.
+    Normal,
+    /// 125 %, the default.
+    #[default]
+    Large,
+    /// 150 %.
+    Larger,
+}
+
+impl ToolbarSize {
+    pub const ALL: [Self; 3] = [Self::Normal, Self::Large, Self::Larger];
+
+    /// The name the Settings row shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::Large => "Large",
+            Self::Larger => "Larger",
+        }
+    }
+
+    /// The factor the toolbar is drawn at (1.0, 1.25 and 1.5).
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Normal => 1.0,
+            Self::Large => 1.25,
+            Self::Larger => 1.5,
+        }
+    }
+
+    /// The value the settings file keeps.
+    pub fn param(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Large => "large",
+            Self::Larger => "larger",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.param() == text)
+    }
+}
+
 /// Where Play and the play/stop key start the transport (`transport.play`'s `from`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PlayFrom {
@@ -180,6 +229,8 @@ pub struct Settings {
     pub device_layout: DeviceLayout,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
+    /// How large the piano roll's toolbar is drawn.
+    pub toolbar_size: ToolbarSize,
     /// The control bar's grid value sets the piano roll's too; otherwise the piano roll keeps
     /// its own.
     pub piano_grid_follows: bool,
@@ -241,6 +292,7 @@ impl Default for Settings {
             play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
             piano_roll_top: PianoRollTop::Track,
+            toolbar_size: ToolbarSize::Large,
             piano_grid_follows: false,
             plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
@@ -339,7 +391,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\npiano_roll_toolbar = {piano_toolbar}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -375,6 +427,7 @@ impl Settings {
                 PianoRollTop::Window => "window",
             },
             piano_grid = if self.piano_grid_follows { "control_bar" } else { "own" },
+            piano_toolbar = self.toolbar_size.param(),
         )
     }
 
@@ -465,6 +518,9 @@ impl Settings {
                 ("piano_roll_top", "track") => settings.piano_roll_top = PianoRollTop::Track,
                 ("piano_roll_top", "window") => settings.piano_roll_top = PianoRollTop::Window,
                 ("piano_roll_grid", "own" | "control_bar") => settings.piano_grid_follows = value == "control_bar",
+                ("piano_roll_toolbar", size) if ToolbarSize::parse(size).is_some() => {
+                    settings.toolbar_size = ToolbarSize::parse(size).unwrap_or_default();
+                }
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -513,6 +569,7 @@ mod tests {
             play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
             piano_roll_top: PianoRollTop::Window,
+            toolbar_size: ToolbarSize::Larger,
             piano_grid_follows: true,
             plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
@@ -636,5 +693,28 @@ map_window_rect = 10, 20, 800, 600
         let (settings, warnings) = Settings::from_text("animations = sometimes\ncolour = pink\nnonsense\n\n# fine\n");
         assert_eq!(settings, Settings::default());
         assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn the_toolbar_size_round_trips_and_an_unknown_one_is_large() {
+        assert_eq!(Settings::default().toolbar_size, ToolbarSize::Large);
+        for size in ToolbarSize::ALL {
+            let settings = Settings { toolbar_size: size, ..Settings::default() };
+            let (back, warnings) = Settings::from_text(&settings.to_text());
+            assert_eq!((back.toolbar_size, warnings.len()), (size, 0), "{size:?}");
+            assert!(settings.to_text().contains(&format!("piano_roll_toolbar = {}\n", size.param())));
+        }
+        // A file without the line, and a value the program does not know, both take the default.
+        let (missing, warnings) = Settings::from_text("piano_roll_top = window\n");
+        assert_eq!((missing.toolbar_size, warnings.len()), (ToolbarSize::Large, 0));
+        let (unknown, warnings) = Settings::from_text("piano_roll_toolbar = huge\n");
+        assert_eq!((unknown.toolbar_size, warnings.len()), (ToolbarSize::Large, 1));
+        // And each size scales the toolbar by its own factor.
+        assert_eq!(
+            ToolbarSize::ALL.map(ToolbarSize::scale),
+            [1.0, 1.25, 1.5],
+            "Normal, Large and Larger scale the toolbar"
+        );
+        assert_eq!(ToolbarSize::ALL.map(ToolbarSize::name), ["Normal", "Large", "Larger"]);
     }
 }

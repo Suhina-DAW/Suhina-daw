@@ -66,6 +66,8 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    boundary from the new beat.
 7. **Deactivated clips** do not play. **Suhina:** launching one is ignored, alone or in a
    scene: its column keeps what it plays (an empty slot's stop button would stop it).
+   A **muted note** inside a launched clip is never planned either, so it is as silent there as it
+   is in the arrangement ([clip editor](ui-clip-editor.md) › Muting).
 8. **Launcher over arrangement.** A track whose column has launched a clip no longer plays its
    arrangement clips, even after that column stops, until "back to arrangement" returns every
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
