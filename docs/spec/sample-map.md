@@ -116,8 +116,13 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   moment, it says **Arranging the map**, with a bar and the share of the layout's iterations done
   ("Getting the map ready" before the first, and for a layout already kept). The card is only drawn: the map
   under it, its buttons and the rest of the window keep working.
-- When the status does not fit between the **Cloud | Grid** switch and the buttons, it is cut
-  short with "…". Its tooltip has all of it and says why samples are missing, one part each:
+- **The top bar:** the controls in one row (**Cloud | Grid**, **+**, **−**, **Fit**, **Large**,
+  **Window**, **Size**, **Volume**), wrapping onto more rows when the map is narrow, never on top
+  of each other (a label stays with its field); under them, the status on a row of its own.
+- **Volume** (−48 to +6 dB) is the preview level the browser's previews use too (Options ›
+  Settings › Browser › Preview volume), kept; moving it also changes the sample playing now
+  (`preview.setGain`), gliding there without a click.
+- When the status does not fit its row, it is cut short with "…". Its tooltip has all of it and says why samples are missing, one part each:
   still to analyse; too long (the limit, and Options › Settings › Browser › Map: longest sample
   to change it); could not be read, by reason with the commonest first (the reason as the
   decoder gives it, such as "unsupported codec: …", "read error: …", "silent" or "larger than

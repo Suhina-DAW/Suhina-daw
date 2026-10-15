@@ -409,6 +409,7 @@ impl Panel {
         self.update_points(state, projects, revision);
         self.view.preview_on_hover = settings.map_hover_preview;
         self.view.dot_size = settings.map_dot_size as f32 / 100.0;
+        self.view.volume = settings.preview_volume;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
         let details = self.status_details(settings.map_max_seconds);
@@ -534,6 +535,13 @@ impl Panel {
             }
             MapEvent::DotSize(percent) => {
                 settings.map_dot_size = percent;
+                return true;
+            }
+            MapEvent::Volume(db) => {
+                settings.preview_volume = db;
+                if state.previewing.is_some() {
+                    let _ = projects.execute("preview.setGain", &json!({ "gain": db }));
+                }
                 return true;
             }
             MapEvent::ToggleLarge => {

@@ -455,6 +455,17 @@ fn previews_need_a_player_and_show_in_the_launcher_state() {
     assert_eq!(state["preview"]["playing"], true);
     assert!(session.audio().files.is_empty(), "a preview does not join the project's audio");
 
+    // A new level for the preview playing: it keeps playing, quieter.
+    run(&mut session, "preview.setGain", json!({ "gain": -12.0 })).unwrap();
+    for _ in 0..8 {
+        renderer.process(&mut block);
+    }
+    assert!(block[600].abs() < 0.2 && block[600].abs() > 0.05, "{}", block[600]);
+    assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["preview"]["playing"], true);
+    for bad in [json!({}), json!({ "gain": 100.0 }), json!({ "gain": "loud" })] {
+        assert!(run(&mut session, "preview.setGain", bad.clone()).is_err(), "{bad}");
+    }
+
     run(&mut session, "preview.play", json!({ "path": text(&m), "track": 1 })).unwrap();
     run(&mut session, "preview.stop", json!({})).unwrap();
     renderer.process(&mut block);

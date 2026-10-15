@@ -92,6 +92,8 @@ pub enum MapEvent {
     Layout(Layout),
     /// The point size was changed, in percent.
     DotSize(u32),
+    /// The preview level was changed, in dB.
+    Volume(i32),
     /// The large-view button.
     ToggleLarge,
     /// The button that moves the map into a window of its own, or back into the browser.
@@ -120,6 +122,8 @@ pub struct MapView {
     /// The points' size as a share of their size at first (Size in the top bar). Positions do
     /// not change with it, so smaller points stand further apart.
     pub dot_size: f32,
+    /// The preview level in dB (Volume in the top bar).
+    pub volume: i32,
     /// Kinds the legend shows; the others are dimmed. Empty: all.
     pub legend: HashSet<Kind>,
     /// Shift-drag rectangle, from where it started.
@@ -235,6 +239,7 @@ impl Default for MapView {
             pressed: None,
             dragging_items: false,
             dot_size: 1.0,
+            volume: crate::settings::PREVIEW_VOLUME,
             legend: HashSet::new(),
             rubber_band: None,
             similar: None,
@@ -482,7 +487,8 @@ pub fn show(
 ) {
     let full = ui.available_rect_before_wrap();
     ui.allocate_rect(full, Sense::hover());
-    let top = Rect::from_min_size(full.min, Vec2::new(full.width(), TOP_BAR));
+    let height = top_bar(ui, full, view, status, details, events);
+    let top = Rect::from_min_size(full.min, Vec2::new(full.width(), height));
     let bottom = Rect::from_min_max(Pos2::new(full.min.x, full.max.y - LEGEND), full.max);
     let mut area = Rect::from_min_max(Pos2::new(full.min.x, top.max.y), Pos2::new(full.max.x, bottom.min.y));
     let side = view.similar.is_some().then(|| {
@@ -491,7 +497,6 @@ pub fn show(
         side
     });
 
-    top_bar(ui, top, view, status, details, events);
     let aspect = aspect_of(area);
     let positions = positions(points, view.layout, grid, aspect);
     view.refresh(points, &positions, aspect);
@@ -553,56 +558,85 @@ fn busy_card(ui: &Ui, area: Rect, busy: &Busy) {
     );
 }
 
+/// The top bar in the top of `full`: the controls, wrapping onto more rows when the map is
+/// narrow, then the status on a row of its own. Returns the bar's height.
 fn top_bar(
     ui: &mut Ui,
-    rect: Rect,
+    full: Rect,
     view: &mut MapView,
     status: &str,
     details: &[StatusPart],
     events: &mut Vec<MapEvent>,
-) {
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(theme::PAD, 2.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
+) -> f32 {
+    let inner =
+        Rect::from_min_max(full.min + Vec2::new(theme::PAD, 2.0), Pos2::new(full.max.x - theme::PAD, full.max.y));
+    let mut child =
+        ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+    child.spacing_mut().item_spacing.y = 2.0;
+    child.spacing_mut().slider_width = 64.0;
+    child.horizontal_wrapped(|ui| controls(ui, view, events));
+    // The status is cut short with "…" when it does not fit. Its tooltip has all of it and says
+    // why files are missing.
+    let text = egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL);
+    child
+        .add_sized(
+            Vec2::new(inner.width(), theme::TEXT_SMALL + 6.0),
+            egui::Label::new(text).truncate().sense(Sense::hover()),
+        )
+        .on_hover_ui(|ui| status_tooltip(ui, status, details));
+    (child.min_rect().bottom() + 2.0 - full.top()).max(TOP_BAR)
+}
+
+/// Widgets that stay on one row: when less than `width` is left on the current row, they start
+/// the next one.
+fn together(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+    // The room left on this row (a wrapping layout's available width is the whole row's).
+    if ui.max_rect().right() - ui.cursor().left() < width {
+        ui.end_row();
+    }
+    add(ui);
+}
+
+/// The map's controls, left to right in the order they wrap.
+fn controls(ui: &mut Ui, view: &mut MapView, events: &mut Vec<MapEvent>) {
     for (layout, name) in [(Layout::Cloud, "Cloud"), (Layout::Grid, "Grid")] {
-        if child.selectable_label(view.layout == layout, name).clicked() && view.layout != layout {
+        if ui.selectable_label(view.layout == layout, name).clicked() && view.layout != layout {
             view.layout = layout;
             events.push(MapEvent::Layout(layout));
         }
     }
-    child.add_space(theme::PAD);
-    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui
-            .button(if view.window { "Dock" } else { "Window" })
-            .on_hover_text(if view.window {
-                "Put the map back into the browser"
-            } else {
-                "Open the map in a window of its own, for another screen"
-            })
+    if ui.button("+").on_hover_text("Zoom in").clicked() {
+        view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
+    }
+    if ui.button("−").on_hover_text("Zoom out").clicked() {
+        view.zoom = (view.zoom / 1.5).max(MIN_ZOOM);
+        view.clamp_centre();
+    }
+    if ui.button("Fit").on_hover_text("Fit all points in view").clicked() {
+        view.fit();
+    }
+    if !view.window
+        && ui
+            .button(if view.large { "Close" } else { "Large" })
+            .on_hover_text("Show the map in the main area")
             .clicked()
-        {
-            events.push(MapEvent::ToggleWindow);
-        }
-        if !view.window
-            && ui
-                .button(if view.large { "Close" } else { "Large" })
-                .on_hover_text("Show the map in the main area")
-                .clicked()
-        {
-            events.push(MapEvent::ToggleLarge);
-        }
-        if ui.button("Fit").on_hover_text("Fit all points in view").clicked() {
-            view.fit();
-        }
-        if ui.button("−").on_hover_text("Zoom out").clicked() {
-            view.zoom = (view.zoom / 1.5).max(MIN_ZOOM);
-            view.clamp_centre();
-        }
-        if ui.button("+").on_hover_text("Zoom in").clicked() {
-            view.zoom = (view.zoom * 1.5).min(MAX_ZOOM);
-        }
+    {
+        events.push(MapEvent::ToggleLarge);
+    }
+    if ui
+        .button(if view.window { "Dock" } else { "Window" })
+        .on_hover_text(if view.window {
+            "Put the map back into the browser"
+        } else {
+            "Open the map in a window of its own, for another screen"
+        })
+        .clicked()
+    {
+        events.push(MapEvent::ToggleWindow);
+    }
+    // Each label stays with its field: the pair moves to the next row as a whole.
+    together(ui, 90.0, |ui| {
+        ui.label(egui::RichText::new("Size").color(theme::text_secondary()).size(theme::TEXT_SMALL));
         let mut percent = (view.dot_size * 100.0).round() as u32;
         let (low, high) = crate::settings::MAP_DOT_SIZES;
         let size = ui
@@ -615,14 +649,18 @@ fn top_bar(
             view.dot_size = percent as f32 / 100.0;
             events.push(MapEvent::DotSize(percent));
         }
-        ui.label(egui::RichText::new("Size").color(theme::text_secondary()).size(theme::TEXT_SMALL));
-        // The status takes the room left between the switch and the buttons, cut short with
-        // "…" when it does not fit. Its tooltip has all of it and says why files are missing.
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            let text = egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL);
-            ui.add(egui::Label::new(text).truncate().sense(Sense::hover()))
-                .on_hover_ui(|ui| status_tooltip(ui, status, details));
-        });
+    });
+    together(ui, 170.0, |ui| {
+        ui.label(egui::RichText::new("Volume").color(theme::text_secondary()).size(theme::TEXT_SMALL));
+        let (low, high) = crate::settings::PREVIEW_VOLUMES;
+        let mut db = view.volume;
+        let volume = ui
+            .add(egui::Slider::new(&mut db, low..=high).suffix(" dB").step_by(1.0))
+            .on_hover_text("The level samples are previewed at; it also changes the one playing");
+        if volume.changed() && db != view.volume {
+            view.volume = db;
+            events.push(MapEvent::Volume(db));
+        }
     });
 }
 
@@ -1308,6 +1346,66 @@ mod tests {
         );
         harness.drop_at(far);
         harness.run();
+    }
+
+    /// However narrow the map, its controls never lie on top of each other: they wrap onto
+    /// more rows, and the map starts below them.
+    #[test]
+    fn the_controls_wrap_instead_of_overlapping_when_the_map_is_narrow() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let status = "153534 samples, 25947 too long, 4955 could not be read";
+        let mut tops = Vec::new();
+        for width in [180.0, 320.0, 900.0] {
+            let mut harness = Harness::builder().with_size(egui::vec2(width, 400.0)).build_ui_state(
+                |ui, view: &mut MapView| show(ui, view, &points, None, status, &[], None, &[], &mut Vec::new()),
+                MapView::default(),
+            );
+            harness.run();
+            let rects: Vec<(String, Rect)> = ["Cloud", "Grid", "+", "−", "Fit", "Large", "Window", "Size", "Volume"]
+                .iter()
+                .map(|label| (label.to_string(), harness.get_by_label(label).rect()))
+                .collect();
+            for (i, (a, ra)) in rects.iter().enumerate() {
+                assert!(ra.right() <= width + 0.5, "{a} runs off a map {width} wide: {ra:?}");
+                for (b, rb) in rects.iter().skip(i + 1) {
+                    assert!(
+                        !ra.shrink(0.5).intersects(rb.shrink(0.5)),
+                        "{a} and {b} overlap at {width}: {ra:?} {rb:?}"
+                    );
+                }
+            }
+            let lowest = rects.iter().map(|(_, r)| r.bottom()).fold(0.0f32, f32::max);
+            assert!(harness.state().area.top() >= lowest, "the map starts below the controls at {width}");
+            tops.push(harness.state().area.top());
+        }
+        assert!(tops[0] > tops[2], "a narrow map has more rows of controls than a wide one: {tops:?}");
+    }
+
+    #[test]
+    fn the_volume_slider_reports_a_new_level() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let state = (MapView::default(), Vec::<MapEvent>::new());
+        let mut harness = Harness::builder().with_size(egui::vec2(900.0, 400.0)).build_ui_state(
+            |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
+                show(ui, view, &points, None, "4 samples", &[], None, &[], events)
+            },
+            state,
+        );
+        harness.run();
+        let slider = harness.get_by_role(egui::accesskit::Role::Slider).rect();
+        // The right end of the slider is the loudest.
+        harness.drag_at(egui::pos2(slider.right() - 1.0, slider.center().y));
+        harness.run();
+        harness.drop_at(egui::pos2(slider.right() - 1.0, slider.center().y));
+        harness.run();
+        let (low, high) = crate::settings::PREVIEW_VOLUMES;
+        assert!(harness.state().1.contains(&MapEvent::Volume(high)), "{:?}", harness.state().1);
+        assert_eq!(harness.state().0.volume, high);
+        assert!(high > low);
     }
 
     /// Pointing at the status shows why samples are missing.

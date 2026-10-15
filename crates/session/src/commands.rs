@@ -629,6 +629,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: preview::play,
     },
     CommandSpec {
+        id: "preview.setGain",
+        label: "Change the level of the preview playing now, gliding there without a click; the next preview gets its own gain",
+        params: &[param("gain", ParamType::Number, "level in dB, at most 12")],
+        kind: CommandKind::Transport,
+        run: preview::set_gain,
+    },
+    CommandSpec {
         id: "preview.stop",
         label: "Stop the preview",
         params: &[],

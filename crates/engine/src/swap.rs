@@ -536,6 +536,13 @@ impl Controller {
         Some(device)
     }
 
+    /// Changes the level of what is previewed now to `gain` (linear), gliding there without a
+    /// click. Fails if the queue is full.
+    pub fn preview_gain(&mut self, gain: f32) -> Result<(), String> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Gain(gain))
+    }
+
     /// Stops the preview. Fails if the queue is full.
     pub fn preview_stop(&mut self) -> Result<(), String> {
         self.preview.send(crate::preview::PreviewCommand::Stop)

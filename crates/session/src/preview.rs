@@ -22,10 +22,7 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
         None | Some(Value::Null) => 0.0,
         Some(v) => v.as_f64().filter(|f| f.is_finite() && *f >= 0.0).ok_or("from must be seconds, at least 0")?,
     };
-    let gain_db = match params.get("gain") {
-        None | Some(Value::Null) => DEFAULT_GAIN_DB,
-        Some(v) => v.as_f64().filter(|g| g.is_finite() && *g <= 12.0).ok_or("gain must be decibels, at most 12")?,
-    };
+    let gain_db = gain_db(params)?.unwrap_or(DEFAULT_GAIN_DB);
     let gain = 10f64.powf(gain_db / 20.0) as f32;
     let track: Option<TrackId> = match params.get("track") {
         None | Some(Value::Null) => None,
@@ -60,6 +57,24 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
         }
         _ => Err(format!("{}: only samples and MIDI files can be previewed", path.display()).into()),
     }
+}
+
+/// A level in dB from `params`' `gain`: finite, at most 12; `None` when left out.
+fn gain_db(params: &Value) -> Result<Option<f64>, CommandError> {
+    match params.get("gain") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            Ok(Some(v.as_f64().filter(|g| g.is_finite() && *g <= 12.0).ok_or("gain must be decibels, at most 12")?))
+        }
+    }
+}
+
+pub(crate) fn set_gain(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    session.player_mut()?;
+    let db = gain_db(params)?.ok_or("gain must be decibels, at most 12")?;
+    let gain = 10f64.powf(db / 20.0) as f32;
+    session.player_mut()?.controller_mut().preview_gain(gain).map_err(CommandError)?;
+    Ok(json!({ "gain": db }))
 }
 
 pub(crate) fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
