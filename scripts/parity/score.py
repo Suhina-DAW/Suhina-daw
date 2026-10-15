@@ -43,9 +43,11 @@ CHAPTERS = [
     (3, "Live Concepts", 27, 0.50, "partial",
      "Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer "
      "concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin."),
-    (4, "Working with the Browser", 60, 0.45, "partial",
+    (4, "Working with the Browser", 60, 0.47, "partial",
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
-     "engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, "
+     "engine, sample map by sound similarity; samples and MIDI files dragged from the system's file "
+     "manager land like a browser drag (exact placement waits for pointer positions from the "
+     "windowing layer). Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.35, "partial",
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
