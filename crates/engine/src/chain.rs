@@ -355,6 +355,15 @@ impl Chain {
         self.next_off = next;
     }
 
+    /// Holds `key`, started by [`Chain::note_on`] or about to start, until it is released by
+    /// hand: the piano roll's key column (`preview.noteOn`). `end` is the frame the note would
+    /// otherwise end at; `u64::MAX` holds it for good.
+    pub(crate) fn hold_key(&mut self, key: u8, end: u64) {
+        if let Some(held) = self.held.get_mut(usize::from(key)) {
+            *held = end;
+        }
+    }
+
     /// Releases `key` now, at `frame` of the block, if it is held.
     pub(crate) fn release_key(&mut self, frame: usize, key: u8) {
         if let Some(held) = self.held.get_mut(usize::from(key))

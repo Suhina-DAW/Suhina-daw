@@ -659,6 +659,24 @@ static COMMANDS: &[CommandSpec] = &[
         run: preview::stop,
     },
     CommandSpec {
+        id: "preview.noteOn",
+        label: "Play a note through a track's instrument and hold it until preview.noteOff, as the piano roll's key column does",
+        params: &[
+            TRACK,
+            param("key", ParamType::Integer, "the key to play, 0 to 127 (60 is C3)"),
+            optional("velocity", ParamType::Number, "how hard, 1 to 127 (default 100)"),
+        ],
+        kind: CommandKind::Transport,
+        run: preview::note_on,
+    },
+    CommandSpec {
+        id: "preview.noteOff",
+        label: "Let go of the note preview.noteOn started on a track, or of every held preview note",
+        params: &[TRACK, optional("key", ParamType::Integer, "the key to let go of; every held key when left out")],
+        kind: CommandKind::Transport,
+        run: preview::note_off,
+    },
+    CommandSpec {
         id: "device.remove",
         label: "Remove a device from a track",
         params: &[TRACK, DEVICE],
@@ -850,6 +868,19 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
         kind: CommandKind::Edit,
         run: notes::duplicate,
+    },
+    CommandSpec {
+        id: "note.split",
+        label: "Split notes of a MIDI clip at a beat, each note that spans it into two; the result gives the new notes' indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            param("at", ParamType::Number, "the beat to split at, in beats from the content's start"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::split,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {

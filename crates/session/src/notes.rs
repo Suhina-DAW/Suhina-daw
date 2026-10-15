@@ -578,6 +578,50 @@ pub(crate) fn duplicate(session: &mut Session, params: &Value) -> Result<Value, 
     append(session, params, added)
 }
 
+/// Whether the note `note` spans the beat `at`: it starts before and ends after it, so a note
+/// that starts or ends exactly at `at` is already cut there.
+fn spans(note: &Note, at: f64) -> bool {
+    note.time < at - EPSILON && note.time + note.duration > at + EPSILON
+}
+
+/// `note.split`: splits each named note that spans the beat `at` into two at `at`, the first
+/// keeping its start and the second its end. One command, one undo step; the halves are appended,
+/// so the indices of the notes the command did not split stay valid.
+pub(crate) fn split(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let at = optional_number(params, "at")?.ok_or("give at, the beat to split the notes at")?;
+    if !(0.0..=MAX_BEAT).contains(&at) {
+        return Err(format!("at must be 0 to {MAX_BEAT} beats, got {at}").into());
+    }
+    edit_notes(&mut session.project, params, |notes| {
+        let chosen = indices(params, notes.len())?;
+        // The first halves are made from the notes as they are; the second halves are appended
+        // once every one of them is known, so an index always means the same note.
+        let mut firsts: Vec<(usize, f64)> = Vec::new();
+        let mut seconds = Vec::new();
+        for &index in &chosen {
+            let note = notes.get(index).ok_or("a note is missing")?;
+            if !spans(note, at) {
+                continue;
+            }
+            firsts.push((index, at - note.time));
+            seconds.push(Note { time: at, duration: note.time + note.duration - at, ..*note });
+        }
+        let total = notes.len().saturating_add(seconds.len());
+        if total > MAX_NOTES_PER_CLIP {
+            return Err(format!("a clip holds at most {MAX_NOTES_PER_CLIP} notes; this would make {total}").into());
+        }
+        for (index, duration) in firsts {
+            if let Some(note) = notes.get_mut(index) {
+                note.duration = duration;
+            }
+        }
+        let first_new = notes.len();
+        notes.extend(seconds);
+        let made: Vec<usize> = (first_new..notes.len()).collect();
+        Ok(json!({ "notes": made, "count": made.len() }))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -571,3 +571,84 @@ fn pasting_never_fills_a_clip_past_its_cap() {
     let twice = run(&mut session, "note.duplicate", json!({ "track": 1, "index": 1, "notes": [0] }));
     assert!(twice.unwrap_err().contains("at most"));
 }
+
+#[test]
+fn splitting_cuts_each_note_that_spans_the_beat_in_two() {
+    let mut session = Session::new(project());
+    // The clip's notes are at beats 0, 1 and 2, each a beat long; a note at 0.5 to 2.5 too.
+    run(
+        &mut session,
+        "note.add",
+        json!({ "track": 1, "index": 0, "notes": [{ "time": 0.5, "length": 2.0, "key": 48, "velocity": 60 }] }),
+    )
+    .unwrap();
+    let before = session.project().clone();
+    let kept = notes(&session, 1);
+    let cut = run(&mut session, "note.split", json!({ "track": 1, "index": 0, "notes": [0, 3], "at": 1.5 })).unwrap();
+    // Only the note that spans 1.5 (0.5 to 2.5) is cut: note 0 ends exactly at 1.0.
+    assert_eq!(cut, json!({ "notes": [4], "count": 1 }));
+    let now = notes(&session, 1);
+    assert_eq!(now.len(), 5);
+    assert_eq!((now[3].time, now[3].duration, now[3].key), (0.5, 1.0, 48));
+    assert_eq!((now[4].time, now[4].duration, now[4].key), (1.5, 1.0, 48));
+    // The halves keep the note's velocity and the notes the command did not touch are untouched.
+    assert_eq!(now[4].velocity, now[3].velocity);
+    assert_eq!(&now[..3], &kept[..3]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(*session.project(), before);
+    // The undo put the note that spans 2.0 back: 0.5 to 2.5, one note again.
+    let restored = notes(&session, 1);
+    assert_eq!((restored.len(), restored[3].time, restored[3].duration), (4, 0.5, 2.0));
+
+    // Splitting again at 2.0: the note that now spans it (0.5 to 2.5) is cut, and a note that
+    // only touches the beat (1.0 to 2.0) is left whole even though it is named.
+    run(&mut session, "note.split", json!({ "track": 1, "index": 0, "notes": [1, 3], "at": 2.0 })).unwrap();
+    let now = notes(&session, 1);
+    // One note spans 2.0 (0.5 to 2.5); note 1 (1.0 to 2.0) only touches it and is left whole.
+    assert_eq!(now.len(), 5);
+    assert_eq!((now[3].time, now[3].duration), (0.5, 1.5));
+    assert_eq!((now[4].time, now[4].duration), (2.0, 0.5));
+    assert_eq!(now[1], kept[1]);
+}
+
+#[test]
+fn splitting_a_duplicate_leaves_the_original_alone() {
+    let mut session = Session::new(project());
+    run(
+        &mut session,
+        "note.add",
+        json!({ "track": 1, "index": 0, "notes": [{ "time": 0.25, "length": 2.0, "key": 70 }] }),
+    )
+    .unwrap();
+    let original = notes(&session, 1);
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    run(&mut session, "note.split", json!({ "track": 1, "index": copy, "notes": [3], "at": 1.0 })).unwrap();
+    let own = arranged(&session)[copy];
+    assert_ne!(own, 1);
+    assert_eq!(notes(&session, 1), original);
+    assert_eq!(notes(&session, own).len(), 5);
+    assert_eq!(notes(&session, own)[4].time, 1.0);
+}
+
+#[test]
+fn malformed_splits_are_refused_and_change_nothing() {
+    let mut session = Session::new(project());
+    let before = session.project().clone();
+    let cases = [
+        ("note.split", json!({ "track": 1, "index": 0, "notes": [0] }), "give at"),
+        ("note.split", json!({ "track": 1, "index": 0, "notes": [0], "at": -1.0 }), "at must be"),
+        ("note.split", json!({ "track": 1, "index": 0, "notes": [0], "at": 1e12 }), "at must be"),
+        ("note.split", json!({ "track": 1, "index": 0, "notes": [0], "at": "halfway" }), "at must be"),
+        ("note.split", json!({ "track": 1, "index": 0, "at": 1.0 }), "notes must be"),
+        ("note.split", json!({ "track": 1, "index": 0, "notes": [9], "at": 1.0 }), "note 9 does not exist"),
+        ("note.split", json!({ "track": 1, "index": 2, "notes": [0], "at": 1.0 }), "audio clip"),
+        ("note.split", json!({ "track": 1, "scene": 2, "notes": [0], "at": 1.0 }), "empty"),
+    ];
+    for (id, params, error) in cases {
+        let got = run(&mut session, id, params.clone());
+        assert!(got.as_ref().is_err_and(|e| e.contains(error)), "{id} {params}: {got:?}");
+    }
+    assert_eq!(session.project(), &before);
+    assert!(!session.can_undo());
+}
