@@ -177,6 +177,6 @@ with a screen recording or notes, no audio from Live needed):
 - Reading the global launch quantisation and the clips' launch settings from a Live Set (needs a
   corpus series).
 - Launching slots from computer keys and MIDI notes (their press and release would drive gate
-  and repeat the same way).
+  and repeat the same way; [#411](https://github.com/suhina-daw/suhina-daw/issues/411)).
 - Launch velocity.
 - Recording into slots.
