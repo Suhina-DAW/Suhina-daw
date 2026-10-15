@@ -146,6 +146,80 @@ fn an_effect_on_a_track_processes_its_sound_before_the_fader() {
 }
 
 #[test]
+fn an_sd_gain_graph_runs_in_the_offline_device_chain() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.gain", "Test Gain", suhina_device_sdk::DeviceRole::Effect);
+    graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 0.5));
+    graph.nodes = vec![
+        suhina_device_sdk::Node::audio_input("in"),
+        suhina_device_sdk::Node::gain("gain", "gain"),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+    let mut effect = device("sd", &[]);
+    effect.kind = DeviceKind::Sd;
+    effect.state = graph.to_sd().ok().map(String::into_bytes);
+    let notes = vec![note(0.0, 1.0, 69)];
+    let plain = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let processed = render_offline(&project(notes, 1.0, vec![device("fm-synth", &[]), effect]), SR, 512).unwrap();
+    let half: Vec<f32> = plain.iter().map(|sample| sample * 0.5).collect();
+    assert!(max_diff(&processed[..plain.len()], &half) < 1e-5);
+}
+
+#[test]
+fn an_sd_midi_effect_transposes_notes_before_the_instrument() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.transpose", "Transpose", suhina_device_sdk::DeviceRole::MidiEffect);
+    graph.nodes = vec![
+        suhina_device_sdk::Node::new("in", suhina_device_sdk::NodeKind::MidiInput),
+        suhina_device_sdk::Node::new("up", suhina_device_sdk::NodeKind::MidiTranspose { semitones: 12 }),
+        suhina_device_sdk::Node::new("out", suhina_device_sdk::NodeKind::MidiOutput),
+    ];
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("in", "up"), suhina_device_sdk::Connection::new("up", "out")];
+    let mut transpose = device("sd", &[]);
+    transpose.kind = DeviceKind::Sd;
+    transpose.state = graph.to_sd().ok().map(String::into_bytes);
+    let notes = vec![note(0.0, 1.0, 48)];
+    let original = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let shifted = render_offline(&project(notes, 1.0, vec![transpose, device("fm-synth", &[])]), SR, 512).unwrap();
+    let expected =
+        render_offline(&project(vec![note(0.0, 1.0, 60)], 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    assert!(peak(&shifted) > 1e-3);
+    assert!(max_diff(&expected, &shifted) < 1e-6);
+    assert!(max_diff(&original, &shifted) > 1e-3);
+}
+
+#[test]
+fn an_sd_instrument_renders_from_timestamped_note_events() {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.gated-tone", "Gated Tone", suhina_device_sdk::DeviceRole::Instrument);
+    graph.nodes = vec![
+        suhina_device_sdk::Node::new("gate", suhina_device_sdk::NodeKind::MidiGate),
+        suhina_device_sdk::Node::new("frequency", suhina_device_sdk::NodeKind::Constant { value: 440.0 }),
+        suhina_device_sdk::Node::new(
+            "osc",
+            suhina_device_sdk::NodeKind::Oscillator { shape: suhina_device_sdk::Waveform::Sine },
+        ),
+        suhina_device_sdk::Node::new("amp", suhina_device_sdk::NodeKind::Multiply),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    graph.connections = vec![
+        suhina_device_sdk::Connection::ports("frequency", "out", "osc", "frequency"),
+        suhina_device_sdk::Connection::ports("gate", "out", "amp", "a"),
+        suhina_device_sdk::Connection::ports("osc", "out", "amp", "b"),
+        suhina_device_sdk::Connection::new("amp", "out"),
+    ];
+    let mut instrument = device("sd", &[]);
+    instrument.kind = DeviceKind::Sd;
+    instrument.state = graph.to_sd().ok().map(String::into_bytes);
+    let audio = render_offline(&project(vec![note(0.0, 0.1, 60)], 1.0, vec![instrument]), SR, 512).unwrap();
+    assert!(audio.iter().any(|sample| sample.abs() > 0.01));
+    assert!(audio.iter().skip(BEAT / 10 * 2).all(|sample| sample.abs() < 1e-6));
+}
+
+#[test]
 fn unknown_and_disabled_devices_pass_the_sound_through() {
     let notes = vec![note(0.0, 1.0, 60)];
     let plain = render_offline(&project(notes.clone(), 1.0, vec![]), SR, 512).unwrap();
@@ -257,4 +331,44 @@ fn hostile_notes_and_devices_do_not_break_a_render() {
 /// A project with one empty track, for tests that only need its channel.
 pub(crate) fn empty_project() -> Project {
     project(Vec::new(), 1.0, Vec::new())
+}
+
+#[path = "../../device-sdk/tests/common/mod.rs"]
+mod sdk_examples;
+
+fn sdk_device(name: &str) -> Device {
+    let graph = sdk_examples::build(name).unwrap();
+    let mut stored = device("sd", &[]);
+    stored.kind = DeviceKind::Sd;
+    stored.state = Some(graph.to_sd().unwrap().into_bytes());
+    stored
+}
+
+#[test]
+fn sdk_effects_run_in_the_engine_independently_of_host_blocks() {
+    for name in ["stereo-utility", "auto-pan", "filter", "distortion", "delay", "compressor"] {
+        let p = project(vec![note(0.01, 0.2, 69)], 0.5, vec![device("fm-synth", &[]), sdk_device(name)]);
+        let reference = render_offline(&p, SR, 512).unwrap();
+        let odd = render_offline(&p, SR, 31).unwrap();
+        assert!(max_diff(&reference, &odd) < 1e-5, "{name}");
+        assert!(reference.iter().all(|v| v.is_finite()));
+        assert!(peak(&reference) > 1e-4, "{name} is silent");
+    }
+}
+
+#[test]
+fn sdk_delay_tail_and_oscillator_phase_carry_through_graph_swaps() {
+    for name in ["auto-pan", "delay"] {
+        let p = project(vec![note(0.0, 0.4, 69)], 2.0, vec![device("fm-synth", &[]), sdk_device(name)]);
+        let mut edited = p.clone();
+        edited.tracks[0].name = "Renamed".into();
+        let mut renderer = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        let mut out = blocks(&mut renderer, 40, 480);
+        controller.update(&edited).unwrap();
+        out.extend(blocks(&mut renderer, 80, 480));
+        let mut untouched = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+        let reference = blocks(&mut untouched, 120, 480);
+        assert!(max_diff(&out, &reference) < 1e-5, "{name}: {}", max_diff(&out, &reference));
+    }
 }

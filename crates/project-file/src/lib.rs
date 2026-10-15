@@ -378,6 +378,7 @@ fn follow_value(f: &FollowAction) -> Value {
 fn device_value(d: &Device) -> Value {
     let kind = match &d.kind {
         DeviceKind::Builtin(id) => json!({ "type": "builtin", "id": id }),
+        DeviceKind::Sd => json!({ "type": "sd" }),
         DeviceKind::Clap { id } => json!({ "type": "clap", "id": id }),
         DeviceKind::Vst3 { id } => json!({ "type": "vst3", "id": id }),
         DeviceKind::Vst2 { id } => json!({ "type": "vst2", "id": id }),
@@ -1007,13 +1008,14 @@ fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
     let k = object(d.get("kind").unwrap_or(&Value::Null), &kind_at)?;
     let kind = match k.get("type").and_then(Value::as_str) {
         Some("builtin") => DeviceKind::Builtin(required_text(k, "id", &kind_at)?),
+        Some("sd") => DeviceKind::Sd,
         Some("clap") => DeviceKind::Clap { id: required_text(k, "id", &kind_at)? },
         Some("vst3") => DeviceKind::Vst3 { id: required_text(k, "id", &kind_at)? },
         Some("vst2") => DeviceKind::Vst2 { id: whole(k, "id", &kind_at)? },
         Some("foreign") => {
             DeviceKind::Foreign { format: required_text(k, "format", &kind_at)?, id: required_text(k, "id", &kind_at)? }
         }
-        _ => return Err(format!("{kind_at}.type: expected builtin, clap, vst3, vst2 or foreign").into()),
+        _ => return Err(format!("{kind_at}.type: expected builtin, sd, clap, vst3, vst2 or foreign").into()),
     };
     let mut params = Vec::new();
     for (i, v) in list(d, "params", at)?.iter().enumerate() {

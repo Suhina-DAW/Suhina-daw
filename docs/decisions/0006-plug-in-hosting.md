@@ -22,6 +22,10 @@ covers:
 - **Date:** 2026-10-11
 - **Issue:** [#30](https://github.com/suhina-daw/suhina-daw/issues/30)
 
+Community `.sd` effects are a separate, data-only path (ADR 0020): the SDK validates and
+prepares their supported graph nodes as fixed Rust processors in the engine. They load no
+community executable code and do not cross the plug-in-host IPC boundary.
+
 ## Context
 
 AGENTS.md rule 5: third-party plug-ins never run in the Suhina process. A plug-in that crashes

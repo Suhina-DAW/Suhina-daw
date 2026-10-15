@@ -43,7 +43,7 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
 4. **Hostile input is an error, never a crash** (AGENTS.md rule 2): every value is checked
    (types, ranges, ids that fit), the file is at most 512 MiB, and the project must validate as
    an imported one must.
-5. **Binary data is base64**: plug-in state and format extensions.
+5. **Binary data is base64**: plug-in state, embedded UTF-8 .sd graph data, and format extensions.
 6. **Audio is referred to, not copied.** Each region keeps its path relative to the project file
    and an absolute path for when that does not resolve. Saving somewhere else rewrites both from
    where the file is found now. A self-contained package (a zip with the audio) is a separate

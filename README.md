@@ -168,6 +168,11 @@ is an [issue](https://github.com/suhina-daw/suhina-daw/issues) in this repositor
 Something missing or a bug? Open an issue with one of the forms, or ask on
 [Discord](https://discord.com/invite/e5JAZYMU).
 
+Community audio effects, MIDI effects and monophonic instruments can be authored with the Rust
+device SDK and shared as one `.sd` file, then added to a track. Version 3 can preserve node positions,
+port anchors and wire routes for a future visual editor. See the [authoring guide](docs/device-sdk.md) and
+[node reference](docs/spec/sdk-nodes.md), including node discovery for AI agents.
+
 ## Documentation
 
 | | |
@@ -189,3 +194,7 @@ Something missing or a bug? Open an issue with one of the forms, or ask on
 
 Suhina is free software, licensed under the [GNU General Public License v3.0 or later](LICENSE).
 Contributions are licensed the same way.
+
+SDK effect panels can include custom vector controls, XY pads, gradients and embedded PNG/JPEG
+icons, photos and repeating backgrounds. Artwork and bindings travel inside the single `.sd`;
+see the [custom panel guide](docs/device-sdk.md#custom-panels-images-and-controls).

@@ -117,13 +117,17 @@ without an engine: the session keeps the armed tracks and tells each new player.
 ## Amendment: device commands (2026-10-12)
 
 Devices on tracks are edited with ordinary **edit** commands, one undo step each:
-`device.add`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
+`device.add`, `device.addSd`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
 `track.devices` read. A device is addressed by its track and its index in the track's chain
 (`device`, from 0, as `track.devices` lists them), and a parameter by its stable id
 ([ADR 0004](0004-built-in-devices.md)), or a plug-in's by its parameter id. `device.setAutomation`
 (also an edit) sets or removes a plug-in parameter's automation lane; its `points` are a list of
 numbers (`ParamType::Numbers`, beat and value in turn), shown to agents as an array of numbers.
 Agents may run all of them.
+
+`device.setParam` accepts `continuous: true` during a slider drag to share one undo snapshot
+across updates of the same parameter. A final call without that flag ends the gesture. Every
+effective update still marks the project changed, including updates after saving mid-gesture.
 
 ## Amendment: one drag, one undo step (2026-10-15)
 

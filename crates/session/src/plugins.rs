@@ -180,7 +180,7 @@ fn found<'a>(catalog: &'a Catalog, kind: &DeviceKind, name: &str) -> Option<Opti
         DeviceKind::Vst3 { id } => Some(catalog.match_vst3(id, name)),
         DeviceKind::Vst2 { id } => Some(catalog.match_vst2(*id, name)),
         DeviceKind::Clap { id } => Some(catalog.match_clap(id, name)),
-        DeviceKind::Builtin(_) | DeviceKind::Foreign { .. } => None,
+        DeviceKind::Builtin(_) | DeviceKind::Sd | DeviceKind::Foreign { .. } => None,
     }
 }
 
@@ -200,6 +200,7 @@ fn device_format(kind: &DeviceKind) -> (&'static str, String) {
         DeviceKind::Vst2 { id } => ("vst2", format!("{id:08X}")),
         DeviceKind::Clap { id } => ("clap", id.clone()),
         DeviceKind::Builtin(id) => ("builtin", id.clone()),
+        DeviceKind::Sd => ("sd", String::new()),
         DeviceKind::Foreign { id, .. } => ("foreign", id.clone()),
     }
 }

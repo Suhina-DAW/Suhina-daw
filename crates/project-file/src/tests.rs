@@ -82,6 +82,15 @@ fn everything() -> Project {
             extensions: ext("Vst3ControllerState"),
         },
         Device {
+            name: "Community Gain".into(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: Some(br#"{"format":"suhina-device","version":1}"#.to_vec()),
+            params: vec![DeviceParam::new("gain", 0.5)],
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        },
+        Device {
             name: "Old".into(),
             kind: DeviceKind::Vst2 { id: 1_234_567 },
             enabled: true,

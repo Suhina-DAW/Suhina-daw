@@ -21,6 +21,7 @@ use crate::widgets::{self, Action};
 pub const DEVICE_WIDTH: f32 = 220.0;
 pub const STACK_WIDTH: f32 = 260.0;
 const PARAM_ROW: f32 = 16.0;
+const NODE_ROW: f32 = 22.0;
 /// Width of the clip's properties beside the chain, and of a property's label.
 const CLIP_WIDTH: f32 = 196.0;
 const LABEL_WIDTH: f32 = 52.0;
@@ -56,8 +57,30 @@ pub struct DeviceBox {
     pub enabled: bool,
     /// Parameter ids and values as text.
     pub params: Vec<(String, String)>,
+    pub graph: Option<GraphBox>,
     /// For a plug-in: where it stands, while the project plays.
     pub plugin: Option<PluginBox>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphBox {
+    pub canvas: Option<std::sync::Arc<suhina_device_sdk::ui::DeviceUi>>,
+    pub linear: bool,
+    pub nodes: Vec<String>,
+    pub parameters: Vec<GraphParameter>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphParameter {
+    pub default: f64,
+    pub ui: suhina_device_sdk::ParameterUi,
+    pub control: suhina_device_sdk::ParameterControl,
+    pub unit: String,
+    pub id: String,
+    pub name: String,
+    pub min: f64,
+    pub max: f64,
+    pub value: f64,
 }
 
 /// Where a plug-in device's plug-in stands, as its panel shows it.
@@ -276,6 +299,20 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     name: d.name.clone(),
                     kind: match &d.kind {
                         DeviceKind::Builtin(_) => "Suhina".into(),
+                        DeviceKind::Sd => d
+                            .state
+                            .as_deref()
+                            .and_then(|state| std::str::from_utf8(state).ok())
+                            .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+                            .map(|graph| {
+                                match graph.role {
+                                    suhina_device_sdk::DeviceRole::Effect => "AudioEffect",
+                                    suhina_device_sdk::DeviceRole::Instrument => "Instrument",
+                                    suhina_device_sdk::DeviceRole::MidiEffect => "MIDI Effect",
+                                }
+                                .to_owned()
+                            })
+                            .unwrap_or_else(|| "AudioEffect".into()),
                         DeviceKind::Clap { .. } => "CLAP".into(),
                         DeviceKind::Vst3 { .. } => "VST3".into(),
                         DeviceKind::Vst2 { .. } => "VST2".into(),
@@ -283,6 +320,45 @@ fn chain(project: &Project, id: TrackId, plugins: &mut dyn FnMut(TrackId, usize)
                     },
                     enabled: d.enabled,
                     params: d.params.iter().map(|p| (p.id.clone(), format_value(p.value))).collect(),
+                    graph: match (&d.kind, d.state.as_deref()) {
+                        (DeviceKind::Sd, Some(state)) => crate::device_canvas::graph(state).map(|cached| {
+                            let graph = &cached.graph;
+                            GraphBox {
+                                canvas: cached.canvas.clone(),
+                                linear: graph.connections.len() == graph.nodes.len().saturating_sub(1)
+                                    && graph.nodes.iter().all(|node| {
+                                        graph.connections.iter().filter(|e| e.from == node.id).count() <= 1
+                                    })
+                                    && graph.connections.iter().all(|e| e.from_port == "out" && e.to_port == "in"),
+                                nodes: graph
+                                    .ordered_nodes()
+                                    .iter()
+                                    .filter(|node| node.visible)
+                                    .map(|node| node.kind.info().name.into())
+                                    .collect(),
+                                parameters: graph
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| GraphParameter {
+                                        default: parameter.default,
+                                        control: parameter.control,
+                                        ui: parameter.ui.clone(),
+                                        unit: parameter.unit.clone(),
+                                        id: parameter.id.clone(),
+                                        name: parameter.name.clone(),
+                                        min: parameter.min,
+                                        max: parameter.max,
+                                        value: d
+                                            .params
+                                            .iter()
+                                            .find(|value| value.id == parameter.id)
+                                            .map_or(parameter.default, |value| parameter.clamp(value.value)),
+                                    })
+                                    .collect(),
+                            }
+                        }),
+                        _ => None,
+                    },
                     plugin: matches!(
                         d.kind,
                         DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. }
@@ -326,7 +402,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places:
 
 /// A chain's devices side by side in `area`; one with an embedded editor is as wide as it.
 fn chain_row(
-    ui: &Ui,
+    ui: &mut Ui,
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
@@ -341,19 +417,36 @@ fn chain_row(
     let mut x = area.left();
     for device in &chain.devices {
         let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
-        let width = editor.map_or(DEVICE_WIDTH, |e| DEVICE_WIDTH.max(e.x + PAD * 2.0));
-        let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + width, area.bottom()));
+        let authored_width = device.graph.as_ref().map_or(DEVICE_WIDTH, |graph| {
+            graph.canvas.as_ref().map_or_else(
+                || {
+                    parameter_layout(&graph.parameters, DEVICE_WIDTH - PAD * 2.0, &[])
+                        .iter()
+                        .map(|cell| cell.right() + PAD * 2.0)
+                        .fold(DEVICE_WIDTH, f32::max)
+                },
+                |c| c.viewport_size.map_or(DEVICE_WIDTH.max(c.size[0] + PAD * 2.0), |v| v[0] + PAD * 2.0),
+            )
+        });
+        let width = editor.map_or(authored_width, |e| authored_width.max(e.x + PAD * 2.0));
+        let bottom =
+            sdk_viewport(device).map_or(area.bottom(), |v| (area.top() + ROW + PAD * 2.0 + v[1]).min(area.bottom()));
+        let rect = Rect::from_min_max(Pos2::new(x, area.top()), Pos2::new(x + width, bottom));
         x = rect.right() + 1.0;
         if rect.left() > area.right() {
             break;
         }
         name_for_readers(ui, rect.intersect(area), device);
-        device_panel(&painter.with_clip_rect(area), rect, device);
+        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
         }
     }
+}
+
+fn sdk_viewport(device: &DeviceBox) -> Option<[f32; 2]> {
+    device.graph.as_ref()?.canvas.as_ref()?.viewport_size
 }
 
 /// The detail stacked in a column: devices one under another.
@@ -495,7 +588,7 @@ fn quantise_block(
 /// A chain's devices one under another in `area`; one with an embedded editor is as tall as
 /// it needs (the editor is cut off at the column's right edge when it is wider).
 fn chain_stack(
-    ui: &Ui,
+    ui: &mut Ui,
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
@@ -514,15 +607,32 @@ fn chain_stack(
             if device.plugin.is_some() { 2.0 + BUTTON_HEIGHT / PARAM_ROW } else { device.params.len().max(1) as f32 };
         let height = match editor {
             Some(editor) => EDITOR_TOP + editor.y + PAD,
-            None => ROW + PAD * 2.0 + rows * PARAM_ROW,
+            None => {
+                ROW + PAD * 2.0
+                    + device.graph.as_ref().map_or(rows * PARAM_ROW, |graph| {
+                        parameter_layout(
+                            &graph.parameters,
+                            area.width(),
+                            graph.canvas.as_ref().map_or(&[], |c| c.hidden_parameters.as_slice()),
+                        )
+                        .iter()
+                        .map(|r| r.bottom())
+                        .fold(0.0f32, f32::max)
+                    })
+                    + device.graph.as_ref().map_or(0.0, |graph| {
+                        graph.nodes.len() as f32 * NODE_ROW + graph.canvas.as_ref().map_or(0.0, |c| c.size[1])
+                    })
+            }
         };
-        let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(area.right(), y + height));
+        let height = sdk_viewport(device).map_or(height, |v| ROW + PAD * 2.0 + v[1]);
+        let right = sdk_viewport(device).map_or(area.right(), |v| (area.left() + v[0] + PAD * 2.0).min(area.right()));
+        let rect = Rect::from_min_max(Pos2::new(area.left(), y), Pos2::new(right, y + height));
         y = rect.bottom() + 1.0;
         if rect.top() > area.bottom() {
             break;
         }
         name_for_readers(ui, rect.intersect(area), device);
-        device_panel(&painter.with_clip_rect(area), rect, device);
+        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
@@ -616,7 +726,14 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
 }
 
 /// One device: a header with its on switch and name, then its parameters, one per row.
-fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
+fn device_panel(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    track: TrackId,
+    device: &DeviceBox,
+    actions: &mut Vec<Action>,
+) {
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
     painter.rect_filled(header, 0.0, theme::control_background());
@@ -630,14 +747,18 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         painter.rect_stroke(switch, 0.0, theme::hairline(theme::text_hint()), egui::StrokeKind::Inside);
     }
     let name_color = if device.enabled { theme::text_primary() } else { theme::text_hint() };
+    let kind_width = widgets::text_width(ui, &device.kind, theme::ui_font(theme::TEXT_TINY));
     let name = Rect::from_min_max(
         Pos2::new(switch.right() + PAD, header.top()),
-        Pos2::new(header.right() - PAD, header.bottom()),
+        Pos2::new((header.right() - PAD * 2.0 - kind_width).max(switch.right() + PAD), header.bottom()),
     );
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &device.name, theme::ui_font(theme::TEXT), name_color);
     widgets::text_in(
         painter,
-        name,
+        Rect::from_min_max(
+            Pos2::new(header.right() - PAD - kind_width, header.top()),
+            Pos2::new(header.right() - PAD, header.bottom()),
+        ),
         Align2::RIGHT_CENTER,
         &device.kind,
         theme::ui_font(theme::TEXT_TINY),
@@ -664,7 +785,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
         );
         return;
     }
-    if device.params.is_empty() {
+    if device.params.is_empty() && device.graph.is_none() {
         let text = if device.kind.starts_with("Not supported") {
             "Kept so the chain keeps its shape"
         } else {
@@ -678,6 +799,276 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
             theme::ui_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
+        return;
+    }
+    if let Some(graph) = &device.graph {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(body.intersect(ui.clip_rect())), |ui| {
+            egui::ScrollArea::both().auto_shrink([false,false]).id_salt(("sd-controls",track.0,device.index)).show(ui, |ui| {
+                let hidden = graph.canvas.as_ref().map_or(&[][..],|c|c.hidden_parameters.as_slice());
+                let cells = parameter_layout(&graph.parameters,body.width(),hidden);
+                let custom_size=graph.canvas.as_ref().map_or(Vec2::ZERO,|c|Vec2::new(c.size[0],c.size[1]));
+                let nodes_height = graph.nodes.len() as f32 * NODE_ROW;
+                let canvas = cells.iter().fold(Vec2::new(body.width().max(custom_size.x),0.0),|size,rect| Vec2::new(size.x.max(rect.right()),size.y.max(rect.bottom())));
+                let (_, body) = ui.allocate_space(Vec2::new(canvas.x,canvas.y+nodes_height+custom_size.y));
+                let painter = &ui.painter_at(body.intersect(ui.clip_rect()));
+                let mut row_top = body.top();
+        for (index, node) in graph.nodes.iter().enumerate() {
+            let row = Rect::from_min_size(Pos2::new(body.left(), row_top), Vec2::new(body.width(), NODE_ROW));
+            if row.bottom() > body.bottom() + 0.5 {
+                break;
+            }
+            let node_rect = Rect::from_min_size(row.min, Vec2::new((row.width() - PAD) * 0.78, NODE_ROW - PAD));
+            painter.rect_filled(node_rect, 1.0, theme::control_background());
+            widgets::text_in(
+                painter,
+                node_rect.shrink(PAD / 2.0),
+                Align2::CENTER_CENTER,
+                node,
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_secondary(),
+            );
+            if graph.linear && index + 1 < graph.nodes.len() {
+                widgets::text_in(
+                    painter,
+                    Rect::from_min_size(Pos2::new(node_rect.right(), row.top()), Vec2::new(PAD, NODE_ROW)),
+                    Align2::CENTER_CENTER,
+                    "›",
+                    theme::ui_font(theme::TEXT),
+                    theme::text_hint(),
+                );
+            }
+            row_top += NODE_ROW;
+        }
+        if let Some(canvas)=&graph.canvas {
+            let rect=Rect::from_min_size(body.min+Vec2::new(0.0,nodes_height),custom_size);
+            crate::device_canvas::show(ui,rect,canvas,&graph.parameters,track,device.index,actions);
+        }
+        for (parameter, cell) in graph.parameters.iter().filter(|p|!hidden.contains(&p.id)).zip(&cells) {
+            let row = cell.translate(Vec2::new(body.left(),body.top()+nodes_height+custom_size.y));
+            let font = egui::FontId::new(parameter.ui.font_size,if parameter.ui.monospace { egui::FontFamily::Monospace } else { egui::FontFamily::Proportional });
+            let foreground = parameter.ui.text_color.map_or_else(theme::text_secondary,|[r,g,b]| egui::Color32::from_rgb(r,g,b));
+            let radius = match parameter.ui.shape {
+                suhina_device_sdk::ControlShape::Square => 0.0,
+                suhina_device_sdk::ControlShape::Pill => 128.0,
+                suhina_device_sdk::ControlShape::Rounded => parameter.ui.corner_radius,
+            };
+            if let Some([r,g,b]) = parameter.ui.panel_color {
+                painter.rect_filled(row,radius,egui::Color32::from_rgb(r,g,b));
+            }
+            let row = row.shrink(4.0);
+            let label_height = parameter.ui.font_size+4.0;
+            let name_rect = match parameter.ui.label_position {
+                suhina_device_sdk::LabelPosition::Left => Rect::from_min_size(row.min,Vec2::new(row.width()*0.34,row.height())),
+                suhina_device_sdk::LabelPosition::Top => Rect::from_min_size(row.min,Vec2::new(row.width(),label_height)),
+                suhina_device_sdk::LabelPosition::Hidden => Rect::from_min_size(row.min,Vec2::ZERO),
+            };
+            if parameter.ui.label_position != suhina_device_sdk::LabelPosition::Hidden {
+            widgets::text_in(
+                painter,
+                name_rect,
+                if parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top { Align2::CENTER_CENTER } else { Align2::LEFT_CENTER },
+                &if parameter.ui.group.is_empty() {
+                    parameter.name.clone()
+                } else {
+                    format!("{} / {}", parameter.ui.group, parameter.name)
+                },
+                font.clone(),
+                foreground,
+            );
+            }
+            let value_height = if parameter.ui.show_value && parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top {
+                parameter.ui.font_size + 4.0
+            } else {
+                0.0
+            };
+            let value_width = if parameter.ui.show_value && value_height == 0.0 { (row.width()*0.24).min(80.0) } else { 0.0 };
+            let control_min = match parameter.ui.label_position {
+                suhina_device_sdk::LabelPosition::Left => Pos2::new(name_rect.right(),row.top()),
+                suhina_device_sdk::LabelPosition::Top => Pos2::new(row.left(),name_rect.bottom()),
+                suhina_device_sdk::LabelPosition::Hidden => row.min,
+            };
+            let slider_rect = Rect::from_min_max(control_min,Pos2::new(row.right()-value_width,row.bottom()-value_height));
+            let mut value = parameter.value;
+            let response = (parameter.min < parameter.max).then(|| {
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(slider_rect)
+                        .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                    |ui| {
+                        ui.style_mut().override_font_id = Some(font.clone());
+                        let visuals = ui.visuals_mut();
+                        visuals.override_text_color = Some(foreground);
+                        let accent = parameter.ui.accent.map(|[r,g,b]| egui::Color32::from_rgb(r,g,b));
+                        if let Some(accent) = accent {
+                            visuals.selection.bg_fill = accent;
+                            visuals.widgets.active.bg_fill = accent;
+                            visuals.widgets.hovered.bg_stroke.color = accent;
+                            visuals.widgets.active.fg_stroke.color = accent;
+                        }
+                        for style in [&mut visuals.widgets.inactive,&mut visuals.widgets.hovered,&mut visuals.widgets.active] {
+                            style.corner_radius = egui::CornerRadius::same(radius as u8);
+                            if let Some([r,g,b]) = parameter.ui.background { style.bg_fill = egui::Color32::from_rgb(r,g,b); style.weak_bg_fill = style.bg_fill; }
+                            if let Some(accent) = accent { style.fg_stroke.color = accent; }
+                        }
+                        ui.set_clip_rect(ui.clip_rect().intersect(slider_rect));
+                        ui.spacing_mut().slider_width = if parameter.control == suhina_device_sdk::ParameterControl::VerticalSlider { slider_rect.height() } else { slider_rect.width() };
+                        ui.push_id((&parameter.id, device.index, track.0), |ui| {
+                            let previous = value;
+                            let mut response = match parameter.control {
+                                suhina_device_sdk::ParameterControl::Toggle => {
+                                    let mut checked = value >= 0.5;
+                                    let response = ui.checkbox(&mut checked, "");
+                                    value = f64::from(checked);
+                                    response
+                                }
+                                suhina_device_sdk::ParameterControl::Button => {
+                                    let response = ui.selectable_label(value >= 0.5, &parameter.name);
+                                    if response.clicked() {
+                                        value = if value >= 0.5 { 0.0 } else { 1.0 };
+                                    }
+                                    response
+                                }
+                                suhina_device_sdk::ParameterControl::Choice => {
+                                    egui::ComboBox::from_id_salt("choice")
+                                        .selected_text(
+                                            parameter.ui.options.get(value as usize).map_or("", String::as_str),
+                                        )
+                                        .width(slider_rect.width())
+                                        .show_ui(ui, |ui| {
+                                            for (i, label) in parameter.ui.options.iter().enumerate() {
+                                                ui.selectable_value(&mut value, i as f64, label);
+                                            }
+                                        })
+                                        .response
+                                }
+                                suhina_device_sdk::ParameterControl::Radio => {
+                                    ui.vertical_centered(|ui| {
+                                        for (i, label) in parameter.ui.options.iter().enumerate() {
+                                            ui.selectable_value(&mut value, i as f64, label);
+                                        }
+                                    })
+                                    .response
+                                }
+                                suhina_device_sdk::ParameterControl::Number => ui.add(
+                                    egui::DragValue::new(&mut value)
+                                        .range(parameter.min..=parameter.max)
+                                        .speed(if parameter.ui.step > 0.0 {
+                                            parameter.ui.step
+                                        } else {
+                                            (parameter.max - parameter.min) / 200.0
+                                        })
+                                        .max_decimals(parameter.ui.decimals),
+                                ),
+                                suhina_device_sdk::ParameterControl::Knob
+                                | suhina_device_sdk::ParameterControl::LogKnob => {
+                                    let logarithmic = parameter.control == suhina_device_sdk::ParameterControl::LogKnob;
+                                    let size = slider_rect.width().min(slider_rect.height()).max(8.0);
+                                    let (rect, mut response) =
+                                        ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click_and_drag());
+                                    if response.clicked() { response.request_focus(); }
+                                    if response.double_clicked() { value = parameter.default; }
+                                    if response.has_focus() {
+                                        let direction = ui.input(|i| {
+                                            i32::from(i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowRight))
+                                            - i32::from(i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowLeft))
+                                        });
+                                        let step = if parameter.ui.step > 0.0 { parameter.ui.step } else { (parameter.max-parameter.min)*0.01 };
+                                        value = (value+direction as f64*step).clamp(parameter.min,parameter.max);
+                                    }
+                                    let mut position = if logarithmic {
+                                        (value / parameter.min).ln() / (parameter.max / parameter.min).ln()
+                                    } else {
+                                        (value - parameter.min) / (parameter.max - parameter.min)
+                                    };
+                                    if response.dragged() {
+                                        let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+                                        position =
+                                            (position - response.drag_delta().y as f64 * 0.005 * fine).clamp(0.0, 1.0);
+                                        value = if logarithmic {
+                                            parameter.min * (parameter.max / parameter.min).powf(position)
+                                        } else {
+                                            parameter.min + position * (parameter.max - parameter.min)
+                                        };
+                                        response.mark_changed();
+                                    }
+                                    let center=rect.center(); let knob_radius=size*9.0/22.0;
+                                    let background=parameter.ui.background.map_or_else(theme::control_background,|[r,g,b]| egui::Color32::from_rgb(r,g,b));
+                                    if parameter.ui.shape == suhina_device_sdk::ControlShape::Square {
+                                        ui.painter().rect_filled(egui::Rect::from_center_size(center,Vec2::splat(knob_radius*2.0)),0.0,background);
+                                    } else { ui.painter().circle_filled(center,knob_radius,background); }
+                                    let border=egui::Stroke::new(1.0,accent.unwrap_or_else(theme::text_hint));
+                                    if parameter.ui.shape == suhina_device_sdk::ControlShape::Square {
+                                        ui.painter().rect_stroke(egui::Rect::from_center_size(center,Vec2::splat(knob_radius*2.0)),0.0,border,egui::StrokeKind::Inside);
+                                    } else { ui.painter().circle_stroke(center,knob_radius,border); }
+                                    let angle=(-135.0+270.0*position as f32).to_radians();
+                                    let tip=center+Vec2::new(angle.sin(),-angle.cos())*(knob_radius-1.0);
+                                    ui.painter().line_segment([center,tip],egui::Stroke::new(1.5,accent.unwrap_or_else(theme::text_primary)));
+                                    response.widget_info(|| {
+                                        egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, &parameter.name)
+                                    });
+                                    response
+                                }
+                                suhina_device_sdk::ParameterControl::VerticalSlider => {
+                                    let rect = Rect::from_center_size(slider_rect.center(), Vec2::new(ui.spacing().interact_size.y, slider_rect.height()));
+                                    let mut slider_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Center)));
+                                    slider_ui.add(egui::Slider::new(&mut value, parameter.min..=parameter.max)
+                                        .vertical().show_value(false)
+                                        .trailing_fill(parameter.ui.accent.is_some())
+                                        .max_decimals(parameter.ui.decimals)
+                                        .step_by(parameter.ui.step))
+                                }
+                                control => ui.add(
+                                    egui::Slider::new(&mut value, parameter.min..=parameter.max)
+                                    .show_value(false)
+                                    .trailing_fill(parameter.ui.accent.is_some())
+                                    .max_decimals(parameter.ui.decimals)
+                                    .logarithmic(control == suhina_device_sdk::ParameterControl::LogSlider)
+                                    .step_by(
+                                        if control == suhina_device_sdk::ParameterControl::Integer {
+                                            1.0
+                                        } else {
+                                            parameter.ui.step
+                                        },
+                                    ),
+                                ),
+                            };
+                            if value != previous {
+                                response.mark_changed();
+                            }
+                            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue,true,&parameter.name));
+                            response.on_hover_text(&parameter.ui.tooltip)
+                        })
+                        .inner
+                    },
+                )
+                .inner
+            });
+            if parameter.ui.show_value { widgets::text_in(
+                painter,
+                if value_height > 0.0 {
+                    Rect::from_min_max(Pos2::new(row.left(), slider_rect.bottom()), row.max)
+                } else {
+                    Rect::from_min_max(Pos2::new(slider_rect.right(), control_min.y), row.max)
+                },
+                if value_height > 0.0 { Align2::CENTER_CENTER } else { Align2::RIGHT_CENTER },
+                if matches!(parameter.control,suhina_device_sdk::ParameterControl::Choice | suhina_device_sdk::ParameterControl::Radio) {
+                    parameter.ui.options.get(value as usize).cloned().unwrap_or_default()
+                } else { format!("{:.*} {}", parameter.ui.decimals, value, parameter.unit).trim().to_owned() }.as_str(),
+                font.clone(),
+                parameter.ui.text_color.map_or_else(theme::text_value,|[r,g,b]| egui::Color32::from_rgb(r,g,b)),
+            ); }
+            if response.as_ref().is_some_and(|response| response.changed() || response.drag_stopped()) {
+                let continuous = response.as_ref().is_some_and(|response| {
+                    (response.drag_started() || response.dragged()) && !response.drag_stopped()
+                });
+                actions.push(Action::new(
+                    "device.setParam",
+                    json!({ "track": track.0, "device": device.index, "param": parameter.id, "value": value, "continuous": continuous }),
+                ));
+            }
+        }
+            });
+        });
         return;
     }
     for (index, (id, value)) in device.params.iter().enumerate() {
@@ -768,9 +1159,76 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
     column
 }
 
+fn parameter_height(parameter: &GraphParameter) -> f32 {
+    if let Some([_, height]) = parameter.ui.size {
+        return height;
+    }
+    let extra = if parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top {
+        parameter.ui.font_size + 4.0
+    } else {
+        0.0
+    };
+    extra
+        + if parameter.ui.show_value && parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top {
+            parameter.ui.font_size + 4.0
+        } else {
+            0.0
+        }
+        + match parameter.control {
+            suhina_device_sdk::ParameterControl::VerticalSlider => 80.0,
+            suhina_device_sdk::ParameterControl::Knob | suhina_device_sdk::ParameterControl::LogKnob => 36.0,
+            suhina_device_sdk::ParameterControl::Radio => {
+                parameter.ui.options.len().max(1) as f32 * (parameter.ui.font_size + 16.0)
+            }
+            _ => 24.0,
+        }
+}
+
+fn parameter_layout(parameters: &[GraphParameter], width: f32, hidden: &[String]) -> Vec<Rect> {
+    let mut bottom = 0.0f32;
+    parameters
+        .iter()
+        .filter(|p| !hidden.contains(&p.id))
+        .map(|parameter| {
+            let [x, y] = parameter.ui.position.unwrap_or([0.0, bottom]);
+            let [w, h] = parameter.ui.size.unwrap_or([width, parameter_height(parameter)]);
+            let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+            bottom = bottom.max(rect.bottom());
+            rect
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "../../device-sdk/examples/ui_controls.rs"]
+mod styled_gallery;
+
+#[cfg(test)]
+#[path = "../../device-sdk/examples/orbit_filter.rs"]
+mod custom_panel;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn top_label_places_value_below_control_and_reserves_height() {
+        let mut parameter = GraphParameter {
+            default: 1.0,
+            control: suhina_device_sdk::ParameterControl::Knob,
+            unit: String::new(),
+            id: "gain".into(),
+            name: "Gain".into(),
+            min: 0.0,
+            max: 2.0,
+            value: 1.0,
+            ui: suhina_device_sdk::ParameterUi::default(),
+        };
+        parameter.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+        let with_value = parameter_height(&parameter);
+        parameter.ui.show_value = false;
+        assert!(with_value > parameter_height(&parameter));
+    }
     use crate::demo::demo_project;
     use suhina_engine::model::{Device, DeviceParam, Extensions};
 
@@ -830,6 +1288,215 @@ mod tests {
         };
         assert_eq!(with_clip, chain);
         assert_eq!(build(&project, None, None), Detail::Nothing);
+    }
+
+    #[test]
+    fn an_audio_effect_shows_its_label_and_only_visible_nodes() {
+        let mut graph = suhina_device_sdk::DeviceGraph::new(
+            "org.example.gain",
+            "Example Gain",
+            suhina_device_sdk::DeviceRole::Effect,
+        );
+        graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 1.0));
+        graph.nodes = vec![
+            suhina_device_sdk::Node::audio_input("in"),
+            suhina_device_sdk::Node::gain("gain", "gain"),
+            suhina_device_sdk::Node::audio_output("out"),
+        ];
+        graph.nodes[0].visible = false;
+        graph.nodes[2].visible = false;
+        graph.connections =
+            vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+        let mut project = demo_project();
+        project.channels[0].devices.push(Device {
+            name: "Example Gain".into(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: graph.to_sd().ok().map(String::into_bytes),
+            params: Vec::new(),
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        });
+        let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
+        assert_eq!(chain.devices[0].kind, "AudioEffect");
+        assert_eq!(
+            chain.devices[0].graph.as_ref().map(|graph| graph.nodes.as_slice()),
+            Some(["Gain".into()].as_slice())
+        );
+        assert_eq!(chain.devices[0].graph.as_ref().map(|graph| graph.parameters.len()), Some(1));
+    }
+
+    #[test]
+    fn every_sdk_control_renders_in_a_scrollable_device_panel() {
+        use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ParameterControl::*};
+        for control in
+            [Slider, LogSlider, Integer, Toggle, Knob, LogKnob, Number, VerticalSlider, Button, Choice, Radio]
+        {
+            let mut graph = DeviceGraph::new("org.test.ui", "UI", DeviceRole::Effect);
+            let mut p = Parameter::new("gain", "Gain", (0.0, 2.0), 1.0);
+            p.control = control;
+            if matches!(control, LogSlider | LogKnob) {
+                p.min = 0.01;
+            }
+            if matches!(control, Toggle | Button) {
+                p.max = 1.0;
+            }
+            if matches!(control, Choice | Radio) {
+                p.ui.options = vec!["Off".into(), "Unity".into(), "Boost".into()];
+            }
+            p.ui.size = Some([240.0, 140.0]);
+            p.ui.position = Some([180.0, 40.0]);
+            p.ui.font_size = 16.0;
+            p.ui.monospace = true;
+            p.ui.shape = suhina_device_sdk::ControlShape::Square;
+            p.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+            if matches!(control, Knob | LogKnob) {
+                p.ui.size = Some([40.0, 40.0]);
+                p.ui.font_size = 12.0;
+                p.ui.label_position = suhina_device_sdk::LabelPosition::Hidden;
+                p.ui.show_value = false;
+            }
+            graph.parameters.push(p);
+            graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
+            graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+            let mut project = demo_project();
+            project.channels[0].devices.push(Device {
+                name: "UI".into(),
+                kind: DeviceKind::Sd,
+                enabled: true,
+                state: Some(graph.to_sd().unwrap().into_bytes()),
+                params: Vec::new(),
+                automation: Vec::new(),
+                extensions: Extensions::default(),
+            });
+            let detail = build(&project, Some(TrackId(1)), None);
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+            });
+            assert!(!output.shapes.is_empty(), "{control:?}");
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    fn authored_control_positions_and_auto_flow_have_the_expected_extent() {
+        use suhina_device_sdk::{ParameterControl, ParameterUi};
+        let mut p = GraphParameter {
+            default: 1.0,
+            control: ParameterControl::Knob,
+            unit: String::new(),
+            id: "gain".into(),
+            name: "Gain".into(),
+            min: 0.0,
+            max: 2.0,
+            value: 1.0,
+            ui: ParameterUi::default(),
+        };
+        p.ui.size = Some([240.0, 120.0]);
+        p.ui.position = Some([300.0, 10.0]);
+        let mut next = p.clone();
+        next.ui.position = None;
+        next.ui.size = Some([200.0, 60.0]);
+        let cells = parameter_layout(&[p, next], 320.0, &[]);
+        assert_eq!(cells[0].min, Pos2::new(300.0, 10.0));
+        assert_eq!(cells[0].max, Pos2::new(540.0, 130.0));
+        assert_eq!(cells[1].min, Pos2::new(0.0, 130.0));
+        assert_eq!(cells[1].max, Pos2::new(200.0, 190.0));
+    }
+
+    #[test]
+    fn render_the_authored_control_gallery() {
+        let graph = styled_gallery::build().unwrap();
+        for parameter in &graph.parameters {
+            assert_eq!(parameter.ui.position.map(|position| position[1]), Some(0.0));
+            assert_eq!(parameter.ui.label_position, suhina_device_sdk::LabelPosition::Top);
+        }
+        let mut project = demo_project();
+        project.channels[0].devices.push(Device {
+            name: graph.name.clone(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: Some(graph.to_sd().unwrap().into_bytes()),
+            params: Vec::new(),
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        });
+        let detail = build(&project, Some(TrackId(1)), None);
+        let mut harness =
+            egui_kittest::Harness::builder().with_size((1180.0, 180.0)).with_pixels_per_point(1.0).wgpu().build_ui(
+                |ui| {
+                    show_row(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                },
+            );
+        theme::install(&harness.ctx);
+        harness.run();
+        let image = harness.render().unwrap();
+        let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+        std::fs::create_dir_all(&output).unwrap();
+        image.save(output.join("sdk-controls.png")).unwrap();
+    }
+
+    #[test]
+    fn render_sdk_example_with_stock_controls() {
+        let graph = custom_panel::build().unwrap();
+        let mut project = demo_project();
+        project.channels[0].devices.push(Device {
+            name: graph.name.clone(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: Some(graph.to_sd().unwrap().into_bytes()),
+            params: Vec::new(),
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        });
+        let detail = build(&project, Some(TrackId(1)), None);
+        let mut harness =
+            egui_kittest::Harness::builder().with_size((660.0, 340.0)).with_pixels_per_point(1.0).wgpu().build_ui(
+                |ui| {
+                    show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                },
+            );
+        theme::install(&harness.ctx);
+        harness.run();
+        let image = harness.render().unwrap();
+        let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+        std::fs::create_dir_all(&output).unwrap();
+        image.save(output.join("sdk-example-controls.png")).unwrap();
+    }
+
+    #[test]
+    fn render_sdk_example_in_a_narrow_panel() {
+        let graph = custom_panel::build().unwrap();
+        let mut project = demo_project();
+        project.channels[0].devices.push(Device {
+            name: graph.name.clone(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: Some(graph.to_sd().unwrap().into_bytes()),
+            params: Vec::new(),
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        });
+        let detail = build(&project, Some(TrackId(1)), None);
+        if let Detail::Devices(chain) = &detail {
+            assert_eq!(sdk_viewport(&chain.devices[0]), None);
+        } else {
+            panic!("expected device chain");
+        }
+        let mut harness =
+            egui_kittest::Harness::builder().with_size((660.0, 340.0)).with_pixels_per_point(1.0).wgpu().build_ui(
+                |ui| {
+                    show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                },
+            );
+        theme::install(&harness.ctx);
+        harness.run();
+        let image = harness.render().unwrap();
+        let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+        std::fs::create_dir_all(&output).unwrap();
+        image.save(output.join("sdk-example-narrow.png")).unwrap();
     }
 
     fn report(status: PluginStatus, editor_open: bool) -> PluginReport {

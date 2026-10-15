@@ -13,6 +13,7 @@ suhina-plugins.workspace = true
 suhina-library.workspace = true
 suhina-media.workspace = true
 suhina-device-api.workspace = true
+suhina-device-sdk.workspace = true
 suhina-device-registry.workspace = true
 suhina-soundmap.workspace = true
 serde_json.workspace = true
@@ -22,6 +23,7 @@ egui = "0.36"  # MIT OR Apache-2.0
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }  # BSD-3-Clause
 
 [dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] } # MIT OR Apache-2.0; SDK artwork fixture
 egui_kittest = { version = "0.36", features = ["wgpu", "snapshot"] }  # MIT OR Apache-2.0
 hound.workspace = true
 suhina-output.workspace = true  # tests that preview through a real audio device

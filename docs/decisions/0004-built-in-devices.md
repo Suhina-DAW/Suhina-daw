@@ -155,6 +155,11 @@ decision 9.
    the slowest path, as in 10. A graph swap hands a send's delay line over when the chain sends
    to the same return with the same delay (`crates/engine/src/sends.rs`).
 
+11. **Data-only community effects** use the separate `suhina-device-sdk` and `.sd` format
+    ([ADR 0020](0020-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
+    only supported node data; the engine prepares them off-thread and runs them in the same
+    real-time-safe chain. Their parameter declarations generate UI controls.
+
 ## Not decided yet
 
 - **A chain on the master channel:** how it runs after every other chain, and how latency

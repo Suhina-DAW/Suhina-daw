@@ -151,9 +151,9 @@ documented behaviour that exists today.
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |
 | 28 | Working with Video | 6 | 0 % | absent | No video import or window. |
 | 29 | Live Audio Effect Reference | 139 | 15 % | partial | Suhina has 7 effects (utility, auto-pan, three-band DJ EQ, vinyl distortion, overdrive, compressor, limiter) against 42 documented audio effects; several are close equivalents in kind but far narrower in parameters and modes. |
-| 30 | Live MIDI Effect Reference | 13 | 0 % | absent | None of the 8 MIDI effects (arpeggiator, chord, scale, velocity...) exist. |
+| 30 | Live MIDI Effect Reference | 13 | 0 % | absent | SDK MIDI-effect graphs run before the instrument; the MIDI-transpose example shifts notes. None of the 8 documented MIDI effects is implemented in full. |
 | 31 | Live Instrument Reference | 120 | 8 % | started | One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, drum sampler, wavetable, subtractive or physical modelling yet. |
-| 32 | Max for Live | 6 | 5 % | planned | ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; no patching runtime. |
+| 32 | Max for Live | 6 | 5 % | planned | ADR 0020 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; visual graph editing is planned. Imported Max devices remain placeholders; no Max runtime. |
 | 33 | Max for Live Devices | 35 | 0 % | absent | Not applicable until Max for Live exists. |
 | 34 | MIDI and Key Remote Control | 9 | 25 % | partial | Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode (Ctrl+M) maps keys to clip slots, scenes and stop buttons, saved in the project, and launcher.addMapping takes MIDI notes too. No live MIDI remote input, CC mapping, takeover modes or mapping browser. |
 | 35 | Using Push 1 | 40 | 0 % | absent | No control-surface support. |

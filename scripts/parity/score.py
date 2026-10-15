@@ -142,9 +142,11 @@ CHAPTERS = [
      "Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, "
      "resampling) exists in crates/separation with a test backend; no model and nothing a user "
      "can run yet."),
-    (23, "Working with Instruments and Effects (Device View)", 34, 0.30, "partial",
+    (23, "Working with Instruments and Effects (Device View)", 34, 0.35, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
-     "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "
+     "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. "
+     "SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, "
+     "graphs and custom panels, and support explicit revision updates. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
     (24, "Using Plug-Ins", 12, 0.64, "partial",
      "CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, "
@@ -171,13 +173,14 @@ CHAPTERS = [
      "compressor, limiter) against 42 documented audio effects; several are close equivalents in "
      "kind but far narrower in parameters and modes."),
     (30, "Live MIDI Effect Reference", 13, 0.00, "absent",
-     "None of the 8 MIDI effects (arpeggiator, chord, scale, velocity...) exist."),
+     "SDK MIDI-effect graphs run before the instrument; the MIDI-transpose example shifts notes. "
+     "None of the 8 documented MIDI effects is implemented in full."),
     (31, "Live Instrument Reference", 120, 0.08, "started",
      "One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, "
      "drum sampler, wavetable, subtractive or physical modelling yet."),
     (32, "Max for Live", 6, 0.05, "planned",
-     "ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; "
-     "no patching runtime."),
+     "ADR 0020 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; "
+     "visual graph editing is planned. Imported Max devices remain placeholders; no Max runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
     (34, "MIDI and Key Remote Control", 9, 0.25, "partial",
      "Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode "

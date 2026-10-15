@@ -9,6 +9,7 @@ pub mod browser;
 pub mod browser_view;
 pub mod demo;
 pub mod detail_view;
+mod device_canvas;
 pub mod drop;
 pub mod follow_view;
 pub mod grid;

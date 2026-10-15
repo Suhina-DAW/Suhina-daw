@@ -187,7 +187,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   step); `project.launcher` lists each slot clip's `follow_action`. A `project_render` script
   picks the same random actions every time ([clip launching](spec/clip-launching.md#follow-actions)).
 
-- **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
+- **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?, sd?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new
   tracks (a Stems file as a group of its master, muted, and its stems, with its mastering on the
@@ -250,7 +250,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
-  `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
+  `device.add`, `device.addSd {track, path, position?}`, `device.remove`, `device.setEnabled` and `device.setParam` (through
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
   `device.setParam` sets a plug-in device's parameter too, by the id `device.pluginParams` lists
   (a running plug-in's parameters with their ranges, default, value and the plug-in's own
@@ -269,8 +269,16 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   says `"automation": "off"`) until `automation.setEnabled` turns it on again
   ([automation spec](spec/automation.md)).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
-  follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file. Renders and
+  follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file.
+  `devices.sdNodes` returns every SDK node contract, ports, units, defaults, configuration examples
+  limits and custom canvas capabilities (including equality expressions and literal-value selector buttons, conditional controls, choice menus and text alignment) for effect authoring by agents ([guide](device-sdk.md)).
+  `device.setParam` applies declared conditional peer links as one undo gesture and sends all affected values to the player.
+  `device.addSd` validates and embeds a composable effect graph in the project; its supported nodes
+  render in both real-time playback and offline rendering. Renders and
   the playing engine run the chains.
+  `device.setParam` accepts an optional bounded text `gesture` id: send `continuous: true` for
+  intermediate updates across both axes, then `continuous: false` for the last axis on release.
+  This gives an XY edit one undo step. A final unchanged value also ends the gesture.
 
 - **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)
   find and list installed plug-ins; a scan loads each new or changed plug-in file in a process

@@ -1,0 +1,29 @@
+[package]
+name = "suhina-device-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] } # MIT OR Apache-2.0
+suhina-dsp.workspace = true
+suhina-device-api.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "gain"
+path = "examples/gain.rs"
+
+[[example]]
+name = "midi_transpose"
+path = "examples/midi_transpose.rs"
+
+[[example]]
+name = "gated_instrument"
+path = "examples/gated_instrument.rs"
+
+[lints]
+workspace = true

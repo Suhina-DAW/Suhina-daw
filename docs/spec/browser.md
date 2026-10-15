@@ -1,6 +1,6 @@
 ---
 description: How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags
-read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
+read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, .sd, new track, empty area
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -34,7 +34,7 @@ project.
 
 ## Terms
 
-- **Item:** anything the browser lists. A *file* (sample, MIDI file, preset, project), a *built-in
+- **Item:** anything the browser lists. A *file* (sample, MIDI file, preset, project, .sd AudioEffect), a *built-in
   device* (an instrument or an effect) or an installed *plug-in*. An item is named by a key: a
   file by its absolute path, a voice in a preset bank by `<path>#<n>` (1–32), a built-in effect or instrument
   by `device:<id>`, a plug-in by `plugin:<spec>` (the spec `plugins.list` gives).
@@ -53,6 +53,7 @@ project.
 | MIDI file | `.mid` `.midi` | MIDI |
 | Preset | `.syx` (DX7 voice data: one voice, or a bank of 32; [spec](dx7-voice-format.md)) | Presets |
 | Project | `.suhina`, `.locr` (saved before October 2026), `.als` | All only |
+| Device effect | `.sd` (data-only Suhina graph) | All, Effects |
 
 Other files are not listed. Extensions are matched without regard to case.
 
@@ -106,7 +107,7 @@ recent group's items (a flat list).
 
 **The category filter** narrows what the tree shows: Samples, MIDI and Presets show files of
 that kind and the folders that hold any (by the index; a folder not indexed yet is shown);
-Instruments and Effects show only those built-in effects and instruments, and plug-ins with that role
+Instruments and Effects show only those built-in effects and instruments, `.sd` AudioEffects, and plug-ins with that role
 (a plug-in with the *instrument* feature counts as an instrument); Plug-ins shows only
 plug-ins. All shows everything.
 
@@ -380,7 +381,7 @@ the CLI can do the same.
 
 | Command | Params | Does |
 |---|---|---|
-| `track.add` | `kind?` (`audio`, `midi`), `name?`, `after?`, `device?`, `preset?`, `voice?` | adds a track with its mixer channel, clip slots for every scene and an Arrangement lane, after track `after` or at the end of the regular tracks; with `device` (a built-in id or a plug-in from `plugins.list`) or `preset`, the device too, and `kind` follows from it |
+| `track.add` | `kind?` (`audio`, `midi`), `name?`, `after?`, `device?`, `sd?`, `preset?`, `voice?` | adds a track with its mixer channel, clip slots for every scene and an Arrangement lane, after track `after` or at the end of the regular tracks; with `device` (a built-in id or a plug-in from `plugins.list`), `sd` or `preset`, the device too, and `kind` follows from it; `.sd` instruments and MIDI effects create MIDI tracks |
 | `clip.addFiles` | `paths`, `track?`, `start?`, `scene?`, `separate?`, `stack?`, `warp?` | places samples, MIDI files and Stems files as in *Files*: on `track` (or new tracks when it is missing; a Stems file's group goes into `track` when it is a group), from beat `start` in the Arrangement or from `scene` (1-based) in the Session (exactly one of the two); `separate` gives each clip a track; `warp` is the stretch mode for samples with a known tempo (`rhythmic` by default); returns the clips, the new tracks, the Stems groups (`groups`) and what was `skipped` |
 | `device.add` | adds `preset?` and `voice?` (1–32) | the built-in effect or instrument with a preset's values |
 

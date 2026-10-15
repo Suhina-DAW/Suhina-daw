@@ -162,7 +162,7 @@ pub fn plugin_key(channel: ChannelId, kind: &DeviceKind, nth: u32) -> Option<u64
         DeviceKind::Clap { id } => (1, id.clone()),
         DeviceKind::Vst3 { id } => (2, id.clone()),
         DeviceKind::Vst2 { id } => (3, id.to_string()),
-        DeviceKind::Builtin(_) | DeviceKind::Foreign { .. } => return None,
+        DeviceKind::Builtin(_) | DeviceKind::Sd | DeviceKind::Foreign { .. } => return None,
     };
     // FNV-1a: stable across runs and builds, unlike the standard library's hasher.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

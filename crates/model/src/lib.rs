@@ -225,6 +225,8 @@ pub struct Send {
 pub enum DeviceKind {
     /// A Suhina device, by its stable id.
     Builtin(String),
+    /// A data-only effect graph, stored as `.sd` JSON in `Device::state`.
+    Sd,
     Clap {
         id: String,
     },
@@ -249,7 +251,8 @@ pub struct Device {
     pub name: String,
     pub kind: DeviceKind,
     pub enabled: bool,
-    /// Plug-in state, handed back to the plug-in unchanged. For VST2 it is the standard VST2
+    /// Plug-in state, handed back to the plug-in unchanged; for `DeviceKind::Sd`, the embedded
+    /// validated `.sd` graph JSON. For VST2 it is the standard VST2
     /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
     /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,

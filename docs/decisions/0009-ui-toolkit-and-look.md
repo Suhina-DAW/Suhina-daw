@@ -78,6 +78,9 @@ What the law protects decides how close the UI may get (summary, not legal advic
    viewport), so it shares the window's state: the browser, the previews and drags into the main
    window ([sample map spec](../spec/sample-map.md) › Where the map is shown).
 
+`AudioEffect` controls and visible node-flow views are also drawn with egui and the same theme tokens
+([ADR 0020](0020-device-graph-files.md)).
+
 ## Consequences
 
 - Ableton users can work without relearning: the views are where they expect and react the way

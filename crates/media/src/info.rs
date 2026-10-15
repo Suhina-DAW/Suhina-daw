@@ -19,6 +19,7 @@ pub enum FileKind {
     Midi,
     Preset,
     Project,
+    Effect,
 }
 
 impl FileKind {
@@ -30,12 +31,15 @@ impl FileKind {
             Self::Midi => "midi",
             Self::Preset => "preset",
             Self::Project => "project",
+            Self::Effect => "effect",
         }
     }
 
     /// The kind [`FileKind::name`] gives `text`.
     pub fn parse(text: &str) -> Option<Self> {
-        [Self::Sample, Self::Stems, Self::Midi, Self::Preset, Self::Project].into_iter().find(|k| k.name() == text)
+        [Self::Sample, Self::Stems, Self::Midi, Self::Preset, Self::Project, Self::Effect]
+            .into_iter()
+            .find(|k| k.name() == text)
     }
 
     /// Whether it is audio that becomes audio clips (a sample, or a Stems file).
@@ -58,6 +62,7 @@ pub fn kind_of(path: &Path) -> Option<FileKind> {
         "mid" | "midi" => Some(FileKind::Midi),
         "syx" => Some(FileKind::Preset),
         "als" => Some(FileKind::Project),
+        "sd" => Some(FileKind::Effect),
         _ => None,
     }
 }
@@ -387,9 +392,10 @@ mod tests {
         assert_eq!(kind_of(Path::new("song.suhina")), Some(FileKind::Project));
         assert_eq!(kind_of(Path::new("old song.LOCR")), Some(FileKind::Project));
         assert_eq!(kind_of(Path::new("set.als")), Some(FileKind::Project));
+        assert_eq!(kind_of(Path::new("effects/gain.SD")), Some(FileKind::Effect));
         assert_eq!(kind_of(Path::new("readme.txt")), None);
         assert_eq!(kind_of(Path::new("noextension")), None);
-        for kind in [FileKind::Sample, FileKind::Midi, FileKind::Preset, FileKind::Project] {
+        for kind in [FileKind::Sample, FileKind::Midi, FileKind::Preset, FileKind::Project, FileKind::Effect] {
             assert_eq!(FileKind::parse(kind.name()), Some(kind));
         }
     }

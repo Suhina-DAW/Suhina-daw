@@ -91,6 +91,36 @@ fn text(path: &Path) -> String {
 }
 
 #[test]
+fn sd_roles_choose_the_new_tracks_kind() {
+    use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, NodeKind};
+    let dir = temp_dir("sd-track-roles");
+    for (role, input, output, kind) in [
+        (DeviceRole::Effect, NodeKind::AudioInput, NodeKind::AudioOutput, "audio"),
+        (DeviceRole::Instrument, NodeKind::MidiGate, NodeKind::AudioOutput, "midi"),
+        (DeviceRole::MidiEffect, NodeKind::MidiInput, NodeKind::MidiOutput, "midi"),
+    ] {
+        let mut graph = DeviceGraph::new("test.track-role", "Track Role", role);
+        graph.nodes = vec![Node::new("in", input), Node::new("out", output)];
+        graph.connections = vec![Connection::new("in", "out")];
+        let path = dir.join(format!("{kind}-{role:?}.sd"));
+        std::fs::write(&path, graph.to_sd().unwrap()).unwrap();
+        let mut session = Session::new(blank_project());
+        let before = session.project().tracks.len();
+        let added = run(&mut session, "track.add", json!({"sd": text(&path)})).unwrap();
+        assert_eq!(added["kind"], kind);
+        assert_eq!(session.project().tracks.len(), before + 1);
+        assert!(!added["device"].is_null());
+        run(&mut session, "edit.undo", json!({})).unwrap();
+        assert_eq!(session.project().tracks.len(), before);
+        if kind == "midi" {
+            assert!(run(&mut session, "track.add", json!({"sd": text(&path), "kind": "audio"})).is_err());
+            assert_eq!(session.project().tracks.len(), before);
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn a_track_is_added_before_the_returns_with_its_channel_slots_and_lane() {
     let mut session = Session::new(blank_project());
     let added = run(&mut session, "track.add", json!({ "kind": "audio" })).unwrap();
