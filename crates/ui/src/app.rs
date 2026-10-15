@@ -27,7 +27,9 @@ use crate::project_dialog::{
     self, AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
 };
 use crate::session_view::{self, SessionViewState, Step};
-use crate::settings::{AtStart, DeviceLayout, EditorPlacement, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
+use crate::settings::{
+    AtStart, DeviceLayout, EditorPlacement, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
+};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::start_panel::{self, AudioSummary, StartChoice, StartState};
 use crate::theme::{self, PAD};

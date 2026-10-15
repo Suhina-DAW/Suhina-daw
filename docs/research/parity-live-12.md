@@ -65,14 +65,14 @@ documentation and UI). The scope decision it leads to is
 | Measure | Value |
 |---|---|
 | The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
-| Page-weighted coverage of everything the manual documents | **about 21 %** |
-| Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 24 %** |
+| Page-weighted coverage of everything the manual documents | **about 22 %** |
+| Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 25 %** |
 | Same, over the scope the roadmap aims at (also without accessibility) | **about 25 %** |
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **157**, every one reachable from the UI, the CLI and MCP |
-| Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
+| Commands | **169**, every one reachable from the UI, the CLI and MCP |
+| Still absent as whole features | MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
 "Page-weighted coverage" is the chapter table below aggregated: each chapter gets a coverage
@@ -129,10 +129,10 @@ documented behaviour that exists today.
 | 5 | Managing Files and Sets | 43 | 38 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink, backups on an interval or before critical operations with the offer after a crash. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
 | 6 | Arrangement View | 22 | 49 % | partial | Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades and ruler clicks (Alt for off the grid), nested groups folded and unfolded, tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
 | 7 | Session View | 13 | 62 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over the view switch); scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature each. A launched clip is selected and the detail area shows its follow-action controls. Missing capture-and-insert scene, moving clips between slots, select-on-launch options. |
-| 8 | Clip View | 34 | 15 % | started | Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll (docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of tool icons with the note clipboard, and the quantise controls in the clip column. No loop or marker editing, no clip panels, no sample editor, no groove/scale panels. |
+| 8 | Clip View | 34 | 18 % | started | Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll (docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of tool icons with the note clipboard and a toolbar size, a MIDI tools column beside the notes, and the selection described in the clip column (count, span, pitch and velocity range). No loop or marker editing, no clip panels, no sample editor, no groove/scale panels. |
 | 9 | Audio Clips, Tempo, and Warping | 18 | 35 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, tempo automation. |
-| 10 | Editing MIDI | 41 | 33 % | started | A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase and Slice tools (keys 1 to 5, the wheel with the right button held steps through them) and its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, splits them at a drawn cut line (note.split splits every note the line crosses), plays keys through the track's instrument, quantises them (Ctrl+U, and grid, amount and ends in the clip column) and edits velocity in a lane, through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty MIDI clip is made with a double-click on a slot or a lane (clip.create). No transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes. |
-| 11 | MIDI Tools | 37 | 0 % | absent | No transformation or generative MIDI tools. |
+| 10 | Editing MIDI | 41 | 37 % | started | A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute tools (keys 1 to 6, the wheel with the right button held steps through them) and its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, splits them at a drawn cut line (note.split splits every note the line crosses), plays keys through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is never played, in the model, the project file and an imported Live Set), quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty MIDI clip is made with a double-click on a slot or a lane (clip.create). No fold, scales, chords, probability or MPE lanes. |
+| 11 | MIDI Tools | 37 | 12 % | started | A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one note.* command with undo and a seed for the random ones. No chord/strum/arpeggiate tools, no generative or shape-based tools. |
 | 12 | Editing MPE | 10 | 0 % | absent | No MPE data, editing or MPE-aware devices. |
 | 13 | Converting Audio to MIDI | 5 | 5 % | planned | Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap. |
 | 14 | Using Grooves | 6 | 0 % | absent | No groove pool, extraction or commit. |
@@ -172,12 +172,12 @@ documented behaviour that exists today.
 <!-- parity:begin area-table -->
 | Area | Manual pages | Covered |
 |---|---|---|
-| Views and editing (ch 6-10, 16) | 140 | 38 % |
+| Views and editing (ch 6-10, 16) | 140 | 40 % |
 | Browser, files, project (ch 4, 5) | 103 | 44 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 42 % |
 | Automation, envelopes (ch 26, 27) | 35 | 28 % |
-| Generative/transform (ch 11-15) | 67 | 0 % |
+| Generative/transform (ch 11-15) | 67 | 7 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
 | Outside scope (ch 28, 32-37, 41) | 175 | 2 % |
 | Setup, shortcuts (ch 2, 3, 42) | 61 | 43 % |
@@ -346,8 +346,8 @@ or does something Live does not:
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 14 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
 | Browser and file management depth | 103 (ch 4, 5) | 44 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
-| Views and clip editing | 140 (ch 6-10, 16) | 38 % | MIDI note editor, clip view panels, split, consolidate |
-| MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
+| Views and clip editing | 140 (ch 6-10, 16) | 40 % | MIDI note editor, clip view panels, split, consolidate |
+| MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 7 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 28 % | drawing and recording automation lanes, send and tempo automation, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
 | Mixing, routing, I/O | 47 (ch 17, 18, 38) | 42 % | crossfader, cue, meters, inputs and monitoring, resampling |

@@ -239,10 +239,11 @@ fn time_field(ui: &Ui, painter: &egui::Painter, rect: Rect, id: Id, info: &Follo
     let shown = format_time(preview.unwrap_or(f.time), info.bar_beats);
     let response = widgets::value_area(ui, rect, id, "Follow time", &shown);
     let range = (TIME_STEP, FollowAction::MAX_TIME);
-    let done = match widgets::drag_value(ui, &response, &mut preview, f.time, TIME_PER_POINT, 1.0, range, info.bar_beats) {
-        Drag::Done(value) => Some(((value / TIME_STEP).round() * TIME_STEP).clamp(range.0, range.1)),
-        Drag::None | Drag::Moving(_) => None,
-    };
+    let done =
+        match widgets::drag_value(ui, &response, &mut preview, f.time, TIME_PER_POINT, 1.0, range, info.bar_beats) {
+            Drag::Done(value) => Some(((value / TIME_STEP).round() * TIME_STEP).clamp(range.0, range.1)),
+            Drag::None | Drag::Moving(_) => None,
+        };
     ui.data_mut(|d| d.insert_temp(id, preview));
     let shown = format_time(preview.map_or(f.time, |p| (p / TIME_STEP).round() * TIME_STEP), info.bar_beats);
     value_look(ui, painter, rect, &response, None, &shown, f.linked || !f.enabled);
@@ -264,12 +265,19 @@ fn chance_field(
     let mut preview = ui.data(|d| d.get_temp::<Option<f64>>(id)).flatten();
     let response = widgets::value_area(ui, rect, id, format!("Chance {name}"), chance);
     let value = f64::from(chance);
-    let done =
-        match widgets::drag_value(ui, &response, &mut preview, value, CHANCE_PER_POINT, 1.0, (0.0, max), f64::from(default))
-        {
-            Drag::Done(v) => Some(v.round().clamp(0.0, max) as u32),
-            Drag::None | Drag::Moving(_) => None,
-        };
+    let done = match widgets::drag_value(
+        ui,
+        &response,
+        &mut preview,
+        value,
+        CHANCE_PER_POINT,
+        1.0,
+        (0.0, max),
+        f64::from(default),
+    ) {
+        Drag::Done(v) => Some(v.round().clamp(0.0, max) as u32),
+        Drag::None | Drag::Moving(_) => None,
+    };
     ui.data_mut(|d| d.insert_temp(id, preview));
     let shown = preview.map_or(value, f64::round);
     value_look(ui, painter, rect, &response, Some(shown / max), &format!("{shown:.0}"), chance == 0);

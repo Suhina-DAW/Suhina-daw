@@ -8,7 +8,8 @@ use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
 use crate::motion;
 use crate::pick::PickField;
 use crate::settings::{
-    AtStart, DeviceLayout, EditorPlacement, Graphics, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn, ToolbarSize,
+    AtStart, DeviceLayout, EditorPlacement, Graphics, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
+    StopReturn, ToolbarSize,
 };
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;

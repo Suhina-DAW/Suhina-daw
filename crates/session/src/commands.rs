@@ -8,7 +8,9 @@ use suhina_model::{
     MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, launch, mapping, meters, note_tools, notes, preview};
+use crate::{
+    CommandError, Session, automation, devices, files, follow, launch, mapping, meters, note_tools, notes, preview,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -2492,9 +2494,11 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
         PasteAt::Beat(_) => None,
     };
     if let (PasteAt::Slot(scene), Some(column)) = (at, column) {
-        let [(clip, content)] = session.clipboard.clone().try_into().map_err(|copied: Vec<_>| {
-            format!("a clip slot holds one clip, and {} are copied", copied.len())
-        })?;
+        let [(clip, content)] = session
+            .clipboard
+            .clone()
+            .try_into()
+            .map_err(|copied: Vec<_>| format!("a clip slot holds one clip, and {} are copied", copied.len()))?;
         let p = &mut session.project;
         let id = new_content_id(p)?;
         p.contents.push(suhina_model::ClipContent { id, ..content });

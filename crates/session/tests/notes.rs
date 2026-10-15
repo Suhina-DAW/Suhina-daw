@@ -315,7 +315,8 @@ fn arranged(session: &Session) -> Vec<u32> {
 fn editing_a_duplicate_leaves_the_original_alone_and_undoes_both() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     assert_eq!(arranged(&session)[copy], 1, "a duplicate plays the same content until it is edited");
     let before_edit = session.project().clone();
@@ -350,7 +351,8 @@ fn editing_a_duplicate_leaves_the_original_alone_and_undoes_both() {
 fn editing_the_original_of_a_duplicate_leaves_the_duplicate_alone() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.setVelocity", json!({ "track": 1, "index": 0, "notes": [0, 1, 2], "velocity": 20 }))
         .unwrap();
@@ -370,7 +372,8 @@ fn quantising_a_duplicate_leaves_the_original_alone() {
     )
     .unwrap();
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.quantize", json!({ "track": 1, "index": copy, "grid": "1/4" })).unwrap();
     let own = arranged(&session)[copy];
@@ -419,7 +422,8 @@ fn an_edit_that_changes_nothing_or_fails_makes_no_copy() {
 #[test]
 fn an_empty_duplicate_gets_its_own_content_when_notes_are_added() {
     let mut session = Session::new(project());
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 1 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 1 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(
         &mut session,
@@ -465,7 +469,8 @@ fn a_shared_pattern_stays_shared_when_edited() {
 fn pasting_into_a_duplicate_leaves_the_original_alone() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [0] })).unwrap();
     run(&mut session, "note.paste", json!({ "track": 1, "index": copy })).unwrap();
@@ -630,7 +635,8 @@ fn splitting_a_duplicate_leaves_the_original_alone() {
     )
     .unwrap();
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.split", json!({ "track": 1, "index": copy, "notes": [3], "at": 1.0 })).unwrap();
     let own = arranged(&session)[copy];

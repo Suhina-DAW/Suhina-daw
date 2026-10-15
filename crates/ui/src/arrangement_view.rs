@@ -1130,7 +1130,19 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         let nest = Nest { places: &places, groups: &groups };
         let order = HeaderOrder { children: shown.children, tracks: &track_order };
-        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &nest, &order, timeline, state, actions);
+        track_header(
+            ui,
+            &lanes_painter,
+            header,
+            lanes_area,
+            lane,
+            track_number,
+            &nest,
+            &order,
+            timeline,
+            state,
+            actions,
+        );
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::border_strong()));
         // The track's automation lanes, under it.
         let lanes = automation::TrackLanes {

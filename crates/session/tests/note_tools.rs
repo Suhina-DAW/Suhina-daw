@@ -554,8 +554,9 @@ fn a_tool_refuses_more_than_ten_thousand_notes_and_a_stretch_past_the_model() {
 fn a_tool_on_a_duplicate_gives_only_that_clip_its_own_content() {
     let mut session = Session::new(project(scale_notes()));
     let original = notes_of(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     assert_eq!(arranged(&session)[copy], 1, "a duplicate plays the same content until it is edited");
     let duplicated = session.project().clone();
     run(&mut session, "note.invert", json!({ "track": 1, "index": copy })).unwrap();
@@ -572,8 +573,9 @@ fn a_tool_on_a_duplicate_gives_only_that_clip_its_own_content() {
 #[test]
 fn muting_a_duplicate_gives_only_that_clip_its_own_content() {
     let mut session = Session::new(project(scale_notes()));
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.setMuted", json!({ "track": 1, "index": copy, "notes": [0], "muted": true })).unwrap();
     let own = arranged(&session)[copy];
     assert_ne!(own, 1);
