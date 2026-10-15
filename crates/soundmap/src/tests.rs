@@ -205,6 +205,30 @@ fn the_cache_is_kept_and_follows_changes() {
 }
 
 #[test]
+fn files_that_cannot_be_read_are_grouped_by_reason_with_examples() {
+    let library = Library::new("failures");
+    let good = library.write("kick.wav", &kick(1));
+    let mut files = vec![good];
+    for i in 0..5 {
+        let name = format!("broken {i}.wav");
+        std::fs::write(library.root.join(&name), b"not audio").unwrap();
+        files.push(library.file(&name));
+    }
+    files.push(library.write("silence.wav", &vec![0.0; 4410]));
+    let mut map = analysed(&library, &files);
+    let laid = map.map(&files, DEFAULT_MAX_SECONDS);
+    assert_eq!(laid.failed, 6);
+    let reasons: Vec<(&str, usize)> = laid.failures.iter().map(|f| (f.reason.as_str(), f.count)).collect();
+    assert_eq!(reasons.len(), 2, "{:?}", laid.failures);
+    // The commonest first; the reason is cut at its first colon, the detail kept whole.
+    assert_eq!(reasons[0].1, 5);
+    assert!(!reasons[0].0.contains(':'));
+    assert_eq!(reasons[1], ("silent", 1));
+    assert_eq!(laid.failures[0].examples.len(), 3);
+    assert!(laid.failures[0].examples.iter().all(|p| p.to_string_lossy().contains("broken")));
+}
+
+#[test]
 fn long_files_are_left_out_and_counted() {
     let library = Library::new("long");
     let short = library.write("kick.wav", &kick(1));

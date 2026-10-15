@@ -117,7 +117,12 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   ("Getting the map ready" before the first, and for a layout already kept). The card is only drawn: the map
   under it, its buttons and the rest of the window keep working.
 - When the status does not fit between the **Cloud | Grid** switch and the buttons, it is cut
-  short with "…"; its tooltip has all of it.
+  short with "…". Its tooltip has all of it and says why samples are missing, one part each:
+  still to analyse; too long (the limit, and Options › Settings › Browser › Map: longest sample
+  to change it); could not be read, by reason with the commonest first (the reason as the
+  decoder gives it, such as "unsupported codec: …", "read error: …", "silent" or "larger than
+  256 MiB", its count and the names of the first three files; at most 12 reasons, the rest
+  counted under the last); and left out over the 200 000 a map holds.
 - A file that cannot be decoded is left out and counted; `soundmap.info` gives the reason.
 
 ## Layout

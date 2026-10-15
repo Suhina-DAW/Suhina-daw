@@ -451,6 +451,13 @@ pub fn kind_colour(kind: Kind) -> Color32 {
     }
 }
 
+/// One part of the status's tooltip: a heading ("4 955 could not be read") and lines under it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatusPart {
+    pub heading: String,
+    pub lines: Vec<String>,
+}
+
 /// Work going on behind the map, shown in a card in the middle of it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Busy {
@@ -468,6 +475,7 @@ pub fn show(
     points: &[MapPoint],
     grid: Option<&Grid>,
     status: &str,
+    details: &[StatusPart],
     busy: Option<&Busy>,
     tags: &[String],
     events: &mut Vec<MapEvent>,
@@ -483,7 +491,7 @@ pub fn show(
         side
     });
 
-    top_bar(ui, top, view, status, events);
+    top_bar(ui, top, view, status, details, events);
     let aspect = aspect_of(area);
     let positions = positions(points, view.layout, grid, aspect);
     view.refresh(points, &positions, aspect);
@@ -495,6 +503,19 @@ pub fn show(
         similar_strip(ui, side, view, points, events);
     }
     legend(ui, bottom, view);
+}
+
+/// The status's tooltip: the whole status, then each part with its lines.
+fn status_tooltip(ui: &mut Ui, status: &str, details: &[StatusPart]) {
+    ui.set_max_width(420.0);
+    ui.label(egui::RichText::new(status).color(theme::text_primary()));
+    for part in details {
+        ui.add_space(theme::PAD);
+        ui.label(egui::RichText::new(&part.heading).color(theme::text_primary()));
+        for line in &part.lines {
+            ui.label(egui::RichText::new(line).color(theme::text_secondary()).size(theme::TEXT_SMALL));
+        }
+    }
 }
 
 /// The card in the middle of the map while it is analysed or arranged. It is only painted, so
@@ -532,7 +553,14 @@ fn busy_card(ui: &Ui, area: Rect, busy: &Busy) {
     );
 }
 
-fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &mut Vec<MapEvent>) {
+fn top_bar(
+    ui: &mut Ui,
+    rect: Rect,
+    view: &mut MapView,
+    status: &str,
+    details: &[StatusPart],
+    events: &mut Vec<MapEvent>,
+) {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(theme::PAD, 2.0)))
@@ -589,10 +617,11 @@ fn top_bar(ui: &mut Ui, rect: Rect, view: &mut MapView, status: &str, events: &m
         }
         ui.label(egui::RichText::new("Size").color(theme::text_secondary()).size(theme::TEXT_SMALL));
         // The status takes the room left between the switch and the buttons, cut short with
-        // "…" when it does not fit; the whole of it is in its tooltip.
+        // "…" when it does not fit. Its tooltip has all of it and says why files are missing.
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             let text = egui::RichText::new(status).color(theme::text_secondary()).size(theme::TEXT_SMALL);
-            ui.add(egui::Label::new(text).truncate()).on_hover_text(status);
+            ui.add(egui::Label::new(text).truncate().sense(Sense::hover()))
+                .on_hover_ui(|ui| status_tooltip(ui, status, details));
         });
     });
 }
@@ -1218,7 +1247,7 @@ mod tests {
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "20 samples", None, &[], events)
+                show(ui, view, &points, None, "20 samples", &[], None, &[], events)
             },
             state,
         );
@@ -1254,7 +1283,7 @@ mod tests {
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "40 samples", None, &[], events)
+                show(ui, view, &points, None, "40 samples", &[], None, &[], events)
             },
             state,
         );
@@ -1281,6 +1310,35 @@ mod tests {
         harness.run();
     }
 
+    /// Pointing at the status shows why samples are missing.
+    #[test]
+    fn the_status_tooltip_says_why_samples_are_missing() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let points: Vec<MapPoint> = (0..4).map(|i| point(i as f32 / 4.0, 0.5, Kind::Kick)).collect();
+        let details = vec![StatusPart {
+            heading: "2 could not be read".into(),
+            lines: vec!["2: unsupported codec: adpcm".into(), "    a.wav, b.wav".into()],
+        }];
+        let status = "4 samples, 2 could not be read";
+        let mut harness = Harness::builder().with_size(egui::vec2(600.0, 340.0)).build_ui_state(
+            |ui, view: &mut MapView| show(ui, view, &points, None, status, &details, None, &[], &mut Vec::new()),
+            MapView::default(),
+        );
+        harness.run();
+        assert!(harness.query_by_label("2: unsupported codec: adpcm").is_none());
+        let at = harness.get_by_label(status).rect().center();
+        harness.hover_at(at);
+        for _ in 0..30 {
+            harness.step();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        harness.run();
+        harness.get_by_label("2 could not be read");
+        harness.get_by_label("2: unsupported codec: adpcm");
+        harness.get_by_label("    a.wav, b.wav");
+    }
+
     /// The card over the map while it is arranged is only painted: a point under it is still
     /// previewed and selected.
     #[test]
@@ -1291,7 +1349,7 @@ mod tests {
         let state = (MapView::default(), Vec::<MapEvent>::new());
         let mut harness = Harness::builder().with_size(egui::vec2(400.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "20 samples", Some(&busy), &[], events)
+                show(ui, view, &points, None, "20 samples", &[], Some(&busy), &[], events)
             },
             state,
         );
@@ -1321,7 +1379,7 @@ mod tests {
         let state = (MapView::default(), false);
         let mut harness = Harness::builder().with_size(size).build_ui_state(
             |ui, (view, dialog): &mut (MapView, bool)| {
-                show(ui, view, &points, None, "20 samples", None, &[], &mut Vec::new());
+                show(ui, view, &points, None, "20 samples", &[], None, &[], &mut Vec::new());
                 if *dialog {
                     egui::Area::new(egui::Id::new("dialog")).order(egui::Order::Foreground).fixed_pos(Pos2::ZERO).show(
                         ui.ctx(),
@@ -1413,7 +1471,7 @@ mod many {
             let started = std::time::Instant::now();
             let mut output = ctx.run_ui(input, |ui| {
                 let mut events = Vec::new();
-                show(ui, &mut view, points, None, "200 000 samples", None, &[], &mut events);
+                show(ui, &mut view, points, None, "200 000 samples", &[], None, &[], &mut events);
             });
             let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
             // No renderer here takes the density texture.
@@ -1442,7 +1500,7 @@ mod many {
             let started = std::time::Instant::now();
             let mut output = ctx.run_ui(input, |ui| {
                 let mut events = Vec::new();
-                show(ui, &mut view, points, None, "200 000 samples", None, &[], &mut events);
+                show(ui, &mut view, points, None, "200 000 samples", &[], None, &[], &mut events);
             });
             let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
             output.textures_delta.clear();
@@ -1522,7 +1580,7 @@ mod similar_keys {
         view.show_similar(0, vec![4, 2]);
         let mut harness = Harness::builder().with_size(egui::vec2(500.0, 340.0)).build_ui_state(
             |ui, (view, events): &mut (MapView, Vec<MapEvent>)| {
-                show(ui, view, &points, None, "6 samples", None, &[], events)
+                show(ui, view, &points, None, "6 samples", &[], None, &[], events)
             },
             (view, Vec::<MapEvent>::new()),
         );
@@ -1606,7 +1664,7 @@ mod look {
                 |ui, view: &mut MapView| {
                     crate::theme::install(ui.ctx());
                     let mut events = Vec::new();
-                    show(ui, view, &points, Some(&grid), "1 200 samples", None, &[], &mut events);
+                    show(ui, view, &points, Some(&grid), "1 200 samples", &[], None, &[], &mut events);
                 },
                 view,
             );
@@ -1627,7 +1685,7 @@ mod look {
             |ui, view: &mut MapView| {
                 crate::theme::install(ui.ctx());
                 let mut events = Vec::new();
-                show(ui, view, &points, None, "200 000 samples", None, &[], &mut events);
+                show(ui, view, &points, None, "200 000 samples", &[], None, &[], &mut events);
             },
             MapView::default(),
         );

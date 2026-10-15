@@ -15,7 +15,7 @@ use suhina_soundmap::layout::Progress;
 
 use crate::browser::{BrowserState, Place, ResultsMode};
 use crate::drop::{BrowserItem, ItemKind};
-use crate::sample_map::{self, Busy, Layout, MapEvent, MapPoint, MapView};
+use crate::sample_map::{self, Busy, Layout, MapEvent, MapPoint, MapView, StatusPart};
 use crate::settings::Settings;
 
 /// A scope is laid out again at most this often while its analysis goes on.
@@ -311,6 +311,54 @@ impl Panel {
         parts.join(", ")
     }
 
+    /// What the status's tooltip says beyond the status: why samples are missing from the map.
+    fn status_details(&self, max_seconds: u32) -> Vec<StatusPart> {
+        let Some(map) = &self.map else { return Vec::new() };
+        let mut parts = Vec::new();
+        if map.pending > 0 {
+            parts.push(StatusPart {
+                heading: format!("{} still to analyse", map.pending),
+                lines: vec!["Each sample is analysed once and kept; the map is arranged again as they come in.".into()],
+            });
+        }
+        if map.too_long > 0 {
+            parts.push(StatusPart {
+                heading: format!("{} too long", map.too_long),
+                lines: vec![
+                    format!("Longer than {max_seconds} s: the map is for one-shots and short loops."),
+                    "Options › Settings › Browser › Map: longest sample changes the limit (5 to 60 s).".into(),
+                ],
+            });
+        }
+        if map.failed > 0 {
+            let mut lines = Vec::new();
+            for failure in &map.failures {
+                lines.push(format!("{}: {}", failure.count, failure.detail));
+                let names: Vec<String> = failure
+                    .examples
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect();
+                if !names.is_empty() {
+                    let more = if failure.count > names.len() { ", …" } else { "" };
+                    lines.push(format!("    {}{more}", names.join(", ")));
+                }
+            }
+            parts.push(StatusPart { heading: format!("{} could not be read", map.failed), lines });
+        }
+        if map.over_limit > 0 {
+            parts.push(StatusPart {
+                heading: format!("{} left out", map.over_limit),
+                lines: vec![format!(
+                    "A map holds at most {} samples; choose a folder in the sidebar to see the rest.",
+                    suhina_soundmap::MAX_ITEMS
+                )],
+            });
+        }
+        parts
+    }
+
     /// The card in the middle of the map: the analysis while samples are left to analyse, else a
     /// layout that has been running for a moment.
     fn busy(&self, now: f64) -> Option<Busy> {
@@ -363,6 +411,7 @@ impl Panel {
         self.view.dot_size = settings.map_dot_size as f32 / 100.0;
         let tags: Vec<String> = projects.file_library_mut().tags().into_iter().map(|t| t.name).collect();
         let status = self.status();
+        let details = self.status_details(settings.map_max_seconds);
         let busy = self.busy(ui.input(|i| i.time));
         // The waveform for the tooltip of the point the pointer rests on, read in the background.
         let now = ui.input(|i| i.time);
@@ -379,6 +428,7 @@ impl Panel {
                 &self.points,
                 self.grid.as_ref(),
                 &status,
+                &details,
                 busy.as_ref(),
                 &tags,
                 &mut events,
