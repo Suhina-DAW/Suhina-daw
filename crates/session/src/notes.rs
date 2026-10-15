@@ -218,14 +218,7 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
         return Err(format!("at most {MAX_NOTES_PER_COMMAND} notes in one command, got {}", list.len()).into());
     }
     let added = list.iter().enumerate().map(|(i, v)| new_note(v, i)).collect::<Result<Vec<_>, _>>()?;
-    let notes = notes_mut(&mut session.project, params)?;
-    let total = notes.len().saturating_add(added.len());
-    if total > MAX_NOTES_PER_CLIP {
-        return Err(format!("a clip holds at most {MAX_NOTES_PER_CLIP} notes; this would make {total}").into());
-    }
-    let first = notes.len();
-    notes.extend(added);
-    Ok(json!({ "added": (first..notes.len()).collect::<Vec<_>>(), "count": notes.len() }))
+    append(session, params, added)
 }
 
 pub(crate) fn delete(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -323,6 +316,101 @@ pub(crate) fn set_velocity(session: &mut Session, params: &Value) -> Result<Valu
         }
     }
     Ok(json!({ "notes": changed }))
+}
+
+/// Notes copied for `note.paste`: their times from the earliest start (the first is at 0), where
+/// that start was, and how long they span (from the earliest start to the latest end).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NoteClipboard {
+    notes: Vec<Note>,
+    from: f64,
+    span: f64,
+}
+
+impl NoteClipboard {
+    pub(crate) fn len(&self) -> usize {
+        self.notes.len()
+    }
+}
+
+/// The notes `chosen` names, with their times from the earliest start.
+fn clipboard_of(notes: &[Note], chosen: &[usize]) -> Result<NoteClipboard, CommandError> {
+    let picked: Vec<Note> =
+        chosen.iter().map(|&i| notes.get(i).copied().ok_or("a note is missing")).collect::<Result<_, _>>()?;
+    let from = picked.iter().map(|n| n.time).fold(f64::INFINITY, f64::min);
+    let end = picked.iter().map(|n| n.time + n.duration).fold(f64::NEG_INFINITY, f64::max);
+    if !(from.is_finite() && end.is_finite()) {
+        return Err("no notes to copy".into());
+    }
+    let notes = picked.into_iter().map(|n| Note { time: n.time - from, ..n }).collect();
+    Ok(NoteClipboard { notes, from, span: end - from })
+}
+
+/// The clipboard's notes placed from `time`, each checked against the limits.
+fn placed(clipboard: &NoteClipboard, time: f64) -> Result<Vec<Note>, CommandError> {
+    clipboard
+        .notes
+        .iter()
+        .map(|n| {
+            let at = time + n.time;
+            if (0.0..=MAX_BEAT).contains(&at) {
+                Ok(Note { time: at, ..*n })
+            } else {
+                Err(format!("a note would start at beat {at}, outside 0 to {MAX_BEAT}").into())
+            }
+        })
+        .collect()
+}
+
+/// Appends `added` to the clip `params` names and says where they went.
+fn append(session: &mut Session, params: &Value, added: Vec<Note>) -> Result<Value, CommandError> {
+    let notes = notes_mut(&mut session.project, params)?;
+    let total = notes.len().saturating_add(added.len());
+    if total > MAX_NOTES_PER_CLIP {
+        return Err(format!("a clip holds at most {MAX_NOTES_PER_CLIP} notes; this would make {total}").into());
+    }
+    let first = notes.len();
+    notes.extend(added);
+    Ok(json!({ "added": (first..notes.len()).collect::<Vec<_>>(), "count": notes.len() }))
+}
+
+pub(crate) fn copy(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let notes = notes_of(&session.project, params)?;
+    let chosen = indices(params, notes.len())?;
+    let clipboard = clipboard_of(notes, &chosen)?;
+    let result = json!({ "copied": clipboard.len(), "span": clipboard.span });
+    session.note_clipboard = Some(clipboard);
+    Ok(result)
+}
+
+pub(crate) fn cut(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let notes = notes_of(&session.project, params)?;
+    let chosen = indices(params, notes.len())?;
+    let clipboard = clipboard_of(notes, &chosen)?;
+    let result = delete(session, params)?;
+    session.note_clipboard = Some(clipboard);
+    Ok(result)
+}
+
+pub(crate) fn paste(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let clipboard = session.note_clipboard.as_ref().ok_or("no notes have been copied; run note.copy first")?;
+    let time = match optional_number(params, "time")? {
+        Some(time) if !(0.0..=MAX_BEAT).contains(&time) => {
+            return Err(format!("time must be 0 to {MAX_BEAT} beats, got {time}").into());
+        }
+        Some(time) => time,
+        None => clipboard.from + clipboard.span,
+    };
+    let added = placed(clipboard, time)?;
+    append(session, params, added)
+}
+
+pub(crate) fn duplicate(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let notes = notes_of(&session.project, params)?;
+    let chosen = indices(params, notes.len())?;
+    let clipboard = clipboard_of(notes, &chosen)?;
+    let added = placed(&clipboard, clipboard.from + clipboard.span)?;
+    append(session, params, added)
 }
 
 #[cfg(test)]
