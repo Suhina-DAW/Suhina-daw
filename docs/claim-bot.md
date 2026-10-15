@@ -97,8 +97,8 @@ board, a pull request merged without its card moving, claims made while the bot 
 | A closed issue, or a merged pull request | `Done` |
 | Anything else | Keeps its Status |
 
-A `/claim` or `/unclaim` that the bot refused (its answer starts with one of the refusals listed in
-`REFUSALS` at the top of the script) does not count. Only Status is written: Priority and Phase are
+A `/claim` or `/unclaim` that the bot refused (its answer matches one of the refusals listed in
+`REFUSALS` and `REFUSED_ANYWHERE` at the top of the script) does not count. Only Status is written: Priority and Phase are
 left for a maintainer, cards are never deleted, and cards of other repositories and draft cards are
 not touched.
 

@@ -208,6 +208,19 @@ class Statuses(unittest.TestCase):
         )
         self.assertEqual(moves(api), [])
 
+    def test_claim_with_a_malformed_name_does_not_count(self):
+        api = Recorded(
+            [page([item("ITEM_10", "Ready", issue_content(10))])],
+            [page([issue(10, comments=[
+                {"body": "/claim @not_a_name", "author": user()},
+                {"body": "@someone, the name after `/claim` is not a GitHub username (letters, "
+                         "digits and single hyphens, up to 39 characters), so nothing was claimed.",
+                 "author": BOT},
+            ])])],
+            [page([])],
+        )
+        self.assertEqual(moves(api), [])
+
     def test_refused_unclaim_keeps_the_claim(self):
         api = Recorded(
             [page([item("ITEM_10", "Ready", issue_content(10))])],

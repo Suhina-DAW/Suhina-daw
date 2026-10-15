@@ -55,6 +55,8 @@ REFUSALS = (
     "Only the person who claimed",
     "Only a maintainer",
 )
+# A refusal that starts with the commenter's name rather than a fixed phrase.
+REFUSED_ANYWHERE = ("nothing was claimed",)
 
 PAGE = 50
 # Comments read per issue, newest last: enough to find the latest `/claim` or `/unclaim`.
@@ -339,7 +341,8 @@ def claimed_in_comments(comments: list[dict]) -> bool:
     for comment in comments:
         if is_bot(comment):
             if pending is not None:
-                if not (comment.get("body") or "").startswith(REFUSALS):
+                answer = comment.get("body") or ""
+                if not (answer.startswith(REFUSALS) or any(r in answer for r in REFUSED_ANYWHERE)):
                     state = pending == "claim"
                 pending = None
             continue
