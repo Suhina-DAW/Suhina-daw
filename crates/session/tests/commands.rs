@@ -144,6 +144,80 @@ fn a_new_edit_clears_redo_and_no_op_edits_record_nothing() {
     assert_eq!(session.project().transport.tempo_bpm, 120.0);
 }
 
+/// Pans `track` as a drag does: the first value without `continue`, the rest with it.
+fn drag_pan(session: &mut Session, track: Value, values: &[f64]) {
+    for (i, pan) in values.iter().enumerate() {
+        let params = json!({ "track": track, "pan": pan, "continue": i > 0 });
+        let result = run(session, "track.setPan", params);
+        assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+#[test]
+fn the_calls_of_one_drag_make_one_undo_step() {
+    let mut session = Session::new(project());
+    drag_pan(&mut session, json!(1), &[0.1, 0.2, 0.3, -0.4]);
+    assert_eq!(session.project().channels[0].pan, -0.4);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &project());
+    assert!(!session.can_undo());
+    // Redo brings back where the drag ended.
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].pan, -0.4);
+
+    // A track named rather than numbered is the same track.
+    let mut session = Session::new(project());
+    run(&mut session, "track.setVolume", json!({ "track": 1, "db": -1 })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "track": "Bass", "db": -2, "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "track": "bass", "db": "-inf", "continue": true })).unwrap();
+    assert_eq!(session.project().channels[0].volume, 0.0);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &project());
+}
+
+#[test]
+fn a_second_drag_or_anything_between_starts_a_new_step() {
+    let mut session = Session::new(project());
+    drag_pan(&mut session, json!(1), &[0.1, 0.2]);
+    drag_pan(&mut session, json!(1), &[0.5, 0.6]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].pan, 0.2);
+
+    // Another track, another command, or another edit between: `continue` starts a new step.
+    let mut session = Session::new(project());
+    drag_pan(&mut session, json!(1), &[0.1]);
+    run(&mut session, "track.setPan", json!({ "track": 2, "pan": 0.7, "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "track": 2, "db": -3, "continue": true })).unwrap();
+    run(&mut session, "track.setMute", json!({ "track": 1, "mute": true })).unwrap();
+    run(&mut session, "track.setPan", json!({ "track": 1, "pan": 0.9, "continue": true })).unwrap();
+    for pan in [0.1, 0.1, 0.1, 0.1, 0.0] {
+        run(&mut session, "edit.undo", json!({})).unwrap();
+        assert_eq!(session.project().channels[0].pan, pan);
+    }
+    assert_eq!(session.project(), &project());
+
+    // Undo ends the step too: the next call starts its own.
+    let mut session = Session::new(project());
+    run(&mut session, "transport.setTempo", json!({ "bpm": 100 })).unwrap();
+    drag_pan(&mut session, json!(1), &[0.1, 0.2]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "track.setPan", json!({ "track": 1, "pan": 0.3, "continue": true })).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].pan, 0.0);
+    assert_eq!(session.project().transport.tempo_bpm, 100.0);
+}
+
+#[test]
+fn a_drag_that_starts_without_a_change_does_not_join_the_last_one() {
+    // The first frame of a drag often sends the value as it is: no step is made, but the
+    // drag before it is still over.
+    let mut session = Session::new(project());
+    drag_pan(&mut session, json!(1), &[0.1, 0.2]);
+    drag_pan(&mut session, json!(1), &[0.2, 0.5]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].pan, 0.2);
+}
+
 #[test]
 fn volume_accepts_silence() {
     let mut session = Session::new(project());

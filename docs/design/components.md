@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -198,7 +198,8 @@ a lane between 20 and 26 px shows the first row clipped.
 ### Value field (slider)
 
 A number field that is its own slider: drag vertically to change (Shift for fine steps),
-double-click to reset (typing a value is planned).
+double-click to reset (typing a value is planned). A track's volume and pan are heard while
+dragging, and a drag is one undo step.
 
 | Part | Volume | Pan | Send |
 |---|---|---|---|

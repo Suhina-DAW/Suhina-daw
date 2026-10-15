@@ -522,12 +522,24 @@ fn mixer_strip(
         Some((t, Control::Pan, v)) if t == track => Some(v),
         _ => None,
     };
+    // Every frame of a drag sets the value, so it is heard while dragging; all but the first
+    // continue its undo step, so the drag is one step.
+    let continued = preview.is_some();
+    let set_pan = |v: f64| {
+        Action::new(
+            "track.setPan",
+            json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+        )
+    };
     match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, (-1.0, 1.0), 0.0) {
-        Drag::Moving(v) => state.drag = Some((track, Control::Pan, v)),
+        Drag::Moving(v) => {
+            state.drag = Some((track, Control::Pan, v));
+            actions.push(set_pan(v));
+        }
         Drag::Done(v) => {
             state.drag = None;
             committed_pan = Some(v);
-            actions.push(Action::new("track.setPan", json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0 })));
+            actions.push(set_pan(v));
         }
         Drag::None => {}
     }
@@ -567,13 +579,20 @@ fn mixer_strip(
         Some((t, Control::Volume, v)) if t == track => Some(v),
         _ => None,
     };
+    let continued = preview.is_some();
+    let set_volume = |v: f64| {
+        let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+        Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+    };
     match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, VOLUME_RANGE, 0.0) {
-        Drag::Moving(v) => state.drag = Some((track, Control::Volume, v)),
+        Drag::Moving(v) => {
+            state.drag = Some((track, Control::Volume, v));
+            actions.push(set_volume(v));
+        }
         Drag::Done(v) => {
             state.drag = None;
             committed_volume = Some(v);
-            let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-            actions.push(Action::new("track.setVolume", json!({ "track": track.0, "db": db })));
+            actions.push(set_volume(v));
         }
         Drag::None => {}
     }

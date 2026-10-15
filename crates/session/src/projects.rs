@@ -326,8 +326,12 @@ impl Projects {
     /// Keeps the active project's plug-ins in line with it (ADR 0006): starts new ones in the
     /// background, takes in the ones that have started, notices crashes. Call it often from the
     /// thread that owns the projects (the window calls it every frame); commands call it too.
-    /// Returns what the user should hear about.
+    /// Returns what the user should hear about. It also lets the playing engine catch up with
+    /// a drag that outran it ([`Session::catch_up_player`]).
     pub fn poll_plugins(&mut self) -> Vec<String> {
+        if let Some(session) = self.active.and_then(|id| self.get_mut(id)) {
+            session.catch_up_player();
+        }
         let mut notices = self.check_output();
         notices.extend(self.sync_active_plugins());
         notices

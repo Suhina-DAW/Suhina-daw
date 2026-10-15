@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -53,7 +53,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
   launched clips playing on
-  ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
+  ([ADR 0005](decisions/0005-edits-while-playing.md)). To sweep a track's volume or pan by
+  ear as one undo step, send `track.setVolume` or `track.setPan` repeatedly with
+  `continue: true` after the first ([ADR 0002](decisions/0002-commands.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 - **Choosing the output.** `audio.devices` lists the audio hosts (WASAPI, and ASIO in a build

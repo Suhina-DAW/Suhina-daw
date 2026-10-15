@@ -104,6 +104,13 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 }
 
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
+/// Lets the calls of one drag make one undo step.
+const CONTINUE: Param = optional(
+    "continue",
+    ParamType::Bool,
+    "true adds the change to the undo step of the previous call of this command on this track, \
+     when no other edit came between (one drag, one step)",
+);
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
@@ -228,6 +235,7 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[
             TRACK,
             param("db", ParamType::Decibels, "level in dB, at most +6; \"-inf\" or below -150 is silence"),
+            CONTINUE,
         ],
         kind: CommandKind::Edit,
         run: set_volume,
@@ -235,7 +243,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "track.setPan",
         label: "Set a track's pan",
-        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right")],
+        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right"), CONTINUE],
         kind: CommandKind::Edit,
         run: set_pan,
     },
