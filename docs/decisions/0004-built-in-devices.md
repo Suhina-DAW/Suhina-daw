@@ -3,7 +3,7 @@ description: The interface of built-in effects and instruments (Device trait, pa
 read_when: device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/dsp/**
   - crates/device-api/**
@@ -127,9 +127,17 @@ decision 9.
    other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
    tracks routed through it, with no buffer of its own.
 
+11. **Automation splits a chain on the arrangement's grid** (added 2026-10-15, #395). A built-in
+   device's lanes (`Device::automation`, ADR 0001) set its parameters at their points and at
+   every 64th frame of the arrangement where the value moved, at a block's first frame only when
+   the transport started or moved; the chain splits the device's block there, with note events,
+   a parameter change before a note at one frame. So the sound does not depend on the block size,
+   as 5 asks, and the device smooths each step. A track whose mixer has lanes runs through a
+   chain, one without devices when it has none, whose gains move frame by frame after its devices.
+   [The automation spec](../spec/automation.md) has the details.
+
 ## Not decided yet
 
-- **Automation lanes** for device parameters (LOOP-39).
 - **Chains on return and master channels, and sends into chains:** how they run and how latency
   compensation (built for track and group chains, 10 above) extends to them.
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.

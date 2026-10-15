@@ -746,6 +746,7 @@ mod tests {
             enabled: false,
             state: None,
             params: vec![DeviceParam::new("gain", -3.5)],
+            automation: Vec::new(),
             extensions: Extensions::default(),
         });
         let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
@@ -782,6 +783,7 @@ mod tests {
             enabled: true,
             state: Some(vec![1, 2]),
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         });
         project

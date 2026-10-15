@@ -123,6 +123,7 @@ pub(crate) fn insert_track(
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Default::default(),
+        automation: Vec::new(),
     });
     let track = Track {
         id,
@@ -787,6 +788,7 @@ fn place_stems(
                 enabled: setting.enabled,
                 state: None,
                 params: setting.params.iter().map(|(id, v)| suhina_model::DeviceParam::new(*id, *v)).collect(),
+                automation: Vec::new(),
                 extensions: Default::default(),
             });
         }

@@ -6,7 +6,9 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
-use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, Settings, Side, StopReturn};
+use crate::settings::{
+    DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn,
+};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
 
@@ -337,6 +339,19 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             }
             y += 8.0;
             section(&mut y, "Transport");
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Play from",
+                "Where Play starts: the play start marker, or the start of the clip selected in the Arrangement view",
+            );
+            let options = [("Marker", PlayFrom::Marker), ("Selected clip", PlayFrom::Clip)];
+            if let Some(choice) = segmented(ui, &painter, control_rect(r, 2), "Play from", &options, settings.play_from)
+            {
+                settings.play_from = choice;
+                outcome.changed = true;
+            }
             let r = row(&mut y);
             label(
                 &painter,

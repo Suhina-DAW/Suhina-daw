@@ -117,7 +117,8 @@ Planned, not built; the ADR that comes before the detectors decides the details.
 - **Chords:** pitch classes (chroma) matched against chord templates and smoothed over time.
 - **Full polyphonic transcription**, if ever: candidate Spotify's Basic Pitch (Apache-2.0) run in
   pure Rust through `tract`, its licence and model weights checked first.
-- **Stem separation:** candidate Demucs (MIT), its model weights checked first
+- **Stem separation:** its own spec, [`stem-separation.md`](stem-separation.md): a model the user
+  supplies, since no widely used model's weights may be shipped with Suhina
   ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
 
 ### Tests
@@ -145,6 +146,6 @@ Checks in Live 12.4 (screen recording or notes; no audio from Live is committed)
 ## Not yet
 
 - Stem separation (*Separate Stems to New Audio Tracks*), planned as a step before detection
-  and as a command of its own; it gets its own spec.
+  and as a command of its own: [`stem-separation.md`](stem-separation.md).
 - Full polyphonic transcription (every note of a mix or a piano part).
 - Converting in real time or while recording.

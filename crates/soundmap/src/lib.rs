@@ -1,10 +1,12 @@
-//! The sample map (docs/spec/sample-map.md, ADR 0013): features of samples, layouts of a scope
-//! by how its items sound, grids, kinds from names, similar items and the feature cache.
+//! The sample map (docs/spec/sample-map.md, ADR 0013): features of samples, kinds from names,
+//! the sound and the user, layouts of a scope by how its items sound, grids, similar items and
+//! the feature cache.
 //!
 //! [`SoundMap`] keeps the caches of the library's folders and analyses new and changed files on
 //! background threads; [`SoundMap::map`] lays out a scope from what is analysed.
 
 pub mod cache;
+pub mod classify;
 pub mod features;
 pub mod grid;
 pub mod kinds;
@@ -33,6 +35,11 @@ pub const MAX_SIMILAR: usize = 100;
 const SAVE_EVERY: usize = 256;
 /// Layouts kept on disk; older ones are removed.
 const KEPT_LAYOUTS: usize = 32;
+/// The file of kinds set by hand, beside the caches, and the most it may hold.
+const HAND_KINDS_FILE: &str = "kinds.txt";
+const HAND_KINDS_HEADER: &str = "suhina-soundmap-kinds 1";
+pub const MAX_HAND_KINDS: usize = 1_000_000;
+const MAX_HAND_KINDS_BYTES: u64 = 256 * 1024 * 1024;
 
 /// A sample file the library knows of.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +70,10 @@ pub struct Point {
     /// Position in 0–1, cloud layout.
     pub position: [f32; 2],
     pub kind: Kind,
+    /// The kind comes from the sound, not from a name or the user.
     pub guessed: bool,
+    /// The kind was set by hand.
+    pub by_hand: bool,
 }
 
 /// A scope laid out.
@@ -122,6 +132,8 @@ pub struct SoundMap {
     threads: usize,
     /// Layouts by the hash of their items, so a scope opens with the map it had.
     layouts: HashMap<u64, Vec<[f32; 2]>>,
+    /// Kinds set by hand, by absolute path; read from the data folder when first needed.
+    hand_kinds: Option<HashMap<PathBuf, Kind>>,
 }
 
 impl SoundMap {
@@ -140,6 +152,7 @@ impl SoundMap {
             sender,
             threads: threads.max(1),
             layouts: HashMap::new(),
+            hand_kinds: None,
         }
     }
 
@@ -318,7 +331,7 @@ impl SoundMap {
     /// keeps a new one.
     pub fn prepare(&mut self, files: &[SourceFile], max_seconds: f32) -> Prepared {
         let max_seconds = max_seconds.clamp(MAX_SECONDS_RANGE.0, MAX_SECONDS_RANGE.1);
-        let mut chosen: Vec<(&SourceFile, features::Features)> = Vec::new();
+        let mut chosen: Vec<(&SourceFile, features::Features, Option<Kind>)> = Vec::new();
         let (mut pending, mut too_long, mut failed, mut over_limit) = (0, 0, 0, 0);
         let mut sorted: Vec<&SourceFile> = files.iter().collect();
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
@@ -329,7 +342,7 @@ impl SoundMap {
                 Some(Analysis::Analysed { seconds, .. }) if *seconds > max_seconds => too_long += 1,
                 Some(Analysis::Analysed { features, .. }) => {
                     if chosen.len() < MAX_ITEMS {
-                        chosen.push((file, *features));
+                        chosen.push((file, *features, None));
                     } else {
                         over_limit += 1;
                     }
@@ -338,10 +351,22 @@ impl SoundMap {
                 None => pending += 1,
             }
         }
-        let key = layout_key(chosen.iter().map(|(f, _)| *f));
+        let hand = self.hand_kinds();
+        for (file, _, kind) in chosen.iter_mut() {
+            *kind = hand.get(&file.path).copied();
+        }
+        let key = layout_key(chosen.iter().map(|(f, _, kind)| (*f, *kind)));
         let cached = self.cached_layout(key, chosen.len());
         Prepared {
-            items: chosen.into_iter().map(|(f, features)| (f.path.clone(), f.folder.clone(), features)).collect(),
+            items: chosen
+                .into_iter()
+                .map(|(f, features, kind)| Item {
+                    path: f.path.clone(),
+                    folder: f.folder.clone(),
+                    features,
+                    hand: kind,
+                })
+                .collect(),
             pending,
             too_long,
             failed,
@@ -360,11 +385,22 @@ impl SoundMap {
     }
 }
 
+/// One item of a scope to lay out.
+#[derive(Debug, Clone)]
+struct Item {
+    path: PathBuf,
+    /// The library folder it is in.
+    folder: PathBuf,
+    features: features::Features,
+    /// Its kind set by hand.
+    hand: Option<Kind>,
+}
+
 /// A scope ready to be laid out.
 #[derive(Debug, Clone)]
 pub struct Prepared {
-    /// Path, library folder and features of each item, by path.
-    items: Vec<(PathBuf, PathBuf, features::Features)>,
+    /// The items, by path.
+    items: Vec<Item>,
     pending: usize,
     too_long: usize,
     failed: usize,
@@ -384,23 +420,39 @@ impl Prepared {
         self.key
     }
 
-    /// Lays the scope out (or takes the kept layout) and finds the kinds.
+    /// Finds the kinds, then lays the scope out by sound and kind (or takes the kept layout).
     pub fn compute(self) -> Map {
-        let features: Vec<features::Features> = self.items.iter().map(|(_, _, f)| *f).collect();
+        let features: Vec<features::Features> = self.items.iter().map(|item| item.features).collect();
         let standardised = Standardised::new(&features);
-        let named: Vec<Option<Kind>> =
-            self.items.iter().map(|(path, folder, _)| kinds::kind_of_path(path, folder)).collect();
-        let kinds = standardised.guess_kinds(&named);
+        let evidence: Vec<Option<(Kind, classify::Evidence)>> = self
+            .items
+            .iter()
+            .map(|item| match item.hand {
+                Some(kind) => Some((kind, classify::Evidence::Hand)),
+                None => classify::named(&item.path, &item.folder),
+            })
+            .collect();
+        let kinds = classify::classify(standardised.rows(), &evidence);
         let positions = match self.cached {
             Some(positions) => positions,
-            None => layout::layout(&standardised, scope_seed(self.items.iter().map(|(p, _, _)| p.as_path()))),
+            None => {
+                let by_kind: Vec<Kind> = kinds.iter().map(|(kind, _)| *kind).collect();
+                let input = Standardised::from_rows(classify::layout_rows(standardised.rows(), &by_kind));
+                layout::layout(&input, scope_seed(self.items.iter().map(|item| item.path.as_path())))
+            }
         };
         let points = self
             .items
             .into_iter()
             .zip(positions)
             .zip(kinds)
-            .map(|(((path, _, _), position), (kind, guessed))| Point { path, position, kind, guessed })
+            .map(|((item, position), (kind, from))| Point {
+                path: item.path,
+                position,
+                kind,
+                guessed: from == classify::From::Sound,
+                by_hand: from == classify::From::Hand,
+            })
             .collect();
         Map {
             points,
@@ -483,8 +535,9 @@ fn layout_from_bytes(bytes: &[u8]) -> Option<Vec<[f32; 2]>> {
     positions.iter().all(|p| p.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))).then_some(positions)
 }
 
-/// The layout cache's key: the items with their sizes and times, and the feature version.
-fn layout_key<'a>(files: impl Iterator<Item = &'a SourceFile>) -> u64 {
+/// The layout cache's key: the items with their sizes, times and kinds set by hand, and the
+/// feature version.
+fn layout_key<'a>(files: impl Iterator<Item = (&'a SourceFile, Option<Kind>)>) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325 ^ u64::from(features::FEATURE_VERSION);
     let mut eat = |bytes: &[u8]| {
         for byte in bytes {
@@ -492,12 +545,103 @@ fn layout_key<'a>(files: impl Iterator<Item = &'a SourceFile>) -> u64 {
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     };
-    for file in files {
+    for (file, hand) in files {
         eat(file.path.to_string_lossy().as_bytes());
         eat(&file.size.to_le_bytes());
         eat(&file.modified.to_le_bytes());
+        if let Some(kind) = hand {
+            eat(b"\0kind:");
+            eat(kind.id().as_bytes());
+        }
     }
     hash
+}
+
+impl SoundMap {
+    /// The kinds set by hand, read from the data folder the first time.
+    fn hand_kinds(&mut self) -> &HashMap<PathBuf, Kind> {
+        let data_folder = self.data_folder.clone();
+        self.hand_kinds.get_or_insert_with(|| match data_folder {
+            Some(dir) => read_hand_kinds(&dir.join(HAND_KINDS_FILE)),
+            None => HashMap::new(),
+        })
+    }
+
+    /// The kind set by hand for a file, if any.
+    pub fn kind_by_hand(&mut self, path: &Path) -> Option<Kind> {
+        self.hand_kinds().get(path).copied()
+    }
+
+    /// Sets a file's kind by hand (`None`: its name and sound decide again), and keeps it in
+    /// the data folder. It wins over the name and the sound, and survives analysing the file
+    /// again and new layouts; the next layout of a scope that holds the file puts it with its
+    /// kind.
+    pub fn set_kind(&mut self, path: &Path, kind: Option<Kind>) -> Result<(), String> {
+        let text = path.to_str().ok_or("the path is not valid text")?;
+        if text.contains(['\n', '\r']) {
+            return Err("the path holds a line break".into());
+        }
+        self.hand_kinds();
+        let kinds = self.hand_kinds.get_or_insert_with(HashMap::new);
+        match kind {
+            Some(kind) => {
+                if kinds.len() >= MAX_HAND_KINDS && !kinds.contains_key(path) {
+                    return Err(format!("at most {MAX_HAND_KINDS} kinds can be set by hand"));
+                }
+                kinds.insert(path.to_path_buf(), kind);
+            }
+            None => {
+                kinds.remove(path);
+            }
+        }
+        let Some(dir) = self.data_folder.clone() else { return Ok(()) };
+        std::fs::create_dir_all(&dir).map_err(|e| format!("could not keep the kind: {e}"))?;
+        let file = dir.join(HAND_KINDS_FILE);
+        let temporary = file.with_extension("txt.tmp");
+        std::fs::write(&temporary, hand_kinds_to_text(kinds))
+            .and_then(|()| std::fs::rename(&temporary, &file))
+            .map_err(|e| format!("could not keep the kind: {e}"))
+    }
+}
+
+/// The file of kinds set by hand: a header line, then a line per file, its kind's id and its
+/// path, split by a tab, sorted by path.
+fn hand_kinds_to_text(kinds: &HashMap<PathBuf, Kind>) -> String {
+    let mut lines: Vec<(&str, Kind)> = kinds.iter().filter_map(|(p, k)| Some((p.to_str()?, *k))).collect();
+    lines.sort();
+    let mut out = String::from(HAND_KINDS_HEADER);
+    out.push('\n');
+    for (path, kind) in lines {
+        out.push_str(kind.id());
+        out.push('\t');
+        out.push_str(path);
+        out.push('\n');
+    }
+    out
+}
+
+/// Reads the kinds set by hand. A missing, unreadable or too large file, or one with another
+/// header, holds none; a line that does not parse is left out.
+fn hand_kinds_from_text(text: &str) -> HashMap<PathBuf, Kind> {
+    let mut lines = text.lines();
+    if lines.next() != Some(HAND_KINDS_HEADER) {
+        return HashMap::new();
+    }
+    lines
+        .filter_map(|line| {
+            let (id, path) = line.split_once('\t')?;
+            Some((PathBuf::from(path), Kind::from_id(id)?)).filter(|(p, _)| !p.as_os_str().is_empty())
+        })
+        .take(MAX_HAND_KINDS)
+        .collect()
+}
+
+fn read_hand_kinds(path: &Path) -> HashMap<PathBuf, Kind> {
+    match std::fs::metadata(path) {
+        Ok(m) if m.len() <= MAX_HAND_KINDS_BYTES => {}
+        _ => return HashMap::new(),
+    }
+    std::fs::read_to_string(path).map(|t| hand_kinds_from_text(&t)).unwrap_or_default()
 }
 
 impl Drop for SoundMap {

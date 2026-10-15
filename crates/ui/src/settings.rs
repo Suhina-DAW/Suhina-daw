@@ -51,6 +51,26 @@ pub enum PianoRollTop {
     Window,
 }
 
+/// Where Play and the play/stop key start the transport (`transport.play`'s `from`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayFrom {
+    /// From the play start marker.
+    #[default]
+    Marker,
+    /// From the start of the clip selected in the Arrangement view; from the marker when none is.
+    Clip,
+}
+
+impl PlayFrom {
+    /// The value `transport.play` takes for it, and the settings file keeps.
+    pub fn param(self) -> &'static str {
+        match self {
+            Self::Marker => "marker",
+            Self::Clip => "clip",
+        }
+    }
+}
+
 /// How the detail area lays out a device chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceLayout {
@@ -155,6 +175,8 @@ pub struct Settings {
     pub on_open: OnOpen,
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
+    /// Where Play starts.
+    pub play_from: PlayFrom,
     pub device_layout: DeviceLayout,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
@@ -216,6 +238,7 @@ impl Default for Settings {
             midi_stacking: false,
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
+            play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
             piano_roll_top: PianoRollTop::Track,
             piano_grid_follows: false,
@@ -316,7 +339,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -341,6 +364,7 @@ impl Settings {
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
+            play_from = self.play_from.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
                 Side::Right => "right",
@@ -386,6 +410,8 @@ impl Settings {
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
                 ("stop", "marker") => settings.stop = StopReturn::Marker,
                 ("stop", "here") => settings.stop = StopReturn::Here,
+                ("play_from", "marker") => settings.play_from = PlayFrom::Marker,
+                ("play_from", "clip") => settings.play_from = PlayFrom::Clip,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
                 ("theme", id) if is_theme_id(id) => settings.theme = id.to_string(),
@@ -484,6 +510,7 @@ mod tests {
             midi_stacking: false,
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
+            play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
             piano_roll_top: PianoRollTop::Window,
             piano_grid_follows: true,
@@ -592,6 +619,16 @@ map_window_rect = 10, 20, 800, 600
 ",
         );
         assert_eq!((settings.zoom, warnings.len()), (ZOOM, 1));
+    }
+
+    #[test]
+    fn play_from_reads_marker_or_clip_and_nothing_else() {
+        assert_eq!(Settings::default().play_from, PlayFrom::Marker);
+        assert_eq!(Settings::from_text("play_from = clip\n").0.play_from, PlayFrom::Clip);
+        assert_eq!(Settings::from_text("play_from = marker\n").0.play_from, PlayFrom::Marker);
+        let (settings, warnings) = Settings::from_text("play_from = selection\n");
+        assert_eq!((settings.play_from, warnings.len()), (PlayFrom::Marker, 1));
+        assert!(Settings::default().to_text().contains("play_from = marker\n"));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 mod app;
 pub mod arrangement_view;
+pub mod automation_lanes;
 pub mod browser;
 pub mod browser_view;
 pub mod demo;
