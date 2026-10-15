@@ -22,21 +22,17 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
         if matches!(control, Choice | Radio) {
             p.ui.options = vec!["Off".into(), "Unity".into(), "Boost".into()];
         }
-        p.ui.position = Some([(index % 3) as f32 * 250.0, (index / 3) as f32 * 160.0]);
-        p.ui.size = Some([240.0, 150.0]);
+        p.ui.position = Some([0.0, index as f32 * 104.0]);
+        p.ui.size = Some([220.0, 96.0]);
         p.ui.label_position = suhina_device_sdk::LabelPosition::Top;
-        p.ui.accent = Some(if index % 2 == 0 { [85, 190, 160] } else { [240, 170, 80] });
-        p.ui.background = Some([50, 61, 73]);
-        p.ui.panel_color = Some([28, 35, 44]);
-        p.ui.text_color = Some([230, 235, 240]);
-        p.ui.font_size = 14.0;
-        p.ui.monospace = index % 2 == 0;
-        p.ui.shape = if index % 3 == 0 {
-            suhina_device_sdk::ControlShape::Square
-        } else {
-            suhina_device_sdk::ControlShape::Rounded
-        };
-        p.ui.corner_radius = 10.0;
+        p.ui.accent = Some([103, 227, 189]);
+        p.ui.background = Some([34, 44, 56]);
+        p.ui.panel_color = Some([22, 29, 38]);
+        p.ui.text_color = Some([220, 230, 238]);
+        p.ui.font_size = 13.0;
+        p.ui.monospace = false;
+        p.ui.shape = suhina_device_sdk::ControlShape::Rounded;
+        p.ui.corner_radius = 8.0;
         graph.parameters.push(p);
         let mut node = Node::gain(&id, &id);
         node.visible = false;

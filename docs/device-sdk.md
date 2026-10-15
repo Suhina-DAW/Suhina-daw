@@ -148,7 +148,7 @@ Sizes describe the whole cell (label, widget and value), not just the widget. A 
 at least `2*font_size+20` pixels of cell height. Square knobs and rounded/pill widget shapes
 use the existing control behaviour, including keyboard edits and default reset. Settings are
 local to a parameter and do not modify the global theme. The `ui_controls` example generates
-a three-column canvas with styled controls. Existing project devices embed their graph; import
+a single-column canvas with styled controls sized for a narrow device panel. Existing project devices embed their graph; import
 the new file as a new device to use its changed layout. Agents can obtain defaults and enum
 choices from `devices.sdNodes`.
 

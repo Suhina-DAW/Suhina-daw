@@ -84,8 +84,8 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
         drawing: vec![
             Draw::Rect { rect: [0.0, 0.0, 390.0, 148.0].map(Into::into), color: [9, 17, 27, 240], radius: 8.0 },
             Draw::Line {
-                from: [0.0.into(), 74.0.into()],
-                to: [390.0.into(), 74.0.into()],
+                from: [0.0.into(), py.clone()],
+                to: [390.0.into(), py.clone()],
                 color: [54, 68, 82, 255],
                 width: 1.0,
             },
