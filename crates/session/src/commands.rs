@@ -565,6 +565,21 @@ static COMMANDS: &[CommandSpec] = &[
         run: devices::add_sd,
     },
     CommandSpec {
+        id: "device.updateSd",
+        label: "Update an embedded .sd device to a newer revision and migrate its saved parameter values",
+        params: &[
+            TRACK,
+            DEVICE,
+            param(
+                "path",
+                ParamType::Text,
+                "path to a newer .sd file with the same device id and a migration from the embedded revision",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::update_sd,
+    },
+    CommandSpec {
         id: "track.add",
         label: "Add an audio or MIDI track with its mixer channel, clip slots and arrangement lane, optionally with a device (an instrument makes a MIDI track, an effect an audio track)",
         params: &[

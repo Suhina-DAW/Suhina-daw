@@ -8,6 +8,7 @@ covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
   - crates/device-sdk/src/nodes.rs
+  - crates/device-sdk/src/**
   - crates/device-sdk/src/graph.rs
   - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/examples/gain.rs
@@ -25,11 +26,12 @@ Issue #300 asks for a Rust SDK that can create a shareable `.sd` device file. Th
 the device and signal flow as data, without embedding Rust source. Version 2 loads composable device graphs into tracks and draws their nodes and parameter
 controls in the detail panel. Version 1 gain graphs remain readable.
 
-Version 3 adds optional [visual connection layouts](../spec/sd-device-format.md#visual-connection-layout):
-node rectangles, wire bends and port anchors. SDK serialization preserves these independently of
-DSP execution. Versions 1 and 2 remain readable; all writes use version 3 so old readers reject
-the new document instead of silently dropping editor data. Interactive graph editing remains
-deferred. Only supported, strictly validated authoring fields are accepted.
+Version 3 added optional [visual connection layouts](../spec/sd-device-format.md#visual-connection-layout):
+node rectangles, wire bends and port anchors. Version 4 separates the file schema version from
+the device revision and adds data-only parameter-id migrations. Versions 1 through 3 remain
+readable; all writes use version 4 so old readers reject the new document instead of silently
+dropping metadata. Interactive graph editing remains deferred. Only supported, strictly validated
+authoring fields are accepted.
 
 ## Decision
 
@@ -53,6 +55,10 @@ deferred. Only supported, strictly validated authoring fields are accepted.
    draws the graph's visible nodes as a read-only signal-flow view. SDK authors can hide
    implementation nodes with `visible: false`; hidden nodes still run. Editing node connections in
    the UI is deferred. Panels label the graph's role as `AudioEffect`, `MIDI Effect` or `Instrument`.
+7. Device ids remain stable across revisions. `device.version` is separate from the file schema
+   version; each revision bump declares a migration from the previous revision. `device.updateSd`
+   explicitly replaces an embedded graph only when id and role match, then migrates parameter values
+   as part of one undoable command. Projects do not silently adopt a newer file.
 
 ## Consequences
 

@@ -346,6 +346,36 @@ pub(crate) fn add_sd(session: &mut Session, params: &Value) -> Result<Value, Com
     Ok(json!({ "device": position, "id": graph.id, "name": graph.name, "kind": "sd" }))
 }
 
+pub(crate) fn update_sd(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("path must be the newer .sd device file")?;
+    let channel = channel_param(session, params)?;
+    let index = device_index(channel.devices.len(), params)?;
+    let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
+    if device.kind != DeviceKind::Sd {
+        return Err("device.updateSd only updates .sd devices".into());
+    }
+    let bytes = device.state.as_deref().ok_or("the .sd graph is missing")?;
+    let text = std::str::from_utf8(bytes).map_err(|_| "the embedded .sd graph is invalid UTF-8")?;
+    let current = suhina_device_sdk::DeviceGraph::from_sd(text).map_err(|e| e.to_string())?;
+    let newer = suhina_device_sdk::DeviceGraph::read_file(std::path::Path::new(path)).map_err(|e| e.to_string())?;
+    if current.id != newer.id || current.role != newer.role {
+        return Err("the .sd file must have the same device id and role".into());
+    }
+    if newer.device_version <= current.device_version {
+        return Err("the .sd file must have a newer device version".into());
+    }
+    let values = device.params.iter().map(|parameter| (parameter.id.clone(), parameter.value)).collect::<Vec<_>>();
+    let migrated = newer.migrate_parameter_values(current.device_version, &values).map_err(|e| e.to_string())?;
+    let state = newer.to_sd().map_err(|e| e.to_string())?.into_bytes();
+    let from_version = current.device_version;
+    device.name = newer.name.clone();
+    device.state = Some(state);
+    device.params = migrated.into_iter().map(|(id, value)| DeviceParam::new(id, value)).collect();
+    Ok(
+        json!({ "device": index, "id": newer.id, "name": newer.name, "from_version": from_version, "to_version": newer.device_version }),
+    )
+}
+
 /// Reads voice `voice` of the preset file at `path`.
 fn read_preset(path: &std::path::Path, voice: usize) -> Result<suhina_device_registry::Preset, CommandError> {
     let size = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?.len();

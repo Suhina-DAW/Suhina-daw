@@ -10,9 +10,17 @@ fn layout_roundtrips_and_wire_identity_survives_reordering() {
     g.nodes.reverse();
     let text = g.to_sd().unwrap();
     assert_eq!(DeviceGraph::from_sd(&text).unwrap(), g);
-    assert!(text.contains("\"version\": 3"));
+    assert!(text.contains(&format!("\"version\": {}", suhina_device_sdk::VERSION)));
     for version in [1, 2] {
-        assert!(DeviceGraph::from_sd(&text.replace("\"version\": 3", &format!("\"version\": {version}"))).is_err());
+        assert!(
+            DeviceGraph::from_sd(
+                &text.replace(
+                    &format!("\"version\": {}", suhina_device_sdk::VERSION),
+                    &format!("\"version\": {version}")
+                )
+            )
+            .is_err()
+        );
     }
     assert!(DeviceGraph::from_sd(&text.replace("\"graph\":", "\"unsupported\":")).is_err());
     assert!(DeviceGraph::from_sd(&text.replace("\"points\":", "\"unsupported\":")).is_err());

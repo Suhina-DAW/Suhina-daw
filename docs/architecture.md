@@ -98,7 +98,7 @@ The engine runs them in chains on tracks, made through `device-registry`.
 
 ## From a file to the speakers
 
-The SDK also preserves optional version-3 editor geometry (node rectangles, wire bends and port
+The SDK also preserves optional editor geometry (node rectangles, wire bends and port
 anchors). This remains authoring data in the embedded JSON; it is validated off the audio thread
 and does not add processing nodes or a runtime/UI dependency. The current node list does not
 render this layout. See the [layout contract](spec/sd-device-format.md#visual-connection-layout).

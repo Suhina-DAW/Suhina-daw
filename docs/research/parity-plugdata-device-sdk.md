@@ -52,7 +52,7 @@ Similar names do not imply matching signal, message, timing, or parameter semant
 
 ## What the comparison says
 
-The SDK's version-3 format now stores node positions, explicit port anchors and wire bend
+The SDK's version-3 format stores node positions, explicit port anchors and wire bend
 points with validated references to its processing graph. SDK round-trip, malformed-input and
 audio-invariance checks live in `crates/device-sdk/tests/editor.rs`; project persistence is
 covered in `crates/session/tests/devices.rs`. This is authoring-data support, not an interactive

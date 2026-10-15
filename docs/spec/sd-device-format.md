@@ -1,5 +1,5 @@
 ---
-description: Version 3 of the data-only Suhina device graph format, SDK, track loading, and visual connection layouts
+description: Version 4 of the data-only Suhina device graph format, SDK, track loading, and device revision migrations
 read_when: .sd, Suhina device, device graph, device SDK, community effect, visual node, device UI
 type: spec
 status: current
@@ -29,17 +29,26 @@ An `.sd` file describes a device as data. It contains no Rust source, executable
 assets. The Rust SDK builds and validates the graph, writes the JSON file and can prepare the
 supported graph for audio processing.
 
-## Version 3
+## File and device versions
 
-The top-level object contains `format: "suhina-device"`, `version: 3`, a `device` object,
-`nodes`, `connections` and optional `editor` metadata. The reader also accepts version 1
-linear input/gain/output graphs and version 2 signal graphs; writing canonical JSON upgrades
-them to version 3 without changing their sound. Older readers reject version 3, preventing
-silent loss of authoring metadata when saving. File version is independent of device identity.
-The device has a stable id, name, role and parameters (`id`, `name`, `min`, `max`, `default`,
+The top-level object contains `format: "suhina-device"`, `version: 4`, a `device` object,
+`nodes`, `connections` and optional `editor` metadata. The reader accepts file versions 1 through
+4; writing canonical JSON upgrades them to version 4 without changing their sound. Older readers
+reject version 4, preventing silent loss of authoring metadata when saving. File version describes
+the JSON schema; `device.version` describes revisions of a device's identity and parameter
+contract. Files without `device.version` are revision 1. Device `id` remains stable across
+revisions. The device also has a name, role and parameters (`id`, `name`, `min`, `max`, `default`,
 `control`, `unit`). Controls include `slider` (default), `log_slider` (positive range), `integer`
 (integer range/default) and `toggle` (range 0..1, integer default). Unit is display text, at most
 128 bytes, default empty. Parameter commands and the processor apply the same clamping/rounding.
+
+Parameter ids are saved identifiers. Keep an id when its meaning and unit stay the same. A device
+revision above 1 includes a `migrations` entry from the immediately previous revision, even when
+no ids changed. Each entry may rename parameter ids with `parameter_ids` (`from`, `to`); mappings
+must preserve meaning and value units. Unchanged ids retain their clamped values, renamed ids
+retain values through the mapping, new parameters receive their defaults, and removed parameters
+are discarded. A migration from a still older revision must be listed directly. The format does
+not define numeric unit conversions or arbitrary code migrations.
 
 Each node has `id`, `kind`, kind-specific configuration and `visible` (default true).
 Hidden nodes still process; the UI shows visible nodes in dependency order. It is a read-only
@@ -125,11 +134,13 @@ Layers, component hierarchy and editable envelope documents remain separate plan
 ```json
 {
   "format": "suhina-device",
-  "version": 3,
+  "version": 4,
   "device": {
     "id": "org.example.gain",
+    "version": 1,
     "name": "Example Gain",
     "role": "effect",
+    "migrations": [],
     "parameters": [{ "id": "gain", "name": "Gain", "min": 0.0, "max": 2.0, "default": 1.0, "control": "slider" }]
   },
   "nodes": [
@@ -153,6 +164,9 @@ instruments require a MIDI track. Dropping an `.sd` into empty space or calling 
 with `sd` creates an audio track for an audio effect and a MIDI track for an instrument or MIDI effect.
 The complete validated graph is
 stored in the project with the device, so the original `.sd` file is not needed after insertion.
+Projects keep this embedded graph when a newer file becomes available. Run `device.updateSd`
+explicitly with the newer file to update a device; its id and role must match, its device revision
+must increase, and parameter migration is applied as one undoable command.
 Parameter values are project state and can be changed with `device.setParam` or the generated
 sliders in the detail panel. The `AudioEffect` panel reserves space for each slider's value so
 controls stay inside narrow device cards.

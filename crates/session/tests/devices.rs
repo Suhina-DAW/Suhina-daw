@@ -198,6 +198,52 @@ fn sd_effects_load_into_tracks_and_expose_their_parameters() {
 }
 
 #[test]
+fn sd_device_updates_migrate_values_atomically_and_undo_to_the_embedded_revision() {
+    use suhina_device_sdk::{
+        Connection, DeviceGraph, DeviceMigration, DeviceRole, Node, Parameter, ParameterIdMigration,
+    };
+
+    let mut old = DeviceGraph::new("org.example.versioned", "Old Gain", DeviceRole::Effect);
+    old.parameters.push(Parameter::new("gain", "Gain", (0.0, 2.0), 1.0));
+    old.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
+    old.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+
+    let mut newer = DeviceGraph::new("org.example.versioned", "New Gain", DeviceRole::Effect);
+    newer.device_version = 2;
+    newer.migrations.push(DeviceMigration {
+        from_version: 1,
+        parameter_ids: vec![ParameterIdMigration { from: "gain".into(), to: "level".into() }],
+    });
+    newer.parameters.push(Parameter::new("level", "Level", (0.0, 4.0), 0.5));
+    newer.nodes = vec![Node::audio_input("in"), Node::gain("gain", "level"), Node::audio_output("out")];
+    newer.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+
+    let old_path = std::env::temp_dir().join(format!("suhina-test-{}-old.sd", std::process::id()));
+    let new_path = std::env::temp_dir().join(format!("suhina-test-{}-new.sd", std::process::id()));
+    std::fs::write(&old_path, old.to_sd().expect("old device serializes")).expect("write old device");
+    std::fs::write(&new_path, newer.to_sd().expect("new device serializes")).expect("write new device");
+
+    let mut session = Session::new(project());
+    run(&mut session, "device.addSd", json!({"track":1,"path":old_path})).unwrap();
+    run(&mut session, "device.setParam", json!({"track":1,"device":0,"param":"gain","value":1.75})).unwrap();
+    let result = run(&mut session, "device.updateSd", json!({"track":1,"device":0,"path":new_path})).unwrap();
+    assert_eq!(result["from_version"], 1);
+    assert_eq!(result["to_version"], 2);
+    let device = &session.project().channels[0].devices[0];
+    assert_eq!(device.name, "New Gain");
+    assert_eq!(device.params, vec![DeviceParam::new("level", 1.75)]);
+    let state = String::from_utf8(device.state.clone().expect("updated graph is embedded")).unwrap();
+    assert_eq!(DeviceGraph::from_sd(&state).unwrap().device_version, 2);
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let device = &session.project().channels[0].devices[0];
+    assert_eq!(device.name, "Old Gain");
+    assert_eq!(device.params, vec![DeviceParam::new("gain", 1.75)]);
+    let _ = std::fs::remove_file(old_path);
+    let _ = std::fs::remove_file(new_path);
+}
+
+#[test]
 fn sd_midi_effects_and_instruments_insert_on_midi_tracks_in_chain_order() {
     let mut midi_effect =
         suhina_device_sdk::DeviceGraph::new("test.transpose", "Transpose", suhina_device_sdk::DeviceRole::MidiEffect);

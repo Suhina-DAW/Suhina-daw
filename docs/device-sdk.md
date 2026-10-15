@@ -29,12 +29,18 @@ covers:
 
 The deliverable is one `.sd` file. It can be added to a track and is embedded in the project.
 
-Version 3 can also preserve visual connection authoring through `graph.editor`:
+Version 4 separates the `.sd` file schema version from `device.version`, the revision of the
+device's stable id and parameter contract. A device revision bump declares a migration from the
+previous revision; migrations can preserve renamed parameter ids. Projects retain their embedded
+graph until `device.updateSd` explicitly updates it.
+
+Version 4 also preserves visual connection authoring through `graph.editor`:
 `editor::Editor` holds a `GraphLayout`, with `NodeLayout` positions/sizes and `WireLayout`
 routes referencing existing `Connection` endpoints. Optional anchors are node-local pixel
 offsets; bend points are graph coordinates. See the [format contract](spec/sd-device-format.md#visual-connection-layout).
 This stores a future editor's layout; the current app still shows the read-only node list.
-Versions 1 and 2 remain readable, and serialization writes version 3.
+File versions 1 through 3 remain readable, and serialization writes version 4. Older device files
+without `device.version` load as revision 1.
 
 ```sh
 cargo run -p suhina-device-sdk --example wire_layout -- target/sdk-examples/wire-layout.sd
@@ -116,7 +122,7 @@ this never removes their processing. The examples expose only their main process
    parameter for each user control. Prefer an existing example with similar signal flow.
    Every node must reach the output, including the audio input. For an unconnected optional
    input the catalog default applies; a required input must have exactly one connection.
-3. Save with `write_file` or author equivalent version 3 JSON. Call `validate` or run the
+3. Save with `write_file` or author equivalent version 4 JSON. Call `validate` or run the
    validation example before adding the effect. Errors identify missing ids/ports, undelayed
    cycles and memory requests; fix those directly. A minimal catalog example describes
    `NodeKind`; wrap it with `id` when placing it in the JSON nodes array.

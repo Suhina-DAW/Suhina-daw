@@ -1,8 +1,8 @@
 //! Build, validate, save, and run data-only Suhina device graphs (`.sd`).
 //!
-//! Version 3 preserves visual connection layouts alongside composable signal graphs.
+//! Version 4 separates device revisions from the file format version.
 //! A validated graph compiles off the audio thread into a processor whose `process`
-//! method performs no allocation. Versions 1 and 2 remain readable.
+//! method performs no allocation. File versions 1 through 4 remain readable.
 
 use std::fmt;
 use std::io::Read;
@@ -23,24 +23,44 @@ pub use suhina_device_api::ProcessContext;
 
 pub const EXTENSION: &str = "sd";
 pub const FORMAT: &str = "suhina-device";
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NODES: usize = 128;
 pub const MAX_CONNECTIONS: usize = MAX_NODES * 5;
 pub const MAX_DELAY_FRAMES: usize = 2_000_000;
 pub const MAX_PARAMETERS: usize = 128;
+pub const MAX_DEVICE_MIGRATIONS: usize = 128;
 const MAX_TEXT_BYTES: usize = 128;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceGraph {
     pub id: String,
+    /// Revision of this device's identity and parameter contract, separate from the file format version.
+    pub device_version: u32,
     pub name: String,
     pub role: DeviceRole,
+    /// Direct migrations from older device revisions to this revision.
+    pub migrations: Vec<DeviceMigration>,
     pub parameters: Vec<Parameter>,
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
     pub ui: Option<ui::DeviceUi>,
     pub editor: Option<editor::Editor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceMigration {
+    pub from_version: u32,
+    #[serde(default)]
+    pub parameter_ids: Vec<ParameterIdMigration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterIdMigration {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,8 +216,10 @@ impl DeviceGraph {
     pub fn new(id: impl Into<String>, name: impl Into<String>, role: DeviceRole) -> Self {
         Self {
             id: id.into(),
+            device_version: 1,
             name: name.into(),
             role,
+            migrations: Vec::new(),
             parameters: Vec::new(),
             nodes: Vec::new(),
             connections: Vec::new(),
@@ -213,6 +235,11 @@ impl DeviceGraph {
             || self.name.len() > MAX_TEXT_BYTES
         {
             return Err(DeviceSdkError("device id and name must be 1 to 128 bytes".into()));
+        }
+        if self.device_version == 0 || self.migrations.len() > MAX_DEVICE_MIGRATIONS {
+            return Err(DeviceSdkError(format!(
+                "device version must be positive and have at most {MAX_DEVICE_MIGRATIONS} migrations"
+            )));
         }
         if self.nodes.len() < 2 || self.nodes.len() > MAX_NODES {
             return Err(DeviceSdkError(format!("a graph must have 2 to {MAX_NODES} nodes")));
@@ -322,6 +349,40 @@ impl DeviceGraph {
             }
         }
 
+        let mut migration_versions = std::collections::HashSet::new();
+        for migration in &self.migrations {
+            if migration.from_version == 0
+                || migration.from_version >= self.device_version
+                || !migration_versions.insert(migration.from_version)
+                || migration.parameter_ids.len() > MAX_PARAMETERS
+            {
+                return Err(DeviceSdkError("device migrations must uniquely target older positive versions".into()));
+            }
+            let mut from_ids = std::collections::HashSet::new();
+            let mut to_ids = std::collections::HashSet::new();
+            for mapping in &migration.parameter_ids {
+                if mapping.from.is_empty()
+                    || mapping.from.len() > MAX_TEXT_BYTES
+                    || mapping.to.is_empty()
+                    || mapping.to.len() > MAX_TEXT_BYTES
+                    || mapping.from == mapping.to
+                    || !from_ids.insert(mapping.from.as_str())
+                    || !to_ids.insert(mapping.to.as_str())
+                    || param_ids.contains(mapping.from.as_str())
+                    || !param_ids.contains(mapping.to.as_str())
+                {
+                    return Err(DeviceSdkError(
+                        "parameter migrations must uniquely rename old ids to current parameter ids".into(),
+                    ));
+                }
+            }
+        }
+        if self.device_version > 1 && !migration_versions.contains(&(self.device_version - 1)) {
+            return Err(DeviceSdkError(
+                "each device version bump must include a migration from the previous version".into(),
+            ));
+        }
+
         if let Some(ui) = &self.ui {
             ui.validate(&self.parameters)?;
         }
@@ -348,6 +409,48 @@ impl DeviceGraph {
             return Err(DeviceSdkError("encoded .sd exceeds 2 MiB".into()));
         }
         Ok(text)
+    }
+
+    /// Carry saved values into this revision. Unchanged ids are retained; renamed ids need an explicit migration.
+    pub fn migrate_parameter_values(
+        &self,
+        from_version: u32,
+        values: &[(String, f64)],
+    ) -> Result<Vec<(String, f64)>, DeviceSdkError> {
+        self.validate()?;
+        if from_version == 0 || from_version > self.device_version {
+            return Err(DeviceSdkError("source device version must be positive and no newer than the target".into()));
+        }
+        if values.len() > MAX_PARAMETERS {
+            return Err(DeviceSdkError(format!("saved parameter values may not exceed {MAX_PARAMETERS}")));
+        }
+        let mut saved = std::collections::HashMap::with_capacity(values.len());
+        for (id, value) in values {
+            if id.is_empty() || id.len() > MAX_TEXT_BYTES || saved.insert(id.as_str(), *value).is_some() {
+                return Err(DeviceSdkError("saved parameter ids must be unique and 1..128 bytes".into()));
+            }
+        }
+        let migration = if from_version == self.device_version {
+            None
+        } else {
+            Some(self.migrations.iter().find(|migration| migration.from_version == from_version).ok_or_else(|| {
+                DeviceSdkError(format!(
+                    "device {} version {} has no migration from version {from_version}",
+                    self.id, self.device_version
+                ))
+            })?)
+        };
+        Ok(self
+            .parameters
+            .iter()
+            .map(|parameter| {
+                let old_id = migration
+                    .and_then(|migration| migration.parameter_ids.iter().find(|mapping| mapping.to == parameter.id))
+                    .map_or(parameter.id.as_str(), |mapping| mapping.from.as_str());
+                let value = saved.get(old_id).map_or(parameter.default, |value| parameter.clamp(*value));
+                (parameter.id.clone(), value)
+            })
+            .collect())
     }
 
     /// Expand one command into an atomic set of clamped values, off the audio thread.
@@ -538,9 +641,17 @@ struct DeviceV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ui: Option<ui::DeviceUi>,
     id: String,
+    #[serde(default = "initial_device_version")]
+    version: u32,
+    #[serde(default)]
+    migrations: Vec<DeviceMigration>,
     name: String,
     role: DeviceRole,
     parameters: Vec<ParameterV1>,
+}
+
+fn initial_device_version() -> u32 {
+    1
 }
 
 #[derive(Serialize, Deserialize)]
@@ -590,6 +701,8 @@ impl From<&DeviceGraph> for FileV1 {
             device: DeviceV1 {
                 ui: graph.ui.clone(),
                 id: graph.id.clone(),
+                version: graph.device_version,
+                migrations: graph.migrations.clone(),
                 name: graph.name.clone(),
                 role: graph.role,
                 parameters: graph
@@ -621,8 +734,10 @@ impl From<FileV1> for DeviceGraph {
             ui: file.device.ui,
             editor: file.editor,
             id: file.device.id,
+            device_version: file.device.version,
             name: file.device.name,
             role: file.device.role,
+            migrations: file.device.migrations,
             parameters: file
                 .device
                 .parameters
@@ -676,6 +791,47 @@ mod tests {
         let mut buffer = [1.0, -1.0];
         effect.process(&mut buffer);
         assert_eq!(buffer, [1.0, -1.0]);
+    }
+
+    #[test]
+    fn device_revisions_are_separate_from_format_versions_and_old_files_default_to_one() {
+        let old = DeviceGraph::from_sd(include_str!("../tests/fixtures/gain-v1.sd")).expect("legacy graph loads");
+        assert_eq!(old.device_version, 1);
+        let encoded = old.to_sd().expect("legacy graph upgrades to current format");
+        let json: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
+        assert_eq!(json["version"], VERSION);
+        assert_eq!(json["device"]["version"], 1);
+        assert_eq!(DeviceGraph::from_sd(&encoded), Ok(old));
+    }
+
+    #[test]
+    fn device_migration_renames_parameter_ids_and_clamps_saved_values() {
+        let mut graph = gain_graph();
+        graph.device_version = 2;
+        graph.migrations.push(DeviceMigration {
+            from_version: 1,
+            parameter_ids: vec![ParameterIdMigration { from: "gain".into(), to: "level".into() }],
+        });
+        graph.parameters[0].id = "level".into();
+        graph.parameters[0].max = 1.0;
+        graph.nodes[1].kind = NodeKind::Gain { parameter: "level".into() };
+
+        let encoded = graph.to_sd().expect("migration serializes");
+        let loaded = DeviceGraph::from_sd(&encoded).expect("migration loads");
+        assert_eq!(loaded, graph);
+        assert_eq!(loaded.migrate_parameter_values(1, &[("gain".into(), 1.5)]), Ok(vec![("level".into(), 1.0)]));
+        assert_eq!(loaded.migrate_parameter_values(1, &[]), Ok(vec![("level".into(), 1.0)]));
+    }
+
+    #[test]
+    fn a_device_revision_bump_requires_a_previous_revision_migration() {
+        let mut graph = gain_graph();
+        graph.device_version = 2;
+        assert!(graph.validate().is_err());
+        graph.migrations.push(DeviceMigration { from_version: 1, parameter_ids: Vec::new() });
+        assert!(graph.validate().is_ok());
+        assert!(graph.migrate_parameter_values(1, &[]).is_ok());
+        assert!(graph.migrate_parameter_values(3, &[]).is_err());
     }
 
     #[test]
