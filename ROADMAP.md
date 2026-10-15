@@ -41,7 +41,7 @@ detail area) goes alongside this list, not after it.
 
 ## Built-in effects and instruments
 
-The separate Rust SDK can create data-only linear `.sd` effects from supported nodes. They can
+The separate Rust SDK can create data-only composable `.sd` effects from supported nodes. They can
 be dropped onto tracks, are embedded in projects, render in real-time and offline, and expose
 their parameters and signal flow in the device detail panel ([ADR 0018](docs/decisions/0018-device-graph-files.md)).
 
@@ -127,6 +127,18 @@ but has not been tried yet ([ADR 0008](docs/decisions/0008-patch-devices.md), pr
 Session clips do not fit ARA's linear timeline; Session view later. ADR before implementation.
 
 ## What works now
+
+- SDK custom panels support independent canvas and preferred viewport dimensions, with scrolling and backwards-compatible automatic sizing.
+
+- SDK effects package custom drawing controls, XY pads, backgrounds and embedded PNG/JPEG artwork in one `.sd`.
+- SDK effect panels support per-control size/position, RGB colours, fonts, shapes and label placement.
+
+- SDK effect controls include knobs, numeric fields, choices and buttons; continuous parameter
+  edits ramp over a configurable duration to reduce clicks.
+
+- SDK effects use arithmetic, stereo operations, modulation, filters, envelope detection and
+  delayed feedback; a node catalog and examples support authoring by people and AI agents
+  ([guide](docs/device-sdk.md)).
 
 ### M0 Foundation
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;

@@ -17,6 +17,43 @@ pub(crate) fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(Value::Array(suhina_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
 }
 
+/// Discoverable SDK node contracts, available through UI/CLI/MCP's shared commands.
+pub(crate) fn sd_nodes(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    Ok(json!({
+        "format": suhina_device_sdk::FORMAT,
+        "version": suhina_device_sdk::VERSION,
+        "roles": ["effect"],
+        "signal": "stereo f64 at sample rate; control values broadcast to both channels",
+        "limits": {
+            "file_bytes": suhina_device_sdk::MAX_FILE_BYTES,
+            "nodes": suhina_device_sdk::MAX_NODES,
+            "connections": suhina_device_sdk::MAX_CONNECTIONS,
+            "parameters": suhina_device_sdk::MAX_PARAMETERS,
+            "delay_frames": suhina_device_sdk::MAX_DELAY_FRAMES,
+            "budget_sample_rate": 384000
+        },
+        "waveforms": ["sine", "triangle", "saw_up", "saw_down", "square", "random"],
+        "filter_modes": ["lowpass", "highpass", "bandpass", "peak", "low_shelf", "high_shelf"],
+        "custom_ui": {
+            "defaults": suhina_device_sdk::ui::DeviceUi::default(),
+            "drawing": ["rect", "circle", "line", "path", "arc", "text", "image", "gradient"],
+            "expressions": ["parameter", "add", "multiply", "sin", "cos"],
+            "gestures": ["drag", "position", "toggle", "momentary"],
+            "image_formats": ["png", "jpeg"],
+            "image_bytes": suhina_device_sdk::ui::MAX_ASSET_BYTES,
+            "total_image_bytes": suhina_device_sdk::ui::MAX_ASSETS_BYTES,
+            "image_pixels": suhina_device_sdk::ui::MAX_IMAGE_PIXELS,
+            "draw_commands": suhina_device_sdk::ui::MAX_DRAW_COMMANDS,
+            "reference": "docs/spec/sdk-custom-ui.md"
+        },
+        "parameter_ui_defaults": suhina_device_sdk::ParameterUi::default(),
+        "label_positions": ["left", "top", "hidden"],
+        "control_shapes": ["rounded", "square", "pill"],
+        "controls": ["slider", "log_slider", "integer", "toggle", "knob", "log_knob", "number", "vertical_slider", "button", "choice", "radio"],
+        "nodes": suhina_device_sdk::NODE_CATALOG,
+    }))
+}
+
 fn info_json(info: &DeviceInfo) -> Value {
     json!({
         "id": info.id,
@@ -105,8 +142,8 @@ fn device_json(index: usize, device: &Device) -> Value {
             })
             .collect::<Vec<_>>()
     }).or_else(|| graph.as_ref().map(|graph| graph.parameters.iter().map(|p| {
-        let value = device.params.iter().find(|stored| stored.id == p.id).map_or(p.default, |stored| stored.value.clamp(p.min, p.max));
-        json!({ "id": p.id, "name": p.name, "value": value, "min": p.min, "max": p.max, "control": "slider" })
+        let value = device.params.iter().find(|stored| stored.id == p.id).map_or(p.default, |stored| p.clamp(stored.value));
+        json!({ "id": p.id, "name": p.name, "value": value, "min": p.min, "max": p.max, "control": p.control, "unit": p.unit, "ui": p.ui, "smoothing_ms": p.smoothing_ms })
     }).collect::<Vec<_>>()));
     json!({
         "index": index,
@@ -117,11 +154,7 @@ fn device_json(index: usize, device: &Device) -> Value {
         "known": kind != "builtin" || info.is_some(),
         "params": params,
         "nodes": graph.as_ref().map(|graph| graph.ordered_nodes().iter().filter(|node| node.visible).map(|node| {
-            let kind = match node.kind {
-                suhina_device_sdk::NodeKind::AudioInput => "Audio Input",
-                suhina_device_sdk::NodeKind::Gain { .. } => "Gain",
-                suhina_device_sdk::NodeKind::AudioOutput => "Audio Output",
-            };
+            let kind = node.kind.info().name;
             json!({ "id": node.id, "kind": kind })
         }).collect::<Vec<_>>()),
     })
@@ -308,7 +341,7 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
                 .enumerate()
                 .find(|(_, p)| p.id == param)
                 .ok_or_else(|| format!("{} has no parameter {param:?}", graph.name))?;
-            (index, value.clamp(parameter.min, parameter.max))
+            (index, parameter.clamp(value))
         }
         _ => {
             return Err(

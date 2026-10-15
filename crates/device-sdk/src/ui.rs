@@ -1,0 +1,490 @@
+//! Data-only drawing programs, image resources and input bindings for custom panels.
+use crate::{DeviceSdkError, Parameter};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, io::Cursor, path::Path};
+
+pub const MAX_ASSET_BYTES: usize = 512 * 1024;
+pub const MAX_ASSETS_BYTES: usize = 1024 * 1024;
+pub const MAX_IMAGE_PIXELS: u64 = 1_000_000;
+pub const MAX_DRAW_COMMANDS: usize = 1024;
+type Color = [u8; 4];
+fn white() -> Color {
+    [255; 4]
+}
+fn one() -> f32 {
+    1.0
+}
+fn uv_default() -> [f32; 4] {
+    [0.0, 0.0, 1.0, 1.0]
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DeviceUi {
+    /// Canvas width and height in logical pixels; defaults to 640 × 240.
+    pub size: [f32; 2],
+    /// Preferred scrollable body width and height; None preserves automatic host sizing.
+    pub viewport_size: Option<[f32; 2]>,
+    pub background: Color,
+    pub assets: Vec<ImageAsset>,
+    pub layers: Vec<Draw>,
+    pub controls: Vec<CustomControl>,
+    pub hidden_parameters: Vec<String>,
+}
+impl Default for DeviceUi {
+    fn default() -> Self {
+        Self {
+            size: [640.0, 240.0],
+            viewport_size: None,
+            background: [24, 28, 34, 255],
+            assets: Vec::new(),
+            layers: Vec::new(),
+            controls: Vec::new(),
+            hidden_parameters: Vec::new(),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageAsset {
+    pub id: String,
+    pub data: String,
+}
+impl ImageAsset {
+    /// Authoring helper: embeds a PNG/JPEG rather than retaining its file path.
+    pub fn from_file(id: impl Into<String>, path: &Path) -> Result<Self, DeviceSdkError> {
+        use std::io::Read;
+        let file = std::fs::File::open(path).map_err(|e| DeviceSdkError(format!("image {}: {e}", path.display())))?;
+        let mut bytes = Vec::new();
+        file.take((MAX_ASSET_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|e| DeviceSdkError(e.to_string()))?;
+        Self::from_bytes(id, &bytes)
+    }
+    pub fn from_bytes(id: impl Into<String>, bytes: &[u8]) -> Result<Self, DeviceSdkError> {
+        if bytes.len() > MAX_ASSET_BYTES {
+            return Err(DeviceSdkError("image exceeds 512 KiB".into()));
+        }
+        let asset = Self { id: id.into(), data: STANDARD.encode(bytes) };
+        asset.dimensions()?;
+        Ok(asset)
+    }
+    fn reader(&self) -> Result<image::ImageReader<Cursor<Vec<u8>>>, DeviceSdkError> {
+        if self.data.len() > MAX_ASSET_BYTES.div_ceil(3) * 4 {
+            return Err(DeviceSdkError(format!("image {:?} exceeds 512 KiB", self.id)));
+        }
+        let bytes = STANDARD.decode(&self.data).map_err(|e| DeviceSdkError(format!("image {:?}: {e}", self.id)))?;
+        if bytes.len() > MAX_ASSET_BYTES {
+            return Err(DeviceSdkError("decoded asset bytes exceed 512 KiB".into()));
+        }
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| DeviceSdkError(e.to_string()))?;
+        if !matches!(reader.format(), Some(image::ImageFormat::Png | image::ImageFormat::Jpeg)) {
+            return Err(DeviceSdkError("UI images must be PNG or JPEG".into()));
+        }
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(4096);
+        limits.max_image_height = Some(4096);
+        limits.max_alloc = Some(16 * 1024 * 1024);
+        reader.limits(limits);
+        Ok(reader)
+    }
+    pub fn dimensions(&self) -> Result<[u32; 2], DeviceSdkError> {
+        let (w, h) =
+            self.reader()?.into_dimensions().map_err(|e| DeviceSdkError(format!("image {:?}: {e}", self.id)))?;
+        if w == 0 || h == 0 || w > 4096 || h > 4096 || u64::from(w) * u64::from(h) > MAX_IMAGE_PIXELS {
+            return Err(DeviceSdkError(format!("image {:?} exceeds dimension/pixel limits", self.id)));
+        }
+        Ok([w, h])
+    }
+    /// Decode with limits off the audio thread; callers cache these pixels/textures.
+    pub fn decode_rgba(&self) -> Result<(Vec<u8>, [usize; 2]), DeviceSdkError> {
+        let [w, h] = self.dimensions()?;
+        let rgba = self.reader()?.decode().map_err(|e| DeviceSdkError(format!("image {:?}: {e}", self.id)))?.to_rgba8();
+        Ok((rgba.into_raw(), [w as usize, h as usize]))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UiValue {
+    Number(f32),
+    Expression(Box<UiExpression>),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum UiExpression {
+    Parameter {
+        parameter: String,
+        #[serde(default)]
+        normalized: bool,
+        #[serde(default)]
+        logarithmic: bool,
+    },
+    Add {
+        a: UiValue,
+        b: UiValue,
+    },
+    Multiply {
+        a: UiValue,
+        b: UiValue,
+    },
+    Sin {
+        value: UiValue,
+    },
+    Cos {
+        value: UiValue,
+    },
+}
+impl From<f32> for UiValue {
+    fn from(value: f32) -> Self {
+        Self::Number(value)
+    }
+}
+impl UiValue {
+    pub fn parameter(id: impl Into<String>, normalized: bool) -> Self {
+        Self::Expression(Box::new(UiExpression::Parameter { parameter: id.into(), normalized, logarithmic: false }))
+    }
+    pub fn normalized(id: impl Into<String>, logarithmic: bool) -> Self {
+        Self::Expression(Box::new(UiExpression::Parameter { parameter: id.into(), normalized: true, logarithmic }))
+    }
+    pub fn sin(self) -> Self {
+        Self::Expression(Box::new(UiExpression::Sin { value: self }))
+    }
+    pub fn cos(self) -> Self {
+        Self::Expression(Box::new(UiExpression::Cos { value: self }))
+    }
+    pub fn evaluate(&self, parameter: &impl Fn(&str, bool, bool) -> f64) -> f32 {
+        self.eval(parameter, 0).clamp(-16384.0, 16384.0) as f32
+    }
+    fn eval(&self, parameter: &impl Fn(&str, bool, bool) -> f64, depth: usize) -> f64 {
+        if depth > 16 {
+            return 0.0;
+        }
+        let v = match self {
+            Self::Number(v) => *v as f64,
+            Self::Expression(expr) => match expr.as_ref() {
+                UiExpression::Parameter { parameter: id, normalized, logarithmic } => {
+                    parameter(id, *normalized, *logarithmic)
+                }
+                UiExpression::Add { a, b } => a.eval(parameter, depth + 1) + b.eval(parameter, depth + 1),
+                UiExpression::Multiply { a, b } => a.eval(parameter, depth + 1) * b.eval(parameter, depth + 1),
+                UiExpression::Sin { value } => value.eval(parameter, depth + 1).sin(),
+                UiExpression::Cos { value } => value.eval(parameter, depth + 1).cos(),
+            },
+        };
+        if v.is_finite() { v.clamp(-1e12, 1e12) } else { 0.0 }
+    }
+}
+impl std::ops::Add for UiValue {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self::Expression(Box::new(UiExpression::Add { a: self, b: rhs }))
+    }
+}
+impl std::ops::Mul for UiValue {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        Self::Expression(Box::new(UiExpression::Multiply { a: self, b: rhs }))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageFit {
+    #[default]
+    Stretch,
+    Contain,
+    Cover,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Draw {
+    Rect {
+        rect: [UiValue; 4],
+        color: Color,
+        #[serde(default)]
+        radius: f32,
+    },
+    Circle {
+        center: [UiValue; 2],
+        radius: UiValue,
+        color: Color,
+    },
+    Line {
+        from: [UiValue; 2],
+        to: [UiValue; 2],
+        color: Color,
+        #[serde(default = "one")]
+        width: f32,
+    },
+    Path {
+        points: Vec<[UiValue; 2]>,
+        color: Color,
+        #[serde(default = "one")]
+        width: f32,
+        #[serde(default)]
+        closed: bool,
+        #[serde(default)]
+        fill: Option<Color>,
+    },
+    Arc {
+        center: [UiValue; 2],
+        radius: UiValue,
+        start: UiValue,
+        end: UiValue,
+        color: Color,
+        #[serde(default = "one")]
+        width: f32,
+    },
+    Text {
+        position: [UiValue; 2],
+        text: String,
+        color: Color,
+        size: f32,
+        #[serde(default)]
+        parameter: Option<String>,
+        #[serde(default)]
+        decimals: usize,
+    },
+    Image {
+        asset: String,
+        rect: [UiValue; 4],
+        #[serde(default = "uv_default")]
+        uv: [f32; 4],
+        #[serde(default = "white")]
+        tint: Color,
+        #[serde(default)]
+        tile_size: Option<[f32; 2]>,
+        #[serde(default)]
+        fit: ImageFit,
+    },
+    Gradient {
+        rect: [UiValue; 4],
+        colors: [Color; 4],
+    },
+}
+impl Draw {
+    pub fn rect(rect: [f32; 4], color: Color) -> Self {
+        Self::Rect { rect: rect.map(UiValue::from), color, radius: 0.0 }
+    }
+    pub fn image(asset: impl Into<String>, rect: [f32; 4]) -> Self {
+        Self::Image {
+            asset: asset.into(),
+            rect: rect.map(UiValue::from),
+            uv: uv_default(),
+            tint: white(),
+            tile_size: None,
+            fit: ImageFit::Stretch,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiGesture {
+    #[default]
+    Drag,
+    Position,
+    Toggle,
+    Momentary,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiBinding {
+    pub parameter: String,
+    #[serde(default)]
+    pub logarithmic: bool,
+}
+impl UiBinding {
+    pub fn new(parameter: impl Into<String>) -> Self {
+        Self { parameter: parameter.into(), logarithmic: false }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomControl {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub tooltip: String,
+    pub bounds: [f32; 4],
+    #[serde(default)]
+    pub gesture: UiGesture,
+    #[serde(default)]
+    pub x: Option<UiBinding>,
+    #[serde(default)]
+    pub y: Option<UiBinding>,
+    #[serde(default)]
+    pub drawing: Vec<Draw>,
+}
+
+impl DeviceUi {
+    pub(crate) fn validate(&self, parameters: &[Parameter]) -> Result<(), DeviceSdkError> {
+        let fail = |s: &str| DeviceSdkError(format!("device UI: {s}"));
+        if self.viewport_size.is_some_and(|size| size.iter().any(|v| !v.is_finite() || !(24.0..=8192.0).contains(v))) {
+            return Err(fail("viewport dimensions exceed limits"));
+        }
+        if self.size.iter().any(|v| !v.is_finite() || !(24.0..=8192.0).contains(v))
+            || self.controls.len() > 128
+            || self.assets.len() > 32
+            || self.hidden_parameters.len() > 128
+        {
+            return Err(fail("canvas dimensions or item count exceed limits"));
+        }
+        let ids = parameters.iter().map(|p| p.id.as_str()).collect::<HashSet<_>>();
+        let mut asset_ids = HashSet::new();
+        let mut pixels = 0u64;
+        let mut bytes = 0usize;
+        for asset in &self.assets {
+            if asset.id.is_empty() || asset.id.len() > 128 || !asset_ids.insert(asset.id.as_str()) {
+                return Err(fail("image ids must be unique and 1..128 bytes"));
+            }
+            let [w, h] = asset.dimensions()?;
+            pixels += u64::from(w) * u64::from(h);
+            bytes = bytes
+                .checked_add(STANDARD.decode(&asset.data).map_err(|e| fail(&e.to_string()))?.len())
+                .ok_or_else(|| fail("asset size overflow"))?;
+            if pixels > 4_000_000 || bytes > MAX_ASSETS_BYTES {
+                return Err(fail("combined image assets exceed byte/pixel limits"));
+            }
+        }
+        if self.hidden_parameters.iter().any(|id| !ids.contains(id.as_str())) {
+            return Err(fail("hidden row refers to unknown parameter"));
+        }
+        let count = self.controls.iter().try_fold(self.layers.len(), |total, c| {
+            total.checked_add(c.drawing.len()).ok_or_else(|| fail("drawing count overflow"))
+        })?;
+        if count > MAX_DRAW_COMMANDS {
+            return Err(fail("more than 1024 drawing commands"));
+        }
+        let mut controls = HashSet::new();
+        let mut expression_budget = 32768usize;
+        for c in &self.controls {
+            let [x, y, w, h] = c.bounds;
+            if c.id.is_empty()
+                || c.id.len() > 128
+                || !controls.insert(c.id.as_str())
+                || c.name.is_empty()
+                || c.name.len() > 128
+                || c.tooltip.len() > 1024
+                || c.bounds.iter().any(|v| !v.is_finite())
+                || x < 0.0
+                || y < 0.0
+                || w < 16.0
+                || h < 16.0
+                || x + w > self.size[0]
+                || y + h > self.size[1]
+            {
+                return Err(fail("invalid custom control id/name/bounds"));
+            }
+            if c.x.is_none() && c.y.is_none() {
+                return Err(fail("custom control needs a parameter binding"));
+            }
+            if c.x.as_ref().zip(c.y.as_ref()).is_some_and(|(x, y)| x.parameter == y.parameter) {
+                return Err(fail("X and Y must bind different parameters"));
+            }
+            if matches!(c.gesture, UiGesture::Toggle | UiGesture::Momentary) && (c.x.is_none() || c.y.is_some()) {
+                return Err(fail("button gestures require only X binding"));
+            }
+            for binding in [c.x.as_ref(), c.y.as_ref()].into_iter().flatten() {
+                let p = parameters
+                    .iter()
+                    .find(|p| p.id == binding.parameter)
+                    .ok_or_else(|| fail("unknown bound parameter"))?;
+                if p.min >= p.max || (binding.logarithmic && p.min <= 0.0) {
+                    return Err(fail("binding needs a nonempty range; logarithmic range must be positive"));
+                }
+            }
+        }
+        for draw in self.layers.iter().chain(self.controls.iter().flat_map(|c| &c.drawing)) {
+            draw.validate(&ids, &asset_ids, &mut expression_budget)?;
+        }
+        Ok(())
+    }
+}
+impl UiValue {
+    fn validate(&self, ids: &HashSet<&str>, depth: usize, budget: &mut usize) -> Result<(), DeviceSdkError> {
+        let fail = || DeviceSdkError("UI expression: invalid value, parameter or complexity".into());
+        if depth > 16 || *budget == 0 {
+            return Err(fail());
+        }
+        *budget -= 1;
+        match self {
+            Self::Number(v) => {
+                if !v.is_finite() || v.abs() > 1e6 {
+                    return Err(fail());
+                }
+            }
+            Self::Expression(expr) => match expr.as_ref() {
+                UiExpression::Parameter { parameter, .. } => {
+                    if !ids.contains(parameter.as_str()) {
+                        return Err(fail());
+                    }
+                }
+                UiExpression::Add { a, b } | UiExpression::Multiply { a, b } => {
+                    a.validate(ids, depth + 1, budget)?;
+                    b.validate(ids, depth + 1, budget)?;
+                }
+                UiExpression::Sin { value } | UiExpression::Cos { value } => value.validate(ids, depth + 1, budget)?,
+            },
+        }
+        Ok(())
+    }
+}
+impl Draw {
+    fn validate(&self, ids: &HashSet<&str>, assets: &HashSet<&str>, budget: &mut usize) -> Result<(), DeviceSdkError> {
+        let fail = |s: &str| DeviceSdkError(format!("UI drawing: {s}"));
+        let width = |v: f32| {
+            if v.is_finite() && (0.0..=128.0).contains(&v) { Ok(()) } else { Err(fail("invalid stroke width/radius")) }
+        };
+        let values: Vec<&UiValue> = match self {
+            Self::Rect { rect, radius, .. } => {
+                width(*radius)?;
+                rect.iter().collect()
+            }
+            Self::Gradient { rect, .. } => rect.iter().collect(),
+            Self::Circle { center, radius, .. } => center.iter().chain([radius]).collect(),
+            Self::Line { from, to, width: w, .. } => {
+                width(*w)?;
+                from.iter().chain(to).collect()
+            }
+            Self::Path { points, width: w, fill, .. } => {
+                width(*w)?;
+                if points.len() < if fill.is_some() { 3 } else { 2 } || points.len() > 256 {
+                    return Err(fail("path requires 2..256 points, at least 3 when filled"));
+                }
+                points.iter().flatten().collect()
+            }
+            Self::Arc { center, radius, start, end, width: w, .. } => {
+                width(*w)?;
+                center.iter().chain([radius, start, end]).collect()
+            }
+            Self::Text { position, text, size, parameter, decimals, .. } => {
+                if text.len() > 1024
+                    || !size.is_finite()
+                    || !(8.0..=48.0).contains(size)
+                    || *decimals > 8
+                    || parameter.as_ref().is_some_and(|p| !ids.contains(p.as_str()))
+                {
+                    return Err(fail("invalid text/font/parameter"));
+                }
+                position.iter().collect()
+            }
+            Self::Image { asset, rect, uv, tile_size, .. } => {
+                if !assets.contains(asset.as_str())
+                    || uv.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+                    || uv[2] <= uv[0]
+                    || uv[3] <= uv[1]
+                    || tile_size.is_some_and(|s| s.iter().any(|v| !v.is_finite() || !(1.0..=4096.0).contains(v)))
+                {
+                    return Err(fail("invalid asset reference, UV or tile size"));
+                }
+                rect.iter().collect()
+            }
+        };
+        for value in values {
+            value.validate(ids, 0, budget)?;
+        }
+        Ok(())
+    }
+}

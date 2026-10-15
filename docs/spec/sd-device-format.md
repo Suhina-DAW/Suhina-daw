@@ -1,12 +1,14 @@
 ---
-description: Version 1 of the data-only Suhina device graph format, SDK, track loading, and generated controls
+description: Version 2 of the data-only Suhina device graph format, SDK, track loading, and generated controls
 read_when: .sd, Suhina device, device graph, device SDK, community effect, visual node, device UI
 type: spec
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
+  - crates/device-sdk/src/graph.rs
+  - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/examples/gain.rs
   - crates/model/src/lib.rs
   - crates/project-file/src/lib.rs
@@ -22,35 +24,50 @@ An `.sd` file describes a device as data. It contains no Rust source, executable
 assets. The Rust SDK builds and validates the graph, writes the JSON file and can prepare the
 supported graph for audio processing.
 
-## Version 1
+## Version 2
 
-The top-level object contains `format: "suhina-device"`, `version: 1`, a `device` object, a
-`nodes` list and `connections`. Connections determine processing order regardless of node storage
-order. The device has a stable id, a display name, a role
-(`effect` or `instrument`) and parameter declarations (`id`, `name`, `min`, `max`, `default`,
-and a generated UI control). The SDK currently generates sliders from those parameter declarations.
-Each node may set `visible: false` to hide it from the read-only graph display; this does not
-remove it from audio processing. Nodes are visible by default, including in files written before
-this field was added. The detail panel draws visible nodes in signal-flow order.
+The top-level object contains `format: "suhina-device"`, `version: 2`, a `device` object,
+`nodes` and `connections`. The reader also accepts version 1 linear input/gain/output graphs;
+writing canonical JSON upgrades them to version 2 without changing their sound.
+The device has a stable id, name, role and parameters (`id`, `name`, `min`, `max`, `default`,
+`control`, `unit`). Controls include `slider` (default), `log_slider` (positive range), `integer`
+(integer range/default) and `toggle` (range 0..1, integer default). Unit is display text, at most
+128 bytes, default empty. Parameter commands and the processor apply the same clamping/rounding.
 
-Version 1 executes effects only. Its supported node kinds are `audio_input`, `gain` and
-`audio_output`. A gain node names one declared parameter. Connections join node ids; ports are
-stereo audio and implicit. Graphs are linear: exactly one input and output, every node lies on
-the path between them, and nodes have at most one input and output.
+Each node has `id`, `kind`, kind-specific configuration and `visible` (default true).
+Hidden nodes still process; the UI shows visible nodes in dependency order. It is a read-only
+list of nodes, not an editor of the connections. Sequential arrows appear only for linear graphs.
 
-The reader rejects files larger than 256 KiB, graphs above 128 nodes and 127 connections, and
-graphs with more than 128 parameters,
-invalid parameter ranges, duplicate ids, missing node or parameter references, unsupported
-versions and invalid graph topology. Instrument graphs can be represented and saved, but version 1
-does not execute them. A prepared effect is created off the audio thread; parameter updates use
-parameter indices and audio processing allocates no memory.
+Connections have `from`, `to`, `from_port` (default `out`) and `to_port` (default `in`).
+Ports carry stereo sample-rate signals; source ports `left` and `right` broadcast one channel.
+Constants and parameters broadcast control values. Each input accepts at most one connection;
+branching is allowed, summing requires add/mix. Exactly one audio input and output is required,
+and every node must contribute to the output. Missing references, duplicate ids, invalid ports,
+missing required inputs and cycles are rejected with node/port diagnostics. Only the `in` port
+of sample_delay/delay breaks a cycle; its input is written after all current-frame evaluations.
+Delay time is an ordinary dependency, so a cycle through it is rejected.
+
+File size is capped at 2 MiB, graphs at 128 nodes, 640 connections and 128 parameters.
+Shared delay history is capped at 2,000,000 stereo frames and validated at 384 kHz, before
+allocating history. Accepted graphs fit all supported rates (8..384 kHz). Non-finite signals
+become zero and finite results are limited to the f32 range after every node.
+
+Compilation with `compile_at(sample_rate)` prepares all buffers and DSP state off the audio
+thread. `process_context` receives the engine transport (tempo, beat, playing); `process`
+uses stopped transport defaults. Oscillators and delays continue to advance while stopped.
+Parameter updates and processing allocate nothing. `reset` clears history without changing
+parameter values. Offline and real-time rendering run this same processor; graph swaps keep
+state when the embedded graph is unchanged, including effect tails and oscillator phase.
+
+See the complete [node reference](sdk-nodes.md) and the [authoring guide](../device-sdk.md),
+including the machine-readable catalog for AI agents.
 
 ## Example
 
 ```json
 {
   "format": "suhina-device",
-  "version": 1,
+  "version": 2,
   "device": {
     "id": "org.example.gain",
     "name": "Example Gain",
@@ -80,7 +97,67 @@ Parameter values are project state and can be changed with `device.setParam` or 
 sliders in the detail panel. The `AudioEffect` panel reserves space for each slider's value so
 controls stay inside narrow device cards.
 
-Only effects execute. Instrument role can be represented but cannot be inserted or rendered yet.
-SDK-authored nodes select from the supported built-in node kinds; arbitrary Rust processors and
-custom executable UI code are not loaded into Suhina. Branching, feedback, custom DSP nodes, and
-freely arranged graph editing remain future work.
+Only effects execute. Instrument role remains representable but cannot be inserted or rendered.
+The `.sd` file contains data only. FFT, sample assets, oversampled nonlinear processing and
+freely arranged graph editing are not implemented; accepted graphs need none of these to load.
+
+## Custom parameter controls and smoothing
+
+Parameter `control` accepts `slider`, `log_slider`, `integer`, `toggle`, `knob`, `log_knob`,
+`number`, `vertical_slider`, `button`, `choice` and `radio`. Button is a persistent on/off
+control. Choice/radio use integer values 0..N-1 and `ui.options` (N nonempty labels, at most
+128 labels of 128 bytes). Log controls require a positive minimum. Integer/toggle/button and
+choice/radio values stay discrete. All edits use `device.setParam` and persist in the project.
+
+Optional `ui` settings: `tooltip` (up to 1024 bytes), `group` (label prefix, up to 128 bytes),
+`step` (nonnegative finite value, default 0), `decimals` (0..8, default 3), and `options`.
+Rows use the selected control's height and the panel scrolls when controls exceed its viewport.
+Executable UI code and arbitrary pixel layouts are not part of the data format.
+
+`smoothing_ms` defaults to 20 ms (including files without this field), accepts 0..1000 ms,
+and ramps continuous parameter changes on the audio thread without allocation. Initial values
+are applied immediately before the first frame. Reset settles to the target value. Discrete
+controls switch immediately; use a `smooth` signal node when a toggle drives gain. This reduces
+parameter step clicks; unstable feedback, discontinuous mode switches and underruns still need
+an effect-specific solution. Delay-time ramps can change pitch as the read head moves.
+
+Generate a control gallery with
+`cargo run -p suhina-device-sdk --example ui_controls -- target/sdk-examples/ui-controls.sd`.
+
+Example parameter UI declaration:
+
+```json
+{"id":"mode","name":"Mode","min":0,"max":2,"default":1,"control":"choice",
+ "ui":{"options":["Off","Clean","Warm"],"group":"Tone","tooltip":"Select the processing mode"}}
+```
+
+## Visual styling and placement
+
+`ui.size` is an optional [width,height] in logical pixels for the entire parameter cell
+(24..4096 wide, 24..4096 high). `ui.position` is optional [x,y] relative to the start of the
+parameter area, after the node list (0..8192). Unpositioned cells stack after earlier cells.
+Both axes scroll when the authored canvas exceeds the viewport. Explicit cells may overlap;
+parameters later in the array draw later. Layout is stored as data in the embedded graph.
+
+Optional RGB triplets `ui.accent`, `ui.background`, `ui.panel_color` and `ui.text_color` style controls, frames
+and text. Omitted colours follow the Suhina theme. `ui.font_size` is 8..48 (default 12),
+`ui.monospace` selects the font family, and `ui.corner_radius` is 0..128 (default 4).
+`ui.shape` is rounded (default), square or pill; knobs use their circular body by default
+and a square body for square. `ui.label_position` is left (default), top or hidden;
+`ui.show_value` defaults to true. Knob size follows the available control area.
+
+These fields are optional and old files retain automatic placement. Authors must leave enough
+cell space for labels and controls. Untrusted geometry is checked before UI rendering;
+there is no executable UI code, external font loading or arbitrary drawing script.
+
+`background` colours widget bodies; `panel_color` colours the entire cell independently.
+
+For a compact knob use `size: [40,40]`, `label_position: "hidden"`, `show_value: false`.
+
+## Authored canvases and embedded images
+
+Optional `device.ui` adds a canvas with backgrounds, embedded PNG/JPEG images, drawing expressions
+and custom parameter controls. Canvas `size` defaults to `[640,240]`; optional `viewport_size`
+(default null, automatic) independently sets the preferred scrollable body dimensions. See the [custom panel contract](sdk-custom-ui.md) for every field,
+gesture and resource limit. Graphics are evaluated on the UI thread and are stored in the same
+`.sd` as the audio graph. They do not change its DSP execution contract.

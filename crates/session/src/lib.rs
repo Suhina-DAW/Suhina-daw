@@ -188,7 +188,7 @@ pub struct Session {
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
     /// Parameter whose live drag has already recorded its single undo snapshot.
-    param_gesture: Option<(suhina_model::TrackId, usize, usize)>,
+    param_gesture: Option<(suhina_model::TrackId, usize, String)>,
     /// The project's plug-ins, running while it plays (ADR 0006).
     pub(crate) plugins: rack::Rack,
     /// The project's decoded audio, by the key its regions name (ADR 0011).
@@ -550,9 +550,20 @@ impl Session {
     /// does not validate, the project is restored and an error is returned.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value, CommandError> {
         let spec = commands().iter().find(|c| c.id == id).ok_or_else(|| unknown_command(id))?;
+        let explicit_gesture = if id == "device.setParam" {
+            match params.get("gesture") {
+                None => None,
+                Some(Value::String(s)) if !s.is_empty() && s.len() <= 128 => Some(s.as_str()),
+                Some(_) => return Err("gesture must be 1..128 bytes of text".into()),
+            }
+        } else {
+            None
+        };
         let continuous_param_edit =
             id == "device.setParam" && params.get("continuous").and_then(Value::as_bool) == Some(true);
-        if (spec.kind == CommandKind::Edit && !continuous_param_edit) || spec.kind == CommandKind::History {
+        if (spec.kind == CommandKind::Edit && !continuous_param_edit && explicit_gesture.is_none())
+            || spec.kind == CommandKind::History
+        {
             self.param_gesture = None;
         }
         if !(params.is_object() || params.is_null()) {
@@ -589,8 +600,17 @@ impl Session {
                         if self.project != before {
                             self.changes = self.changes.wrapping_add(1);
                             let change = self.param_edit.take();
-                            let gesture = change.map(|change| (change.track, change.device, change.param));
-                            if !continuous_param_edit || self.param_gesture != gesture {
+                            let gesture = change.map(|change| {
+                                (
+                                    change.track,
+                                    change.device,
+                                    explicit_gesture.map_or_else(
+                                        || format!("parameter:{}", change.param),
+                                        |key| format!("custom:{key}"),
+                                    ),
+                                )
+                            });
+                            if (!continuous_param_edit && explicit_gesture.is_none()) || self.param_gesture != gesture {
                                 self.push_undo(before);
                             }
                             self.param_gesture = continuous_param_edit.then_some(gesture).flatten();
@@ -603,6 +623,9 @@ impl Session {
                             if !sent {
                                 self.update_player()?;
                             }
+                        }
+                        if !continuous_param_edit {
+                            self.param_gesture = None;
                         }
                         Ok(value)
                     }

@@ -3,10 +3,13 @@ description: A data-only versioned graph format and Rust SDK for community-autho
 read_when: .sd, Suhina device SDK, device graph, community device, graph effect
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
+  - crates/device-sdk/src/nodes.rs
+  - crates/device-sdk/src/graph.rs
+  - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/examples/gain.rs
 ---
 
@@ -19,8 +22,8 @@ covers:
 ## Context
 
 Issue #300 asks for a Rust SDK that can create a shareable `.sd` device file. The file describes
-the device and signal flow as data, without embedding Rust source. Version 1 loads linear effect
-graphs into tracks and draws their nodes and parameter controls in the detail panel.
+the device and signal flow as data, without embedding Rust source. Version 2 loads composable effect graphs into tracks and draws their nodes and parameter
+controls in the detail panel. Version 1 gain graphs remain readable.
 
 ## Decision
 
@@ -28,22 +31,45 @@ graphs into tracks and draws their nodes and parameter controls in the detail pa
    connections. It contains no executable code.
 2. `suhina-device-sdk` is a Rust crate that builds, validates, reads and writes this format and
    prepares supported graphs for processing.
-3. Version 1 supports linear stereo effect graphs with audio input, gain and audio output nodes.
-   It can represent an instrument role, but does not execute instrument graphs yet.
+3. Version 2 supports sample-rate stereo signal graphs: branching, explicit input/output ports,
+   arithmetic, channel operations, modulation, filters, envelope detection and delays. Delayed
+   input edges break feedback cycles; undelayed cycles are rejected. Instrument role remains
+   representable, but only effects execute. Version 1 linear gain files stay readable.
+   The [node reference](../spec/sdk-nodes.md) specifies every supported node.
 4. Graph validation and compilation happen off the audio thread. Prepared processing uses fixed
-   graph state and does not allocate. Version 1 caps file size, nodes, parameters, and connections.
+   graph state and does not allocate. Validation caps file size, nodes, parameters, connections and total delay history.
+   Delay history is budgeted at 384 kHz so accepted files fit every supported sample rate.
 5. `device.addSd` loads a validated effect onto a track, and the browser accepts `.sd` files as
    effects. The project embeds the graph JSON in the device state, independent of the source file.
    The engine compiles it while building the renderer and swaps graphs through the existing edit
    path.
-6. Parameter declarations generate slider controls in the device detail panel. The panel also
+6. Parameter declarations generate slider, logarithmic slider, integer and toggle controls in the device detail panel. The panel also
    draws the graph's visible nodes as a read-only signal-flow view. SDK authors can hide
    implementation nodes with `visible: false`; hidden nodes still run. Editing node connections in
    the UI is deferred. The panel labels these as `AudioEffect` to distinguish them from plug-ins.
 
 ## Consequences
 
-- SDK authors can create a data-only gain effect, its parameter UI, and its visual node flow.
+- SDK authors compose effects from supported DSP primitives and distribute one self-contained
+  `.sd` file, with generated parameter UI and a read-only node list.
+- Node contracts are available in the SDK's JSON catalog and the read command `devices.sdNodes`
+  through MCP command dispatch. The same catalog generates the node reference table;
+  tests reject stale documentation. [The authoring guide](../device-sdk.md) includes AI workflows.
 - The graph runs in offline and real-time chains without loading community Rust code.
-- Version 1 is intentionally a linear effect graph; branching, feedback, executable custom DSP,
-  instruments, asset packaging and graph editing require later decisions and implementation.
+- Executable custom DSP, instruments, spectral processing, oversampling and
+  graph editing remain outside this data-only effect implementation. Delay memory and node
+  counts are bounded, but graph admission is not a hardware CPU deadline guarantee.
+
+
+Custom UI controls and configurable parameter smoothing are described in the
+[format specification](../spec/sd-device-format.md). Generate a gallery with
+`cargo run -p suhina-device-sdk --example ui_controls -- target/sdk-examples/ui-controls.sd`.
+
+Parameter UI metadata also supports bounded cell size/position, RGB theme overrides, font size
+and family, shape and label placement. The renderer scrolls the authored canvas, and the SDK
+rejects non-finite or excessive geometry before loading. The format remains data-only.
+
+An optional data-only [custom canvas](../spec/sdk-custom-ui.md) now packages embedded PNG/JPEG
+images, vector drawing expressions and parameter input bindings. Authors program these with Rust
+SDK types; the file contains no executable extension. The UI caches parsed scenes and bounded
+image textures, performs decoding with allocation limits, and sends edits through `device.setParam`.

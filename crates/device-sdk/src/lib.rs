@@ -1,7 +1,6 @@
 //! Build, validate, save, and run data-only Suhina device graphs (`.sd`).
 //!
-//! Version 1 supports linear effect graphs made from audio input, gain, and audio output
-//! nodes. A validated graph compiles off the audio thread into a processor whose `process`
+//! Version 2 supports composable stereo signal graphs, modulation and delayed feedback. A validated graph compiles off the audio thread into a processor whose `process`
 //! method performs no allocation.
 
 use std::fmt;
@@ -10,12 +9,21 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+mod graph;
+mod nodes;
+mod runtime;
+pub mod ui;
+pub use nodes::{FilterMode, NODE_CATALOG, NodeInfo, NodeKind, PortInfo, Waveform, node_reference_markdown};
+pub use runtime::PreparedEffect;
+pub use suhina_device_api::ProcessContext;
+
 pub const EXTENSION: &str = "sd";
 pub const FORMAT: &str = "suhina-device";
-pub const VERSION: u32 = 1;
-pub const MAX_FILE_BYTES: usize = 256 * 1024;
+pub const VERSION: u32 = 2;
+pub const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NODES: usize = 128;
-pub const MAX_CONNECTIONS: usize = MAX_NODES - 1;
+pub const MAX_CONNECTIONS: usize = MAX_NODES * 5;
+pub const MAX_DELAY_FRAMES: usize = 2_000_000;
 pub const MAX_PARAMETERS: usize = 128;
 const MAX_TEXT_BYTES: usize = 128;
 
@@ -27,6 +35,7 @@ pub struct DeviceGraph {
     pub parameters: Vec<Parameter>,
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
+    pub ui: Option<ui::DeviceUi>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +53,9 @@ pub struct Parameter {
     pub max: f64,
     pub default: f64,
     pub control: ParameterControl,
+    pub unit: String,
+    pub ui: ParameterUi,
+    pub smoothing_ms: f64,
 }
 
 /// How the parameter is presented in the generated device panel.
@@ -52,6 +64,81 @@ pub struct Parameter {
 pub enum ParameterControl {
     #[default]
     Slider,
+    LogSlider,
+    Integer,
+    Toggle,
+    Knob,
+    LogKnob,
+    Number,
+    VerticalSlider,
+    Button,
+    Choice,
+    Radio,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelPosition {
+    #[default]
+    Left,
+    Top,
+    Hidden,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlShape {
+    #[default]
+    Rounded,
+    Square,
+    Pill,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ParameterUi {
+    pub tooltip: String,
+    pub group: String,
+    pub options: Vec<String>,
+    pub step: f64,
+    pub decimals: usize,
+    pub size: Option<[f32; 2]>,
+    pub position: Option<[f32; 2]>,
+    pub accent: Option<[u8; 3]>,
+    pub background: Option<[u8; 3]>,
+    pub panel_color: Option<[u8; 3]>,
+    pub text_color: Option<[u8; 3]>,
+    pub font_size: f32,
+    pub monospace: bool,
+    pub corner_radius: f32,
+    pub shape: ControlShape,
+    pub label_position: LabelPosition,
+    pub show_value: bool,
+}
+impl Default for ParameterUi {
+    fn default() -> Self {
+        Self {
+            tooltip: String::new(),
+            group: String::new(),
+            options: Vec::new(),
+            step: 0.0,
+            decimals: 3,
+            size: None,
+            position: None,
+            accent: None,
+            background: None,
+            panel_color: None,
+            text_color: None,
+            font_size: 12.0,
+            monospace: false,
+            corner_radius: 4.0,
+            shape: ControlShape::Rounded,
+            label_position: LabelPosition::Left,
+            show_value: true,
+        }
+    }
+}
+fn default_smoothing_ms() -> f64 {
+    20.0
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,17 +148,21 @@ pub struct Node {
     pub visible: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeKind {
-    AudioInput,
-    Gain { parameter: String },
-    AudioOutput,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Connection {
     pub from: String,
     pub to: String,
+    #[serde(default = "default_output_port")]
+    pub from_port: String,
+    #[serde(default = "default_input_port")]
+    pub to_port: String,
+}
+fn default_output_port() -> String {
+    "out".into()
+}
+fn default_input_port() -> String {
+    "in".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +185,7 @@ impl DeviceGraph {
             parameters: Vec::new(),
             nodes: Vec::new(),
             connections: Vec::new(),
+            ui: None,
         }
     }
 
@@ -137,95 +229,91 @@ impl DeviceGraph {
             {
                 return Err(DeviceSdkError(format!("parameter {:?} has an invalid range or default", parameter.id)));
             }
-        }
-
-        let mut node_ids = std::collections::HashSet::new();
-        let mut inputs = 0;
-        let mut outputs = 0;
-        for node in &self.nodes {
-            if node.id.is_empty() || node.id.len() > MAX_TEXT_BYTES || !node_ids.insert(node.id.as_str()) {
-                return Err(DeviceSdkError("node ids must be unique, non-empty, and at most 128 bytes".into()));
+            if parameter.unit.len() > MAX_TEXT_BYTES {
+                return Err(DeviceSdkError(format!("parameter {:?}: unit exceeds 128 bytes", parameter.id)));
             }
-            match &node.kind {
-                NodeKind::AudioInput => inputs += 1,
-                NodeKind::AudioOutput => outputs += 1,
-                NodeKind::Gain { parameter } if param_ids.contains(parameter.as_str()) => {}
-                NodeKind::Gain { parameter } => {
-                    return Err(DeviceSdkError(format!(
-                        "gain node {:?} refers to missing parameter {parameter:?}",
-                        node.id
-                    )));
-                }
-            }
-        }
-        if inputs != 1 || outputs != 1 {
-            return Err(DeviceSdkError("a graph must have exactly one audio input and one audio output".into()));
-        }
-
-        let mut incoming = std::collections::HashMap::new();
-        let mut outgoing = std::collections::HashMap::new();
-        for connection in &self.connections {
-            if !node_ids.contains(connection.from.as_str()) || !node_ids.contains(connection.to.as_str()) {
-                return Err(DeviceSdkError("a connection refers to a missing node".into()));
-            }
-            if outgoing.insert(connection.from.as_str(), connection.to.as_str()).is_some()
-                || incoming.insert(connection.to.as_str(), connection.from.as_str()).is_some()
+            let ui = &parameter.ui;
+            let minimum_height =
+                ui.font_size + 16.0 + if ui.label_position == LabelPosition::Top { ui.font_size + 4.0 } else { 0.0 };
+            if ui.size.is_some_and(|[w, h]| {
+                !w.is_finite()
+                    || !h.is_finite()
+                    || !(24.0..=4096.0).contains(&w)
+                    || !(minimum_height..=4096.0).contains(&h)
+            }) || ui.position.is_some_and(|p| p.iter().any(|v| !v.is_finite() || !(0.0..=8192.0).contains(v)))
+                || !ui.font_size.is_finite()
+                || !(8.0..=48.0).contains(&ui.font_size)
+                || !ui.corner_radius.is_finite()
+                || !(0.0..=128.0).contains(&ui.corner_radius)
             {
-                return Err(DeviceSdkError(
-                    "version 1 graphs are linear: each node has at most one input and output".into(),
-                ));
+                return Err(DeviceSdkError(format!("parameter {:?}: invalid UI geometry or font", parameter.id)));
+            }
+            if !parameter.smoothing_ms.is_finite()
+                || !(0.0..=1000.0).contains(&parameter.smoothing_ms)
+                || !parameter.ui.step.is_finite()
+                || parameter.ui.step < 0.0
+                || parameter.ui.decimals > 8
+                || parameter.ui.tooltip.len() > 1024
+                || parameter.ui.group.len() > 128
+                || parameter.ui.options.len() > 128
+                || parameter.ui.options.iter().any(|s| s.is_empty() || s.len() > 128)
+            {
+                return Err(DeviceSdkError(format!("parameter {:?}: invalid UI or smoothing settings", parameter.id)));
+            }
+            if matches!(parameter.control, ParameterControl::Choice | ParameterControl::Radio)
+                && (parameter.ui.options.is_empty()
+                    || parameter.min != 0.0
+                    || parameter.max != (parameter.ui.options.len() - 1) as f64)
+            {
+                return Err(DeviceSdkError(format!(
+                    "parameter {:?}: choices require range 0..options.len()-1",
+                    parameter.id
+                )));
+            }
+            let discrete = matches!(
+                parameter.control,
+                ParameterControl::Integer
+                    | ParameterControl::Toggle
+                    | ParameterControl::Button
+                    | ParameterControl::Choice
+                    | ParameterControl::Radio
+            );
+            if (discrete && [parameter.min, parameter.max, parameter.default].iter().any(|v| v.fract() != 0.0))
+                || (matches!(parameter.control, ParameterControl::Toggle | ParameterControl::Button)
+                    && (parameter.min != 0.0 || parameter.max != 1.0))
+                || (matches!(parameter.control, ParameterControl::LogSlider | ParameterControl::LogKnob)
+                    && parameter.min <= 0.0)
+            {
+                return Err(DeviceSdkError(format!(
+                    "parameter {:?}: range/default incompatible with control",
+                    parameter.id
+                )));
             }
         }
-        let input = self.nodes.iter().find(|node| node.kind == NodeKind::AudioInput).map(|node| node.id.as_str());
-        let output = self.nodes.iter().find(|node| node.kind == NodeKind::AudioOutput).map(|node| node.id.as_str());
-        let (Some(mut current), Some(output)) = (input, output) else {
-            return Err(DeviceSdkError("graph input or output is missing".into()));
-        };
-        if incoming.contains_key(current) || outgoing.contains_key(output) {
-            return Err(DeviceSdkError("audio input and output must be the endpoints of the graph".into()));
+
+        if let Some(ui) = &self.ui {
+            ui.validate(&self.parameters)?;
         }
-        let mut visited = 1;
-        while let Some(next) = outgoing.get(current) {
-            current = next;
-            visited += 1;
-            if visited > self.nodes.len() {
-                return Err(DeviceSdkError("graph contains a cycle".into()));
-            }
-        }
-        if current != output || visited != self.nodes.len() {
-            return Err(DeviceSdkError("every node must lie on the path from audio input to audio output".into()));
-        }
+        self.validate_nodes()?;
+        self.execution_order()?;
+        self.delay_budget(384_000.0)?;
         Ok(())
     }
 
-    /// The nodes in signal-flow order. The graph must be valid before this is called.
+    /// Dependency order; delay input edges are committed after the current frame.
     pub fn ordered_nodes(&self) -> Vec<&Node> {
-        let Some(mut current) =
-            self.nodes.iter().find(|node| node.kind == NodeKind::AudioInput).map(|node| node.id.as_str())
-        else {
-            return Vec::new();
-        };
-        let mut ordered = Vec::with_capacity(self.nodes.len());
-        while ordered.len() < self.nodes.len() {
-            let Some(node) = self.nodes.iter().find(|node| node.id == current) else { break };
-            ordered.push(node);
-            if node.kind == NodeKind::AudioOutput {
-                break;
-            }
-            let Some(next) = self.connections.iter().find(|edge| edge.from == current).map(|edge| edge.to.as_str())
-            else {
-                break;
-            };
-            current = next;
-        }
-        ordered
+        self.execution_order().unwrap_or_default().into_iter().filter_map(|i| self.nodes.get(i)).collect()
     }
 
     pub fn to_sd(&self) -> Result<String, DeviceSdkError> {
         self.validate()?;
         let file = FileV1::from(self);
-        serde_json::to_string_pretty(&file)
-            .map_err(|error| DeviceSdkError(format!("could not encode device graph: {error}")))
+        let text = serde_json::to_string_pretty(&file)
+            .map_err(|error| DeviceSdkError(format!("could not encode device graph: {error}")))?;
+        if text.len() > MAX_FILE_BYTES {
+            return Err(DeviceSdkError("encoded .sd exceeds 2 MiB".into()));
+        }
+        Ok(text)
     }
 
     pub fn from_sd(text: &str) -> Result<Self, DeviceSdkError> {
@@ -234,11 +322,27 @@ impl DeviceGraph {
         }
         let file: FileV1 =
             serde_json::from_str(text).map_err(|error| DeviceSdkError(format!("invalid .sd JSON: {error}")))?;
-        if file.format != FORMAT || file.version != VERSION {
+        if file.format != FORMAT || !(1..=VERSION).contains(&file.version) {
             return Err(DeviceSdkError(format!(
                 "unsupported device format/version: {:?}/{}",
                 file.format, file.version
             )));
+        }
+        if file.version == 1
+            && (file
+                .nodes
+                .iter()
+                .any(|node| !matches!(node.kind, NodeKind::AudioInput | NodeKind::AudioOutput | NodeKind::Gain { .. }))
+                || file.connections.iter().any(|edge| edge.from_port != "out" || edge.to_port != "in"))
+        {
+            return Err(DeviceSdkError("version 1 only supports legacy input/gain/output nodes".into()));
+        }
+        if file.version == 1 {
+            let mut sources = std::collections::HashSet::new();
+            let mut destinations = std::collections::HashSet::new();
+            if file.connections.iter().any(|edge| !sources.insert(&edge.from) || !destinations.insert(&edge.to)) {
+                return Err(DeviceSdkError("version 1 connections must form a linear chain".into()));
+            }
         }
         let graph: Self = file.into();
         graph.validate()?;
@@ -274,61 +378,34 @@ impl DeviceGraph {
         })
     }
 
-    /// Compiles a validated linear graph off the audio thread.
+    /// Prepare at 48 kHz; use compile_at for the actual engine sample rate.
     pub fn compile(&self) -> Result<PreparedEffect, DeviceSdkError> {
+        self.compile_at(48_000.0)
+    }
+    /// Compiles off the audio thread, including bounded delay storage.
+    pub fn compile_at(&self, sample_rate: f64) -> Result<PreparedEffect, DeviceSdkError> {
         self.validate()?;
         if self.role != DeviceRole::Effect {
-            return Err(DeviceSdkError("version 1 executes effect graphs only".into()));
+            return Err(DeviceSdkError("only effect graphs execute".into()));
         }
-        let mut gains = Vec::new();
-        for node in self.ordered_nodes() {
-            if let NodeKind::Gain { parameter } = &node.kind {
-                let index =
-                    self.parameters.iter().position(|item| item.id == *parameter).ok_or_else(|| {
-                        DeviceSdkError(format!("gain node refers to missing parameter {parameter:?}"))
-                    })?;
-                gains.push((index, self.parameters[index].default as f32));
-            }
-        }
-        Ok(PreparedEffect {
-            gains,
-            parameters: self
-                .parameters
-                .iter()
-                .map(|parameter| (parameter.min, parameter.max, parameter.default))
-                .collect(),
-        })
-    }
-}
-
-/// A precompiled effect graph. Construct it before audio processing; processing and indexed
-/// parameter updates do not allocate.
-pub struct PreparedEffect {
-    gains: Vec<(usize, f32)>,
-    parameters: Vec<(f64, f64, f64)>,
-}
-
-impl PreparedEffect {
-    pub fn set_parameter(&mut self, index: usize, value: f64) {
-        let Some((min, max, default)) = self.parameters.get(index) else { return };
-        let value = if value.is_finite() { value.clamp(*min, *max) } else { *default };
-        for (param_index, gain) in &mut self.gains {
-            if *param_index == index {
-                *gain = value as f32;
-            }
-        }
-    }
-
-    pub fn process(&self, interleaved_stereo: &mut [f32]) {
-        for (_, gain) in &self.gains {
-            for sample in interleaved_stereo.iter_mut() {
-                *sample *= *gain;
-            }
-        }
+        PreparedEffect::new(self, sample_rate)
     }
 }
 
 impl Parameter {
+    /// Clamp hostile values and preserve discrete parameter semantics.
+    pub fn clamp(&self, value: f64) -> f64 {
+        let value = if value.is_finite() { value.clamp(self.min, self.max) } else { self.default };
+        match self.control {
+            ParameterControl::Toggle
+            | ParameterControl::Integer
+            | ParameterControl::Button
+            | ParameterControl::Choice
+            | ParameterControl::Radio => value.round().clamp(self.min, self.max),
+            _ => value,
+        }
+    }
+
     pub fn new(id: impl Into<String>, name: impl Into<String>, range: (f64, f64), default: f64) -> Self {
         Self {
             id: id.into(),
@@ -337,11 +414,17 @@ impl Parameter {
             max: range.1,
             default,
             control: ParameterControl::Slider,
+            unit: String::new(),
+            ui: ParameterUi::default(),
+            smoothing_ms: default_smoothing_ms(),
         }
     }
 }
 
 impl Node {
+    pub fn new(id: impl Into<String>, kind: NodeKind) -> Self {
+        Self { id: id.into(), kind, visible: true }
+    }
     pub fn audio_input(id: impl Into<String>) -> Self {
         Self { id: id.into(), kind: NodeKind::AudioInput, visible: true }
     }
@@ -355,7 +438,15 @@ impl Node {
 
 impl Connection {
     pub fn new(from: impl Into<String>, to: impl Into<String>) -> Self {
-        Self { from: from.into(), to: to.into() }
+        Self::ports(from, "out", to, "in")
+    }
+    pub fn ports(
+        from: impl Into<String>,
+        from_port: impl Into<String>,
+        to: impl Into<String>,
+        to_port: impl Into<String>,
+    ) -> Self {
+        Self { from: from.into(), to: to.into(), from_port: from_port.into(), to_port: to_port.into() }
     }
 }
 
@@ -370,6 +461,8 @@ struct FileV1 {
 
 #[derive(Serialize, Deserialize)]
 struct DeviceV1 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ui: Option<ui::DeviceUi>,
     id: String,
     name: String,
     role: DeviceRole,
@@ -385,6 +478,12 @@ struct ParameterV1 {
     default: f64,
     #[serde(default)]
     control: ParameterControl,
+    #[serde(default)]
+    unit: String,
+    #[serde(default)]
+    ui: ParameterUi,
+    #[serde(default = "default_smoothing_ms")]
+    smoothing_ms: f64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -393,7 +492,7 @@ struct NodeV1 {
     #[serde(default = "default_visible", skip_serializing_if = "is_visible")]
     visible: bool,
     #[serde(flatten)]
-    kind: NodeKindV1,
+    kind: NodeKind,
 }
 
 fn default_visible() -> bool {
@@ -404,33 +503,18 @@ fn is_visible(visible: &bool) -> bool {
     *visible
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum NodeKindV1 {
-    AudioInput,
-    Gain { parameter: String },
-    AudioOutput,
-}
-
 impl From<&DeviceGraph> for FileV1 {
     fn from(graph: &DeviceGraph) -> Self {
         let nodes = graph
             .nodes
             .iter()
-            .map(|node| NodeV1 {
-                id: node.id.clone(),
-                visible: node.visible,
-                kind: match &node.kind {
-                    NodeKind::AudioInput => NodeKindV1::AudioInput,
-                    NodeKind::Gain { parameter } => NodeKindV1::Gain { parameter: parameter.clone() },
-                    NodeKind::AudioOutput => NodeKindV1::AudioOutput,
-                },
-            })
+            .map(|node| NodeV1 { id: node.id.clone(), visible: node.visible, kind: node.kind.clone() })
             .collect();
         Self {
             format: FORMAT.into(),
             version: VERSION,
             device: DeviceV1 {
+                ui: graph.ui.clone(),
                 id: graph.id.clone(),
                 name: graph.name.clone(),
                 role: graph.role,
@@ -444,6 +528,9 @@ impl From<&DeviceGraph> for FileV1 {
                         max: parameter.max,
                         default: parameter.default,
                         control: parameter.control,
+                        unit: parameter.unit.clone(),
+                        ui: parameter.ui.clone(),
+                        smoothing_ms: parameter.smoothing_ms,
                     })
                     .collect(),
             },
@@ -456,6 +543,7 @@ impl From<&DeviceGraph> for FileV1 {
 impl From<FileV1> for DeviceGraph {
     fn from(file: FileV1) -> Self {
         Self {
+            ui: file.device.ui,
             id: file.device.id,
             name: file.device.name,
             role: file.device.role,
@@ -470,20 +558,15 @@ impl From<FileV1> for DeviceGraph {
                     max: parameter.max,
                     default: parameter.default,
                     control: parameter.control,
+                    unit: parameter.unit,
+                    ui: parameter.ui,
+                    smoothing_ms: parameter.smoothing_ms,
                 })
                 .collect(),
             nodes: file
                 .nodes
                 .into_iter()
-                .map(|node| Node {
-                    id: node.id,
-                    visible: node.visible,
-                    kind: match node.kind {
-                        NodeKindV1::AudioInput => NodeKind::AudioInput,
-                        NodeKindV1::Gain { parameter } => NodeKind::Gain { parameter },
-                        NodeKindV1::AudioOutput => NodeKind::AudioOutput,
-                    },
-                })
+                .map(|node| Node { id: node.id, visible: node.visible, kind: node.kind })
                 .collect(),
             connections: file.connections,
         }
@@ -504,7 +587,8 @@ mod tests {
 
     #[test]
     fn gain_graph_round_trips_and_processes_audio() {
-        let graph = gain_graph();
+        let mut graph = gain_graph();
+        graph.parameters[0].smoothing_ms = 0.0;
         let restored = DeviceGraph::from_sd(&graph.to_sd().unwrap_or_default()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(restored, graph);
         let mut effect = restored.compile().unwrap_or_else(|e| panic!("{e}"));
@@ -539,7 +623,7 @@ mod tests {
             Connection::new("down2", "out"),
         ];
         let restored = DeviceGraph::from_sd(&graph.to_sd().unwrap()).unwrap();
-        let effect = restored.compile().unwrap();
+        let mut effect = restored.compile().unwrap();
         let mut buffer = [1.0, -1.0];
         effect.process(&mut buffer);
         for (sample, expected) in buffer.into_iter().zip([1.0, -1.0]) {

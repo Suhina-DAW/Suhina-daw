@@ -519,6 +519,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: devices::list,
     },
     CommandSpec {
+        id: "devices.sdNodes",
+        label: "Describe every .sd SDK node: ports, units, defaults, configuration examples and processing rules",
+        params: &[],
+        kind: CommandKind::Read,
+        run: devices::sd_nodes,
+    },
+    CommandSpec {
         id: "track.devices",
         label: "List the devices on a track in order, with the parameter values of every built-in effect and instrument",
         params: &[TRACK],
@@ -677,6 +684,11 @@ static COMMANDS: &[CommandSpec] = &[
                 "continuous",
                 ParamType::Bool,
                 "true while a UI control is being dragged; updates share one undo step",
+            ),
+            optional(
+                "gesture",
+                ParamType::Text,
+                "shared custom-control gesture id, 1..128 bytes; continuous=false ends it",
             ),
         ],
         kind: CommandKind::Edit,

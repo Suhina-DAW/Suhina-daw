@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -131,9 +131,14 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
   follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file.
-  `device.addSd` validates and embeds a linear effect graph in the project; its supported nodes
+  `devices.sdNodes` returns every SDK node contract, ports, units, defaults, configuration examples
+  limits and custom canvas capabilities for effect authoring by agents ([guide](device-sdk.md)).
+  `device.addSd` validates and embeds a composable effect graph in the project; its supported nodes
   render in both real-time playback and offline rendering. Renders and
   the playing engine run the chains.
+  `device.setParam` accepts an optional bounded text `gesture` id: send `continuous: true` for
+  intermediate updates across both axes, then `continuous: false` for the last axis on release.
+  This gives an XY edit one undo step. A final unchanged value also ends the gesture.
 
 - **Plug-ins.** `plugins.scan`, `plugins.list` and `plugins.folders` (through `command_run`)
   find and list installed plug-ins; a scan loads each new or changed plug-in file in a process

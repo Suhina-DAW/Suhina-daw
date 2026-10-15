@@ -150,3 +150,12 @@ opens New or open, not a new track.
 - Clip editor (piano roll, sample editor): separate spec.
 - Arrangement view: separate spec.
 - Hot-swapping a device or sample from the browser ([browser](browser.md) › Not decided yet).
+
+## SDK effect panels
+
+Suhina SDK effects display their declared stock parameter controls and optional authored canvas.
+Canvas backgrounds, embedded images and custom parameter controls are described by the
+[custom panel contract](sdk-custom-ui.md). The horizontal device card uses the declared canvas
+width by default; `viewport_size` overrides the preferred body width and height in both chain
+orientations. Constrained views scroll the contents. Custom controls use the same parameter commands,
+undo history and smoothing as stock controls.

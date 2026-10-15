@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -83,7 +83,7 @@ The engine runs them in chains on tracks, made through `device-registry`.
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-registry` | Every built-in effect or instrument by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
 | `device-api` | The `Device` trait, `DeviceInfo` (an effect or an instrument) and `ParamInfo` (plain values in their unit, conversion to knob travel), `NoteEvent` for instruments, and the contract tests every device runs (`conformance::check`, with note checks for instruments). | nothing |
-| `device-sdk` | Builds, validates, serializes and prepares data-only `.sd` effect graphs; version 1 supports linear chains of audio input, gain and audio output nodes with generated parameter UI. It contains no executable Rust in `.sd` files. | serde, serde_json |
+| `device-sdk` | Builds, validates, serializes and prepares data-only `.sd` effect graphs; version 2 supports branching stereo signal graphs, DSP primitives, modulation and delayed feedback, with a shared node catalog, generated parameter UI and embedded custom canvases. It contains no executable Rust in `.sd` files. | dsp, device-api, serde, serde_json, base64, image (PNG/JPEG) |
 | `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region with each block's notes and controllers (`Event`, up to 1024 a block), one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Linked into the engine's process through `plugins`. | nothing |
 | `plugins` | The engine's side of plug-in hosting: `Plugin::start` loads an instance into a `suhina-plugin-host` process (the one its group shares, `Launch::group`, or one of its own) and returns a control half (health, ping, state, parameters, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. `scan` and `scan_pool` find installed CLAP and VST3 plug-ins (standard folders, `CLAP_PATH`, folders the user adds), read VST3 bundles' `moduleinfo.json` without loading them and load the rest in a few long-lived `--scan-worker` processes with per-file timeouts, into a catalog that can be saved. `PluginAudio::process_with_events` sends an instrument its notes. `offline::render` runs audio (and `render_with_events` notes) through a plug-in without a deadline (`suhina-cli plugin run`, `plugin run-device`). The session starts a project's plug-ins with it and hands their audio halves to the engine. | ipc |
 | `plugin-host` | The `suhina-plugin-host` executable: answers control messages and serves plug-ins' main-thread callbacks on its main thread, and runs several instances, each with its own link and audio thread. Loads CLAP plug-ins (`clap:<file>[#<id>]`, through `clack-host`) and VST3 plug-ins (`vst3:<bundle>[#<class id>]`, through the `vst3` bindings), stereo in and out (no input for an instrument), notes and controllers, parameters, editors in a window of their own or embedded as a child in the engine's window where the engine says (Windows, X11 on Linux), with state and latency, and test plug-ins (`test:clap`, `test:vst3`, `test:gain`, `test:crash-after:<n>`, `test:hang-after:<n>`, `test:slow-load:<ms>`). `--scan <file>` and `--scan-worker` describe plug-in files for the scanner. The second crate allowed `unsafe`: opening plug-in files and the VST3 COM calls, each block documented. | ipc, plugins, clack |
@@ -103,7 +103,9 @@ the file off the audio thread, then stores its canonical JSON in the device stat
 defaults in project state. Project saves embed both. Renderer construction compiles the graph into
 a fixed processor off the audio thread; the render path runs its supported nodes in the same chain
 as built-in effects. The detail panel reads the embedded graph to draw its visual node flow and
-parameter sliders. See [ADR 0018](decisions/0018-device-graph-files.md).
+parameter controls. The UI caches custom canvases and bounded textures; image decoding and drawing
+expressions run only on the UI thread. Custom controls dispatch parameter commands, with a shared
+gesture id grouping both XY axes into one undo step. See [ADR 0018](decisions/0018-device-graph-files.md).
 
 ```text
 .als ──als::read_file──> Project ──media::load_project_audio──> AudioPool

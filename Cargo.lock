@@ -2008,6 +2008,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -4144,8 +4146,12 @@ dependencies = [
 name = "suhina-device-sdk"
 version = "0.0.1"
 dependencies = [
+ "base64",
+ "image",
  "serde",
  "serde_json",
+ "suhina-device-api",
+ "suhina-dsp",
 ]
 
 [[package]]
@@ -4317,6 +4323,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "hound",
+ "image",
  "serde_json",
  "suhina-device-api",
  "suhina-device-registry",

@@ -271,3 +271,43 @@ fn hostile_notes_and_devices_do_not_break_a_render() {
 pub(crate) fn empty_project() -> Project {
     project(Vec::new(), 1.0, Vec::new())
 }
+
+#[path = "../../device-sdk/tests/common/mod.rs"]
+mod sdk_examples;
+
+fn sdk_device(name: &str) -> Device {
+    let graph = sdk_examples::build(name).unwrap();
+    let mut stored = device("sd", &[]);
+    stored.kind = DeviceKind::Sd;
+    stored.state = Some(graph.to_sd().unwrap().into_bytes());
+    stored
+}
+
+#[test]
+fn sdk_effects_run_in_the_engine_independently_of_host_blocks() {
+    for name in ["stereo-utility", "auto-pan", "filter", "distortion", "feedback-delay", "compressor"] {
+        let p = project(vec![note(0.01, 0.2, 69)], 0.5, vec![device("fm-synth", &[]), sdk_device(name)]);
+        let reference = render_offline(&p, SR, 512).unwrap();
+        let odd = render_offline(&p, SR, 31).unwrap();
+        assert!(max_diff(&reference, &odd) < 1e-5, "{name}");
+        assert!(reference.iter().all(|v| v.is_finite()));
+        assert!(peak(&reference) > 1e-4, "{name} is silent");
+    }
+}
+
+#[test]
+fn sdk_delay_tail_and_oscillator_phase_carry_through_graph_swaps() {
+    for name in ["auto-pan", "feedback-delay"] {
+        let p = project(vec![note(0.0, 0.4, 69)], 2.0, vec![device("fm-synth", &[]), sdk_device(name)]);
+        let mut edited = p.clone();
+        edited.tracks[0].name = "Renamed".into();
+        let mut renderer = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+        let mut controller = renderer.controller();
+        let mut out = blocks(&mut renderer, 40, 480);
+        controller.update(&edited).unwrap();
+        out.extend(blocks(&mut renderer, 80, 480));
+        let mut untouched = Renderer::with_audio(&p, &crate::AudioPool::new(), SR).unwrap();
+        let reference = blocks(&mut untouched, 120, 480);
+        assert!(max_diff(&out, &reference) < 1e-5, "{name}: {}", max_diff(&out, &reference));
+    }
+}

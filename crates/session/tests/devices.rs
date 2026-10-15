@@ -269,3 +269,87 @@ fn plug_in_commands_need_a_plug_in_and_a_playing_project() {
         [("device.openEditor", "plugin"), ("device.closeEditor", "plugin"), ("device.restart", "plugin")]
     );
 }
+
+#[test]
+fn sdk_catalog_is_a_read_command_and_matches_the_sdk() {
+    let mut session = Session::new(project());
+    let catalog = run(&mut session, "devices.sdNodes", json!({})).unwrap();
+    assert_eq!(catalog["version"], 2);
+    assert_eq!(catalog["nodes"].as_array().unwrap().len(), suhina_device_sdk::NODE_CATALOG.len());
+    assert!(
+        catalog["nodes"].as_array().unwrap().iter().any(|n| n["kind"] == "delay" && n["inputs"][1]["name"] == "time")
+    );
+    assert!(run(&mut session, "edit.undo", json!({})).is_err());
+}
+
+#[test]
+fn branching_sd_graph_and_discrete_parameters_survive_project_save_and_source_removal() {
+    use suhina_device_sdk::{
+        Connection as C, DeviceGraph, DeviceRole, Node as N, NodeKind as K, Parameter, ParameterControl,
+    };
+    let mut g = DeviceGraph::new("org.test.stereo", "Stereo", DeviceRole::Effect);
+    let mut p = Parameter::new("gain", "Gain", (0.0, 2.0), 1.0);
+    p.control = ParameterControl::Integer;
+    p.unit = "steps".into();
+    g.parameters.push(p);
+    g.nodes = vec![N::audio_input("in"), N::new("stereo", K::Stereo), N::gain("gain", "gain"), N::audio_output("out")];
+    g.connections = vec![
+        C::ports("in", "left", "stereo", "right"),
+        C::ports("in", "right", "stereo", "left"),
+        C::new("stereo", "gain"),
+        C::new("gain", "out"),
+    ];
+    let path = std::env::temp_dir().join(format!("suhina-sdk-branching-{}.sd", std::process::id()));
+    g.write_file(&path).unwrap();
+    let mut session = Session::new(project());
+    run(&mut session, "device.addSd", json!({"track":1,"path":path})).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let listed = run(&mut session, "track.devices", json!({"track":1})).unwrap();
+    assert_eq!(listed[0]["params"][0]["control"], "integer");
+    assert_eq!(listed[0]["params"][0]["unit"], "steps");
+    let changed =
+        run(&mut session, "device.setParam", json!({"track":1,"device":0,"param":"gain","value":1.6})).unwrap();
+    assert_eq!(changed["value"], 2.0);
+    let restored = suhina_project_file::from_json(&suhina_project_file::to_json(session.project())).unwrap();
+    let device = &restored.channels[0].devices[0];
+    let graph = DeviceGraph::from_sd(std::str::from_utf8(device.state.as_deref().unwrap()).unwrap()).unwrap();
+    assert_eq!(graph, g);
+    assert_eq!(device.params[0].value, 2.0);
+    let mut effect = graph.compile().unwrap();
+    effect.set_parameter(0, device.params[0].value);
+    let mut out = [1.0, 2.0];
+    effect.process(&mut out);
+    assert_eq!(out, [4.0, 2.0]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().channels[0].devices[0].params[0].value, 1.0);
+}
+
+#[test]
+fn xy_gesture_groups_axes_and_ends_on_unchanged_value() {
+    let mut session = Session::new(project());
+    run(&mut session, "device.add", json!({"track":1,"id":"utility"})).unwrap();
+    let before = session.project().clone();
+    for (param, value, continuous) in [("gain", 2.0, true), ("balance", 0.5, true), ("balance", 0.5, false)] {
+        run(
+            &mut session,
+            "device.setParam",
+            json!({"track":1,"device":0,"param":param,"value":value,"continuous":continuous,"gesture":"xy"}),
+        )
+        .unwrap();
+    }
+    let after = session.project().clone();
+    run(
+        &mut session,
+        "device.setParam",
+        json!({"track":1,"device":0,"param":"gain","value":3.0,"continuous":false,"gesture":"xy"}),
+    )
+    .unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &after);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &before);
+    assert!(
+        run(&mut session, "device.setParam", json!({"track":1,"device":0,"param":"gain","value":3.0,"gesture":""}))
+            .is_err()
+    );
+}

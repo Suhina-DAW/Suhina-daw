@@ -119,7 +119,7 @@ impl Chain {
                     if !stored.enabled || graph.role != suhina_device_sdk::DeviceRole::Effect {
                         continue;
                     }
-                    let Ok(mut effect) = graph.compile() else { continue };
+                    let Ok(mut effect) = graph.compile_at(f64::from(sample_rate)) else { continue };
                     let values: Vec<f64> = graph
                         .parameters
                         .iter()
@@ -303,7 +303,11 @@ impl Chain {
                 }
                 Slot::Sd(effect) => {
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        effect.process(span);
+                        let mut sd_context = *context;
+                        if sd_context.playing {
+                            sd_context.beat += from as f64 * sd_context.tempo / (60.0 * effect.sample_rate());
+                        }
+                        effect.process_context(&sd_context, span);
                     }
                 }
                 Slot::Plugin(plugin) => {
@@ -450,7 +454,11 @@ impl Chain {
                 }
                 Slot::Sd(effect) => {
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        effect.process(span);
+                        let mut sd_context = *context;
+                        if sd_context.playing {
+                            sd_context.beat += from as f64 * sd_context.tempo / (60.0 * effect.sample_rate());
+                        }
+                        effect.process_context(&sd_context, span);
                     }
                 }
                 Slot::Plugin(plugin) => {
