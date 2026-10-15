@@ -5,17 +5,20 @@ type: howto
 status: current
 last_verified: 2026-10-15
 covers:
+  - crates/device-sdk/src/ui/widgets.rs
   - crates/device-sdk/examples/stereo_utility.rs
   - crates/device-sdk/examples/auto_pan.rs
   - crates/device-sdk/examples/filter.rs
   - crates/device-sdk/examples/distortion.rs
-  - crates/device-sdk/examples/feedback_delay.rs
+  - crates/device-sdk/examples/delay.rs
+  - crates/device-sdk/examples/common/delay_panel.rs
   - crates/device-sdk/examples/compressor.rs
   - crates/device-sdk/examples/common/mod.rs
   - crates/device-sdk/examples/catalog.rs
   - crates/device-sdk/examples/validate.rs
   - crates/device-sdk/examples/ui_controls.rs
   - crates/device-sdk/examples/custom_panel.rs
+  - crates/device-sdk/examples/wire_layout.rs
   - crates/device-sdk/examples/midi_transpose.rs
   - crates/device-sdk/examples/gated_instrument.rs
   - crates/session/src/commands.rs
@@ -25,6 +28,18 @@ covers:
 # Author a data-only SDK device
 
 The deliverable is one `.sd` file. It can be added to a track and is embedded in the project.
+
+Version 3 can also preserve visual connection authoring through `graph.editor`:
+`editor::Editor` holds a `GraphLayout`, with `NodeLayout` positions/sizes and `WireLayout`
+routes referencing existing `Connection` endpoints. Optional anchors are node-local pixel
+offsets; bend points are graph coordinates. See the [format contract](spec/sd-device-format.md#visual-connection-layout).
+This stores a future editor's layout; the current app still shows the read-only node list.
+Versions 1 and 2 remain readable, and serialization writes version 3.
+
+```sh
+cargo run -p suhina-device-sdk --example wire_layout -- target/sdk-examples/wire-layout.sd
+cargo run -p suhina-device-sdk --example validate -- target/sdk-examples/wire-layout.sd
+```
 An author writes Rust that assembles a graph from supported nodes; Suhina runs the graph as data.
 Use [the format specification](spec/sd-device-format.md) and [node reference](spec/sdk-nodes.md).
 Audio effects, MIDI effects and monophonic instruments execute. Parameters, nodes and device ids
@@ -50,13 +65,13 @@ cargo run -p suhina-device-sdk --example stereo_utility -- target/sdk-examples/s
 cargo run -p suhina-device-sdk --example auto_pan -- target/sdk-examples/auto-pan.sd
 cargo run -p suhina-device-sdk --example filter -- target/sdk-examples/filter.sd
 cargo run -p suhina-device-sdk --example distortion -- target/sdk-examples/distortion.sd
-cargo run -p suhina-device-sdk --example feedback_delay -- target/sdk-examples/feedback-delay.sd
+cargo run -p suhina-device-sdk --example delay -- target/sdk-examples/delay.sd
 cargo run -p suhina-device-sdk --example compressor -- target/sdk-examples/compressor.sd
-cargo run -p suhina-device-sdk --example validate -- target/sdk-examples/feedback-delay.sd
+cargo run -p suhina-device-sdk --example validate -- target/sdk-examples/delay.sd
 ```
 
 Read the individual files under `crates/device-sdk/examples/` for complete graphs: stereo width, auto-pan,
-low-pass filter, distortion with wet/dry, feedback delay and a stereo-linked compressor.
+low-pass filter, distortion with wet/dry, filtered/modulated delay and a stereo-linked compressor.
 The compressor is a hard-knee example, the distortion is not oversampled and oscillators are
 not band-limited; these examples demonstrate composition rather than production mastering.
 Feedback greater than unity can grow without bound; constrain feedback parameters and use
@@ -101,7 +116,7 @@ this never removes their processing. The examples expose only their main process
    parameter for each user control. Prefer an existing example with similar signal flow.
    Every node must reach the output, including the audio input. For an unconnected optional
    input the catalog default applies; a required input must have exactly one connection.
-3. Save with `write_file` or author equivalent version 2 JSON. Call `validate` or run the
+3. Save with `write_file` or author equivalent version 3 JSON. Call `validate` or run the
    validation example before adding the effect. Errors identify missing ids/ports, undelayed
    cycles and memory requests; fix those directly. A minimal catalog example describes
    `NodeKind`; wrap it with `id` when placing it in the JSON nodes array.
@@ -219,3 +234,57 @@ Set `DeviceUi.viewport_size = Some([320.0, 240.0])` to reserve a smaller scrolla
 its default is `None` (automatic host sizing). Both accept 24..8192 logical pixels per axis.
 The header and padding are added by the host; available panel space may clip the viewport.
 See [the sizing contract](spec/sdk-custom-ui.md) for automatic sizes and both chain orientations.
+
+## Delay example
+
+The Delay panel has independent left/right timing. Sync selects sixteenth-note multiples
+(1, 2, 3, 4, 5, 6, 8, 16) at the transport tempo; otherwise the division grid and offset are replaced by a logarithmic millisecond time knob.
+Offsets adjust synchronized times by up to 33.3 percent; they do not alter the millisecond value in Time mode. Link mirrors Sync/Time mode, division, offset and millisecond edits in both directions.
+Enabling Link copies the left settings to the right. Linked edits, including continuous drags,
+are one undo step and persist in the project.
+Feedback and Dry/Wet are percentages. Freeze stops feeding new input and sets feedback to unity.
+Ping Pong feeds the left channel first and swaps channels on each return.
+The filter has a logarithmic centre frequency, width in octaves, high/low-pass edges and bypass.
+The graph is a smooth logarithmic band display controlled by the same frequency/width parameters,
+with continuous two-pole high-pass and low-pass magnitude curves at narrow and wide settings.
+LFO controls delay-time depth, filter-frequency depth, rate and morph towards sine.
+Click the arrow or LFO caption to collapse or expand Rate, Wave and Morph. Delay and Filter
+amounts stay visible. The section stays anchored at the bottom: opening the details reduces
+the filter graph height by 30 pixels, and folding restores that space to the graph.
+Control sizes stay fixed. Folding only changes presentation, retains all modulation settings
+and is saved with the device through `device.setParam` (`lfo_expanded`).
+Wave opens a menu of Sine, Triangle, Ramp Up, Ramp Down, Square, S&H and Wander.
+S&H holds a deterministic random value per cycle; Wander smooths that source with a 200 ms one-pole.
+Rate opens Rate, Time, Synced, Triplet, Dotted and 16th. Rate edits Hz and Time edits milliseconds.
+Synced edits a whole-note divisor (1/N), Triplet and Dotted scale that frequency by 3/2 and 2/3,
+and 16th edits the number of sixteenth notes per cycle. These modes follow transport tempo.
+Menu choices use the standard parameter command, persistence and undo. Opening or dismissing
+an overlay does not create an edit.
+Repitch slews the read-head distance over 20 ms, Fade crossfades read heads over 20 ms, and Jump
+changes distance immediately. Times are bounded to one sample..4 seconds, including tempo sync
+and modulation. The processor is an original implementation, without a claim of sound equivalence.
+Existing projects embed their old graph; add the newly generated delay.sd to use this panel.
+
+### Reusing functional panel elements
+
+`ui::Widget` describes one functional UI node: `Button`, `Number`, `Knob`,
+`Disclosure`, `Menu`, `WaveformMenu` or `FilterBand`. Assign it to a
+`CustomControl.widget`, set that control's id, bounds and parameter bindings,
+and leave `drawing` empty. The host supplies the artwork and existing gestures.
+Delay uses widgets for every interactive element; its LFO section is a composition
+of individual widgets, not a reusable section with fixed parameters.
+
+For example, a choice selector in any device can use:
+
+```json
+{"id":"mode_menu","name":"Mode","bounds":[10,10,80,16],
+ "gesture":"menu","x":{"parameter":"mode"},"widget":{"kind":"menu"}}
+```
+
+Declare `mode` as a Choice parameter with its own options. Buttons use Toggle or
+Set gestures; Number and Knob use Drag with a Y binding; Disclosure uses Toggle;
+menus use Menu with a Choice X binding; FilterBand uses Position with X frequency
+and Y width bindings (logarithmic X, linear Y). WaveformMenu uses seven choices
+in order: sine, triangle, rising ramp, falling ramp, square, sample-and-hold and wander. Number supports precision, number/frequency/choice formatting,
+colour, alignment, border, prefix and suffix. The widget contains no device-specific
+parameter names. Custom drawings remain available for artwork and specialised controls.

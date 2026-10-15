@@ -87,6 +87,7 @@ pub enum NodeKind {
     SampleDelay,
     Delay { max_seconds: f64 },
     Tempo,
+    LfoRate,
     Beat,
     Playing,
 }
@@ -606,9 +607,10 @@ pub static NODE_CATALOG: &[NodeInfo] = &[
         inputs: &[
             PortInfo { name: "in", default: None, unit: "signal" },
             PortInfo { name: "time", default: Some(0.0), unit: "seconds" },
+            PortInfo { name: "mode", default: Some(2.0), unit: "0 repitch, 1 fade, 2 jump" },
         ],
         outputs: &["out", "left", "right"],
-        description: "Fractional stereo delay with linear interpolation, time limited to one frame..max_seconds. max_seconds must be >0 and <=60. Breaks feedback only through in port; time remains an ordinary dependency. Reset clears history.",
+        description: "Fractional stereo delay with independent channel times and linear interpolation, time limited to one frame..max_seconds. Mode 0 slews time with a 20 ms one-pole (repitch), 1 crossfades read heads over 20 ms, 2 jumps to the new time (the default for older graphs). max_seconds must be >0 and <=60. Breaks feedback only through in port; time remains an ordinary dependency. Reset clears history.",
         configuration: " max_seconds: f64",
         example: "{\"kind\":\"delay\",\"max_seconds\":0.01}",
         rust_variant: "Delay",
@@ -703,6 +705,26 @@ pub static NODE_CATALOG: &[NodeInfo] = &[
         example: "{\"kind\":\"midi_gate\"}",
         rust_variant: "MidiGate",
     },
+    NodeInfo {
+        kind: "lfo_rate",
+        name: "LFO Rate",
+        inputs: &[
+            PortInfo { name: "rate", default: Some(0.5), unit: "Hz" },
+            PortInfo { name: "time", default: Some(2000.0), unit: "ms" },
+            PortInfo { name: "division", default: Some(4.0), unit: "divisor or sixteenth count" },
+            PortInfo {
+                name: "mode",
+                default: Some(0.0),
+                unit: "0 Rate, 1 Time, 2 Synced, 3 Triplet, 4 Dotted, 5 16th",
+            },
+            PortInfo { name: "tempo", default: Some(120.0), unit: "BPM" },
+        ],
+        outputs: &["out", "left", "right"],
+        description: "Stateless Hz conversion. Clamps rate to 0.01..20, time to 1..20000 ms, rounded division to 1..64, rounded mode to 0..5 and tempo to 1..1000 BPM. Modes output rate, 1000/time, tempo*division/240, tempo*division/160, tempo*division/360 or tempo/(15*division). Broadcasts mono; no reset state.",
+        configuration: "none",
+        example: "{\"kind\":\"lfo_rate\"}",
+        rust_variant: "LfoRate",
+    },
 ];
 impl NodeKind {
     pub fn info(&self) -> &'static NodeInfo {
@@ -757,6 +779,7 @@ impl NodeKind {
             Self::Filter { .. } => &NODE_CATALOG[41],
             Self::SampleDelay => &NODE_CATALOG[42],
             Self::Delay { .. } => &NODE_CATALOG[43],
+            Self::LfoRate => &NODE_CATALOG[53],
             Self::Tempo => &NODE_CATALOG[44],
             Self::Beat => &NODE_CATALOG[45],
             Self::Playing => &NODE_CATALOG[46],

@@ -1,8 +1,10 @@
 //! Data-only drawing programs, image resources and input bindings for custom panels.
 use crate::{DeviceSdkError, Parameter};
+mod widgets;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, io::Cursor, path::Path};
+pub use widgets::Widget;
 
 pub const MAX_ASSET_BYTES: usize = 512 * 1024;
 pub const MAX_ASSETS_BYTES: usize = 1024 * 1024;
@@ -129,6 +131,16 @@ pub enum UiExpression {
         a: UiValue,
         b: UiValue,
     },
+    Equal {
+        a: UiValue,
+        b: UiValue,
+    },
+    Exp {
+        value: UiValue,
+    },
+    Log {
+        value: UiValue,
+    },
     Sin {
         value: UiValue,
     },
@@ -147,6 +159,12 @@ impl UiValue {
     }
     pub fn normalized(id: impl Into<String>, logarithmic: bool) -> Self {
         Self::Expression(Box::new(UiExpression::Parameter { parameter: id.into(), normalized: true, logarithmic }))
+    }
+    pub fn exp(self) -> Self {
+        Self::Expression(Box::new(UiExpression::Exp { value: self }))
+    }
+    pub fn ln(self) -> Self {
+        Self::Expression(Box::new(UiExpression::Log { value: self }))
     }
     pub fn sin(self) -> Self {
         Self::Expression(Box::new(UiExpression::Sin { value: self }))
@@ -169,6 +187,11 @@ impl UiValue {
                 }
                 UiExpression::Add { a, b } => a.eval(parameter, depth + 1) + b.eval(parameter, depth + 1),
                 UiExpression::Multiply { a, b } => a.eval(parameter, depth + 1) * b.eval(parameter, depth + 1),
+                UiExpression::Equal { a, b } => {
+                    f64::from((a.eval(parameter, depth + 1) - b.eval(parameter, depth + 1)).abs() < 0.0001)
+                }
+                UiExpression::Exp { value } => value.eval(parameter, depth + 1).exp(),
+                UiExpression::Log { value } => value.eval(parameter, depth + 1).ln(),
                 UiExpression::Sin { value } => value.eval(parameter, depth + 1).sin(),
                 UiExpression::Cos { value } => value.eval(parameter, depth + 1).cos(),
             },
@@ -196,6 +219,21 @@ pub enum ImageFit {
     Stretch,
     Contain,
     Cover,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextFormat {
+    Choice,
+    #[default]
+    Number,
+    Frequency,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -238,6 +276,10 @@ pub enum Draw {
         width: f32,
     },
     Text {
+        #[serde(default)]
+        align: TextAlign,
+        #[serde(default)]
+        format: TextFormat,
         position: [UiValue; 2],
         text: String,
         color: Color,
@@ -287,6 +329,9 @@ pub enum UiGesture {
     Position,
     Toggle,
     Momentary,
+    Menu,
+    /// Set the X parameter to a literal value, for segmented selectors.
+    Set(u16),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,6 +348,10 @@ impl UiBinding {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CustomControl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<Widget>,
+    #[serde(default)]
+    pub visible_when: Option<UiValue>,
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -352,7 +401,7 @@ impl DeviceUi {
             return Err(fail("hidden row refers to unknown parameter"));
         }
         let count = self.controls.iter().try_fold(self.layers.len(), |total, c| {
-            total.checked_add(c.drawing.len()).ok_or_else(|| fail("drawing count overflow"))
+            total.checked_add(c.drawings().len()).ok_or_else(|| fail("drawing count overflow"))
         })?;
         if count > MAX_DRAW_COMMANDS {
             return Err(fail("more than 1024 drawing commands"));
@@ -360,6 +409,41 @@ impl DeviceUi {
         let mut controls = HashSet::new();
         let mut expression_budget = 32768usize;
         for c in &self.controls {
+            if c.widget.is_some() && !c.drawing.is_empty() {
+                return Err(fail("widget and drawing are mutually exclusive"));
+            }
+            if let Some(widget) = &c.widget {
+                let valid = match widget {
+                    Widget::Button { .. } => {
+                        matches!(c.gesture, UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_))
+                    }
+                    Widget::Disclosure { .. } => c.gesture == UiGesture::Toggle,
+                    Widget::Number { .. } | Widget::Knob { .. } => {
+                        c.gesture == UiGesture::Drag && c.x.is_none() && c.y.is_some()
+                    }
+                    Widget::Menu => c.gesture == UiGesture::Menu,
+                    Widget::WaveformMenu => {
+                        c.gesture == UiGesture::Menu
+                            && c.x.as_ref().is_some_and(|binding| {
+                                parameters.iter().any(|p| {
+                                    p.id == binding.parameter && p.min == 0. && p.max == 6. && p.ui.options.len() == 7
+                                })
+                            })
+                    }
+                    Widget::FilterBand { min_hz, max_hz } => {
+                        c.gesture == UiGesture::Position
+                            && c.x.as_ref().is_some_and(|binding| binding.logarithmic)
+                            && c.y.as_ref().is_some_and(|binding| !binding.logarithmic)
+                            && min_hz.is_finite()
+                            && max_hz.is_finite()
+                            && *min_hz > 0.
+                            && max_hz > min_hz
+                    }
+                };
+                if !valid {
+                    return Err(fail("widget has incompatible gesture, bindings or frequency range"));
+                }
+            }
             let [x, y, w, h] = c.bounds;
             if c.id.is_empty()
                 || c.id.len() > 128
@@ -370,12 +454,15 @@ impl DeviceUi {
                 || c.bounds.iter().any(|v| !v.is_finite())
                 || x < 0.0
                 || y < 0.0
-                || w < 16.0
-                || h < 16.0
+                || w < 8.0
+                || h < 8.0
                 || x + w > self.size[0]
                 || y + h > self.size[1]
             {
                 return Err(fail("invalid custom control id/name/bounds"));
+            }
+            if let Some(condition) = &c.visible_when {
+                condition.validate(&ids, 0, &mut expression_budget)?;
             }
             if c.x.is_none() && c.y.is_none() {
                 return Err(fail("custom control needs a parameter binding"));
@@ -383,7 +470,9 @@ impl DeviceUi {
             if c.x.as_ref().zip(c.y.as_ref()).is_some_and(|(x, y)| x.parameter == y.parameter) {
                 return Err(fail("X and Y must bind different parameters"));
             }
-            if matches!(c.gesture, UiGesture::Toggle | UiGesture::Momentary) && (c.x.is_none() || c.y.is_some()) {
+            if matches!(c.gesture, UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu)
+                && (c.x.is_none() || c.y.is_some())
+            {
                 return Err(fail("button gestures require only X binding"));
             }
             for binding in [c.x.as_ref(), c.y.as_ref()].into_iter().flatten() {
@@ -391,12 +480,21 @@ impl DeviceUi {
                     .iter()
                     .find(|p| p.id == binding.parameter)
                     .ok_or_else(|| fail("unknown bound parameter"))?;
+                if c.gesture == UiGesture::Menu && (p.control != crate::ParameterControl::Choice || binding.logarithmic)
+                {
+                    return Err(fail("menu needs a non-logarithmic Choice binding"));
+                }
                 if p.min >= p.max || (binding.logarithmic && p.min <= 0.0) {
                     return Err(fail("binding needs a nonempty range; logarithmic range must be positive"));
                 }
+                if let UiGesture::Set(value) = c.gesture
+                    && !(p.min..=p.max).contains(&f64::from(value))
+                {
+                    return Err(fail("button value is outside the bound parameter range"));
+                }
             }
         }
-        for draw in self.layers.iter().chain(self.controls.iter().flat_map(|c| &c.drawing)) {
+        for draw in self.layers.iter().cloned().chain(self.controls.iter().flat_map(|c| c.drawings().into_owned())) {
             draw.validate(&ids, &asset_ids, &mut expression_budget)?;
         }
         Ok(())
@@ -421,11 +519,14 @@ impl UiValue {
                         return Err(fail());
                     }
                 }
-                UiExpression::Add { a, b } | UiExpression::Multiply { a, b } => {
+                UiExpression::Add { a, b } | UiExpression::Multiply { a, b } | UiExpression::Equal { a, b } => {
                     a.validate(ids, depth + 1, budget)?;
                     b.validate(ids, depth + 1, budget)?;
                 }
-                UiExpression::Sin { value } | UiExpression::Cos { value } => value.validate(ids, depth + 1, budget)?,
+                UiExpression::Sin { value }
+                | UiExpression::Cos { value }
+                | UiExpression::Exp { value }
+                | UiExpression::Log { value } => value.validate(ids, depth + 1, budget)?,
             },
         }
         Ok(())

@@ -9,6 +9,7 @@ covers:
   - crates/device-sdk/src/runtime.rs
   - crates/device-sdk/src/midi.rs
   - crates/device-sdk/src/ui.rs
+  - crates/device-sdk/src/editor.rs
   - docs/spec/sdk-nodes.md
   - docs/decisions/0008-patch-devices.md
 ---
@@ -50,6 +51,13 @@ Similar names do not imply matching signal, message, timing, or parameter semant
 | Other bundled libraries (ELSE 553, cyclone 223, Gem 528, heavylib 29, MERDA 21, pdlua 2; some overlap the categories above) | No external-object loading | **Not covered as libraries.** These are upstream catalog origin totals, not counts of unique missing DSP features; an SDK graph can only use implemented node kinds. |
 
 ## What the comparison says
+
+The SDK's version-3 format now stores node positions, explicit port anchors and wire bend
+points with validated references to its processing graph. SDK round-trip, malformed-input and
+audio-invariance checks live in `crates/device-sdk/tests/editor.rs`; project persistence is
+covered in `crates/session/tests/devices.rs`. This is authoring-data support, not an interactive
+patch editor or Pd patch compatibility. Component hierarchy, named layers and editable
+envelope documents are still planned.
 
 This audit enumerated every record in the supplied reference JSON; the table groups the gap by
 the catalog's own categories, including non-DSP facilities so they are not mistaken for missing

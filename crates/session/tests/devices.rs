@@ -326,7 +326,7 @@ fn plug_in_commands_need_a_plug_in_and_a_playing_project() {
 fn sdk_catalog_is_a_read_command_and_matches_the_sdk() {
     let mut session = Session::new(project());
     let catalog = run(&mut session, "devices.sdNodes", json!({})).unwrap();
-    assert_eq!(catalog["version"], 2);
+    assert_eq!(catalog["version"], suhina_device_sdk::VERSION);
     assert_eq!(catalog["nodes"].as_array().unwrap().len(), suhina_device_sdk::NODE_CATALOG.len());
     assert!(
         catalog["nodes"].as_array().unwrap().iter().any(|n| n["kind"] == "delay" && n["inputs"][1]["name"] == "time")
@@ -351,6 +351,17 @@ fn branching_sd_graph_and_discrete_parameters_survive_project_save_and_source_re
         C::new("stereo", "gain"),
         C::new("gain", "out"),
     ];
+    g.editor = Some(suhina_device_sdk::editor::Editor {
+        graph: suhina_device_sdk::editor::GraphLayout {
+            nodes: vec![],
+            wires: vec![suhina_device_sdk::editor::WireLayout {
+                connection: C::ports("in", "left", "stereo", "right"),
+                points: vec![[50.0, 60.0]],
+                from_anchor: None,
+                to_anchor: None,
+            }],
+        },
+    });
     let path = std::env::temp_dir().join(format!("suhina-sdk-branching-{}.sd", std::process::id()));
     g.write_file(&path).unwrap();
     let mut session = Session::new(project());
@@ -374,6 +385,9 @@ fn branching_sd_graph_and_discrete_parameters_survive_project_save_and_source_re
     assert_eq!(out, [4.0, 2.0]);
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(session.project().channels[0].devices[0].params[0].value, 1.0);
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    let state = session.project().channels[0].devices[0].state.as_deref().unwrap();
+    assert_eq!(DeviceGraph::from_sd(std::str::from_utf8(state).unwrap()).unwrap(), g);
 }
 
 #[test]
@@ -404,4 +418,49 @@ fn xy_gesture_groups_axes_and_ends_on_unchanged_value() {
         run(&mut session, "device.setParam", json!({"track":1,"device":0,"param":"gain","value":3.0,"gesture":""}))
             .is_err()
     );
+}
+
+#[path = "../../device-sdk/examples/delay.rs"]
+mod delay_panel_example;
+
+#[test]
+fn sdk_linked_delay_values_update_both_directions_and_undo_together() {
+    let graph = delay_panel_example::build().unwrap();
+    let path = std::env::temp_dir().join(format!("suhina-linked-delay-{}.sd", std::process::id()));
+    graph.write_file(&path).unwrap();
+    let mut session = Session::new(project());
+    run(&mut session, "device.addSd", json!({"track":1,"path":path})).unwrap();
+    std::fs::remove_file(path).unwrap();
+    fn value(session: &Session, id: &str) -> f64 {
+        session.project().channels[0].devices[0].params.iter().find(|p| p.id == id).unwrap().value
+    }
+    fn edit(session: &mut Session, id: &str, value: f64) {
+        run(session, "device.setParam", json!({"track":1,"device":0,"param":id,"value":value})).unwrap();
+    }
+    edit(&mut session, "time_right", 427.);
+    assert_eq!(value(&session, "time_left"), 427.);
+    assert_eq!(value(&session, "time_right"), 427.);
+    edit(&mut session, "sync_right", 0.);
+    assert_eq!(value(&session, "sync_left"), 0.);
+    let saved = suhina_project_file::to_json(session.project());
+    assert_eq!(suhina_project_file::from_json(&saved).unwrap(), *session.project());
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(value(&session, "sync_left"), 1.);
+    assert_eq!(value(&session, "sync_right"), 1.);
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    assert_eq!(value(&session, "sync_left"), 0.);
+    edit(&mut session, "link", 0.);
+    edit(&mut session, "time_right", 640.);
+    assert_eq!(value(&session, "time_left"), 427.);
+    edit(&mut session, "link", 1.);
+    assert_eq!(value(&session, "time_right"), 427.);
+    for (v, continuous) in [(500., true), (520., true), (550., false)] {
+        run(&mut session,"device.setParam",json!({"track":1,"device":0,"param":"time_right","value":v,"continuous":continuous,"gesture":"linked-time"})).unwrap();
+    }
+    assert_eq!(value(&session, "time_left"), 550.);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(value(&session, "time_left"), 427.);
+    assert_eq!(value(&session, "time_right"), 427.);
+    edit(&mut session, "division_left", 16.);
+    assert_eq!(value(&session, "division_right"), 16.);
 }

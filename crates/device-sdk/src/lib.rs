@@ -1,7 +1,8 @@
 //! Build, validate, save, and run data-only Suhina device graphs (`.sd`).
 //!
-//! Version 2 supports composable stereo signal graphs, modulation and delayed feedback. A validated graph compiles off the audio thread into a processor whose `process`
-//! method performs no allocation.
+//! Version 3 preserves visual connection layouts alongside composable signal graphs.
+//! A validated graph compiles off the audio thread into a processor whose `process`
+//! method performs no allocation. Versions 1 and 2 remain readable.
 
 use std::fmt;
 use std::io::Read;
@@ -9,6 +10,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+pub mod editor;
 mod graph;
 mod midi;
 mod nodes;
@@ -21,7 +23,7 @@ pub use suhina_device_api::ProcessContext;
 
 pub const EXTENSION: &str = "sd";
 pub const FORMAT: &str = "suhina-device";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 pub const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NODES: usize = 128;
 pub const MAX_CONNECTIONS: usize = MAX_NODES * 5;
@@ -38,6 +40,7 @@ pub struct DeviceGraph {
     pub nodes: Vec<Node>,
     pub connections: Vec<Connection>,
     pub ui: Option<ui::DeviceUi>,
+    pub editor: Option<editor::Editor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,8 +100,17 @@ pub enum ControlShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterLink {
+    pub enabled_by: String,
+    pub peer: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ParameterUi {
+    /// Mirror edits to this peer while the named toggle is enabled.
+    pub link: Option<ParameterLink>,
     pub tooltip: String,
     pub group: String,
     pub options: Vec<String>,
@@ -120,6 +132,7 @@ pub struct ParameterUi {
 impl Default for ParameterUi {
     fn default() -> Self {
         Self {
+            link: None,
             tooltip: String::new(),
             group: String::new(),
             options: Vec::new(),
@@ -189,6 +202,7 @@ impl DeviceGraph {
             nodes: Vec::new(),
             connections: Vec::new(),
             ui: None,
+            editor: None,
         }
     }
 
@@ -236,6 +250,20 @@ impl DeviceGraph {
                 return Err(DeviceSdkError(format!("parameter {:?}: unit exceeds 128 bytes", parameter.id)));
             }
             let ui = &parameter.ui;
+            if let Some(link) = &ui.link {
+                let peer = self.parameters.iter().find(|p| p.id == link.peer);
+                let gate = self.parameters.iter().find(|p| p.id == link.enabled_by);
+                if !peer.is_some_and(|p| {
+                    p.id != parameter.id
+                        && p.min == parameter.min
+                        && p.max == parameter.max
+                        && p.control == parameter.control
+                        && p.unit == parameter.unit
+                }) || !gate.is_some_and(|p| p.control == ParameterControl::Toggle && p.min == 0.0 && p.max == 1.0)
+                {
+                    return Err(DeviceSdkError("parameter link needs a matching peer and a 0..1 toggle".into()));
+                }
+            }
             let minimum_height =
                 ui.font_size + 16.0 + if ui.label_position == LabelPosition::Top { ui.font_size + 4.0 } else { 0.0 };
             if ui.size.is_some_and(|[w, h]| {
@@ -299,6 +327,9 @@ impl DeviceGraph {
         }
         self.validate_nodes()?;
         self.execution_order()?;
+        if let Some(editor) = &self.editor {
+            editor.validate(self)?;
+        }
         self.delay_budget(384_000.0)?;
         Ok(())
     }
@@ -319,6 +350,23 @@ impl DeviceGraph {
         Ok(text)
     }
 
+    /// Expand one command into an atomic set of clamped values, off the audio thread.
+    pub fn parameter_edits(&self, id: &str, value: f64, current: impl Fn(&str) -> f64) -> Vec<(usize, f64)> {
+        let Some((index, p)) = self.parameters.iter().enumerate().find(|(_, p)| p.id == id) else { return Vec::new() };
+        let value = p.clamp(value);
+        let mut changes = vec![(index, value)];
+        for (i, source) in self.parameters.iter().enumerate() {
+            let Some(link) = &source.ui.link else { continue };
+            let Some((j, peer)) = self.parameters.iter().enumerate().find(|(_, p)| p.id == link.peer) else { continue };
+            if source.id == id && current(&link.enabled_by) > 0.5 {
+                changes.push((j, peer.clamp(value)));
+            } else if link.enabled_by == id && value > 0.5 && i < j {
+                changes.push((j, peer.clamp(current(&source.id))));
+            }
+        }
+        changes
+    }
+
     pub fn from_sd(text: &str) -> Result<Self, DeviceSdkError> {
         if text.len() > MAX_FILE_BYTES {
             return Err(DeviceSdkError(format!("a .sd file is limited to {} KiB", MAX_FILE_BYTES / 1024)));
@@ -330,6 +378,9 @@ impl DeviceGraph {
                 "unsupported device format/version: {:?}/{}",
                 file.format, file.version
             )));
+        }
+        if file.version < 3 && file.editor.is_some() {
+            return Err(DeviceSdkError("editor metadata requires .sd version 3".into()));
         }
         if file.version == 1
             && (file
@@ -478,6 +529,8 @@ struct FileV1 {
     device: DeviceV1,
     nodes: Vec<NodeV1>,
     connections: Vec<Connection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    editor: Option<editor::Editor>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -557,6 +610,7 @@ impl From<&DeviceGraph> for FileV1 {
             },
             nodes,
             connections: graph.connections.clone(),
+            editor: graph.editor.clone(),
         }
     }
 }
@@ -565,6 +619,7 @@ impl From<FileV1> for DeviceGraph {
     fn from(file: FileV1) -> Self {
         Self {
             ui: file.device.ui,
+            editor: file.editor,
             id: file.device.id,
             name: file.device.name,
             role: file.device.role,

@@ -191,7 +191,10 @@ fn version_one_gain_example_remains_readable_and_new_nodes_require_version_two()
     let mut out = [1.0, -1.0];
     g.compile().unwrap().process(&mut out);
     assert_eq!(out, [1.0, -1.0]);
-    let text = graph(K::Tanh).to_sd().unwrap().replace("\"version\": 2", "\"version\": 1");
+    let text = graph(K::Tanh)
+        .to_sd()
+        .unwrap()
+        .replace(&format!("\"version\": {}", suhina_device_sdk::VERSION), "\"version\": 1");
     assert!(DeviceGraph::from_sd(&text).is_err());
     assert!(g.compile_at(f64::NAN).is_err());
     assert!(g.compile_at(1e9).is_err());
@@ -233,7 +236,7 @@ fn synced_lfo_follows_transport_position() {
 
 #[test]
 fn six_authoring_examples_save_restore_and_have_the_expected_sound() {
-    for name in ["stereo-utility", "auto-pan", "filter", "distortion", "feedback-delay", "compressor"] {
+    for name in ["stereo-utility", "auto-pan", "filter", "distortion", "delay", "compressor"] {
         let g = examples::build(name).unwrap();
         assert_eq!(DeviceGraph::from_sd(&g.to_sd().unwrap()).unwrap(), g);
         let mut effect = g.compile().unwrap();
@@ -248,9 +251,9 @@ fn six_authoring_examples_save_restore_and_have_the_expected_sound() {
             }
             "filter" => assert!((out[47998] - 0.5).abs() < 1e-4),
             "distortion" => assert!((out[47998] - (0.25 + 0.5 * 1.0f32.tanh())).abs() < 1e-6),
-            "feedback-delay" => {
+            "delay" => {
                 assert_eq!(out[0], 0.25);
-                assert_eq!(out[24000], 0.5);
+                assert!(out[24000] > 0.0 && out[24000] < 0.5);
             }
             "compressor" => assert!(out[47998] > 0.1 && out[47998] < 0.2, "{}", out[47998]),
             _ => {}
@@ -354,4 +357,196 @@ fn visual_ui_settings_round_trip_and_hostile_geometry_is_rejected() {
     }
     g.parameters[0].ui.font_size = 100.0;
     assert!(g.validate().is_err());
+}
+
+#[test]
+fn delay_panel_has_working_stereo_timing_ping_pong_and_valid_selectors() {
+    let mut g = examples::build("delay").unwrap();
+    assert_eq!(g, DeviceGraph::from_sd(&g.to_sd().unwrap()).unwrap());
+    for p in &mut g.parameters {
+        p.default = match p.id.as_str() {
+            "filter_on" | "sync_left" | "sync_right" | "link" => 0.0,
+            "time_left" => 10.0,
+            "time_right" => 20.0,
+            "offset_left" => 33.3,
+            "offset_right" => -33.3,
+            "wet" => 100.0,
+            "mode" => 2.0,
+            "ping_pong" => 1.0,
+            _ => p.default,
+        };
+    }
+    let mut audio = vec![0.0; 800];
+    audio[0] = 1.0;
+    g.compile_at(8000.0).unwrap().process(&mut audio);
+    assert!((audio[160] - 1.0).abs() < 1e-5, "first repeat in left channel");
+    assert!((audio[481] - 0.5).abs() < 1e-5, "second repeat in right channel");
+    assert_eq!(audio[161], 0.0);
+    assert_eq!(audio[480], 0.0);
+    let canvas = g.ui.as_mut().unwrap();
+    let selector =
+        canvas.controls.iter_mut().find(|c| matches!(c.gesture, suhina_device_sdk::ui::UiGesture::Set(_))).unwrap();
+    selector.gesture = suhina_device_sdk::ui::UiGesture::Set(999);
+    assert!(g.validate().is_err());
+}
+
+#[test]
+fn logarithmic_delay_curve_is_smooth_when_narrow_and_handles_bad_math() {
+    use suhina_device_sdk::ui::{Draw, UiValue};
+    assert!((UiValue::from(2.0).ln().exp().evaluate(&|_, _, _| 0.0) - 2.0).abs() < 1e-5);
+    assert_eq!(UiValue::from(-1.0).ln().evaluate(&|_, _, _| 0.0), 0.0);
+    assert_eq!(UiValue::from(1000.0).exp().evaluate(&|_, _, _| 0.0), 0.0);
+    let g = examples::build("delay").unwrap();
+    let control = g.ui.as_ref().unwrap().controls.iter().find(|c| c.id == "filter_graph").unwrap();
+    let drawings = control.drawings();
+    let points = drawings
+        .iter()
+        .find_map(|d| match d {
+            Draw::Path { points, .. } => Some(points),
+            _ => None,
+        })
+        .unwrap();
+    for (cutoff, width) in [(4010.0, 2.4), (2600.0, 3.09), (1000.0, 8.0)] {
+        let lookup = |id: &str, norm: bool, log: bool| {
+            let p = g.parameters.iter().find(|p| p.id == id).unwrap();
+            let v = match id {
+                "cutoff" => cutoff,
+                "width" => width,
+                _ => p.default,
+            };
+            if !norm {
+                v
+            } else if log {
+                (v.ln() - p.min.ln()) / (p.max.ln() - p.min.ln())
+            } else {
+                (v - p.min) / (p.max - p.min)
+            }
+        };
+        let ys: Vec<_> = points.iter().map(|p| p[1].evaluate(&lookup)).collect();
+        assert!(ys.iter().all(|y| y.is_finite()));
+        let peak = ys.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!((30.0..45.0).contains(&peak));
+        for pair in ys.windows(2) {
+            if pair[0] < 118. && pair[1] < 118. {
+                assert!((pair[1] - pair[0]).abs() < 9.0, "abrupt visible edge: {pair:?}");
+            }
+        }
+        if width < 4.0 {
+            assert!(ys[0] > 118.0 && *ys.last().unwrap() > 60.0);
+        }
+    }
+}
+
+#[test]
+fn lfo_rate_modes_convert_real_units_and_follow_tempo() {
+    for (mode, hz) in [(0., 0.5), (1., 0.5), (2., 2.), (3., 3.), (4., 4. / 3.), (5., 2.)] {
+        let mut g = graph(K::LfoRate);
+        g.nodes.push(N::new("mode", K::Constant { value: mode }));
+        g.connections.push(C::ports("mode", "out", "node", "mode"));
+        let mut audio = [0.; 2];
+        g.compile().unwrap().process(&mut audio);
+        assert!((audio[0] as f64 - hz).abs() < 1e-6, "mode {mode}");
+        assert_eq!(audio[0], audio[1]);
+        if mode >= 2. {
+            g.nodes.push(N::new("tempo", K::Tempo));
+            g.connections.push(C::ports("tempo", "out", "node", "tempo"));
+            let mut effect = g.compile().unwrap();
+            audio.fill(0.0);
+            effect.process_context(&ProcessContext { tempo: 90., beat: 0., playing: true }, &mut audio);
+            assert!((audio[0] as f64 - hz * 0.75).abs() < 1e-6, "tempo in mode {mode}");
+        }
+    }
+    let mut bad = examples::build("delay").unwrap();
+    bad.parameters.iter_mut().find(|p| p.id == "mod_shape").unwrap().control = ParameterControl::Integer;
+    assert!(bad.validate().is_err(), "menu requires declared Choice options");
+}
+
+#[test]
+fn lfo_disclosure_round_trips_without_changing_audio() {
+    let graph = examples::build("delay").unwrap();
+    let index = graph.parameters.iter().position(|p| p.id == "lfo_expanded").unwrap();
+    let mut collapsed = graph.clone();
+    collapsed.parameters[index].default = 0.0;
+    assert_eq!(collapsed, DeviceGraph::from_sd(&collapsed.to_sd().unwrap()).unwrap());
+    let mut open_effect = graph.compile().unwrap();
+    let mut folded_effect = collapsed.compile().unwrap();
+    let mut open: Vec<_> = (0..96000).map(|i| ((i as f32) * 0.02).sin() * 0.1).collect();
+    let mut folded = open.clone();
+    open_effect.process(&mut open);
+    folded_effect.process(&mut folded);
+    assert_eq!(open, folded);
+    open_effect.set_parameter(index, 0.0);
+    let mut next = vec![0.1; 2048];
+    let mut reference = next.clone();
+    open_effect.process(&mut next);
+    folded_effect.process(&mut reference);
+    assert_eq!(next, reference);
+}
+
+#[test]
+fn delay_folding_gives_space_to_the_filter_graph() {
+    let graph = examples::build("delay").unwrap();
+    let canvas = graph.ui.as_ref().unwrap();
+    for (expanded, height, offset) in [(1., 118., 0.), (0., 148., 30.)] {
+        let lookup = |id: &str, _: bool, _: bool| if id == "lfo_expanded" { expanded } else { 0. };
+        let visible = |name: &str| {
+            canvas
+                .controls
+                .iter()
+                .find(|c| c.name == name && c.visible_when.as_ref().is_none_or(|v| v.evaluate(&lookup) != 0.))
+                .unwrap()
+        };
+        let filter = visible("Filter frequency and width");
+        assert_eq!(filter.bounds, [129., 0., 204., height]);
+        let disclosure = visible("LFO details");
+        assert_eq!(disclosure.bounds, [129., 135. + offset, 43., 12.]);
+        assert_eq!(visible("mod delay").bounds, [207., 135. + offset, 52., 12.]);
+        assert_eq!(visible("mod filter").bounds, [298., 135. + offset, 35., 12.]);
+        let background = canvas
+            .layers
+            .iter()
+            .find_map(|d| match d {
+                suhina_device_sdk::ui::Draw::Rect { rect, .. } => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(background[1].evaluate(&lookup), 135. + offset);
+        assert_eq!(background[1].evaluate(&lookup) + background[3].evaluate(&lookup), 180.);
+    }
+}
+
+#[test]
+fn delay_uses_independent_widgets_and_rejects_invalid_widget_contracts() {
+    use suhina_device_sdk::ui::{Draw, Widget};
+    let graph = examples::build("delay").unwrap();
+    let canvas = graph.ui.as_ref().unwrap();
+    assert!(canvas.controls.iter().all(|c| c.widget.is_some() && c.drawing.is_empty()));
+    let encoded = graph.to_sd().unwrap();
+    assert!(encoded.contains("\"widget\""));
+    assert_eq!(graph, DeviceGraph::from_sd(&encoded).unwrap());
+    let mut bad = graph.clone();
+    let control = &mut bad.ui.as_mut().unwrap().controls[0];
+    control.drawing.push(Draw::Rect { rect: [0., 0., 8., 8.].map(Into::into), color: [0; 4], radius: 0. });
+    assert!(bad.validate().is_err());
+    let mut bad = graph.clone();
+    bad.ui.as_mut().unwrap().controls[0].widget = Some(Widget::Menu);
+    assert!(bad.validate().is_err());
+    let mut bad = graph.clone();
+    let control = bad
+        .ui
+        .as_mut()
+        .unwrap()
+        .controls
+        .iter_mut()
+        .find(|c| matches!(c.widget, Some(Widget::FilterBand { .. })))
+        .unwrap();
+    control.widget = Some(Widget::FilterBand { min_hz: 0., max_hz: 18000. });
+    assert!(bad.validate().is_err());
+    let mut bad = graph.clone();
+    let control =
+        bad.ui.as_mut().unwrap().controls.iter_mut().find(|c| matches!(c.widget, Some(Widget::Number { .. }))).unwrap();
+    if let Some(Widget::Number { decimals, .. }) = &mut control.widget {
+        *decimals = 99;
+    }
+    assert!(bad.validate().is_err());
 }

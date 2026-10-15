@@ -98,6 +98,11 @@ The engine runs them in chains on tracks, made through `device-registry`.
 
 ## From a file to the speakers
 
+The SDK also preserves optional version-3 editor geometry (node rectangles, wire bends and port
+anchors). This remains authoring data in the embedded JSON; it is validated off the audio thread
+and does not add processing nodes or a runtime/UI dependency. The current node list does not
+render this layout. See the [layout contract](spec/sd-device-format.md#visual-connection-layout).
+
 An `.sd` device enters through `device.addSd` or a browser drop. The session reads and validates
 the file off the audio thread, then stores its canonical JSON in the device state and its parameter
 defaults in project state. Project saves embed both. Renderer construction compiles the graph into
@@ -245,3 +250,16 @@ renderer without a deadline.
   block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, clip editor), meters, and the commands they still
   need (arm, sends) (M8). The browser's open questions are in its spec › Not decided yet.
+
+SDK parameter edits can expand conditional peer links into several parameter messages.
+The session stores and validates the complete command, records one undo gesture, then sends
+every message to the player. If a message cannot be sent it updates the complete graph.
+
+### SDK panel widgets
+
+The device SDK owns reusable, data-only UI widget descriptions and their drawing
+programs (`crates/device-sdk/src/ui/widgets.rs`). Each widget is one control bound
+to parameters; device examples compose these controls. The UI prepares and caches
+the drawing programs per canvas alongside its image resources, then evaluates them
+against current parameter values. Widgets use the existing command/undo path and
+do not add DSP graph nodes or run on the audio thread.

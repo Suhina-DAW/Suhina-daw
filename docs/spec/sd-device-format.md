@@ -1,5 +1,5 @@
 ---
-description: Version 2 of the data-only Suhina device graph format, SDK, track loading, and generated controls
+description: Version 3 of the data-only Suhina device graph format, SDK, track loading, and visual connection layouts
 read_when: .sd, Suhina device, device graph, device SDK, community effect, visual node, device UI
 type: spec
 status: current
@@ -7,6 +7,8 @@ last_verified: 2026-10-15
 covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
+  - crates/device-sdk/src/editor.rs
+  - crates/device-sdk/examples/wire_layout.rs
   - crates/device-sdk/src/graph.rs
   - crates/device-sdk/src/midi.rs
   - crates/device-sdk/src/runtime.rs
@@ -27,11 +29,13 @@ An `.sd` file describes a device as data. It contains no Rust source, executable
 assets. The Rust SDK builds and validates the graph, writes the JSON file and can prepare the
 supported graph for audio processing.
 
-## Version 2
+## Version 3
 
-The top-level object contains `format: "suhina-device"`, `version: 2`, a `device` object,
-`nodes` and `connections`. The reader also accepts version 1 linear input/gain/output graphs;
-writing canonical JSON upgrades them to version 2 without changing their sound.
+The top-level object contains `format: "suhina-device"`, `version: 3`, a `device` object,
+`nodes`, `connections` and optional `editor` metadata. The reader also accepts version 1
+linear input/gain/output graphs and version 2 signal graphs; writing canonical JSON upgrades
+them to version 3 without changing their sound. Older readers reject version 3, preventing
+silent loss of authoring metadata when saving. File version is independent of device identity.
 The device has a stable id, name, role and parameters (`id`, `name`, `min`, `max`, `default`,
 `control`, `unit`). Controls include `slider` (default), `log_slider` (positive range), `integer`
 (integer range/default) and `toggle` (range 0..1, integer default). Unit is display text, at most
@@ -69,12 +73,59 @@ state when the embedded graph is unchanged, including effect tails and oscillato
 See the complete [node reference](sdk-nodes.md) and the [authoring guide](../device-sdk.md),
 including the machine-readable catalog for AI agents.
 
+## Visual connection layout
+
+Optional `editor.graph` contains `nodes` and `wires` arrays (both default empty).
+This is authoring data for a future editor, not an interactive editor or a second processing
+graph. The existing read-only node list does not render this layout yet. Unknown fields in
+editor objects are rejected so unsupported metadata cannot be silently discarded.
+
+Node layout records have `node` (an existing node id), `position: [x,y]` and
+`size: [width,height]`. Positions and wire points are logical pixels in graph coordinates
+(-8192..8192); sizes are 24..4096. At most one layout per node, including hidden nodes, is
+allowed. Layout records are optional for individual nodes; absent records mean automatic layout.
+
+Wire records have `connection` (the existing `from`, `from_port`, `to`, `to_port` tuple),
+`points` (default empty, at most 256 intermediate polyline bends), and optional
+`from_anchor` / `to_anchor` offsets in logical pixels from the corresponding node's top-left.
+An explicit anchor requires a layout for that endpoint, and must lie within its node rectangle
+(edges included). Omitted anchors mean automatic port placement; they are not audio values.
+The complete visual route is source anchor, intermediate points in array order, destination
+anchor. No bend means a direct line. The endpoint tuple, not an array index, identifies a wire;
+reordering connections does not change its meaning. One route per existing connection is allowed.
+Different connections using the same port must use the same explicit anchor for that port.
+Removing or reconnecting an edge requires updating/removing its route before saving.
+
+There are at most 128 node layouts, 640 wire routes and 4096 total bend points. All geometry
+must be finite. Invalid references, duplicate layouts/routes and inconsistent port anchors fail
+validation before compilation. Editor data is preserved by SDK serialization and embedded
+project state and is not read by DSP processing. It does not change the existing file-size cap.
+Versions 1/2 must not contain non-null `editor` data.
+
+```json
+"editor": {"graph": {
+  "nodes": [
+    {"node":"in", "position":[0,0], "size":[120,80]},
+    {"node":"gain", "position":[240,0], "size":[120,80]}
+  ],
+  "wires": [{
+    "connection":{"from":"in","from_port":"out","to":"gain","to_port":"in"},
+    "from_anchor":[120,40], "to_anchor":[0,40],
+    "points":[[180,40],[180,60]]
+  }]
+}}
+```
+
+Generate a complete example with `cargo run -p suhina-device-sdk --example wire_layout --
+target/sdk-examples/wire-layout.sd`, then validate it with the `validate` example.
+Layers, component hierarchy and editable envelope documents remain separate planned additions.
+
 ## Example
 
 ```json
 {
   "format": "suhina-device",
-  "version": 2,
+  "version": 3,
   "device": {
     "id": "org.example.gain",
     "name": "Example Gain",
@@ -174,3 +225,14 @@ and custom parameter controls. Canvas `size` defaults to `[640,240]`; optional `
 (default null, automatic) independently sets the preferred scrollable body dimensions. See the [custom panel contract](sdk-custom-ui.md) for every field,
 gesture and resource limit. Graphics are evaluated on the UI thread and are stored in the same
 `.sd` as the audio graph. They do not change its DSP execution contract.
+
+## Linked parameter edits
+
+A parameter's `ui.link` may contain `enabled_by` (a declared 0..1 Toggle id) and `peer`
+(a different parameter id with the same range, control kind and unit). Invalid references
+are rejected. Links expand `device.setParam` on the session thread into clamped parameter
+messages; they do not perform work on the audio thread. Expansion is one hop, not recursive.
+Declare reciprocal links for bidirectional pairs. While the toggle is enabled, either edit
+updates both stored values. When enabling the toggle, the earlier parameter in each reciprocal
+pair is copied to the later one. The complete edit shares one undo snapshot and all messages
+reach the attached player; undo, redo and project saving preserve the pair.

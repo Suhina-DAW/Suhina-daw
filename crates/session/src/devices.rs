@@ -44,8 +44,8 @@ pub(crate) fn sd_nodes(_: &mut Session, _: &Value) -> Result<Value, CommandError
         "custom_ui": {
             "defaults": suhina_device_sdk::ui::DeviceUi::default(),
             "drawing": ["rect", "circle", "line", "path", "arc", "text", "image", "gradient"],
-            "expressions": ["parameter", "add", "multiply", "sin", "cos"],
-            "gestures": ["drag", "position", "toggle", "momentary"],
+            "expressions": ["parameter", "add", "multiply", "sin", "cos", "equal", "exp", "log"],
+            "gestures": ["drag", "position", "toggle", "momentary", {"set": 3}, "menu"],
             "image_formats": ["png", "jpeg"],
             "image_bytes": suhina_device_sdk::ui::MAX_ASSET_BYTES,
             "total_image_bytes": suhina_device_sdk::ui::MAX_ASSETS_BYTES,
@@ -379,6 +379,7 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     let channel = channel_param(session, params)?;
     let index = device_index(channel.devices.len(), params)?;
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
+    let mut edits = Vec::new();
     let (param_index, value) = match &device.kind {
         DeviceKind::Builtin(id) => {
             let info =
@@ -399,6 +400,16 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
                 .enumerate()
                 .find(|(_, p)| p.id == param)
                 .ok_or_else(|| format!("{} has no parameter {param:?}", graph.name))?;
+            edits = graph
+                .parameter_edits(param, value, |id| {
+                    device.params.iter().find(|p| p.id == id).map_or_else(
+                        || graph.parameters.iter().find(|p| p.id == id).map_or(0.0, |p| p.default),
+                        |p| p.value,
+                    )
+                })
+                .into_iter()
+                .filter_map(|(i, value)| graph.parameters.get(i).map(|p| (i, p.id.clone(), value)))
+                .collect();
             (index, parameter.clamp(value))
         }
         _ => {
@@ -407,12 +418,18 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
             );
         }
     };
-    match device.params.iter_mut().find(|p| p.id == param) {
-        Some(stored) => stored.value = value,
-        None => device.params.push(DeviceParam::new(param, value)),
+    if edits.is_empty() {
+        edits.push((param_index, param.to_string(), value));
     }
-    // A playing engine takes this as a message, without a new graph.
-    session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
+    let mut messages = Vec::new();
+    for (param_index, id, value) in edits {
+        match device.params.iter_mut().find(|p| p.id == id) {
+            Some(stored) => stored.value = value,
+            None => device.params.push(DeviceParam::new(id, value)),
+        }
+        messages.push(ParamEdit { track, device: index, param: param_index, value });
+    }
+    session.param_edits = messages;
     Ok(json!({ "device": index, "param": param, "value": value }))
 }
 

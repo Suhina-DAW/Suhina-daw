@@ -106,7 +106,7 @@ The JSON catalog uses the same records and includes a minimal configuration exam
 | `sample_hold` / `SampleHold` | `in` (required, signal), `trigger` (required, signal) | Captures input on each nonpositive-to-positive trigger transition per channel. Held value and previous trigger reset to zero. |
 | `filter` / `Filter` | `in` (required, signal), `frequency` (1000, Hz), `q` (0.7071067811865476, Q), `gain` (0, dB) | Stereo biquad using suhina-dsp; frequency 1..0.49*sample rate, Q 0.025..100, gain +/-48 dB. Independent channel state resets to zero. Modulation updates coefficients only when controls change. |
 | `sample_delay` / `SampleDelay` | `in` (required, signal) | One-frame stereo delay; reads previous input before current input is committed. Breaks feedback cycles. Reset clears history. |
-| `delay` / `Delay` | `in` (required, signal), `time` (0, seconds) | Fractional stereo delay with linear interpolation, time limited to one frame..max_seconds. max_seconds must be >0 and <=60. Breaks feedback only through in port; time remains an ordinary dependency. Reset clears history. |
+| `delay` / `Delay` | `in` (required, signal), `time` (0, seconds), `mode` (2, 0 repitch, 1 fade, 2 jump) | Fractional stereo delay with independent channel times and linear interpolation, time limited to one frame..max_seconds. Mode 0 slews time with a 20 ms one-pole (repitch), 1 crossfades read heads over 20 ms, 2 jumps to the new time (the default for older graphs). max_seconds must be >0 and <=60. Breaks feedback only through in port; time remains an ordinary dependency. Reset clears history. |
 | `tempo` / `Tempo` | None | Broadcasts current transport tempo in beats/minute, limited to 1..1000. |
 | `beat` / `Beat` | None | Broadcasts transport beat, advanced each frame while playing. |
 | `playing` / `Playing` | None | Broadcasts transport running flag as 0 or 1. |
@@ -116,4 +116,16 @@ The JSON catalog uses the same records and includes a minimal configuration exam
 | `midi_key` / `MidiKey` | None | Instrument signal containing the current MIDI key, or 0 when no key is held. |
 | `midi_velocity` / `MidiVelocity` | None | Instrument signal containing the current note velocity from 0 to 1. |
 | `midi_gate` / `MidiGate` | None | Instrument signal set to 1 while a note is held and 0 otherwise. |
+| `lfo_rate` / `LfoRate` | `rate` (0.5, Hz), `time` (2000, ms), `division` (4, divisor or sixteenth count), `mode` (0, 0 Rate, 1 Time, 2 Synced, 3 Triplet, 4 Dotted, 5 16th), `tempo` (120, BPM) | Stateless Hz conversion. Clamps rate to 0.01..20, time to 1..20000 ms, rounded division to 1..64, rounded mode to 0..5 and tempo to 1..1000 BPM. Modes output rate, 1000/time, tempo*division/240, tempo*division/160, tempo*division/360 or tempo/(15*division). Broadcasts mono; no reset state. |
 <!-- sdk-nodes:end -->
+
+## LFO rate conversion
+
+`lfo_rate` is a stateless control-rate converter with five mono inputs: `rate` in Hz
+(0.01..20), `time` in ms (1..20000), integer `division` (1..64), `mode` (rounded 0..5)
+and `tempo` (1..1000 BPM). It broadcasts a frequency in Hz. Modes are Rate, Time, Synced,
+Triplet, Dotted and 16th respectively: rate; 1000/time; tempo*division/240;
+tempo*division/160; tempo*division/360; tempo/(15*division).
+The synchronized divisor describes 1/division of a whole note; the 16th mode counts
+sixteenth notes per cycle. Inputs are clamped before conversion. It has no state to reset,
+allocations, latency or signal-dependent processing.

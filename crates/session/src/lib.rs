@@ -185,8 +185,8 @@ pub struct Session {
     player: Option<Player>,
     /// A copied arrangement clip and the content it plays, for `clip.paste`.
     clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
-    /// Set by an edit command whose only change is one device parameter.
-    pub(crate) param_edit: Option<ParamEdit>,
+    /// Set by an edit command whose changes are device parameters.
+    pub(crate) param_edits: Vec<ParamEdit>,
     /// Parameter whose live drag has already recorded its single undo snapshot.
     param_gesture: Option<(suhina_model::TrackId, usize, String)>,
     /// The project's plug-ins, running while it plays (ADR 0006).
@@ -214,7 +214,7 @@ impl Session {
             redo: Vec::new(),
             player: None,
             clipboard: None,
-            param_edit: None,
+            param_edits: Vec::new(),
             param_gesture: None,
             plugins: rack::Rack::default(),
             audio: suhina_engine::AudioPool::new(),
@@ -589,7 +589,7 @@ impl Session {
                 Ok(value)
             }
             CommandKind::Edit => {
-                self.param_edit = None;
+                self.param_edits.clear();
                 let before = self.project.clone();
                 let result = (spec.run)(self, params).and_then(|value| match self.project.validate() {
                     Ok(()) => Ok(value),
@@ -599,8 +599,8 @@ impl Session {
                     Ok(value) => {
                         if self.project != before {
                             self.changes = self.changes.wrapping_add(1);
-                            let change = self.param_edit.take();
-                            let gesture = change.map(|change| {
+                            let changes = std::mem::take(&mut self.param_edits);
+                            let gesture = changes.first().map(|change| {
                                 (
                                     change.track,
                                     change.device,
@@ -616,8 +616,10 @@ impl Session {
                             self.param_gesture = continuous_param_edit.then_some(gesture).flatten();
                             // A parameter change goes to the engine as a message; anything else,
                             // or a message that cannot be sent, as a new graph.
-                            let sent = match (change, self.player.as_mut()) {
-                                (Some(change), Some(player)) => player.set_device_param(change).is_ok(),
+                            let sent = match (changes.is_empty(), self.player.as_mut()) {
+                                (false, Some(player)) => {
+                                    changes.into_iter().all(|change| player.set_device_param(change).is_ok())
+                                }
                                 _ => false,
                             };
                             if !sent {

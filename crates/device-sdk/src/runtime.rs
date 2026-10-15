@@ -19,9 +19,22 @@ enum State {
     Phase(f64),
     Random(u32),
     Smooth([f64; 2]),
-    Held { value: [f64; 2], trigger: [f64; 2] },
-    Filter { channels: [Biquad; 2], controls: [f64; 3] },
-    Delay { history: Vec<[f64; 2]>, cursor: usize, max_frames: f64 },
+    Held {
+        value: [f64; 2],
+        trigger: [f64; 2],
+    },
+    Filter {
+        channels: [Biquad; 2],
+        controls: [f64; 3],
+    },
+    Delay {
+        history: Vec<[f64; 2]>,
+        cursor: usize,
+        max_frames: f64,
+        heads: [f64; 2],
+        targets: [f64; 2],
+        fades: [usize; 2],
+    },
 }
 /// Compiled graph. Prepare and drop off the audio thread. Processing, reset and parameter
 /// updates neither allocate nor perform I/O. The same processor runs offline and live.
@@ -96,8 +109,18 @@ impl PreparedEffect {
                     history: vec![[0.0; 2]; (max_seconds * sample_rate).ceil() as usize + 2],
                     cursor: 0,
                     max_frames: (max_seconds * sample_rate).max(1.0),
+                    heads: [0.; 2],
+                    targets: [0.; 2],
+                    fades: [0; 2],
                 },
-                NodeKind::SampleDelay => State::Delay { history: vec![[0.0; 2]; 2], cursor: 0, max_frames: 1.0 },
+                NodeKind::SampleDelay => State::Delay {
+                    history: vec![[0.0; 2]; 2],
+                    cursor: 0,
+                    max_frames: 1.0,
+                    heads: [0.; 2],
+                    targets: [0.; 2],
+                    fades: [0; 2],
+                },
                 _ => State::None,
             };
             nodes.push(Op { kind: node.kind.clone(), inputs, defaults, parameter, state });
@@ -185,7 +208,10 @@ impl PreparedEffect {
                     }
                     *controls = [f64::NAN; 3];
                 }
-                State::Delay { history, cursor, .. } => {
+                State::Delay { history, cursor, heads, targets, fades, .. } => {
+                    heads.fill(0.);
+                    targets.fill(0.);
+                    fades.fill(0);
                     history.fill([0.0; 2]);
                     *cursor = 0;
                 }
@@ -236,6 +262,19 @@ impl PreparedEffect {
                     (Constant { value }, _) => output = [*value; 2],
                     (Parameter { .. }, _) => output = [parameter; 2],
                     (Tempo, _) => output = [tempo; 2],
+                    (LfoRate, _) => {
+                        let division = x[2][0].round().clamp(1., 64.);
+                        let bpm = x[4][0].clamp(1., 1000.);
+                        let hz = match x[3][0].round().clamp(0., 5.) as u8 {
+                            0 => x[0][0].clamp(0.01, 20.),
+                            1 => 1000. / x[1][0].clamp(1., 20000.),
+                            2 => bpm * division / 240.,
+                            3 => bpm * division / 160.,
+                            4 => bpm * division / 360.,
+                            _ => bpm / (15. * division),
+                        };
+                        output = [hz; 2];
+                    }
                     (Beat, _) => output = [beat; 2],
                     (Playing, _) => output = [f64::from(context.playing); 2],
                     (MidiKey, _) => output = [self.midi[0]; 2],
@@ -286,20 +325,54 @@ impl PreparedEffect {
                             output[c] = channels[c].process(x[0][c]);
                         }
                     }
-                    (Delay { .. } | SampleDelay, State::Delay { history, cursor, max_frames }) => {
-                        let frames = if matches!(op.kind, SampleDelay) {
-                            1.0
-                        } else {
-                            (x[1][0] * self.sample_rate).clamp(1.0, *max_frames)
-                        };
-                        let whole = frames.floor() as usize;
-                        let fraction = frames - whole as f64;
+                    (
+                        Delay { .. } | SampleDelay,
+                        State::Delay { history, cursor, max_frames, heads, targets, fades },
+                    ) => {
                         let len = history.len();
-                        let at = (*cursor + len - whole) % len;
-                        let prev = (at + len - 1) % len;
-                        if let Some((a, b)) = history.get(at).zip(history.get(prev)) {
-                            for c in 0..2 {
-                                output[c] = a[c] * (1.0 - fraction) + b[c] * fraction;
+                        let fade_frames = (self.sample_rate * 0.02).max(1.0) as usize;
+                        for c in 0..2 {
+                            let frames = if matches!(op.kind, SampleDelay) {
+                                1.0
+                            } else {
+                                (x[1][c] * self.sample_rate).clamp(1.0, *max_frames)
+                            };
+                            let read = |distance: f64| {
+                                let whole = distance.floor() as usize;
+                                let fraction = distance - whole as f64;
+                                let at = (*cursor + len - whole) % len;
+                                let prev = (at + len - 1) % len;
+                                history
+                                    .get(at)
+                                    .zip(history.get(prev))
+                                    .map_or(0.0, |(a, b)| a[c] * (1.0 - fraction) + b[c] * fraction)
+                            };
+                            if x[2][0].round() == 1.0 && heads[c] > 0.0 {
+                                if fades[c] == 0 && (frames - targets[c]).abs() >= 1.0 {
+                                    heads[c] = targets[c];
+                                    targets[c] = frames;
+                                    fades[c] = fade_frames;
+                                }
+                                if fades[c] > 0 {
+                                    let blend = 1.0 - fades[c] as f64 / fade_frames as f64;
+                                    output[c] = read(heads[c]) * (1.0 - blend) + read(targets[c]) * blend;
+                                    fades[c] -= 1;
+                                    if fades[c] == 0 {
+                                        heads[c] = targets[c];
+                                    }
+                                } else {
+                                    output[c] = read(targets[c]);
+                                }
+                            } else {
+                                let frames = if x[2][0].round() == 0.0 && heads[c] > 0.0 {
+                                    heads[c] + (frames - heads[c]) / fade_frames as f64
+                                } else {
+                                    frames
+                                };
+                                output[c] = read(frames);
+                                heads[c] = frames;
+                                targets[c] = frames;
+                                fades[c] = 0;
                             }
                         }
                     }

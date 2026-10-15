@@ -5,6 +5,7 @@ type: spec
 status: current
 last_verified: 2026-10-15
 covers:
+  - crates/device-sdk/src/ui/widgets.rs
   - crates/device-sdk/src/ui.rs
   - crates/ui/src/device_canvas.rs
   - crates/ui/src/detail_view.rs
@@ -38,7 +39,7 @@ Drawing commands: rectangle, circle, line, path, arc, text, image and four-corne
 Paths have at most 256 points; filled paths must be convex. Arc tessellation is bounded. Colours are RGBA byte quadruples.
 Text can append a parameter's current value with bounded decimal precision. Numeric drawing
 values can be literals or bounded expressions (parameter, normalized parameter, add, multiply,
-sine and cosine). Expression depth is at most 16, with 32768 expression nodes per canvas;
+sine, cosine, exponential, natural logarithm and equality). Expression depth is at most 16, with 32768 expression nodes per canvas;
 non-finite results become zero, finite values are bounded before drawing. This supports moving
 markers, response drawings, circular handles, segmented displays and meters driven by parameters.
 No DSP outputs or audio-thread buffers are read by the UI.
@@ -56,7 +57,7 @@ use PNG transparency. Photos and patterns are original assets supplied by the au
 Gestures: drag (relative X/Y), position (absolute pointer position, Y upward), toggle, momentary.
 Bindings map normalized coordinates to parameter units with optional logarithmic mapping.
 Keyboard arrows edit axes, Shift provides fine adjustment, double click resets defaults;
-Space/Enter activate buttons. The control name and values are exposed to accessibility.
+Space/Enter activate buttons. A gesture `{"set": 3}` sets the X parameter to the literal integer 3; its value must be inside the declared range. The control name and values are exposed to accessibility.
 Edits dispatch `device.setParam` with a shared gesture id so a two-axis drag is one undo gesture.
 All bindings reference declared parameter ids, and values use their range/discrete clamping.
 
@@ -86,6 +87,7 @@ current value and unit to the prefix `text`. `decimals` is 0..8. Unknown fields 
 
 A value expression uses `op`: `parameter` has `parameter` (id), `normalized` (false), `logarithmic`
 (false); `add` and `multiply` have `a` and `b`; `sin` and `cos` have `value` (radians).
+The `equal` expression has `a` and `b` and returns 1 when their difference is less than 0.0001, otherwise 0; use it for selected segment highlights.
 The parameter expression returns raw units unless `normalized` is true. Use the same
 `logarithmic` flag on bindings and normalized drawings.
 
@@ -108,3 +110,48 @@ A serialized control referencing a declared continuous `cutoff` parameter:
 `drag`. `id`, `name`, and `bounds` are required. A canvas defaults to 640x240 with background
 [24,28,34,255], empty assets/layers/controls/hidden_parameters. Asset objects require `id` and
 `data` (standard base64). Runtime controls bind only declared parameters, never paths or commands.
+
+## Conditional controls and text layout
+
+A custom control can set `visible_when` to a numeric expression. Values <=0 hide both the
+drawing and interaction; an omitted condition keeps the control visible. Conditions use the
+same bounded validation as drawing expressions. Control width and height are at least 8 pixels.
+Text supports `align: left|center` (default left) and `format: number|frequency|choice` (default number).
+Frequency formatting uses two decimal kHz at >=1000 Hz and the declared numeric precision below.
+The Delay example uses these fields for centred selectors and mutually exclusive Sync/Time controls.
+
+`exp` and `log` expressions each take `value`; `log` is the natural logarithm. Domain errors
+and non-finite results evaluate to zero, like other drawing expressions. These support a continuous
+log-frequency band response in the Delay panel without changing DSP processing. Its plotted
+high-pass and low-pass losses use a two-pole magnitude model at every sampled frequency.
+Parameter text is fitted to its control's clip area, down to 8 logical pixels, and percent
+readouts omit the space before the unit. Delay offsets also have a bordered field.
+Keyboard and mouse focus use short grey corner brackets around the complete custom control;
+rotary controls include their caption inside that area. Starting a drag requests keyboard focus.
+
+## Choice menus
+
+The `menu` gesture binds only X to a Choice parameter. A click, Enter or Space opens a popup
+of its declared `ui.options`, with the current item selected. Choosing an item dispatches one
+`device.setParam` command with its zero-based option index and ends the gesture. Opening,
+cancelling with Escape, or clicking outside changes no parameter. Popups use the host overlay
+layer and remain visible above or below the authored canvas. `text.format: choice` displays
+the bound parameter's current option label instead of a number.
+
+## Delay example folding
+
+The Delay example keeps its 400 by 180 canvas fixed. Expanding LFO details
+reduces the filter graph height from 148 to 118 logical pixels; collapsing them
+returns those 30 pixels to the graph. The Filter row and LFO summary move together,
+keeping the LFO section anchored at the bottom. LFO controls retain their size.
+
+## Reusable functional widgets
+
+A control may specify a typed `widget` instead of a custom `drawing`. Widgets are
+independent UI nodes, each bound to its own declared parameter (or two parameters
+for the filter band display). They are not DSP nodes. The SDK supplies buttons,
+number fields, knobs, disclosure toggles, choice menus, waveform menus and filter
+band displays. Styling and bindings belong to each instance; no LFO section widget
+exists. The host uses the same gestures, commands, keyboard handling, undo and
+persistence as custom controls. Legacy drawing controls remain readable. A widget
+and a nonempty custom drawing are mutually exclusive.

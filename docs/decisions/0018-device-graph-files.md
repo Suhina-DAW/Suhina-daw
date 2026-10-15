@@ -25,6 +25,12 @@ Issue #300 asks for a Rust SDK that can create a shareable `.sd` device file. Th
 the device and signal flow as data, without embedding Rust source. Version 2 loads composable device graphs into tracks and draws their nodes and parameter
 controls in the detail panel. Version 1 gain graphs remain readable.
 
+Version 3 adds optional [visual connection layouts](../spec/sd-device-format.md#visual-connection-layout):
+node rectangles, wire bends and port anchors. SDK serialization preserves these independently of
+DSP execution. Versions 1 and 2 remain readable; all writes use version 3 so old readers reject
+the new document instead of silently dropping editor data. Interactive graph editing remains
+deferred. Only supported, strictly validated authoring fields are accepted.
+
 ## Decision
 
 1. `.sd` is versioned JSON with device metadata, role, parameters, processing nodes and graph

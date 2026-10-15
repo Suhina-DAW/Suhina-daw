@@ -6,6 +6,8 @@ use suhina_device_sdk::{DeviceGraph, DeviceRole, FilterMode, Node as N, NodeKind
 
 fn text(position: [f32; 2], label: &str, size: f32) -> Draw {
     Draw::Text {
+        align: Default::default(),
+        format: Default::default(),
         position: position.map(Into::into),
         text: label.into(),
         color: [204, 220, 233, 255],
@@ -74,6 +76,8 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
     let px = UiValue::from(12.0) + UiValue::normalized("cutoff", true) * 366.0.into();
     let py = UiValue::from(136.0) + UiValue::normalized("balance", false) * (-124.0).into();
     canvas.controls.push(CustomControl {
+        widget: None,
+        visible_when: None,
         id: "orbit".into(),
         name: "Frequency and stereo position".into(),
         tooltip: "X: logarithmic cutoff. Y: stereo balance. Arrow keys adjust each axis.".into(),
@@ -100,6 +104,8 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
     });
     let angle = UiValue::from(-2.35) + UiValue::normalized("level", false) * 4.7.into();
     canvas.controls.push(CustomControl {
+        widget: None,
+        visible_when: None,
         id: "output".into(),
         name: "Output level".into(),
         tooltip: "Drag vertically or press Up/Down. Double click restores unity.".into(),
@@ -127,6 +133,8 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
                 width: 3.0,
             },
             Draw::Text {
+                align: Default::default(),
+                format: Default::default(),
                 position: [30.0.into(), 72.0.into()],
                 text: "".into(),
                 color: [204, 220, 233, 255],

@@ -33,6 +33,7 @@ pub(crate) fn graph(bytes: &[u8]) -> Option<Arc<Parsed>> {
 struct Loaded {
     source: Arc<DeviceUi>,
     images: Vec<Result<egui::TextureHandle, String>>,
+    controls: Vec<Vec<Draw>>,
 }
 fn images(ctx: &egui::Context, source: &Arc<DeviceUi>) -> Arc<Loaded> {
     let key = egui::Id::new("sd-image-cache");
@@ -58,7 +59,8 @@ fn images(ctx: &egui::Context, source: &Arc<DeviceUi>) -> Arc<Loaded> {
                 .map_err(|e| e.to_string())
         })
         .collect();
-    let loaded = Arc::new(Loaded { source: source.clone(), images });
+    let controls = source.controls.iter().map(|c| c.drawings().into_owned()).collect();
+    let loaded = Arc::new(Loaded { source: source.clone(), images, controls });
     cache.push(loaded.clone());
     if cache.len() > 8 {
         cache.remove(0);
@@ -124,18 +126,44 @@ fn paint(painter: &egui::Painter, drawings: &[Draw], origin: Pos2, parameters: &
                     .collect();
                 painter.add(egui::Shape::line(points, Stroke::new(*width, color(*c))));
             }
-            Draw::Text { position, text, color: c, size, parameter, decimals } => {
-                let label = parameter
-                    .as_ref()
-                    .and_then(|id| parameters.iter().find(|p| p.id == *id))
-                    .map_or_else(|| text.clone(), |p| format!("{text}{:.*} {}", *decimals, p.value, p.unit));
-                painter.text(
-                    point(position),
-                    egui::Align2::LEFT_TOP,
-                    label,
-                    egui::FontId::proportional(*size),
-                    color(*c),
+            Draw::Text { position, text, color: c, size, parameter, decimals, align, format } => {
+                let label = parameter.as_ref().and_then(|id| parameters.iter().find(|p| p.id == *id)).map_or_else(
+                    || text.clone(),
+                    |p| match format {
+                        TextFormat::Choice => {
+                            p.ui.options.get(p.value.round().max(0.0) as usize).cloned().unwrap_or_default()
+                        }
+                        TextFormat::Frequency if p.value >= 1000.0 => format!("{text}{:.2} kHz", p.value / 1000.0),
+                        _ => format!(
+                            "{text}{:.*}{}{}",
+                            *decimals,
+                            p.value,
+                            if p.unit.is_empty() || p.unit == "%" { "" } else { " " },
+                            p.unit
+                        ),
+                    },
                 );
+                let position = point(position);
+                let mut font = egui::FontId::proportional(*size);
+                let mut galley = painter.layout_no_wrap(label.clone(), font.clone(), color(*c));
+                if parameter.is_some() {
+                    let clip = painter.clip_rect();
+                    let available_width = if *align == TextAlign::Center {
+                        2. * (position.x - clip.left()).min(clip.right() - position.x)
+                    } else {
+                        clip.right() - position.x
+                    };
+                    let available_height = clip.bottom() - position.y;
+                    let scale = (available_width / galley.size().x.max(1.))
+                        .min(available_height / galley.size().y.max(1.))
+                        .clamp(0., 1.);
+                    if scale < 1. {
+                        font.size = (font.size * scale).max(8.);
+                        galley = painter.layout_no_wrap(label, font, color(*c));
+                    }
+                }
+                let offset = if *align == TextAlign::Center { Vec2::new(galley.size().x / 2., 0.) } else { Vec2::ZERO };
+                painter.galley(position - offset, galley, color(*c));
             }
             Draw::Gradient { rect, colors } => {
                 let r = rectangle(rect);
@@ -201,20 +229,31 @@ pub(crate) fn show(
     let painter = ui.painter_at(rect.intersect(ui.clip_rect()));
     painter.rect_filled(rect, 0.0, color(canvas.background));
     paint(&painter, &canvas.layers, rect.min, parameters, &loaded);
-    for control in &canvas.controls {
+    for (control, drawings) in canvas.controls.iter().zip(&loaded.controls) {
+        if control.visible_when.as_ref().is_some_and(|v| {
+            v.evaluate(&|id, norm, log| {
+                parameters.iter().find(|p| p.id == id).map_or(0.0, |p| if norm { normalized(p, log) } else { p.value })
+            }) <= 0.0
+        }) {
+            continue;
+        }
         let [x, y, w, h] = control.bounds;
         let bounds = Rect::from_min_size(rect.min + Vec2::new(x, y), Vec2::new(w, h));
         paint(
             &painter.with_clip_rect(bounds.intersect(painter.clip_rect())),
-            &control.drawing,
+            drawings,
             bounds.min,
             parameters,
             &loaded,
         );
         let response = ui
-            .interact(bounds, egui::Id::new(("sd-custom", track.0, device, &control.id)), egui::Sense::click_and_drag())
+            .interact(
+                bounds,
+                egui::Id::new(("sd-custom", track.0, device, &control.id)),
+                if control.gesture == UiGesture::Menu { egui::Sense::click() } else { egui::Sense::click_and_drag() },
+            )
             .on_hover_text(&control.tooltip);
-        if response.clicked() {
+        if response.clicked() || response.drag_started() {
             response.request_focus();
         }
         let focused = response.has_focus();
@@ -241,6 +280,40 @@ pub(crate) fn show(
             let Some(binding) = binding else { continue };
             let Some(p) = parameters.iter().find(|p| p.id == binding.parameter) else { continue };
             descriptions.push(format!("{}: {} {}", p.name, p.value, p.unit));
+            if control.gesture == UiGesture::Menu {
+                let key_open =
+                    focused && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
+                let mut popup = egui::Popup::menu(&response);
+                if key_open {
+                    popup = popup.open_memory(Some(egui::SetOpenCommand::Toggle));
+                }
+                let frame = egui::Frame::popup(ui.style())
+                    .corner_radius(0)
+                    .fill(Color32::from_rgb(24, 24, 24))
+                    .stroke(Stroke::new(1., Color32::from_rgb(255, 173, 86)));
+                let mut picked = None;
+                popup.frame(frame).show(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.;
+                    ui.spacing_mut().interact_size.y = 14.;
+                    ui.visuals_mut().selection.bg_fill = Color32::from_rgb(255, 173, 86);
+                    for (index, label) in p.ui.options.iter().enumerate() {
+                        let selected = p.value.round() == index as f64;
+                        let text = egui::RichText::new(label).size(11.).color(if selected {
+                            Color32::from_rgb(24, 24, 24)
+                        } else {
+                            Color32::from_rgb(255, 173, 86)
+                        });
+                        if ui.selectable_label(selected, text).clicked() {
+                            picked = Some(index as f64);
+                            ui.close();
+                        }
+                    }
+                });
+                if let Some(value) = picked.filter(|v| *v != p.value) {
+                    control_actions.push(Action::new("device.setParam",json!({"track":track.0,"device":device,"param":p.id,"value":value,"continuous":false,"gesture":control.id})));
+                }
+                continue;
+            }
             let old = normalized(p, binding.logarithmic);
             let mut next = old;
             match control.gesture {
@@ -258,10 +331,21 @@ pub(crate) fn show(
                     next += if axis == 0 { delta.x as f64 / w as f64 } else { -delta.y as f64 / h as f64 } * fine;
                 }
                 UiGesture::Toggle if response.clicked() => next = if old >= 0.5 { 0.0 } else { 1.0 },
+                UiGesture::Set(value) if response.clicked() || button => {
+                    let value = f64::from(value);
+                    next = if binding.logarithmic {
+                        (value.ln() - p.min.ln()) / (p.max.ln() - p.min.ln())
+                    } else {
+                        (value - p.min) / (p.max - p.min)
+                    };
+                }
                 UiGesture::Momentary => next = f64::from(response.is_pointer_button_down_on() || button),
                 _ => {}
             }
-            if !matches!(control.gesture, UiGesture::Toggle | UiGesture::Momentary) {
+            if !matches!(
+                control.gesture,
+                UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu
+            ) {
                 next += (if axis == 0 { dx } else { dy }) as f64 * 0.01 * fine;
             }
             let mut value = if binding.logarithmic {
@@ -279,13 +363,21 @@ pub(crate) fn show(
             );
             let key_delta = if axis == 0 { dx } else { dy };
             if key_delta != 0
-                && !matches!(control.gesture, UiGesture::Toggle | UiGesture::Momentary)
+                && !matches!(
+                    control.gesture,
+                    UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu
+                )
                 && (discrete || p.ui.step > 0.0)
             {
                 let step = if discrete { p.ui.step.max(1.0) } else { p.ui.step * fine };
                 value = (p.value + f64::from(key_delta) * step).clamp(p.min, p.max);
             }
-            if response.double_clicked() && !matches!(control.gesture, UiGesture::Toggle | UiGesture::Momentary) {
+            if response.double_clicked()
+                && !matches!(
+                    control.gesture,
+                    UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu
+                )
+            {
                 value = p.default;
             }
             // Reuse the SDK's discrete/range rules through the shared command.
@@ -315,7 +407,10 @@ pub(crate) fn show(
             actions.push(action);
         }
         response.widget_info(|| {
-            let kind = if matches!(control.gesture, UiGesture::Toggle | UiGesture::Momentary) {
+            let kind = if matches!(
+                control.gesture,
+                UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu
+            ) {
                 egui::WidgetType::Button
             } else {
                 egui::WidgetType::DragValue
@@ -325,12 +420,18 @@ pub(crate) fn show(
             info
         });
         if focused {
-            painter.rect_stroke(
-                bounds,
-                2.0,
-                Stroke::new(1.0, ui.visuals().selection.stroke.color),
-                egui::StrokeKind::Inside,
-            );
+            let r = bounds.shrink(0.5);
+            let leg = 3.0_f32.min(r.width() * 0.25).min(r.height() * 0.25);
+            let stroke = Stroke::new(1., Color32::from_rgb(160, 160, 154));
+            for (corner, dx, dy) in [
+                (r.left_top(), 1., 1.),
+                (r.right_top(), -1., 1.),
+                (r.left_bottom(), 1., -1.),
+                (r.right_bottom(), -1., -1.),
+            ] {
+                painter.line_segment([corner + Vec2::new(dx * leg, 0.), corner], stroke);
+                painter.line_segment([corner, corner + Vec2::new(0., dy * leg)], stroke);
+            }
         }
     }
 }
@@ -352,11 +453,241 @@ mod tests {
         }
     }
     #[test]
+    fn delay_panel_renders_and_selector_dispatches_a_literal() {
+        let graph = super::delay_example::build().unwrap();
+        let parameters: Vec<_> = graph
+            .parameters
+            .iter()
+            .map(|p| GraphParameter {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                value: p.default,
+                unit: p.unit.clone(),
+                control: p.control,
+                ui: p.ui.clone(),
+            })
+            .collect();
+        let canvas = Arc::new(graph.ui.unwrap());
+        let preview_canvas = canvas.clone();
+        let preview_parameters = parameters.clone();
+        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+            crate::theme::install(ui.ctx());
+            show(
+                ui,
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                &preview_canvas,
+                &preview_parameters,
+                TrackId(1),
+                0,
+                &mut Vec::new(),
+            );
+        });
+        harness.run();
+        harness.render().unwrap().save("../../target/delay-panel.png").unwrap();
+        use egui_kittest::kittest::Queryable;
+        let mut narrow_parameters = parameters.clone();
+        for p in &mut narrow_parameters {
+            p.value = match p.id.as_str() {
+                "cutoff" => 4010.0,
+                "width" => 2.4,
+                "offset_left" => -33.3,
+                "offset_right" => 33.3,
+                _ => p.value,
+            };
+        }
+        let narrow_canvas = canvas.clone();
+        let mut narrow = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+            crate::theme::install(ui.ctx());
+            show(
+                ui,
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                &narrow_canvas,
+                &narrow_parameters,
+                TrackId(1),
+                0,
+                &mut Vec::new(),
+            );
+        });
+        narrow.run();
+        narrow.get_by_label("Feedback").click();
+        narrow.run();
+        narrow.render().unwrap().save("../../target/delay-focus.png").unwrap();
+        let mut time_parameters = parameters.clone();
+        for p in &mut time_parameters {
+            if p.id.starts_with("sync_") {
+                p.value = 0.0;
+            }
+            if p.id.starts_with("time_") {
+                p.value = 427.0;
+            }
+        }
+        let time_canvas = canvas.clone();
+        let mut time_harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+            crate::theme::install(ui.ctx());
+            show(
+                ui,
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                &time_canvas,
+                &time_parameters,
+                TrackId(1),
+                0,
+                &mut Vec::new(),
+            );
+        });
+        time_harness.run();
+        time_harness.render().unwrap().save("../../target/delay-time-panel.png").unwrap();
+        let actions = click(&canvas, &parameters, Pos2::new(40., 35.));
+        assert!(actions.iter().any(|a| a.params["param"] == "division_left" && a.params["value"] == 2.0));
+        let mut time_parameters = parameters.clone();
+        for p in &mut time_parameters {
+            if p.id.starts_with("sync_") {
+                p.value = 0.0;
+            }
+        }
+        assert!(
+            click(&canvas, &time_parameters, Pos2::new(40., 35.))
+                .iter()
+                .all(|a| !a.params["param"].as_str().unwrap_or_default().starts_with("division_")),
+            "hidden sync grid must not intercept clicks"
+        );
+        let actions = click(&canvas, &time_parameters, Pos2::new(30., 18.));
+        assert!(actions.iter().any(|a| a.params["param"] == "sync_left" && a.params["value"] == 1.0));
+    }
+    #[test]
+    fn delay_menus_open_choose_and_cancel_without_spurious_edits() {
+        use egui_kittest::kittest::Queryable;
+        let graph = super::delay_example::build().unwrap();
+        let parameters: Vec<_> = graph
+            .parameters
+            .iter()
+            .map(|p| GraphParameter {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                value: p.default,
+                unit: p.unit.clone(),
+                control: p.control,
+                ui: p.ui.clone(),
+            })
+            .collect();
+        let canvas = Arc::new(graph.ui.unwrap());
+        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 220.)).build_ui_state(
+            move |ui, state: &mut (Vec<GraphParameter>, Vec<Action>)| {
+                crate::theme::install(ui.ctx());
+                let mut actions = Vec::new();
+                show(
+                    ui,
+                    Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                    &canvas,
+                    &state.0,
+                    TrackId(1),
+                    0,
+                    &mut actions,
+                );
+                for a in &actions {
+                    if let Some(p) = state.0.iter_mut().find(|p| a.params["param"] == p.id) {
+                        p.value = a.params["value"].as_f64().unwrap();
+                    }
+                }
+                state.1.extend(actions);
+            },
+            (parameters, Vec::new()),
+        );
+        harness.run();
+        harness.get_by_label("LFO waveform").click();
+        harness.run();
+        assert!(harness.state().1.is_empty(), "opening Wave must not edit the parameter");
+        harness.render().unwrap().save("../../target/delay-wave-menu.png").unwrap();
+        harness.get_by_label("Wander").click();
+        harness.run();
+        assert_eq!(harness.state().1.len(), 1);
+        assert_eq!(harness.state().1[0].params["param"], "mod_shape");
+        assert_eq!(harness.state().1[0].params["value"], 6.0);
+        assert_eq!(harness.state().1[0].params["continuous"], false);
+        harness.get_by_label("LFO rate mode").click();
+        harness.run();
+        assert_eq!(harness.state().1.len(), 1);
+        harness.render().unwrap().save("../../target/delay-rate-menu.png").unwrap();
+        harness.get_by_label("Triplet").click();
+        harness.run();
+        assert_eq!(harness.state().1.len(), 2);
+        assert_eq!(harness.state().1[1].params["param"], "mod_rate_mode");
+        assert_eq!(harness.state().1[1].params["value"], 3.0);
+        harness.get_by_label("LFO rate mode").click();
+        harness.run();
+        harness.key_combination(&[egui::Key::Escape]);
+        harness.run();
+        assert_eq!(harness.state().1.len(), 2, "Escape must not edit a parameter");
+        harness.get_by_label("LFO details").click();
+        harness.run();
+        assert_eq!(harness.state().1.last().unwrap().params["param"], "lfo_expanded");
+        assert_eq!(harness.state().1.last().unwrap().params["value"], 0.0);
+        assert!(harness.query_by_label("LFO waveform").is_none());
+        assert!(harness.query_by_label("LFO rate mode").is_none());
+        assert!(harness.query_by_label("mod morph").is_none());
+        assert!(harness.query_by_label("mod delay").is_some());
+        assert!(harness.query_by_label("mod filter").is_some());
+        harness.render().unwrap().save("../../target/delay-lfo-collapsed.png").unwrap();
+        harness.get_by_label("LFO details").click();
+        harness.run();
+        assert_eq!(harness.state().1.last().unwrap().params["value"], 1.0);
+        assert!(harness.query_by_label("LFO waveform").is_some());
+        assert!(harness.query_by_label("LFO rate mode").is_some());
+        assert!(harness.query_by_label("mod morph").is_some());
+        assert_eq!(harness.state().0.iter().find(|p| p.id == "mod_shape").unwrap().value, 6.0);
+        assert_eq!(harness.state().0.iter().find(|p| p.id == "mod_rate_mode").unwrap().value, 3.0);
+        harness.render().unwrap().save("../../target/delay-lfo-expanded.png").unwrap();
+    }
+    fn click(canvas: &Arc<DeviceUi>, parameters: &[GraphParameter], position: Pos2) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let mut actions = Vec::new();
+        for pressed in [None, Some(true), Some(false)] {
+            let events = pressed.map_or_else(Vec::new, |pressed| {
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ]
+            });
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(412., 192.))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    show(
+                        ui,
+                        Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                        canvas,
+                        parameters,
+                        TrackId(1),
+                        0,
+                        &mut actions,
+                    )
+                },
+            );
+            output.textures_delta.clear();
+        }
+        actions
+    }
+    #[test]
     fn idle_log_control_does_not_emit_edits_and_xy_click_is_one_gesture() {
         let ctx = egui::Context::default();
         let canvas = Arc::new(DeviceUi {
             size: [160.0, 160.0],
             controls: vec![CustomControl {
+                widget: None,
+                visible_when: None,
                 id: "xy".into(),
                 name: "XY".into(),
                 tooltip: String::new(),
@@ -413,3 +744,8 @@ mod tests {
         assert_eq!(actions[1].params["value"], 0.75);
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::duplicate_mod)]
+#[path = "../../device-sdk/examples/delay.rs"]
+mod delay_example;

@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -132,7 +132,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
   follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file.
   `devices.sdNodes` returns every SDK node contract, ports, units, defaults, configuration examples
-  limits and custom canvas capabilities for effect authoring by agents ([guide](device-sdk.md)).
+  limits and custom canvas capabilities (including equality expressions and literal-value selector buttons, conditional controls, choice menus and text alignment) for effect authoring by agents ([guide](device-sdk.md)).
+  `device.setParam` applies declared conditional peer links as one undo gesture and sends all affected values to the player.
   `device.addSd` validates and embeds a composable effect graph in the project; its supported nodes
   render in both real-time playback and offline rendering. Renders and
   the playing engine run the chains.

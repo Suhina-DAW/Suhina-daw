@@ -130,6 +130,13 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 
 ## What works now
 
+- SDK `.sd` version 3 preserves node positions, port anchors and wire routes for future visual editing; version 1/2 files remain readable. Interactive graph editing is still planned.
+
+- SDK panels have reusable typed buttons, number fields, knobs, disclosure toggles, selectors and filter-band controls; Delay composes its interface from these individual widgets.
+- SDK custom panels support popup choice menus; Delay exposes waveform and LFO rate-mode selections.
+
+- The SDK Delay example has an embedded stereo timing/filter/LFO panel, Sync/Time modes, bidirectional linked timing edits, feedback freeze, ping-pong repeats and three delay-time transition modes.
+
 - SDK custom panels support independent canvas and preferred viewport dimensions, with scrolling and backwards-compatible automatic sizing.
 
 - SDK effects package custom drawing controls, XY pads, backgrounds and embedded PNG/JPEG artwork in one `.sd`.
