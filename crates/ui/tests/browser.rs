@@ -122,6 +122,17 @@ fn double_click(harness: &mut Harness<'static, App>, label: &str) {
     harness.run();
 }
 
+/// Presses and lets go once, at `pos`, a frame apart, without waiting: two in a row are a
+/// double-click.
+fn quick_click_at(harness: &mut Harness<'static, App>, pos: Pos2) {
+    harness.hover_at(pos);
+    harness.step();
+    harness.drag_at(pos);
+    harness.step();
+    harness.drop_at(pos);
+    harness.step();
+}
+
 /// Presses at `at` and lets go a frame later, like a mouse click.
 fn click_at(harness: &mut Harness<'static, App>, at: Pos2) {
     harness.hover_at(at);
@@ -236,6 +247,70 @@ fn a_click_on_a_folders_chevron_opens_it_and_on_its_title_only_selects_it() {
     assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "the folder stays open");
     click_at(&mut harness, at);
     assert!(harness.query_by_label(&row("Groove.mid")).is_none(), "a second click closes it");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_double_click_on_a_folders_chevron_opens_it_and_stays_open() {
+    let (settings, folder) = (temp("chevron-settings"), temp("chevron"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    // Clicking the chevron of the library folder twice in quick succession — the second
+    // click inside egui's double-click window (0.3 s, 6 pt) — opens it once and leaves it
+    // open, instead of opening and closing it again (#293).
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    let at = harness.get_by_label(&row(&name)).rect();
+    let chevron = Pos2::new(at.left() + 8.0, at.center().y);
+    quick_click_at(&mut harness, chevron);
+    quick_click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "a double-click on the chevron opens the folder");
+    // Past the double-click window, a click on the chevron closes it again: every distinct
+    // click toggles.
+    for _ in 0..8 {
+        harness.step();
+    }
+    quick_click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_none(), "a click after the window closes it");
+    // A double-click on the row itself still opens it.
+    double_click(&mut harness, &row(&name));
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "a double-click on the folder opens it");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_click_on_a_headings_chevron_opens_it_and_stays_open() {
+    let (settings, folder) = (temp("heading-chevron-settings"), temp("heading-chevron"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    let at = harness.get_by_label(&row("Instruments")).rect();
+    let chevron = Pos2::new(at.left() + 8.0, at.center().y);
+    // A single click on a heading's chevron opens it and it stays open: the press and the
+    // release of the click must not each toggle it (#293).
+    quick_click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some(), "a click on the heading's chevron opens it");
+    // Past the double-click window (eight frames is 0.4 s, the window is 0.3 s), the next
+    // click closes it again.
+    for _ in 0..8 {
+        harness.step();
+    }
+    quick_click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_none(), "a click after the window closes it");
+    // A rapid double-click on the chevron opens it once: the second click of the pair is a
+    // double and does not toggle again.
+    for _ in 0..8 {
+        harness.step();
+    }
+    quick_click_at(&mut harness, chevron);
+    quick_click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some(), "a double-click on the chevron opens it once");
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }

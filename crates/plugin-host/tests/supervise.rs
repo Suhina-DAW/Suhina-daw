@@ -165,6 +165,30 @@ fn a_real_clap_file_when_one_is_given() {
     assert!(plugin.ping());
 }
 
+/// Runs a real VST3 file or bundle through the host when `SUHINA_TEST_VST3` names one
+/// (`path/to/Name.vst3`, optionally `#<class id>`); skipped otherwise.
+#[test]
+fn a_real_vst3_bundle_when_one_is_given() {
+    let Ok(spec) = std::env::var("SUHINA_TEST_VST3") else {
+        eprintln!("SUHINA_TEST_VST3 not set; skipped");
+        return;
+    };
+    let (mut plugin, mut audio) = start(&format!("vst3:{spec}"));
+    let mut done = 0;
+    for _ in 0..100 {
+        if block(&mut audio, PATIENT).0 == Outcome::Done {
+            done += 1;
+        }
+    }
+    assert_eq!(done, 100);
+    let state = plugin.save_state();
+    eprintln!("{spec}: latency {}, state {:?} bytes", plugin.latency(), state.as_ref().map(|s| s.data.len()));
+    if let Ok(state) = state {
+        plugin.load_state(state).unwrap();
+    }
+    assert!(plugin.ping());
+}
+
 #[test]
 fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     use suhina_plugins::offline::render;

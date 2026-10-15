@@ -55,6 +55,9 @@ jobs:
             const CLAIMED = "In progress";
             // Where a released card goes, so that it can be taken again.
             const RELEASED = "Ready";
+            // A claim with no pull request after this long has lapsed, and the next `/claim` takes it
+            // over (CONTRIBUTING.md › Working on an issue). A draft pull request is enough to keep it.
+            const LAPSE_HOURS = 48;
 
             const issue = context.payload.issue;
             // Assignees and labels are read again rather than taken from the event, which is as old
@@ -148,6 +151,32 @@ jobs:
                 const found = (field.options || []).find((option) => same(option.name, name));
                 return found ? found.id : null;
               };
+              // Open pull requests that say `Closes #N` for this issue; none when the lookup fails.
+              const openPullRequests = async () => {
+                try {
+                  const linked = await project.graphql(
+                    `query ($issue: ID!) {
+                       node(id: $issue) {
+                         ... on Issue {
+                           closedByPullRequestsReferences(first: 10, includeClosedPrs: false) {
+                             nodes { number title url }
+                           }
+                         }
+                       }
+                     }`,
+                    { issue: issue.node_id },
+                  );
+                  return (
+                    (linked.node &&
+                      linked.node.closedByPullRequestsReferences &&
+                      linked.node.closedByPullRequestsReferences.nodes) ||
+                    []
+                  );
+                } catch (error) {
+                  core.warning(`Could not look for linked pull requests: ${error.message}`);
+                  return [];
+                }
+              };
               const isFree = (name) => FREE.some((free) => same(name, free));
               const isNotReady = (name) => NOT_READY.some((held) => same(name, held));
               const isWorking = (name) => WORKING.some((working) => same(name, working));
@@ -227,6 +256,27 @@ jobs:
                 }
               };
 
+              // When this bot last wrote "Claimed by" here, or null: the age of the current claim. A
+              // claim made only in a plain comment has no such time, and never lapses on its own.
+              const claimedAt = async () => {
+                try {
+                  const comments = await github.paginate(github.rest.issues.listComments, {
+                    ...context.repo,
+                    issue_number: issue.number,
+                    per_page: 100,
+                  });
+                  const claim = comments
+                    .filter((entry) => entry.user && entry.user.type === "Bot")
+                    .filter((entry) => (entry.body || "").startsWith("Claimed by @"))
+                    .pop();
+                  const at = claim ? Date.parse(claim.created_at) : NaN;
+                  return Number.isNaN(at) ? null : at;
+                } catch (error) {
+                  core.warning(`Could not read when this was claimed: ${error.message}`);
+                  return null;
+                }
+              };
+
               if (command === "hold" || command === "ready") {
                 if (!maintainer) {
                   return say(`Only a maintainer can hold or release an issue, @${actor}.`);
@@ -298,6 +348,18 @@ jobs:
                 );
               }
 
+              // A feature request in Backlog is not agreed yet: a maintainer moves it to Ready (`/ready`)
+              // once Suhina wants it, so two people never start the same idea in two shapes. A bug in
+              // Backlog is free, and a maintainer may claim either.
+              const feature = (current.labels || []).some((label) => label.name === "enhancement");
+              if (feature && !maintainer && (!item || status === null || same(status, "Backlog"))) {
+                return say(
+                  `This feature is not agreed yet (**${status || "Backlog"}**), so it is not open to ` +
+                    `claim. Write your plan in this issue; a maintainer moves it to **${RELEASED}** with ` +
+                    `\`/ready\` when Suhina wants it, and then \`/claim\` works.`,
+                );
+              }
+
               if (item && isNotReady(status)) {
                 const reason = await holdReason();
                 return say(
@@ -308,51 +370,70 @@ jobs:
               }
 
               // A card without a Status yet is free, as it is for `/unclaim`.
+              let lapsed = false;
               if (item && status !== null && !isFree(status)) {
                 if (same(status, CLAIMED) && assignees.length === 1 && assignees[0] === actor) {
-                  return say(`@${actor}, this one is already yours.`);
+                  // Often a second session of the same person, or an agent started twice: point it at
+                  // the work that exists, so it continues there instead of opening a second pull request.
+                  const open = await openPullRequests();
+                  const list = open.map((pr) => `- #${pr.number} ${pr.title}`).join("\n");
+                  return say(
+                    `@${actor}, this one is already yours` +
+                      (open.length > 0
+                        ? `, and it has a pull request:\n\n${list}\n\nContinue there rather than opening another one.`
+                        : ". If another session of yours is on it, continue that work rather than starting again."),
+                  );
                 }
+                // A claim in progress with no pull request after LAPSE_HOURS is free again: the
+                // claimer is unassigned here and the claim below goes ahead.
+                if (same(status, CLAIMED) && !assignees.includes(actor)) {
+                  const at = await claimedAt();
+                  if (at !== null && Date.now() - at > LAPSE_HOURS * 3600 * 1000) {
+                    lapsed = (await openPullRequests()).length === 0;
+                  }
+                }
+                if (lapsed) {
+                  if (assignees.length > 0) {
+                    try {
+                      await github.rest.issues.removeAssignees({
+                        ...context.repo,
+                        issue_number: issue.number,
+                        assignees,
+                      });
+                    } catch (error) {
+                      core.warning(`Could not unassign ${mentions}: ${error.message}`);
+                    }
+                  }
+                  await say(
+                    `The claim${mentions ? ` by ${mentions}` : ""} lapsed: no pull request in ` +
+                      `${LAPSE_HOURS} hours. It passes to @${actor}.`,
+                  );
+                }
+              }
+              if (item && status !== null && !isFree(status) && !lapsed) {
                 const who = mentions ? ` (${mentions})` : "";
                 const state = isWorking(status)
                   ? `already **${status}**${who}, so someone is on it`
                   : `**${status}**${who}, which is not open to start`;
                 return say(
                   `This is ${state}. Please take another one — the [good first issues](${firstIssues}) ` +
-                    `are a good start. If that work has stalled, offer in its pull request to take it ` +
-                    `over rather than opening a second one.`,
+                    `are a good start. A claim with no pull request lapses after ${LAPSE_HOURS} hours, and ` +
+                    `then \`/claim\` takes it over; if its pull request has stalled, ask its author ` +
+                    `there, and with no answer in three days you may take it over in that pull request.`,
                 );
               }
 
               // A pull request that closes the issue has taken it, whatever the board says. This is a
               // courtesy check, not the gate: the board decides, so a failure here must not stop a
               // legitimate claim.
-              try {
-                const linked = await project.graphql(
-                  `query ($issue: ID!) {
-                     node(id: $issue) {
-                       ... on Issue {
-                         closedByPullRequestsReferences(first: 10, includeClosedPrs: false) {
-                           nodes { number title url }
-                         }
-                       }
-                     }
-                   }`,
-                  { issue: issue.node_id },
+              const open = await openPullRequests();
+              if (open.length > 0) {
+                const list = open.map((pr) => `- #${pr.number} ${pr.title}`).join("\n");
+                return say(
+                  `There is already a pull request for this, so it is taken:\n\n${list}\n\n` +
+                    `If it has stalled, ask its author there; with no answer in three days you may ` +
+                    `take the work over in it (CONTRIBUTING.md › Working on an issue).`,
                 );
-                const open =
-                  (linked.node &&
-                    linked.node.closedByPullRequestsReferences &&
-                    linked.node.closedByPullRequestsReferences.nodes) ||
-                  [];
-                if (open.length > 0) {
-                  const list = open.map((pr) => `- #${pr.number} ${pr.title}`).join("\n");
-                  return say(
-                    `There is already a pull request for this, so it is taken:\n\n${list}\n\n` +
-                      `If it has stalled, offer there to take the work over instead of opening a second one.`,
-                  );
-                }
-              } catch (error) {
-                core.warning(`Could not look for linked pull requests: ${error.message}`);
               }
 
               if (!(await requireOption(CLAIMED))) return;
@@ -372,8 +453,9 @@ jobs:
 
               return say(
                 `Claimed by @${actor}: **${CLAIMED}** on the [board](${boardUrl}).\n\n` +
-                  `Please keep that true: comment \`/unclaim\` if you stop, and write ` +
-                  `\`Closes #${issue.number}\` in your pull request when it is ready. A plan in a ` +
+                  `Please keep that true: open a draft pull request that says \`Closes #${issue.number}\` ` +
+                  `within ${LAPSE_HOURS} hours, or the claim lapses and the next \`/claim\` takes it ` +
+                  `over; comment \`/unclaim\` if you stop. A plan in a ` +
                   `comment — what you will change, and roughly when — helps whoever reviews it.`,
               );
             } catch (error) {
