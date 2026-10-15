@@ -183,7 +183,7 @@ impl Event {
                 if data.len() % 2 != 0 {
                     return Err(bad("has an odd length for UTF-16"));
                 }
-                let units: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                let units: Vec<u16> = data.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
                 let Some((&0, text)) = units.split_last() else {
                     return Err(bad("has no terminator"));
                 };
