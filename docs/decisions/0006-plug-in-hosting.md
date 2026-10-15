@@ -122,7 +122,8 @@ workspace forbids.
      with its automation yet.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* protocol
-     version 7 (`open_editor` says whether the editor is `embedded` in the engine's window,
+     version 8 (`latency_changed` comes unasked when a running plug-in reports another
+     latency; see *Latency* below); version 7 (`open_editor` says whether the editor is `embedded` in the engine's window,
      `place_editor` puts it there and is not answered, and `editor_resized` comes unasked when
      a plug-in gives its editor a new size, decision 10); version 6: `open_editor` names the
      window that owns the editor's (`owner`); since
@@ -441,8 +442,20 @@ workspace forbids.
   and plug-ins, as each reports) delay it most, up to 2 s, through delay lines made with the
   graph. A plug-in's latency is known once it has started, which builds a new graph. The
   playhead shows what the engine renders, so it runs ahead of what is heard by that delay.
+- **Latency that changes while a plug-in runs** (a lookahead the user sets; #110) is followed.
+  A CLAP plug-in asks for a restart (`request_restart`, the only way its latency may change
+  while it is active) or says `latency.changed`; a VST3 plug-in calls `restartComponent` with
+  `kLatencyChanged`. The host's main loop then stops the instance's audio thread (a VST3
+  processor first gets the parameter values still waiting, in a block of no samples, so it has
+  the value that changed its latency), deactivates and activates the plug-in as before, starts a
+  new audio thread on the same link and reads the latency again; when it differs, the host sends
+  `latency_changed` unasked. The engine side takes it in without waiting
+  (`Plugin::follow_latency`), and the session builds a new graph, as when a plug-in starts, so
+  the tracks are lined up again. Blocks that come during the restart (milliseconds) go
+  unanswered, as a late block does. An offline render started with its plug-ins keeps the
+  latencies they had when they started.
 - Not built yet: consecutive plug-ins of one process in one round trip; automating plug-in
-  parameters from the engine; latency a plug-in changes while it runs (read once, at start).
+  parameters from the engine.
 
 ## Sources
 

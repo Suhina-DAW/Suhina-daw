@@ -188,6 +188,7 @@ Change this code, and check these documents.
 | `crates/session/tests/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/meters.rs` | [Level meters](spec/level-meters.md) |
+| `crates/session/tests/scenes.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
@@ -205,7 +206,7 @@ Change this code, and check these documents.
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
-| `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/ui/src/meter.rs` | [Components](design/components.md), [Level meters](spec/level-meters.md) |
 | `crates/ui/src/missing_files.rs` | [Architecture](architecture.md), [Components](design/components.md), [Missing files](spec/missing-files.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |

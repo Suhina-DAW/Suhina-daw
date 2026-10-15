@@ -124,10 +124,11 @@ CHAPTERS = [
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
-    (24, "Using Plug-Ins", 12, 0.62, "partial",
+    (24, "Using Plug-Ins", 12, 0.64, "partial",
      "CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, "
      "editors (Windows/X11), scans, latency "
-     "compensation, saved state, VST2 read and matched to VST3, parameters set and automated from "
+     "compensation (followed when a plug-in changes its latency while it plays), saved state, "
+     "VST2 read and matched to VST3, parameters set and automated from "
      "the engine. Missing AU, VST2 hosting, "
      "configure mode, VST preset banks, sidechain parameters."),
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",

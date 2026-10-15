@@ -82,8 +82,15 @@ fn a_slow_host_misses_then_the_link_is_busy_until_it_answers() {
     assert_eq!(link.process(&input, &mut output, timeout), Outcome::Busy);
     assert!(started.elapsed() < Duration::from_millis(5), "busy returns at once: {:?}", started.elapsed());
 
-    thread::sleep(Duration::from_millis(300));
-    assert_eq!(link.process(&input, &mut output, LONG), Outcome::Done);
+    // The link stays busy until the slow host answers; a loaded machine may take longer than the
+    // host's pause, so wait for that rather than for a fixed time.
+    let waiting = Instant::now();
+    let mut outcome = link.process(&input, &mut output, LONG);
+    while outcome == Outcome::Busy && waiting.elapsed() < LONG {
+        thread::sleep(Duration::from_millis(10));
+        outcome = link.process(&input, &mut output, LONG);
+    }
+    assert_eq!(outcome, Outcome::Done);
     assert_eq!(output[3], input[3] * 0.5);
     assert_eq!(host.join().ok(), Some(3));
 }

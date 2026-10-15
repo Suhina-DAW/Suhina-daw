@@ -273,6 +273,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   still loading or could not start; it can be sent to the background, and the project plays
   meanwhile. A scan finds plug-ins that were missing without opening the project again.
 - Tracks are lined up for the latency of their devices and plug-ins.
+- A plug-in that changes its latency while it plays (a lookahead set in its editor) is
+  followed: Suhina hears of it, restarts the plug-in's processing as its format asks, and lines
+  the tracks up again.
 - The device panel shows each plug-in's state (loading, running, missing, crashed) with Open
   editor, Close editor or Restart; the same commands work from the CLI and MCP. Editors float
   above Suhina's window, owned by it (Windows, X11), and respond at once; a setting
@@ -294,8 +297,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)). Their lanes are set by command;
   the Arrangement's lanes show built-in parameters only so far.
 - Still to do: plug-ins of one process in one round trip
-  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), latency a plug-in changes while
-  it runs ([#110](https://github.com/suhina-daw/suhina-daw/issues/110)), waiting for each chain's
+  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), waiting for each chain's
   plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), real-time
   priority through MMCSS and rtkit ([#150](https://github.com/suhina-daw/suhina-daw/issues/150)),
   checking an imported Live Set with real plug-ins
