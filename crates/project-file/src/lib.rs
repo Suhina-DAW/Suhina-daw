@@ -23,8 +23,9 @@ use serde_json::{Map, Value, json};
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    Launcher, LauncherColumn, LoopRange, MAX_CHANGE_BEAT, MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, Note, Project,
+    Rgb, Scene, Send, Slot, StretchMode, TempoPoint, TimeSignature, TimeSignatureChange, Track, TrackId, Transport,
+    WarpMarker, valid_bpm,
 };
 
 /// The file extension, without the dot.
@@ -196,13 +197,33 @@ fn slashes(path: &Path) -> String {
 
 fn project_value(p: &Project) -> Value {
     let mut out = Map::new();
-    out.insert(
-        "transport".into(),
-        json!({
-            "tempo_bpm": number(p.transport.tempo_bpm),
-            "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
-        }),
-    );
+    let mut transport = json!({
+        "tempo_bpm": number(p.transport.tempo_bpm),
+        "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
+    });
+    // The changes are written only when there are some, so a project without them is saved as
+    // it always was.
+    if let Some(t) = transport.as_object_mut() {
+        if !p.transport.tempo_changes.is_empty() {
+            let changes = p.transport.tempo_changes.iter();
+            t.insert(
+                "tempo_changes".into(),
+                changes.map(|c| json!({ "beat": number(c.beat), "bpm": number(c.bpm), "ramp": c.ramp })).collect(),
+            );
+        }
+        if !p.transport.time_signature_changes.is_empty() {
+            let changes = p.transport.time_signature_changes.iter();
+            t.insert(
+                "time_signature_changes".into(),
+                changes
+                    .map(|c| {
+                        json!({ "bar": c.bar, "time_signature": [c.time_signature.numerator, c.time_signature.denominator] })
+                    })
+                    .collect(),
+            );
+        }
+    }
+    out.insert("transport".into(), transport);
     out.insert("tracks".into(), p.tracks.iter().map(track_value).collect());
     out.insert("channels".into(), p.channels.iter().map(channel_value).collect());
     out.insert("contents".into(), p.contents.iter().map(content_value).collect());
@@ -478,6 +499,72 @@ fn extensions(o: &Obj, at: &str) -> Result<Extensions, ProjectFileError> {
     Ok(Extensions(out))
 }
 
+/// A time signature written as `[numerator, denominator]`, each a whole number from 1 to 255.
+fn time_signature(value: &Value, at: &str) -> Result<TimeSignature, ProjectFileError> {
+    let Value::Array(pair) = value else {
+        return Err(format!("{at}: expected [numerator, denominator]").into());
+    };
+    let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
+    match (pair.len(), pair.first().and_then(part), pair.get(1).and_then(part)) {
+        (2, Some(numerator), Some(denominator)) => Ok(TimeSignature { numerator, denominator }),
+        (2, _, _) => Err(format!("{at}: expected two whole numbers").into()),
+        _ => Err(format!("{at}: expected [numerator, denominator]").into()),
+    }
+}
+
+/// The transport's tempo changes (`docs/spec/tempo-map.md`): each after beat 0, at a tempo from
+/// 1 to 999 bpm.
+fn tempo_changes(t: &Obj) -> Result<Vec<TempoPoint>, ProjectFileError> {
+    let items = list(t, "tempo_changes", "project.transport")?;
+    if items.len() > MAX_TEMPO_CHANGES {
+        return Err(format!("project.transport.tempo_changes: more than {MAX_TEMPO_CHANGES}").into());
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let at = format!("project.transport.tempo_changes[{i}]");
+            let c = object(v, &at)?;
+            let beat = float(c, "beat", &at)?;
+            if !(beat > 0.0 && beat <= MAX_CHANGE_BEAT) {
+                return Err(format!("{at}.beat: {beat} is not after the start of the song").into());
+            }
+            let bpm = float(c, "bpm", &at)?;
+            if !valid_bpm(bpm) {
+                return Err(format!("{at}.bpm: {bpm} is not a tempo").into());
+            }
+            Ok(TempoPoint { beat, bpm, ramp: flag(c, "ramp", false, &at)? })
+        })
+        .collect()
+}
+
+/// The transport's time-signature changes: each at a bar after the first, with a signature a
+/// project keeps.
+fn time_signature_changes(t: &Obj) -> Result<Vec<TimeSignatureChange>, ProjectFileError> {
+    let items = list(t, "time_signature_changes", "project.transport")?;
+    if items.len() > MAX_TIME_SIGNATURE_CHANGES {
+        return Err(format!("project.transport.time_signature_changes: more than {MAX_TIME_SIGNATURE_CHANGES}").into());
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let at = format!("project.transport.time_signature_changes[{i}]");
+            let c = object(v, &at)?;
+            let bar: u32 = whole(c, "bar", &at)?;
+            if bar == 0 {
+                return Err(format!("{at}.bar: the first bar has the start signature").into());
+            }
+            let value = c.get("time_signature").unwrap_or(&Value::Null);
+            let time_signature = time_signature(value, &format!("{at}.time_signature"))?;
+            if !time_signature.is_valid() {
+                return Err(format!("{at}.time_signature: not a time signature").into());
+            }
+            Ok(TimeSignatureChange { bar, time_signature })
+        })
+        .collect()
+}
+
 fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
     let p = object(value, "project")?;
     let transport = match p.get("transport") {
@@ -485,29 +572,19 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
         Some(t) => {
             let t = object(t, "project.transport")?;
             let signature = match t.get("time_signature") {
-                Some(Value::Array(pair)) if pair.len() == 2 => {
-                    let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
-                    match (pair.first().and_then(part), pair.get(1).and_then(part)) {
-                        (Some(numerator), Some(denominator)) => TimeSignature { numerator, denominator },
-                        _ => {
-                            return Err("project.transport.time_signature: expected two whole numbers"
-                                .to_string()
-                                .into());
-                        }
-                    }
-                }
                 None | Some(Value::Null) => TimeSignature { numerator: 4, denominator: 4 },
-                Some(_) => {
-                    return Err("project.transport.time_signature: expected [numerator, denominator]"
-                        .to_string()
-                        .into());
-                }
+                Some(value) => time_signature(value, "project.transport.time_signature")?,
             };
             let tempo = float_or(t, "tempo_bpm", 120.0, "project.transport")?;
             if !(1.0..=999.0).contains(&tempo) {
                 return Err(format!("project.transport.tempo_bpm: {tempo} is not a tempo").into());
             }
-            Transport { tempo_bpm: tempo, time_signature: signature }
+            Transport {
+                tempo_bpm: tempo,
+                time_signature: signature,
+                tempo_changes: tempo_changes(t)?,
+                time_signature_changes: time_signature_changes(t)?,
+            }
         }
     };
     let tracks = list(p, "tracks", "project")?

@@ -89,7 +89,18 @@ fn everything() -> Project {
         extensions: Extensions::default(),
     };
     Project {
-        transport: Transport { tempo_bpm: 128.5, time_signature: TimeSignature { numerator: 7, denominator: 8 } },
+        transport: Transport {
+            tempo_bpm: 128.5,
+            time_signature: TimeSignature { numerator: 7, denominator: 8 },
+            tempo_changes: vec![
+                TempoPoint { beat: 14.0, bpm: 90.0, ramp: false },
+                TempoPoint { beat: 30.5, bpm: 140.25, ramp: true },
+            ],
+            time_signature_changes: vec![TimeSignatureChange {
+                bar: 4,
+                time_signature: TimeSignature { numerator: 3, denominator: 4 },
+            }],
+        },
         tracks: vec![
             Track { color: None, ..track(1, false, Some(4), None) },
             track(2, true, Some(2), Some(1)),
@@ -257,6 +268,18 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "transport": { "tempo_bpm": 0 } }"#,
         r#"{ "transport": { "time_signature": [0, 4] } }"#,
         r#"{ "transport": { "time_signature": [300, 4] } }"#,
+        r#"{ "transport": { "tempo_changes": 3 } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 0, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": -4, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 1e9, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4, "bpm": 1000 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4, "bpm": 100, "ramp": "yes" } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 0, "time_signature": [3, 4] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": -2, "time_signature": [3, 4] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2, "time_signature": [3, 5] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2, "time_signature": [3] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2 } ] } }"#,
         r#"{ "channels": [ { "id": 1, "role": "boss" } ] }"#,
         r#"{ "channels": [ { "id": 1, "pan": 3 } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst9" } } ] } ] }"#,
@@ -284,6 +307,22 @@ fn a_clip_without_fade_shapes_has_linear_fades() {
     let clip = &project.arrangement.lanes[0].clips[0];
     assert_eq!((clip.fade_in_curve, clip.fade_out_curve), (FadeCurve::default(), FadeCurve::default()));
     assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
+}
+
+/// A project without tempo or time-signature changes is written as it was before they existed,
+/// and a file from before then reads with none.
+#[test]
+fn a_project_without_changes_writes_no_change_lists() {
+    let text = to_json(&Project::default());
+    assert!(!text.contains("tempo_changes") && !text.contains("time_signature_changes"), "{text}");
+    let project = from_json(r#"{ "format": "suhina", "version": 1, "project": { "transport": { "tempo_bpm": 90 } } }"#);
+    let transport = project.map(|p| p.transport).unwrap_or_default();
+    assert!(transport.tempo_changes.is_empty() && transport.time_signature_changes.is_empty());
+    let too_many = format!(
+        r#"{{ "format": "suhina", "version": 1, "project": {{ "transport": {{ "tempo_changes": [{}] }} }} }}"#,
+        vec![r#"{ "beat": 1, "bpm": 100 }"#; suhina_model::MAX_TEMPO_CHANGES + 1].join(",")
+    );
+    assert!(from_json(&too_many).is_err());
 }
 
 #[test]
