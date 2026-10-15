@@ -7,6 +7,7 @@ mod blank;
 mod commands;
 mod devices;
 mod files;
+mod launch;
 mod library;
 mod plugins;
 mod preview;

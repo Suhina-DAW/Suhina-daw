@@ -23,8 +23,8 @@ use serde_json::{Map, Value, json};
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    LaunchMode, LaunchQuantization, LaunchSettings, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene,
+    Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -348,9 +348,18 @@ fn clip_value(c: &Clip) -> Value {
         "fade_out_curve": number(c.fade_out_curve.curve),
     });
     if let Some(map) = out.as_object_mut() {
+        // Only a clip whose launch settings were changed carries them, so most clips (and every
+        // arrangement clip that never was in a slot) stay as they were written before.
+        if !c.launch.is_default() {
+            map.insert("launch".into(), launch_value(&c.launch));
+        }
         with_extensions(map, &c.extensions);
     }
     out
+}
+
+fn launch_value(l: &LaunchSettings) -> Value {
+    json!({ "mode": l.mode.name(), "legato": l.legato, "quantization": l.quantization.name() })
 }
 
 fn with_extensions(map: &mut Map<String, Value>, extensions: &Extensions) {
@@ -781,8 +790,35 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
         fade_out: float_or(c, "fade_out", 0.0, at)?,
         fade_in_curve: fade_curve(c, "fade_in", at)?,
         fade_out_curve: fade_curve(c, "fade_out", at)?,
+        launch: read_launch(c, at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// A clip's launch settings, `launch`: the defaults when missing (files written before launch
+/// settings), and for each of its keys that is missing.
+fn read_launch(c: &Obj, at: &str) -> Result<LaunchSettings, ProjectFileError> {
+    let at = format!("{at}.launch");
+    let l = match c.get("launch") {
+        None | Some(Value::Null) => return Ok(LaunchSettings::default()),
+        Some(value) => object(value, &at)?,
+    };
+    let name = |key: &str| match l.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name)) => Ok(Some(name.as_str())),
+        Some(_) => Err(ProjectFileError(format!("{at}.{key}: expected a name"))),
+    };
+    let mode = match name("mode")? {
+        None => LaunchMode::default(),
+        Some(text) => LaunchMode::from_name(text)
+            .ok_or_else(|| ProjectFileError(format!("{at}.mode: unknown launch mode {text:?}")))?,
+    };
+    let quantization = match name("quantization")? {
+        None => LaunchQuantization::default(),
+        Some(text) => LaunchQuantization::from_name(text)
+            .ok_or_else(|| ProjectFileError(format!("{at}.quantization: unknown launch quantisation {text:?}")))?,
+    };
+    Ok(LaunchSettings { mode, legato: flag(l, "legato", false, &at)?, quantization })
 }
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files

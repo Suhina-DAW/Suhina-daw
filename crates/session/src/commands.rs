@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, devices, files, preview};
+use crate::{CommandError, Session, devices, files, launch, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -510,6 +510,42 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[],
         kind: CommandKind::Transport,
         run: back_to_arrangement,
+    },
+    CommandSpec {
+        id: "clip.release",
+        label: "Release a slot's launch button (clip.launch is the press): stops a clip in gate mode, ends the repeats of one in repeat mode",
+        params: &[TRACK, SCENE],
+        kind: CommandKind::Transport,
+        run: launch::release_clip,
+    },
+    CommandSpec {
+        id: "clip.setLaunchMode",
+        label: "Set what launching a slot's clip does: trigger (plays until stopped), gate (plays while held), toggle (a second launch stops it) or repeat (relaunches at its quantisation while held)",
+        params: &[TRACK, SCENE, param("mode", ParamType::Text, "trigger, gate, toggle or repeat")],
+        kind: CommandKind::Edit,
+        run: launch::set_launch_mode,
+    },
+    CommandSpec {
+        id: "clip.setLegato",
+        label: "Set whether a slot's clip starts at the position of the clip it replaces on its track (legato) instead of at its start",
+        params: &[TRACK, SCENE, param("on", ParamType::Bool, "true for legato")],
+        kind: CommandKind::Edit,
+        run: launch::set_legato,
+    },
+    CommandSpec {
+        id: "clip.setQuantization",
+        label: "Set the grid a slot's clip waits for when launched: global (the launcher's), none, or its own",
+        params: &[
+            TRACK,
+            SCENE,
+            param(
+                "value",
+                ParamType::Text,
+                "global, none, 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T or 1/32",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: launch::set_quantization,
     },
     CommandSpec {
         id: "devices.list",
@@ -1491,6 +1527,9 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
                         "length": clip.length,
                         "loop": clip.loop_range.is_some(),
                         "enabled": clip.enabled,
+                        "launch_mode": clip.launch.mode.name(),
+                        "legato": clip.launch.legato,
+                        "quantization": clip.launch.quantization.name(),
                     }),
                     None => json!({ "scene": number, "clip": null, "stop_button": slot.has_stop }),
                 })
@@ -1664,7 +1703,7 @@ pub fn parse_quantization(text: &str) -> Result<Quantization, CommandError> {
 }
 
 /// The launcher column of `params.track`.
-fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+pub(crate) fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
     let track = track_id(p, params)?;
     p.launcher
         .columns
@@ -1674,7 +1713,7 @@ fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
 }
 
 /// The 0-based scene index of the 1-based `params.scene`.
-fn scene_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+pub(crate) fn scene_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
     let count = p.launcher.scenes.len();
     let number = params.get("scene").and_then(Value::as_u64).ok_or("scene must be a whole number from 1")?;
     usize::try_from(number)

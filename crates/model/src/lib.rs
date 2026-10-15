@@ -7,6 +7,9 @@
 use std::collections::HashSet;
 use std::fmt;
 
+mod launch;
+pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
+
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(pub u32);
@@ -301,6 +304,8 @@ pub struct Clip {
     /// default.
     pub fade_in_curve: FadeCurve,
     pub fade_out_curve: FadeCurve,
+    /// How the clip launches from a launcher slot: mode, legato and its own quantisation.
+    pub launch: LaunchSettings,
     pub extensions: Extensions,
 }
 
@@ -681,6 +686,7 @@ mod tests {
             fade_out: 0.0,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         }
     }

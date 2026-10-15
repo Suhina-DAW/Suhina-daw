@@ -20,6 +20,7 @@ fn everything() -> Project {
         fade_out: 1.0,
         fade_in_curve: FadeCurve { shape: FadeShape::SCurve, curve: -0.5 },
         fade_out_curve: FadeCurve { shape: FadeShape::EqualPower, curve: 0.75 },
+        launch: LaunchSettings { mode: LaunchMode::Gate, legato: true, quantization: LaunchQuantization::Triplet(8) },
         extensions: Extensions::default(),
     };
     let channel = |id: u32, role: ChannelRole, output: Option<u32>| Channel {
@@ -268,6 +269,11 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_shape": "wobbly" } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_out_shape": 3 } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_curve": 2 } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": 3 } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": "hold" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": 1 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "legato": "yes" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "quantization": "3 bars" } } ] } ] } }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -284,6 +290,38 @@ fn a_clip_without_fade_shapes_has_linear_fades() {
     let clip = &project.arrangement.lanes[0].clips[0];
     assert_eq!((clip.fade_in_curve, clip.fade_out_curve), (FadeCurve::default(), FadeCurve::default()));
     assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
+}
+
+/// A clip written before launch settings launches as before: trigger, no legato, the global
+/// quantisation; one with some of the keys takes the defaults for the others. A clip with the
+/// defaults is written without them.
+#[test]
+fn launch_settings_default_when_missing_and_are_written_only_when_changed() {
+    let read = |launch: &str| {
+        let text = format!(
+            r#"{{ "format": "suhina", "version": 1, "project": {{ "contents": [ {{ "id": 1, "length": 4 }} ],
+            "arrangement": {{ "lanes": [ {{ "clips": [ {{ "content": 1, "start": 0, "length": 4 {launch} }} ] }} ] }} }} }}"#
+        );
+        from_json(&text).unwrap().arrangement.lanes[0].clips[0].launch
+    };
+    assert_eq!(read(""), LaunchSettings::default());
+    assert_eq!(read(r#", "launch": null"#), LaunchSettings::default());
+    assert_eq!(
+        read(r#", "launch": { "mode": "toggle" }"#),
+        LaunchSettings { mode: LaunchMode::Toggle, ..LaunchSettings::default() }
+    );
+    assert_eq!(
+        read(r#", "launch": { "legato": true, "quantization": "none" }"#),
+        LaunchSettings { legato: true, quantization: LaunchQuantization::None, ..LaunchSettings::default() }
+    );
+    let mut project = everything();
+    project.launcher.columns[0].slots[0].clip.as_mut().unwrap().launch = LaunchSettings::default();
+    let json = to_json(&project);
+    let written: Value = serde_json::from_str(&json).unwrap();
+    let slot = &written["project"]["launcher"]["columns"][0]["slots"][0]["clip"];
+    assert!(slot.get("launch").is_none(), "{slot}");
+    let arrangement = &written["project"]["arrangement"]["lanes"][0]["clips"][0];
+    assert_eq!(arrangement["launch"], json!({ "mode": "gate", "legato": true, "quantization": "1/8T" }));
 }
 
 #[test]
