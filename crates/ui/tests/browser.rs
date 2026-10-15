@@ -108,6 +108,16 @@ fn double_click(harness: &mut Harness<'static, App>, label: &str) {
     harness.run();
 }
 
+/// Presses and lets go once, at `pos`, a frame apart.
+fn click_at(harness: &mut Harness<'static, App>, pos: Pos2) {
+    harness.hover_at(pos);
+    harness.step();
+    harness.drag_at(pos);
+    harness.step();
+    harness.drop_at(pos);
+    harness.step();
+}
+
 /// Steps the window until `done` holds (a drop decodes its samples on another thread).
 fn until(harness: &mut Harness<'static, App>, done: impl Fn(&App) -> bool) -> bool {
     let end = Instant::now() + Duration::from_secs(10);
@@ -139,6 +149,37 @@ fn the_tree_lists_devices_and_folders_and_opens_them() {
     double_click(&mut harness, &row("Drums"));
     harness.run();
     assert!(harness.query_by_label(&row("Kick Hard.wav")).is_some());
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_double_click_on_a_folders_chevron_opens_it_and_stays_open() {
+    let (settings, folder) = (temp("chevron-settings"), temp("chevron"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    // Clicking the chevron of the library folder twice in quick succession — the second
+    // click inside egui's double-click window (0.3 s, 6 pt) — opens it once and leaves it
+    // open, instead of opening and closing it again (#293).
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    let at = harness.get_by_label(&row(&name)).rect();
+    let chevron = Pos2::new(at.left() + 8.0, at.center().y);
+    click_at(&mut harness, chevron);
+    click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "a double-click on the chevron opens the folder");
+    // Past the double-click window, a click on the chevron closes it again: every distinct
+    // click toggles.
+    for _ in 0..8 {
+        harness.step();
+    }
+    click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_none(), "a click after the window closes it");
+    // A double-click on the row itself still opens it.
+    double_click(&mut harness, &row(&name));
+    harness.run();
+    assert!(harness.query_by_label(&row("Groove.mid")).is_some(), "a double-click on the folder opens it");
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }

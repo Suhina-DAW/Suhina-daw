@@ -23,6 +23,12 @@ pub const SEARCH: f32 = 26.0;
 pub const FILTER: f32 = 16.0;
 pub const SIDEBAR: f32 = 104.0;
 pub const INDENT: f32 = 12.0;
+
+/// Clicks left of this on a row that opens are its chevron: the triangle sits 10 pt wide,
+/// 4 pt in from the row's indent.
+fn chevron_zone(left: f32, depth: usize) -> f32 {
+    left + 16.0 + depth as f32 * INDENT
+}
 pub const PREVIEW: f32 = 54.0;
 pub const FOOTER: f32 = 20.0;
 const FILTER_PAD: f32 = 7.0;
@@ -649,7 +655,12 @@ fn results_view(
     if let Some(index) = double
         && let Some(row) = rows.get(index)
     {
-        if row.opens {
+        // A double-click on the row itself opens it — but not on its chevron: the gesture's
+        // two clicks are within egui's double-click window (0.3 s, 6 pt) and its first one
+        // toggled already, so the double would open and close the folder again (#293).
+        let on_chevron = row.opens
+            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth));
+        if row.opens && !on_chevron {
             state.toggle(&row.item.key);
         } else if row.item.kind == ItemKind::Project {
             out.open_project = row.item.path();
@@ -657,11 +668,14 @@ fn results_view(
             out.add = vec![row.item.clone()];
         }
     }
-    // A click on a chevron opens; a click elsewhere on a folder only selects it.
+    // A click on a chevron opens; a click elsewhere on a folder only selects it. The second
+    // click of a rapid pair on the same chevron is a double and does not toggle: the first
+    // click of the gesture did, so the two together open the folder once (#293).
     if let Some((index, _)) = clicked
         && let Some(row) = rows.get(index)
         && row.opens
-        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < area.left() + 16.0 + row.depth as f32 * INDENT)
+        && !ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary))
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth))
     {
         state.toggle(&row.item.key);
     }
