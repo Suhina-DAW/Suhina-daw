@@ -592,3 +592,182 @@ fn a_plug_in_that_arrived_while_playing_is_handed_over_with_its_slot() {
     assert_eq!(peak(&blocks(&mut next, 40, 256)), 0.0, "and plays on in the next renderer");
     drop(controller);
 }
+
+/// A stand-in for a plug-in in a host process that runs several: it scales the sound by its
+/// gain, and runs the plug-ins a joint block names after it in the same round trip, as the
+/// host does.
+struct Member {
+    joint: crate::Joint,
+    gain: f32,
+    /// The gains of every member of its process, by number.
+    process: Arc<std::sync::Mutex<std::collections::HashMap<u32, f32>>>,
+    /// Round trips to its process (any member's).
+    trips: Arc<AtomicUsize>,
+    output: Vec<f32>,
+    followed: Arc<std::sync::Mutex<Vec<crate::Followed>>>,
+    /// Set false to make its process stop answering.
+    answering: bool,
+    /// The parameter events it was given ([`PluginProcessor::automate`]), by id.
+    automated: Arc<std::sync::Mutex<Vec<u32>>>,
+}
+
+impl Member {
+    fn new(
+        process: u64,
+        member: u32,
+        gain: f32,
+        gains: &Arc<std::sync::Mutex<std::collections::HashMap<u32, f32>>>,
+        trips: &Arc<AtomicUsize>,
+    ) -> Self {
+        gains.lock().unwrap().insert(member, gain);
+        Self {
+            joint: crate::Joint { process, member },
+            gain,
+            process: Arc::clone(gains),
+            trips: Arc::clone(trips),
+            output: Vec::new(),
+            followed: Arc::default(),
+            answering: true,
+            automated: Arc::default(),
+        }
+    }
+}
+
+impl PluginProcessor for Member {
+    fn process(&mut self, buffer: &mut [f32], _events: &[(usize, NoteEvent)], _timeout: Duration) -> bool {
+        self.trips.fetch_add(1, Ordering::SeqCst);
+        buffer.iter_mut().for_each(|s| *s *= self.gain);
+        true
+    }
+
+    fn joint(&self) -> Option<crate::Joint> {
+        Some(self.joint)
+    }
+
+    fn send(&mut self, buffer: &[f32], events: &[(usize, NoteEvent)], patience: Duration) -> Sent {
+        self.send_joint(buffer, events, &[], patience)
+    }
+
+    fn send_joint(
+        &mut self,
+        buffer: &[f32],
+        _events: &[(usize, NoteEvent)],
+        followers: &[u32],
+        _patience: Duration,
+    ) -> Sent {
+        self.trips.fetch_add(1, Ordering::SeqCst);
+        let gains = self.process.lock().unwrap();
+        // One plug-in after the other, as the host runs them.
+        self.output = buffer.iter().map(|s| s * self.gain).collect();
+        for follower in followers {
+            let gain = gains.get(follower).copied().unwrap_or(1.0);
+            self.output.iter_mut().for_each(|s| *s *= gain);
+        }
+        Sent::Out
+    }
+
+    fn wait(&mut self, buffer: &mut [f32], _timeout: Duration) -> bool {
+        if self.answering {
+            buffer.copy_from_slice(&self.output);
+        }
+        self.answering
+    }
+
+    fn followed(&mut self, _events: &[(usize, NoteEvent)], how: crate::Followed) {
+        self.followed.lock().unwrap().push(how);
+    }
+
+    fn automate(&mut self, params: &[crate::ParamEvent]) {
+        self.automated.lock().unwrap().extend(params.iter().map(|p| p.id));
+    }
+}
+
+#[test]
+fn consecutive_plug_ins_of_one_process_share_a_round_trip_and_sound_the_same() {
+    let clap = |id: &str| plug(DeviceKind::Clap { id: id.into() });
+    let mut off = clap("c");
+    off.enabled = false;
+    // a, b, (c disabled), d share process 1; a built-in device; e in process 1; f in process 2.
+    let devices = vec![clap("a"), clap("b"), off, clap("d"), device("utility", &[]), clap("e"), clap("f")];
+    let p = project(vec![note(0.0, 2.0, 69)], 2.0, devices);
+    let gains = [0.5, 0.8, 0.1, 0.9, 0.7, 0.6];
+    let render = |processes: [u64; 6]| {
+        let table = Arc::default();
+        let trips = Arc::new(AtomicUsize::new(0));
+        let mut plugins = Plugins::new();
+        let mut followed = Vec::new();
+        for (n, found) in plugin_devices(&p).into_iter().enumerate() {
+            let member = Member::new(processes[n], n as u32 + 1, gains[n], &table, &trips);
+            followed.push(Arc::clone(&member.followed));
+            plugins.insert(found.key, EFFECT, Box::new(member));
+        }
+        let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 512, plugins).unwrap();
+        let hows: Vec<Vec<crate::Followed>> = followed.iter().map(|f| f.lock().unwrap().clone()).collect();
+        (out, trips.load(Ordering::SeqCst), hows)
+    };
+    // Each in a process of its own: five round trips a block (the disabled one makes none).
+    let (alone, alone_trips, alone_followed) = render([1, 2, 3, 4, 5, 6]);
+    // a, b and d in one round trip; e alone (after a built-in device); f in its own process.
+    let (joint, joint_trips, followed) = render([1, 1, 1, 1, 1, 2]);
+    let blocks = alone_trips / 5;
+    assert!(blocks > 0);
+    assert_eq!(alone_trips, blocks * 5);
+    assert_eq!(joint_trips, blocks * 3);
+    assert!(alone_followed.iter().all(Vec::is_empty));
+    // b and d followed a in every block and were answered; nobody else followed anyone.
+    for (n, hows) in followed.iter().enumerate() {
+        let expected = if n == 1 || n == 3 { blocks } else { 0 };
+        assert_eq!(hows.len(), expected, "plug-in {n}");
+        assert!(hows.iter().all(|h| *h == crate::Followed::Answered));
+    }
+    // Sample for sample the same sound.
+    assert_eq!(alone.len(), joint.len());
+    assert!(alone.iter().zip(&joint).all(|(a, b)| a.to_bits() == b.to_bits()));
+    assert!(peak(&joint) > 0.0);
+}
+
+#[test]
+fn a_joint_block_that_misses_is_a_miss_for_every_plug_in_in_it() {
+    let clap = |id: &str| plug(DeviceKind::Clap { id: id.into() });
+    let p = project(vec![note(0.0, 2.0, 69)], 2.0, vec![clap("a"), clap("b")]);
+    let (table, trips) = (Arc::default(), Arc::new(AtomicUsize::new(0)));
+    let mut first = Member::new(1, 1, 0.5, &table, &trips);
+    first.answering = false;
+    let second = Member::new(1, 2, 0.5, &table, &trips);
+    let followed = Arc::clone(&second.followed);
+    let found = plugin_devices(&p);
+    let mut plugins = Plugins::new();
+    plugins.insert(found[0].key, EFFECT, Box::new(first));
+    // The second is an instrument: a miss leaves it silent, as when it misses on its own.
+    plugins.insert(found[1].key, INSTRUMENT, Box::new(second));
+    let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 512, plugins).unwrap();
+    assert_eq!(peak(&out), 0.0);
+    let hows = followed.lock().unwrap();
+    assert!(!hows.is_empty());
+    assert!(hows.iter().all(|h| *h == crate::Followed::Late));
+    assert_eq!(trips.load(Ordering::SeqCst), hows.len(), "one round trip a block, for both");
+}
+
+#[test]
+fn a_plug_in_with_parameter_events_runs_on_its_own_and_gets_them() {
+    let clap = |id: &str| plug(DeviceKind::Clap { id: id.into() });
+    // b has a value set for parameter 7: it goes to b at the start of the first block.
+    let mut set = clap("b");
+    set.params = vec![DeviceParam::new("7", 0.5)];
+    let p = project(vec![note(0.0, 2.0, 69)], 2.0, vec![clap("a"), set]);
+    let (table, trips) = (Arc::default(), Arc::new(AtomicUsize::new(0)));
+    let first = Member::new(1, 1, 0.5, &table, &trips);
+    let second = Member::new(1, 2, 0.8, &table, &trips);
+    let (followed, automated) = (Arc::clone(&second.followed), Arc::clone(&second.automated));
+    let found = plugin_devices(&p);
+    let mut plugins = Plugins::new();
+    plugins.insert(found[0].key, EFFECT, Box::new(first));
+    plugins.insert(found[1].key, EFFECT, Box::new(second));
+    render_offline_with_plugins(&p, &AudioPool::new(), SR, 512, plugins).unwrap();
+    assert_eq!(*automated.lock().unwrap(), [7], "the value reached b, once");
+    // The first block runs a and b in a round trip each, as the joint block's events are a's;
+    // every later block runs them in one.
+    let joint = followed.lock().unwrap().len();
+    assert!(joint > 0);
+    assert_eq!(trips.load(Ordering::SeqCst), joint + 2);
+}
