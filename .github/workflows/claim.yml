@@ -7,6 +7,9 @@ name: Claim
 # that closes the issue, a status that says someone is already on it, a status that says the work is
 # not to be started — and refuses the claim for them, saying which one it found.
 #
+# A maintainer may write `/claim @login` to claim for someone else: the same checks run for that
+# person, who is assigned, and the answer says a maintainer claimed on their behalf.
+#
 # It needs the repository secret `PROJECT_TOKEN`, because the workflow's `GITHUB_TOKEN` cannot
 # reach a project owned by the organization. docs/claim-bot.md says how to make one, which
 # scopes it needs and what happens when it expires.
@@ -83,6 +86,14 @@ jobs:
             const command = head[1].toLowerCase();
             // Everything after the command: the plan of a `/claim`, or why a `/hold` holds.
             const argument = body.replace(/^\/[a-z]+\b/i, "").replace(/\s+/g, " ").trim();
+            // `/claim @login …`: a maintainer claims for someone else. GitHub logins are letters,
+            // digits and single hyphens, up to 39 characters, never starting or ending with a hyphen.
+            // The name only ever reaches the API as a value, but it is checked anyway, so a typo is
+            // answered instead of assigning nobody.
+            const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+            const sameLogin = (a, b) => typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+            const named = command === "claim" ? argument.match(/^@(\S+)/) : null;
+            const target = named ? named[1].replace(/[,.:;!?]+$/, "") : null;
 
             const slug = `${context.repo.owner}/${context.repo.repo}`;
             const boardUrl = `${context.serverUrl}/orgs/${owner}/projects/${projectNumber}`;
@@ -94,6 +105,25 @@ jobs:
                 issue_number: issue.number,
                 body: text,
               });
+
+            if (target !== null && !LOGIN.test(target)) {
+              // The text is not quoted back: it is whatever followed the `@`, and may itself mention someone.
+              return say(
+                `@${actor}, the name after \`/claim\` is not a GitHub username (letters, digits and ` +
+                  `single hyphens, up to 39 characters), so nothing was claimed. Write it like ` +
+                  `\`/claim @octocat Plan: …\`.`,
+              );
+            }
+            // Claiming for oneself by name is an ordinary claim.
+            const onBehalf = target !== null && !sameLogin(target, actor);
+            if (onBehalf && !maintainer) {
+              return say(
+                `Only a maintainer can claim an issue for someone else, @${actor}; you may claim it ` +
+                  `for yourself with \`/claim\` and your plan.`,
+              );
+            }
+            // Who the claim is for: the commenter, or the person a maintainer named.
+            const claimant = onBehalf ? target : actor;
 
             if (!projectToken) {
               // No secret, no card movement. Say so rather than leaving the claimer guessing: the
@@ -188,6 +218,9 @@ jobs:
                 (item && item.fieldValueByName && item.fieldValueByName.name) || null;
               const assignees = (current.assignees || []).map((user) => user.login);
               const mentions = assignees.map((login) => `@${login}`).join(", ");
+              const hasClaimant = assignees.some((login) => sameLogin(login, claimant));
+              // The claimant as GitHub spells them when they are assigned already, as written otherwise.
+              const who = assignees.find((login) => sameLogin(login, claimant)) || claimant;
 
               const setStatus = (itemId, name) =>
                 project.graphql(
@@ -372,11 +405,17 @@ jobs:
               // A card without a Status yet is free, as it is for `/unclaim`.
               let lapsed = false;
               if (item && status !== null && !isFree(status)) {
-                if (same(status, CLAIMED) && assignees.length === 1 && assignees[0] === actor) {
+                if (same(status, CLAIMED) && assignees.length === 1 && hasClaimant) {
                   // Often a second session of the same person, or an agent started twice: point it at
                   // the work that exists, so it continues there instead of opening a second pull request.
                   const open = await openPullRequests();
                   const list = open.map((pr) => `- #${pr.number} ${pr.title}`).join("\n");
+                  if (onBehalf) {
+                    return say(
+                      `@${actor}, this is already **${CLAIMED}** for @${who}` +
+                        (open.length > 0 ? `, with a pull request:\n\n${list}` : "; nothing changed."),
+                    );
+                  }
                   return say(
                     `@${actor}, this one is already yours` +
                       (open.length > 0
@@ -386,7 +425,7 @@ jobs:
                 }
                 // A claim in progress with no pull request after LAPSE_HOURS is free again: the
                 // claimer is unassigned here and the claim below goes ahead.
-                if (same(status, CLAIMED) && !assignees.includes(actor)) {
+                if (same(status, CLAIMED) && !hasClaimant) {
                   const at = await claimedAt();
                   if (at !== null && Date.now() - at > LAPSE_HOURS * 3600 * 1000) {
                     lapsed = (await openPullRequests()).length === 0;
@@ -406,15 +445,15 @@ jobs:
                   }
                   await say(
                     `The claim${mentions ? ` by ${mentions}` : ""} lapsed: no pull request in ` +
-                      `${LAPSE_HOURS} hours. It passes to @${actor}.`,
+                      `${LAPSE_HOURS} hours. It passes to @${who}.`,
                   );
                 }
               }
               if (item && status !== null && !isFree(status) && !lapsed) {
-                const who = mentions ? ` (${mentions})` : "";
+                const on = mentions ? ` (${mentions})` : "";
                 const state = isWorking(status)
-                  ? `already **${status}**${who}, so someone is on it`
-                  : `**${status}**${who}, which is not open to start`;
+                  ? `already **${status}**${on}, so someone is on it`
+                  : `**${status}**${on}, which is not open to start`;
                 return say(
                   `This is ${state}. Please take another one — the [good first issues](${firstIssues}) ` +
                     `are a good start. A claim with no pull request lapses after ${LAPSE_HOURS} hours, and ` +
@@ -440,23 +479,39 @@ jobs:
               await setStatus(await ensureItem(), CLAIMED);
 
               // Assigning is the second signal next to the card, and it can fail on its own (a user
-              // who may not be assigned); the claim stands either way.
-              try {
-                await github.rest.issues.addAssignees({
-                  ...context.repo,
-                  issue_number: issue.number,
-                  assignees: [actor],
-                });
-              } catch (error) {
-                core.warning(`Could not assign @${actor}: ${error.message}`);
+              // who may not be assigned); the claim stands either way. GitHub skips, without an error,
+              // someone it may not assign (no access, never commented here, or no such account), so
+              // the answer checks the issue it gets back.
+              let assigned = hasClaimant;
+              if (!hasClaimant) {
+                try {
+                  const updated = await github.rest.issues.addAssignees({
+                    ...context.repo,
+                    issue_number: issue.number,
+                    assignees: [claimant],
+                  });
+                  const now = (updated && updated.data && updated.data.assignees) || null;
+                  assigned = now === null || now.some((user) => sameLogin(user.login, claimant));
+                } catch (error) {
+                  core.warning(`Could not assign @${claimant}: ${error.message}`);
+                  assigned = false;
+                }
               }
+              const unassigned = assigned
+                ? ""
+                : `\n\nGitHub did not assign @${who} (it assigns only people with access to the ` +
+                  `repository or who have commented on this issue), so the card is the only record ` +
+                  `of the claim for now.`;
 
               return say(
-                `Claimed by @${actor}: **${CLAIMED}** on the [board](${boardUrl}).\n\n` +
+                `Claimed by @${who}` +
+                  (onBehalf ? `, on behalf of a maintainer (@${actor})` : "") +
+                  `: **${CLAIMED}** on the [board](${boardUrl}).\n\n` +
                   `Please keep that true: open a draft pull request that says \`Closes #${issue.number}\` ` +
                   `within ${LAPSE_HOURS} hours, or the claim lapses and the next \`/claim\` takes it ` +
                   `over; comment \`/unclaim\` if you stop. A plan in a ` +
-                  `comment — what you will change, and roughly when — helps whoever reviews it.`,
+                  `comment — what you will change, and roughly when — helps whoever reviews it.` +
+                  unassigned,
               );
             } catch (error) {
               // A token that expired, or a query the schema no longer answers, must not leave the
