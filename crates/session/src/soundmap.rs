@@ -1,5 +1,5 @@
 //! The sample map's commands (`docs/spec/sample-map.md` › Commands, ADR 0013): analysis of the
-//! library's samples, layouts of a scope, similar items. Like the library they belong to
+//! library's samples, layouts of a scope, similar items, kinds set by hand. Like the library they belong to
 //! Suhina, not to one project, so they run on [`Projects`] and never change a project.
 
 use std::collections::HashSet;
@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use suhina_library::{FileKind, Group, Item};
 use suhina_soundmap::cache::Analysis;
+use suhina_soundmap::kinds::Kind;
 use suhina_soundmap::{DEFAULT_MAX_SECONDS, MAX_SECONDS_RANGE, MAX_SIMILAR, Map, SoundMap, SourceFile};
 
 use crate::commands::{CommandKind, CommandSpec, ParamType, optional, param};
@@ -36,7 +37,7 @@ static SOUND_MAP_COMMANDS: &[CommandSpec<Projects>] = &[
     },
     CommandSpec {
         id: "soundmap.layout",
-        label: "Lay out samples by how they sound: each analysed sample's position (0–1), kind (kick, snare, hat…, and whether it was guessed) and whether it matches the text and tags; and how many are not analysed yet, too long or unreadable",
+        label: "Lay out samples by how they sound and their kind: each analysed sample's position (0–1), kind (kick, snare, hat…, whether it was guessed from the sound and whether it was set by hand) and whether it matches the text and tags; and how many are not analysed yet, too long or unreadable",
         params: &[
             optional("place", ParamType::Text, PLACE),
             optional("text", ParamType::Text, "words a matching sample's name or path holds"),
@@ -61,12 +62,21 @@ static SOUND_MAP_COMMANDS: &[CommandSpec<Projects>] = &[
     },
     CommandSpec {
         id: "soundmap.info",
-        label: "What the sample map knows of a sample: its kind and where it comes from (its name or a guess), its length and its features",
+        label: "What the sample map knows of a sample: its kind and where it comes from (set by hand, its name, or a guess from its sound), its length and its features",
         params: &[param("item", ParamType::Text, "a sample's path")],
         kind: CommandKind::Library,
         run: info,
     },
+    CommandSpec {
+        id: "soundmap.setKind",
+        label: "Set a sample's kind by hand, over its name and its sound, or give it back to them (auto); kept with the library and through new analyses and layouts",
+        params: &[param("item", ParamType::Text, "a sample's path"), param("kind", ParamType::Text, KIND_PARAM)],
+        kind: CommandKind::Library,
+        run: set_kind,
+    },
 ];
+
+const KIND_PARAM: &str = "kick, snare, clap, closedHat, openHat, hat, rim, tom, crash, ride, cymbal, percussion, bass, tonal, vocal, effect or other; auto to let the name and the sound decide again";
 
 /// The sample map commands, as `commands.list` shows them.
 pub fn sound_map_commands() -> &'static [CommandSpec<Projects>] {
@@ -278,6 +288,7 @@ fn layout(projects: &mut Projects, params: &Value) -> Result<Value, CommandError
             "y": point.position[1],
             "kind": point.kind.id(),
             "guessed": point.guessed,
+            "byHand": point.by_hand,
             "matches": matches(projects, &point.path, &words, &tags),
         });
         if let Some((column, row)) = cells.as_ref().and_then(|g| g.cells.get(i)) {
@@ -323,14 +334,20 @@ fn similar(projects: &mut Projects, params: &Value) -> Result<Value, CommandErro
     Ok(json!({ "items": items }))
 }
 
+/// The sample in the browser's folders at `path`.
+fn sample_file(projects: &mut Projects, path: &Path) -> Result<SourceFile, CommandError> {
+    sample_files(projects)
+        .into_iter()
+        .find(|f| f.path == path)
+        .ok_or_else(|| format!("{} is not a sample in the browser's folders", path.display()).into())
+}
+
 fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let path = PathBuf::from(text(params, "item")?);
     projects.poll_sound_map();
-    let file = sample_files(projects)
-        .into_iter()
-        .find(|f| f.path == path)
-        .ok_or_else(|| format!("{} is not a sample in the browser's folders", path.display()))?;
-    let named = suhina_soundmap::kinds::kind_of_path(&file.path, &file.folder);
+    let file = sample_file(projects, &path)?;
+    let hand = projects.sound_map_mut().kind_by_hand(&file.path);
+    let named = suhina_soundmap::classify::named(&file.path, &file.folder);
     let analysis = projects.sound_map_mut().analysis(&file);
     let mut out = json!({ "item": path.display().to_string() });
     match analysis {
@@ -346,19 +363,42 @@ fn info(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> 
             out["featureVersion"] = json!(suhina_soundmap::features::FEATURE_VERSION);
         }
     }
-    match named {
-        Some(kind) => {
+    match (hand, named) {
+        (Some(kind), _) => {
+            out["kind"] = json!(kind.id());
+            out["kindFrom"] = json!("hand");
+        }
+        (None, Some((kind, suhina_soundmap::classify::Evidence::FileName))) => {
             out["kind"] = json!(kind.id());
             out["kindFrom"] = json!("name");
         }
-        None => {
-            // A guess needs the neighbours: the map of the sample's folder.
+        _ => {
+            // A folder's kind may give way to the sound, and a guess needs the kinds learned
+            // from the sample's library folder: its map.
             let folder = file.folder.display().to_string();
             let map = map_of(projects, Some(&folder), MAX_SECONDS_RANGE.1)?;
-            let guess = map.points.iter().find(|p| p.path == path);
-            out["kind"] = json!(guess.map_or("other", |p| p.kind.id()));
-            out["kindFrom"] = json!(if guess.is_some_and(|p| p.guessed) { "guess" } else { "none" });
+            let point = map.points.iter().find(|p| p.path == path);
+            let kind = point.map(|p| p.kind).or(named.map(|(k, _)| k)).unwrap_or(Kind::Other);
+            let from = match point {
+                Some(p) if p.guessed => "guess",
+                Some(_) | None if named.is_some() => "name",
+                _ => "none",
+            };
+            out["kind"] = json!(kind.id());
+            out["kindFrom"] = json!(from);
         }
     }
     Ok(out)
+}
+
+fn set_kind(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let path = PathBuf::from(text(params, "item")?);
+    let id = text(params, "kind")?;
+    let kind = match id {
+        "auto" => None,
+        id => Some(Kind::from_id(id).ok_or_else(|| format!("unknown kind {id:?}: {KIND_PARAM}"))?),
+    };
+    let file = sample_file(projects, &path)?;
+    projects.sound_map_mut().set_kind(&file.path, kind)?;
+    Ok(json!({ "item": path.display().to_string(), "kind": kind.map_or("auto", Kind::id) }))
 }

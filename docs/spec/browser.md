@@ -174,6 +174,10 @@ with the part played so far brighter and a playhead.
   The status bar says so too, and says why when nothing can preview at all: no project is open
   (previews play through the active project's audio output), or the project has no audio output.
 
+The browser is not the only place a preview starts: the piano roll's key column plays a note
+through the track's instrument while a key is held, with the same voice and the same commands
+([clip editor](ui-clip-editor.md) › Playing the keys, [ADR 0011](../decisions/0011-preview-and-added-audio.md)).
+
 ## Tempo and key of a file
 
 Shown in the preview strip and used when a sample is dropped (see *Warping*). Taken from, in

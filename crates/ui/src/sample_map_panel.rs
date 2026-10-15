@@ -52,6 +52,9 @@ pub struct Panel {
     pub add: Vec<BrowserItem>,
     /// Something to say in the status bar (a preview that cannot play).
     pub status: Option<String>,
+    /// A kind was set by hand since the layout was made: the next refresh lays the scope out
+    /// again, so the item moves to its kind's region.
+    stale: bool,
 }
 
 impl Default for Panel {
@@ -68,6 +71,7 @@ impl Default for Panel {
             flags_key: None,
             add: Vec::new(),
             status: None,
+            stale: false,
         }
     }
 }
@@ -136,8 +140,8 @@ impl Panel {
         }
         let now = ui.input(|i| i.time);
         let place = Self::place(state);
-        let scope_changed =
-            self.shown.as_ref().is_none_or(|s| s.place != place || s.max_seconds != settings.map_max_seconds);
+        let scope_changed = self.stale
+            || self.shown.as_ref().is_none_or(|s| s.place != place || s.max_seconds != settings.map_max_seconds);
         if !scope_changed && !(analysed && now - self.last_layout >= RELAYOUT_SECONDS) {
             if analysed {
                 ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(RELAYOUT_SECONDS));
@@ -146,6 +150,7 @@ impl Panel {
         }
         let Ok(files) = suhina_session::scope_files(projects, place.as_deref()) else { return };
         let prepared = projects.sound_map_mut().prepare(&files, settings.map_max_seconds as f32);
+        self.stale = false;
         let key = ScopeKey { place, max_seconds: settings.map_max_seconds, layout_key: prepared.key() };
         self.last_layout = now;
         if self.shown.as_ref() == Some(&key) {
@@ -227,6 +232,7 @@ impl Panel {
                     position: p.position,
                     kind: p.kind,
                     guessed: p.guessed,
+                    by_hand: p.by_hand,
                     in_use: in_use.contains(&p.path),
                     selected: selected.contains(path_key.as_str()),
                     matches: text_matches && tag_matches,
@@ -393,6 +399,28 @@ impl Panel {
                     state.selection_changed = false;
                 }
             }
+            MapEvent::SetKind { item, kind } => {
+                if let Some(path) = self.path(item) {
+                    let id = kind.map_or("auto", |k| k.id());
+                    match projects
+                        .execute("soundmap.setKind", &json!({ "item": path.display().to_string(), "kind": id }))
+                    {
+                        Ok(_) => {
+                            // Shown at once; the new layout follows.
+                            if let (Some(kind), Some(point)) =
+                                (kind, self.map.as_mut().and_then(|m| m.points.get_mut(item)))
+                            {
+                                point.kind = kind;
+                                point.guessed = false;
+                                point.by_hand = true;
+                            }
+                            self.flags_key = None;
+                            self.stale = true;
+                        }
+                        Err(e) => self.status = Some(e.0),
+                    }
+                }
+            }
             MapEvent::Layout(layout) => {
                 settings.map_grid = layout == Layout::Grid;
                 return true;
@@ -538,6 +566,39 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(panel.map.as_ref().unwrap().points.len(), 17);
+
+        // A kind set by hand shows at once and the scope is laid out again with it; Automatic
+        // gives it back to the name and the sound.
+        use suhina_soundmap::kinds::Kind;
+        let index = |panel: &Panel| {
+            panel.map.as_ref().unwrap().points.iter().position(|p| p.path.ends_with("hat 3.wav")).unwrap()
+        };
+        let hat = index(&panel);
+        let key = panel.shown.as_ref().map(|k| k.layout_key);
+        panel.handle(MapEvent::SetKind { item: hat, kind: Some(Kind::Tom) }, &mut state, &mut projects, &mut settings);
+        assert_eq!(panel.map.as_ref().unwrap().points[hat].kind, Kind::Tom);
+        assert!(panel.map.as_ref().unwrap().points[hat].by_hand);
+        for _ in 0..200 {
+            draw(&mut panel, &mut state, &mut projects, &mut settings);
+            if panel.shown.as_ref().map(|k| k.layout_key) != key && panel.job.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_ne!(panel.shown.as_ref().map(|k| k.layout_key), key);
+        let hat = index(&panel);
+        assert_eq!(panel.points[hat].kind, Kind::Tom);
+        assert!(panel.points[hat].by_hand);
+        panel.handle(MapEvent::SetKind { item: hat, kind: None }, &mut state, &mut projects, &mut settings);
+        for _ in 0..200 {
+            draw(&mut panel, &mut state, &mut projects, &mut settings);
+            if panel.map.as_ref().is_some_and(|m| m.points[index(&panel)].kind == Kind::Hat) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let hat = index(&panel);
+        assert_eq!((panel.points[hat].kind, panel.points[hat].by_hand), (Kind::Hat, false));
         drop(projects);
         let _ = std::fs::remove_dir_all(settings_dir);
         let _ = std::fs::remove_dir_all(samples);

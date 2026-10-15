@@ -104,6 +104,14 @@ linked to its log. Downloading an artifact needs a GitHub sign-in, and an artifa
 zip: on Windows it holds the package folder, on Linux and macOS the package's `.tar.gz`, because a
 zip drops the executable bit.
 
+The linking run belongs to the build it links, and says so in what it starts: only a run that built
+something is answered, so a run that was skipped (its *what to build* job decided not to build),
+cancelled or superseded by a newer push links nothing and takes no runner from the builds that do
+have something to link. A failed build is answered like a successful one, with the platform that
+failed linked to its log. The runs that do link wait as one run per pull request rather than one per
+platform, a newer build's link replacing one that is still waiting; a run from a fork lists no pull
+request there, and is grouped by its head repository and branch instead.
+
 | Pull request | Built |
 |---|---|
 | opened and pushed by a maintainer | on every push; a newer push cancels a build still running |
@@ -218,7 +226,11 @@ else. No mention in a post pings anyone.
 the event. The nightly never reaches `discord.yml`: it is created with the workflow's own token,
 which starts no other workflow. `discord.yml` runs on `pull_request_target`, so pull requests from
 forks are posted too; it checks out the base branch and never runs the pull request's code. No
-repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice.
+repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice. Two
+events about one item (an issue opened and then closed, a pull request pushed and then merged) share
+a `concurrency` group keyed on that item, so a newer event replaces one that is still waiting and a
+burst waits as one run per item instead of one per event; a post that is already running is never
+cut off, because a half-posted notification is one nobody sees.
 
 The testing forum has a thread per pull request, named `#<number> <title>`; the number always
 comes first, because the bot *Suhina GitHub* finds a pull request's thread by it, among the
@@ -271,6 +283,14 @@ three stay side by side. The smoke test runs the VST3 test plug-in built into th
 packaged CLI; the desktop app needs a window, so only its libraries are checked. Each archive also holds
 `LICENSE`, `NOTICE`, `README.md`, `ATTRIBUTION.md` and the licences of the ported code,
 `LICENSE-APACHE` (the FM synth) and `LICENSE-signalsmith.txt` (the time stretcher).
+
+## Reminders
+
+Secrets that expire, so a release checks them before they stop a bot in the middle of the next one:
+
+| Secret | Used by | Expires | Renew |
+|---|---|---|---|
+| `PROJECT_TOKEN` | the claim bot and Project sync ([`claim-bot.md`](claim-bot.md)) | fill in | [`claim-bot.md`](claim-bot.md) › Setting it up |
 
 ## Not yet
 

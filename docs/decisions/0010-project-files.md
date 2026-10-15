@@ -3,7 +3,7 @@ description: Suhina's own project file (.suhina; .locr from before October 2026 
 read_when: project file, save, open, .suhina, .locr, file extension, native format, project.save, templates, new project, blank project, unsaved changes, recent projects
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/project-file
   - crates/session/src/lib.rs

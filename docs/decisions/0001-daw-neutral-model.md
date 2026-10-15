@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/model/src/lib.rs
 ---
@@ -95,6 +95,27 @@ by an older or newer Suhina still opens. Plug-ins keep using `state`; placeholde
 neither. Importers fill `params` when they map another DAW's device onto a Suhina device
 (first: Live's Utility, `docs/spec/als-format.md` › Devices).
 
+## Amendment: plug-in parameters and automation lanes (2026-10-15)
+
+`params` also holds values set on a plug-in device: by the plug-in's parameter id written in
+decimal, in the plug-in's own range (a VST3 plug-in's normalized, a CLAP plug-in's plain), set
+over the `state` it loads with. A `Device` also holds `automation`: one `AutomationLane` per
+parameter (by the same id as `params`), points of an arrangement beat and a value in beat order,
+the value moving in a straight line from one to the next and holding before the first and after
+the last; two points at one beat make a jump. Lanes play on plug-in devices first (#109); built-in
+effects and instruments follow with LOOP-39. A lane belongs to its device, so it moves, copies and
+goes with it.
+
+## Amendment: envelopes for every parameter (2026-10-15)
+
+Lanes play on built-in devices too, and a `Channel` holds `automation` of its own: lanes of its
+mixer parameters `volume`, `pan` and `mute`, in the units of the channel's fields (#395). An
+`AutomationPoint` has a `curve` (-1 to 1, 0 a straight line) for the segment to the next point,
+and an `AutomationLane` an `enabled` flag: a manual change to the parameter turns it off, and the
+value set by hand holds until it is on again. The shapes, steps and how the engine plays them are
+in [the automation spec](../spec/automation.md); the pure parts (a lane's value at a beat, the
+curve) are in `model::automation`.
+
 ## Amendment: fade shapes and curves (2026-10-13)
 
 Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`): a
@@ -102,6 +123,21 @@ Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`)
 Linear with curve 0 is the default, so a project without them sounds as before. A curve outside
 −1 … +1 does not validate (`ValidationError::BadFades`). The formulas are in
 [arrangement editing](../spec/arrangement-editing.md) › Fades.
+
+## Amendment: copy on edit for duplicated clips (2026-10-15)
+
+`clip.duplicate` keeps placing the same content: a duplicate costs one `Clip`, and a later
+linked copy (a clip that stays shared on purpose) builds on that. Independence comes when the
+notes are edited instead: the first `note.*` edit that changes the notes of a clip whose
+content other clips also play gives that clip its own copy of the content (a new `ContentId`,
+the same name), inside the same command and so the same undo step; the other clips keep the
+original ([clip editor spec](../spec/ui-clip-editor.md) › Coordinates,
+[#352](https://github.com/suhina-daw/suhina-daw/issues/352)). This is the "make unique" the
+consequences below ask for, done without asking. A content with a lane that targets a track (a
+shared pattern) is not copied: its placements are one pattern on purpose. Copying on duplicate
+instead was rejected because it would leave nothing for a linked copy to share and doubles the
+contents of a set full of repeats that are never edited. `clip.paste` already gives the pasted
+clip its own content. Audio content edits (`clip.setGain`) still act on the shared content.
 
 ## Consequences
 
