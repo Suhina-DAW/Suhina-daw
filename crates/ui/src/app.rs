@@ -2425,7 +2425,9 @@ impl App {
                 let params = json!({ "track": track.0, "scene": scene + 1 });
                 actions.push(Action::new(if action == "selection.copy" { "clip.copy" } else { "clip.paste" }, params));
             }
-            "selection.cut" | "selection.duplicate" | "selection.delete" if self.shown == View::Session => {
+            // Cut and duplicate of a slot's clip wait for launcher clip commands; Delete works,
+            // in the arm below.
+            "selection.cut" | "selection.duplicate" if self.shown == View::Session => {
                 self.status = Status::Hint("In the Session view, a slot's clip can be copied and pasted".into());
             }
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
@@ -2436,30 +2438,48 @@ impl App {
                     actions.push(delete);
                     return;
                 }
-                let Some((track, index)) = self.arrangement.selected_clip() else { return };
-                let id = match action {
-                    "selection.copy" => "clip.copy",
-                    "selection.cut" => "clip.cut",
-                    "selection.duplicate" => "clip.duplicate",
-                    _ => "clip.delete",
-                };
-                if matches!(id, "clip.cut" | "clip.delete") {
-                    self.arrangement.clear_selected_clip();
-                }
-                let mut params = json!({ "track": track.0, "index": index });
-                // A copy follows the stacking setting for its kind, as a moved clip does.
-                if id == "clip.duplicate" {
-                    let audio = self
-                        .timeline
-                        .as_ref()
-                        .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
-                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
-                        .map(|c| c.audio);
-                    if audio.is_some_and(|audio| self.stacks(audio)) {
-                        params["stack"] = json!(true);
+                // The Session view: Delete takes the selected slot's clip off its slot, and the
+                // detail area falls back to the track's devices.
+                if self.shown == View::Session {
+                    if action == "selection.delete"
+                        && let Some((track, scene)) = self.view.selected_slot
+                        && self.session().is_some_and(|s| {
+                            let p = s.project();
+                            p.launcher
+                                .columns
+                                .iter()
+                                .any(|c| c.track == track && c.slots.get(scene).is_some_and(|slot| slot.clip.is_some()))
+                        })
+                    {
+                        self.view.selected_slot = None;
+                        actions.push(Action::new("clip.delete", json!({ "track": track.0, "scene": scene + 1 })));
                     }
+                } else {
+                    let Some((track, index)) = self.arrangement.selected_clip() else { return };
+                    let id = match action {
+                        "selection.copy" => "clip.copy",
+                        "selection.cut" => "clip.cut",
+                        "selection.duplicate" => "clip.duplicate",
+                        _ => "clip.delete",
+                    };
+                    if matches!(id, "clip.cut" | "clip.delete") {
+                        self.arrangement.clear_selected_clip();
+                    }
+                    let mut params = json!({ "track": track.0, "index": index });
+                    // A copy follows the stacking setting for its kind, as a moved clip does.
+                    if id == "clip.duplicate" {
+                        let audio = self
+                            .timeline
+                            .as_ref()
+                            .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
+                            .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                            .map(|c| c.audio);
+                        if audio.is_some_and(|audio| self.stacks(audio)) {
+                            params["stack"] = json!(true);
+                        }
+                    }
+                    actions.push(Action::new(id, params));
                 }
-                actions.push(Action::new(id, params));
             }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.

@@ -145,8 +145,10 @@ column has **stop all clips** for the whole set.
 right-click selects it and opens its menu: **Copy** copies its clip (`clip.copy {track,
 scene}`), **Paste** puts the copied clip in it (`clip.paste {track, scene}`), greyed out while
 nothing has been copied. Ctrl+C and Ctrl+V do the same on the selected slot
-([shortcuts](../shortcuts.md)); Ctrl+X, Ctrl+D and Delete act on arrangement clips only and say so
-in the Session view.
+([shortcuts](../shortcuts.md)); Ctrl+X and Ctrl+D act on arrangement clips only and say so in the
+Session view. **Suhina:** the Delete key (or Backspace) takes a selected slot's clip off its
+slot (`clip.delete` with the slot's track and scene); one undo puts it back, and the detail area
+falls back to the track's devices.
 
 ### Between the views
 

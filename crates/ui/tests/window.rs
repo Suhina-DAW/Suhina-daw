@@ -2394,6 +2394,25 @@ fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
 }
 
 #[test]
+fn the_delete_key_takes_a_selected_slot_clip_off_its_slot() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // A double-click makes the empty clip in Keys' slot; its name area selects the clip.
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    harness.get_by_label("Select MIDI clip on Keys (scene 1)").click();
+    harness.run();
+    // Delete takes the selected clip off its slot: the empty slot's stop control is back.
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert!(harness.query_by_label("Stop Keys (scene 1)").is_some(), "the slot is empty again");
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_none(), "the clip is gone");
+    // One undo puts it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some(), "the clip is back");
+}
+
+#[test]
 fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
     harness.get_by_label("Arrangement view").click();
