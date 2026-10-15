@@ -19,29 +19,12 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
-API = "https://discord.com/api/v10"
+from discord_api import Discord, DiscordError, cut, is_thread_of, locate, prefix
+
 MARK = "[Merged]"
 REACTION = "✅"
-# Discord's longest thread name.
-NAME_LIMIT = 100
-# Discord allows two renames of a thread in ten minutes; a longer wait gives up.
-MAX_WAIT = 660.0
-ATTEMPTS = 4
-# Archived threads are listed newest first, 100 a page.
-MAX_PAGES = 20
-
-
-def prefix(number: int) -> str:
-    return f"#{number} "
-
-
-def is_thread_of(name: str, number: int) -> bool:
-    return (name or "").startswith(prefix(number))
 
 
 def is_marked(name: str, number: int) -> bool:
@@ -53,19 +36,8 @@ def merged_name(name: str, number: int) -> str | None:
     the pull request's thread or is already marked."""
     if not is_thread_of(name, number) or is_marked(name, number):
         return None
-    head = f"{prefix(number)}{MARK} "
     rest = name[len(prefix(number)) :].strip()
-    text = (head + rest).rstrip()
-    if len(text) > NAME_LIMIT:
-        text = text[: NAME_LIMIT - 1].rstrip() + "…"
-    return text
-
-
-def find_thread(threads: list[dict], number: int, forum: str) -> dict | None:
-    for thread in threads:
-        if str(thread.get("parent_id")) == forum and is_thread_of(thread.get("name", ""), number):
-            return thread
-    return None
+    return cut(f"{prefix(number)}{MARK} {rest}")
 
 
 def merged_number(event: dict) -> int | None:
@@ -74,60 +46,6 @@ def merged_number(event: dict) -> int | None:
         return None
     number = pr.get("number")
     return number if isinstance(number, int) else None
-
-
-class Discord:
-    def __init__(self, token: str):
-        self.token = token
-
-    def call(self, method: str, path: str, body: dict | None = None) -> dict | None:
-        data = json.dumps(body).encode() if body is not None else None
-        for _ in range(ATTEMPTS):
-            request = urllib.request.Request(API + path, data=data, method=method)
-            request.add_header("Authorization", f"Bot {self.token}")
-            request.add_header("User-Agent", "DiscordBot (https://github.com/suhina-daw/suhina-daw, 1)")
-            if data is not None:
-                request.add_header("Content-Type", "application/json")
-            try:
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    text = response.read()
-                    return json.loads(text) if text else {}
-            except urllib.error.HTTPError as error:
-                text = error.read().decode(errors="replace")
-                if error.code != 429:
-                    raise DiscordError(f"{method} {path}: {error.code} {text[:300]}") from None
-                try:
-                    wait = float(json.loads(text).get("retry_after", 1.0))
-                except (ValueError, AttributeError):
-                    wait = float(error.headers.get("Retry-After") or 1.0)
-                if wait > MAX_WAIT:
-                    raise DiscordError(f"{method} {path}: rate limited for {wait:.0f} s") from None
-                print(f"Rate limited; waiting {wait:.1f} s.")
-                time.sleep(wait + 0.5)
-        raise DiscordError(f"{method} {path}: still rate limited after {ATTEMPTS} attempts")
-
-
-class DiscordError(Exception):
-    pass
-
-
-def locate(discord: Discord, guild: str, forum: str, number: int) -> dict | None:
-    active = discord.call("GET", f"/guilds/{guild}/threads/active") or {}
-    found = find_thread(active.get("threads") or [], number, forum)
-    if found:
-        return found
-    before = ""
-    for _ in range(MAX_PAGES):
-        query = "?limit=100" + (f"&before={urllib.parse.quote(before)}" if before else "")
-        page = discord.call("GET", f"/channels/{forum}/threads/archived/public{query}") or {}
-        threads = page.get("threads") or []
-        found = find_thread(threads, number, forum)
-        if found or not threads or not page.get("has_more"):
-            return found
-        before = (threads[-1].get("thread_metadata") or {}).get("archive_timestamp") or ""
-        if not before:
-            return None
-    return None
 
 
 def mark(discord: Discord, thread: dict, number: int) -> None:
