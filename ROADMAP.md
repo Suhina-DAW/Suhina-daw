@@ -300,6 +300,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- Samples, Stems files and MIDI files dragged from the system's file manager land like a drag
+  from the browser: on the slot, lane or empty space under the pointer, outlined while they hover
+  (`clip.addFiles`). Where the system reports no pointer position during the drag, they go where
+  Enter puts them ([spec](docs/spec/browser.md#files-from-the-system)).
 - **Missing files**: a project whose audio files cannot be found says so in a bar when it opens
   (Find…, Later; View › Missing files). The panel lists them with the clips that use them, finds
   them by name in the browser's folders and the project's folder at once, or in a folder typed or

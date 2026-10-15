@@ -4,10 +4,15 @@ name: CI
 # are free for an open-source repository. Linux and Windows are part of the required check; macOS
 # is reported without blocking merges until it has proven itself. The release workflow builds and
 # checks all three for every tag and for the nightly.
+#
+# merge_group: the merge queue (CONTRIBUTING.md › Merging many pull requests) tests its
+# temporary branch, main with the queued pull requests merged onto it, with the same jobs, so the
+# `ci` check a ruleset requires reports there too. Jobs that need a pull request skip.
 on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -22,9 +27,10 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # Changes that touch only documentation skip the build jobs entirely; no code reads these
-  # files. main requires only the `ci` job at the end, which passes when the others passed or
-  # were skipped.
+  # Changes that touch only documentation, scripts/ or .github/ skip the build jobs entirely: no
+  # Rust build or test reads these files, and the docs job below, which always runs, tests the
+  # scripts. A change to this file still runs every job. main requires only the `ci` job at the
+  # end, which passes when the others passed or were skipped.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -34,16 +40,23 @@ jobs:
         with:
           fetch-depth: 0
       # A pull request is checked out as a merge commit, so its first parent is the current base.
+      # A merge queue group is compared with the main it is built on.
       - id: diff
         env:
-          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+          BASE: >-
+            ${{ github.event_name == 'pull_request' && 'HEAD^1'
+              || github.event_name == 'merge_group' && github.event.merge_group.base_sha
+              || github.event.before }}
         run: |
           if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(git diff --name-only "$BASE" HEAD \
-            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$' || true)
+            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$|^scripts/|^\.github/' || true)
+          if git diff --name-only "$BASE" HEAD | grep -qx '\.github/workflows/ci\.yml'; then
+            code=true
+          fi
           if [ -n "$code" ]; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
 
   # Runs on every change, documentation included.
@@ -168,6 +181,7 @@ jobs:
 
   # Pull requests from forks: every commit must carry a Signed-off-by line (Developer
   # Certificate of Origin, CONTRIBUTING.md). Branches of this repository are the maintainers'.
+  # Skipped in the merge queue: its pull requests were checked here before they were queued.
   dco:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
@@ -189,7 +203,8 @@ jobs:
           done
           exit $missing
 
-  # The one check main requires. Fails if any job it depends on failed or was cancelled.
+  # The one check main requires. Fails if any job it depends on failed or was cancelled. It runs
+  # on pull requests and in the merge queue alike, so the queue waits on the same check.
   ci:
     if: always()
     needs: [changes, docs, fmt, check, dco]
