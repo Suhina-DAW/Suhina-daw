@@ -6,6 +6,12 @@
 //! that expect every bus to have one get it. The state handed to the engine is the component's
 //! (the controller is brought in step with it on load).
 //!
+//! A plug-in whose latency changes while it runs says so through the component handler
+//! (`restartComponent` with `kLatencyChanged`). The main loop then stops the audio thread (which
+//! hands the processor the parameter values still waiting, in a block of no samples, so it knows
+//! the value that changed its latency), deactivates and activates the component, reads its
+//! latency again and starts a new audio thread on the same link.
+//!
 //! A plug-in is named `vst3:<bundle or file>` (the first audio class in it) or
 //! `vst3:<bundle or file>#<class id>`, the class id as 32 hex digits; `test:vst3` is a gain
 //! built into the host for tests ([`crate::test_vst3`]).
@@ -15,7 +21,7 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, c_void};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -409,6 +415,8 @@ impl IHostApplicationTrait for HostApplication {
 /// to the processor with its next block, as the SDK asks the host to do.
 struct ComponentHandler {
     pending: Pending,
+    /// The `restartComponent` flags the plug-in asked with, not yet served (from any thread).
+    restart: Arc<AtomicI32>,
 }
 
 impl Class for ComponentHandler {
@@ -435,7 +443,8 @@ impl IComponentHandlerTrait for ComponentHandler {
         kResultOk
     }
 
-    unsafe fn restartComponent(&self, _flags: int32) -> tresult {
+    unsafe fn restartComponent(&self, flags: int32) -> tresult {
+        self.restart.fetch_or(flags, Ordering::AcqRel);
         kResultOk
     }
 }
@@ -549,9 +558,19 @@ unsafe impl Send for AudioSide {}
 
 /// A loaded, active VST3 plug-in and its audio thread.
 pub(crate) struct Vst3Plugin {
-    audio: Option<thread::JoinHandle<()>>,
+    /// The audio thread; it hands the link back when it stops.
+    audio: Option<thread::JoinHandle<Served>>,
     stop: Arc<AtomicBool>,
+    /// The audio thread is stopping for a restart: it hands the processor the parameter values
+    /// still waiting first.
+    flush: Arc<AtomicBool>,
     latency: u32,
+    /// The `restartComponent` flags the plug-in asked with.
+    restart: Arc<AtomicI32>,
+    /// What the audio thread is started with: each bus's channels (inputs, outputs) and the
+    /// sample rate.
+    buses: (Vec<usize>, Vec<usize>),
+    sample_rate: f64,
     connections: Option<(ComPtr<IConnectionPoint>, ComPtr<IConnectionPoint>)>,
     controller: Option<ComPtr<IEditController>>,
     separate_controller: bool,
@@ -587,7 +606,8 @@ impl Vst3Plugin {
         let component = module.create::<IComponent>(&cid).ok_or("could not make the plug-in's component")?;
         let host = ComWrapper::new(HostApplication);
         let pending = Pending::default();
-        let handler = ComWrapper::new(ComponentHandler { pending: pending.clone() });
+        let restart = Arc::new(AtomicI32::new(0));
+        let handler = ComWrapper::new(ComponentHandler { pending: pending.clone(), restart: restart.clone() });
         let context = host.to_com_ptr::<FUnknown>().ok_or("host object")?;
         // SAFETY: a live component, given the host's context object for the call.
         if !ok(unsafe { component.initialize(context.as_ptr()) }) {
@@ -610,7 +630,11 @@ impl Vst3Plugin {
         let mut plugin = Self {
             audio: None,
             stop: Arc::new(AtomicBool::new(false)),
+            flush: Arc::new(AtomicBool::new(false)),
             latency: 0,
+            restart,
+            buses: (Vec::new(), Vec::new()),
+            sample_rate,
             connections: None,
             controller,
             separate_controller,
@@ -634,7 +658,7 @@ impl Vst3Plugin {
 
         let processor = plugin.component.cast::<IAudioProcessor>().ok_or("the plug-in does not process audio")?;
         let max_frames = served.max_frames();
-        let buses = plugin.set_up_buses(&processor);
+        plugin.buses = plugin.set_up_buses(&processor);
         let mut setup = ProcessSetup {
             processMode: ProcessModes_::kRealtime as int32,
             symbolicSampleSize: SymbolicSampleSizes_::kSample32 as int32,
@@ -651,20 +675,73 @@ impl Vst3Plugin {
         }
         // SAFETY: a live, active processor.
         plugin.latency = unsafe { processor.getLatencySamples() };
+        // What it asked while being set up is served by the setting up.
+        plugin.restart.store(0, Ordering::Release);
+        plugin.start_audio(processor, served)?;
+        Ok(plugin)
+    }
 
-        let stop = plugin.stop.clone();
-        let pending = plugin.pending.clone();
-        let mapping = MidiMapping::of(plugin.controller.as_ref());
+    /// Starts an audio thread that serves blocks from `served` through the active `processor`.
+    fn start_audio(&mut self, processor: ComPtr<IAudioProcessor>, served: Served) -> Result<(), String> {
+        self.stop = Arc::new(AtomicBool::new(false));
+        self.flush = Arc::new(AtomicBool::new(false));
+        let (stop, flush) = (self.stop.clone(), self.flush.clone());
+        let pending = self.pending.clone();
+        let mapping = MidiMapping::of(self.controller.as_ref());
+        let (buses, sample_rate) = (self.buses.clone(), self.sample_rate);
         let audio = AudioSide(processor);
         let thread = thread::Builder::new()
             .name("plug-in audio".into())
             .spawn(move || {
                 crate::real_time_thread();
-                serve(audio, served, buses, sample_rate, (pending, mapping), &stop);
+                serve(audio, served, buses, sample_rate, (pending, mapping), (&stop, &flush))
             })
             .map_err(|e| e.to_string())?;
-        plugin.audio = Some(thread);
-        Ok(plugin)
+        self.audio = Some(thread);
+        Ok(())
+    }
+
+    /// A latency the plug-in reported since this was last asked: one that asked for a restart
+    /// because its latency changed is deactivated and activated again first, as the SDK asks.
+    pub(crate) fn latency_changed(&mut self) -> Option<u32> {
+        let flags = self.restart.swap(0, Ordering::AcqRel);
+        if flags & RestartFlags_::kLatencyChanged == 0 {
+            return None;
+        }
+        match self.reactivate() {
+            Ok(latency) if latency != self.latency => {
+                self.latency = latency;
+                Some(latency)
+            }
+            Ok(_) => None,
+            Err(why) => {
+                eprintln!("plug-in {}: could not restart it: {why}", self.name);
+                None
+            }
+        }
+    }
+
+    /// Stops the audio thread, deactivates and activates the component, and starts a new audio
+    /// thread on the same link; returns the latency it reports then. An audio thread stuck in
+    /// the plug-in is left as it is, and so is the plug-in.
+    fn reactivate(&mut self) -> Result<u32, String> {
+        self.flush.store(true, Ordering::Release);
+        if !self.stop_audio(crate::UNLOAD_WAIT) {
+            return Err("its audio thread does not stop".into());
+        }
+        let served =
+            self.audio.take().ok_or("it has no audio thread")?.join().map_err(|_| "its audio thread failed")?;
+        let processor = self.component.cast::<IAudioProcessor>().ok_or("the plug-in does not process audio")?;
+        // SAFETY: a live component; processing has stopped.
+        let _ = unsafe { self.component.setActive(0) };
+        // SAFETY: as above, set up as when it loaded.
+        if !ok(unsafe { self.component.setActive(1) }) {
+            return Err("the plug-in did not activate again".into());
+        }
+        // SAFETY: a live, active processor.
+        let latency = unsafe { processor.getLatencySamples() };
+        self.start_audio(processor, served)?;
+        Ok(latency)
     }
 
     /// Connects component and controller, when they are separate objects that talk.
@@ -974,16 +1051,20 @@ impl Drop for Vst3Plugin {
     }
 }
 
-/// The audio thread: serves blocks from the link through the processor until `stop` is set.
+/// The audio thread: serves blocks from the link through the processor until `stop` is set,
+/// then hands the link back. When `flush` is set by then, the parameter values still waiting go
+/// to the processor first, in a block of no samples (the SDK's way of passing parameters
+/// without audio).
 fn serve(
     audio: AudioSide,
     mut served: Served,
     buses: (Vec<usize>, Vec<usize>),
     sample_rate: f64,
     (pending, mapping): (Pending, MidiMapping),
-    stop: &AtomicBool,
-) {
+    (stop, flush): (&AtomicBool, &AtomicBool),
+) -> Served {
     let processor = audio.0;
+    let waiting = pending.clone();
     let mut changes = BlockChanges::new(pending);
     let notes = BlockEvents::new();
     let max_frames = served.max_frames() as usize;
@@ -1068,8 +1149,28 @@ fn serve(
             }
         });
     }
+    if flush.load(Ordering::Acquire) && waiting.lock().is_ok_and(|w| !w.is_empty()) {
+        let mut data = ProcessData {
+            processMode: ProcessModes_::kRealtime as int32,
+            symbolicSampleSize: SymbolicSampleSizes_::kSample32 as int32,
+            numSamples: 0,
+            numInputs: inputs.len() as int32,
+            numOutputs: outputs.len() as int32,
+            inputs: inputs.as_mut_ptr(),
+            outputs: outputs.as_mut_ptr(),
+            inputParameterChanges: changes.take(std::iter::empty()),
+            outputParameterChanges: std::ptr::null_mut(),
+            inputEvents: std::ptr::null_mut(),
+            outputEvents: std::ptr::null_mut(),
+            processContext: &mut context,
+        };
+        // SAFETY: as in the blocks above, with no samples to read or write.
+        let _ = unsafe { processor.process(&mut data) };
+        changes.done();
+    }
     // SAFETY: as above.
     let _ = unsafe { processor.setProcessing(0) };
+    served
 }
 
 #[cfg(test)]

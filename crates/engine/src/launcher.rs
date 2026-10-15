@@ -1774,6 +1774,49 @@ mod tests {
         assert!((left(BEAT + BEAT / 2 + BEAT / 4) - 0.125).abs() < 0.01);
     }
 
+    #[test]
+    fn launched_unwarped_audio_loops_over_the_whole_file() {
+        // A sample with no known tempo in a slot (`docs/spec/browser.md` › Warping): unwarped,
+        // looping over its whole length. A 0.75 s ramp is 1.5 beats at 120 bpm, not a whole bar.
+        let frames = SR as usize * 3 / 4;
+        let samples = (0..frames).map(|i| i as f32 / SR as f32).collect();
+        let mut audio = AudioPool::new();
+        audio.files.insert("hit.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples }));
+        let region = AudioRegion {
+            file: "hit.wav".into(),
+            absolute_file: None,
+            sample_rate: Some(SR),
+            channels: Some(1),
+            duration_seconds: Some(0.75),
+            warped: false,
+            stretch: StretchMode::default(),
+            warp_markers: Vec::new(),
+            gain: 1.0,
+            transpose: 0.0,
+            stream: None,
+        };
+        let content = ClipContent {
+            id: ContentId(1),
+            name: "hit".into(),
+            length: 1.5,
+            lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
+            extensions: Extensions::default(),
+        };
+        let launch = [(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })];
+        let looping = project(vec![content.clone()], vec![vec![with(clip(1, 1.5, true))]]);
+        let out = render_launches(&looping, &audio, SR, &launch, 2.0).unwrap();
+        let left = |out: &[f32], seconds: f64| out[2 * (seconds * f64::from(SR)) as usize];
+        assert!((left(&out, 0.25) - 0.25).abs() < 0.01, "{}", left(&out, 0.25));
+        // Past the end of the file it starts again from its beginning, pass after pass.
+        assert!((left(&out, 1.0) - 0.25).abs() < 0.01, "{}", left(&out, 1.0));
+        assert!((left(&out, 1.85) - 0.35).abs() < 0.01, "{}", left(&out, 1.85));
+        // With its loop off the same clip plays once and the column falls silent.
+        let once = project(vec![content], vec![vec![with(clip(1, 1.5, false))]]);
+        let out = render_launches(&once, &audio, SR, &launch, 2.0).unwrap();
+        assert!((left(&out, 0.25) - 0.25).abs() < 0.01);
+        assert!(out[2 * SR as usize..].iter().all(|s| *s == 0.0), "silent after the end");
+    }
+
     /// A project whose only slot loops a 440 Hz sine warped to play at 0.9 times its speed.
     fn stretched_sine() -> (Project, AudioPool) {
         let samples = (0..2 * SR as usize)

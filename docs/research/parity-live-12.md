@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **135**, every one reachable from the UI, the CLI and MCP |
+| Commands | **136**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -134,7 +134,7 @@ documented behaviour that exists today.
 | 13 | Converting Audio to MIDI | 5 | 5 % | planned | Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap. |
 | 14 | Using Grooves | 6 | 0 % | absent | No groove pool, extraction or commit. |
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
-| 16 | Launching Clips | 12 | 51 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area). Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier and scene follow actions. |
+| 16 | Launching Clips | 12 | 52 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area), samples looping in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop). Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier and scene follow actions. |
 | 17 | Routing and I/O | 22 | 10 % | absent | Only track output to main or a group (track.setOutput); track input is a model field read from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral. |
 | 18 | Mixing | 18 | 55 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output on a second pair of the device (previews, per-track cue, cue volume); return tracks imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers. |
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |
@@ -142,7 +142,7 @@ documented behaviour that exists today.
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, resampling) exists in crates/separation with a test backend; no model and nothing a user can run yet. |
 | 23 | Working with Instruments and Effects (Device View) | 34 | 30 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
-| 24 | Using Plug-Ins | 12 | 62 % | partial | CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3, parameters set and automated from the engine. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
+| 24 | Using Plug-Ins | 12 | 64 % | partial | CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, editors (Windows/X11), scans, latency compensation (followed when a plug-in changes its latency while it plays), saved state, VST2 read and matched to VST3, parameters set and automated from the engine. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
 | 26 | Automation and Editing Envelopes | 22 | 45 % | partial | Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints with curved segments and jumps, saved, played in playback and renders (64-frame steps, ramped mixer gains), a manual change turning a lane off until re-enabled. Lanes under each track in the Arrangement: a parameter chooser, points added, moved on the grid, selected and moved or deleted together, curves bent by dragging, re-enabled from the lane. Missing recording, drawing with a pencil, plug-in lanes in the view, send, master and tempo automation, locking, simplifying envelopes. |
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |
@@ -399,8 +399,8 @@ whether a DAW is usable without it.
 4. **Automation** (ch 26-27): device and mixer parameters first (the command layer
    and the model make this cheap), then tempo. Their envelopes now play and are edited by
    command (#109, #395); the lanes view in the arrangement is what is left before tempo.
-5. **Cue** (part of ch 18): sends and return tracks play, level meters are done and the cue
-   output works.
+5. **Cue** (part of ch 18): sends and returns play and level meters are done; the cue output is
+   the rest of this item.
 6. **Arrangement editing: locators, the loop brace, split, consolidate** (ch 6):
    small commands, large workflow gain, and two of them are already open issues (#98, #99).
 

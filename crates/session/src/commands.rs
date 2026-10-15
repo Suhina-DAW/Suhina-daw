@@ -4,8 +4,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Scene, Slot,
-    TimeSignature, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, Project, Scene,
+    Slot, TimeSignature, Track, TrackId,
 };
 
 use crate::{CommandError, Session, automation, devices, files, follow, meters, notes, preview};
@@ -562,6 +562,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[TRACK, SCENE],
         kind: CommandKind::Transport,
         run: launch_clip,
+    },
+    CommandSpec {
+        id: "clip.setLoop",
+        label: "Switch the loop of the clip in a track's slot: on, it repeats its whole length until stopped; off, it plays once",
+        params: &[TRACK, SCENE, param("loop", ParamType::Bool, "true loops the clip, false plays it once")],
+        kind: CommandKind::Edit,
+        run: set_slot_loop,
     },
     CommandSpec {
         id: "scene.launch",
@@ -2169,6 +2176,28 @@ fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandEr
     };
     send(session, LaunchCommand::LaunchClip { column, slot: scene })?;
     Ok(json!({ "scene": scene + 1, "queued": queued }))
+}
+
+/// `clip.setLoop`: a slot clip's loop on (over its whole length, or the loop it already has) or
+/// off (`docs/spec/clip-launching.md` › Playing a clip).
+fn set_slot_loop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let on = params.get("loop").and_then(Value::as_bool).ok_or("loop must be true or false")?;
+    let column = column_index(&session.project, params)?;
+    let scene = scene_index(&session.project, params)?;
+    let clip = session
+        .project
+        .launcher
+        .columns
+        .get_mut(column)
+        .and_then(|c| c.slots.get_mut(scene))
+        .and_then(|s| s.clip.as_mut())
+        .ok_or("that slot has no clip")?;
+    clip.loop_range = match (on, clip.loop_range) {
+        (false, _) => None,
+        (true, Some(range)) => Some(range),
+        (true, None) => Some(LoopRange { start: 0.0, end: clip.length }),
+    };
+    Ok(json!({ "scene": scene + 1, "loop": on }))
 }
 
 fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

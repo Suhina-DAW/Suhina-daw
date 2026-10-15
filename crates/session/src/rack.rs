@@ -892,6 +892,7 @@ impl Rack {
         }
         changed |= self.receive(player, &mut notices);
         self.take_returned(&mut notices);
+        changed |= self.follow_latencies();
         self.send_placements();
         self.watch(&mut notices);
         if changed {
@@ -936,6 +937,25 @@ impl Rack {
                     notices.push(format!("{name} could not start: {why}"));
                     instance.status = PluginStatus::Failed(why);
                 }
+            }
+        }
+        changed
+    }
+
+    /// Takes in the latencies running plug-ins reported since they started (a lookahead the user
+    /// changed, say). Returns whether what the graphs need to know changed: a new graph then
+    /// lines the tracks up again.
+    fn follow_latencies(&mut self) -> bool {
+        let mut changed = false;
+        for instance in self.instances.values_mut() {
+            if instance.status != PluginStatus::Running {
+                continue;
+            }
+            let Some(control) = instance.control.as_mut() else { continue };
+            let latency = control.follow_latency();
+            if latency != instance.info.latency {
+                instance.info.latency = latency;
+                changed = true;
             }
         }
         changed

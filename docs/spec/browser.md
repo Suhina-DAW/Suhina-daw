@@ -245,6 +245,15 @@ default, the `rhythmic` stretch mode), and its length in beats comes from its ow
 sample without a known tempo is not warped: it plays at its own speed, and its length in beats
 is its duration at the project's tempo when it is dropped.
 
+**Suhina: in a slot, every sample loops.** A sample (or a Stems file's part) dropped into a clip
+slot loops over its whole length, whether its tempo is known or not, like a MIDI file's clip does;
+on the Arrangement it plays once. A sample with no known tempo keeps its own speed, so its loop is
+the whole file: launched, it plays to the end of the file and starts again from its beginning. The
+rule is "always", not "only when longer than about a bar", because a slot is where loops live and
+because a length in beats depends on the project's tempo: a threshold would loop the same file at
+one tempo and play it once at another. A one-shot (a hit, a crash) is made by switching its loop
+off (`clip.setLoop` with `loop: false`; [clip launching](clip-launching.md) › Loop switch).
+
 A MIDI file's notes keep their positions in beats (its tempo does not change the project's).
 A clip's length is the end of its last note rounded up to a whole bar (at least one bar).
 

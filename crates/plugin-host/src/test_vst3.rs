@@ -4,8 +4,11 @@
 //! the host's whole VST3 path except opening a file. A compatibility class says it replaces
 //! the VST2 plug-in [`REPLACES`] (`Gain`, named "Gain"), and the component reads that plug-in's
 //! saved state as a standard VST2 bank too: a chunk bank whose chunk is the gain. The controller
-//! keeps whatever state it is given, and has one parameter, the gain (id 0), which the
-//! processor follows when a block brings a change. It has an event input too: a note-on adds
+//! keeps whatever state it is given, and has two parameters, which the processor follows when
+//! a block brings a change: the gain (id 0) and its latency (id 1, 0 to [`MAX_LATENCY`] frames,
+//! [`LATENCY`] at first). Setting the latency on the controller asks the host for a restart
+//! (`restartComponent` with `kLatencyChanged`); the processor reports the new latency once its
+//! change has reached it. It has an event input too: a note-on adds
 //! its velocity to the first output channel at its frame, and its controller maps MIDI
 //! controller 7 to the gain (`IMidiMapping`). Its editor is an empty 300 × 200 view that
 //! accepts a native window and, when it opens, moves the gain to [`EDITOR_GAIN`] through the
@@ -20,12 +23,21 @@ use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComRef, ComWrapper, uid};
 
-/// Latency the test plug-in reports, in frames.
+/// Latency the test plug-in reports at first, in frames.
 pub(crate) const LATENCY: u32 = 32;
+/// Most latency its latency parameter sets, in frames.
+pub(crate) const MAX_LATENCY: u32 = 4096;
+/// The id of its latency parameter.
+const LATENCY_PARAMETER: u32 = 1;
+
+/// The latency a normalized value of the latency parameter stands for, in frames.
+fn latency_frames(value: f64) -> u32 {
+    (value.clamp(0.0, 1.0) * f64::from(MAX_LATENCY)).round() as u32
+}
 
 const PROCESSOR_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x47616931);
 const CONTROLLER_CID: TUID = uid(0x4C6F6F70, 0x7765726B, 0x54657374, 0x43746C31);
-/// The id of its one parameter, the gain.
+/// The id of its gain parameter.
 const GAIN_PARAMETER: u32 = 0;
 /// The gain the editor sets when it opens.
 const EDITOR_GAIN: f64 = 0.125;
@@ -43,6 +55,7 @@ fn copy_text(text: &str, field: &mut [c_char]) {
 
 struct Processor {
     gain: Arc<AtomicU32>,
+    latency: AtomicU32,
 }
 
 impl Class for Processor {
@@ -156,7 +169,7 @@ impl IAudioProcessorTrait for Processor {
     }
 
     unsafe fn getLatencySamples(&self) -> u32 {
-        LATENCY
+        self.latency.load(Ordering::Acquire)
     }
 
     unsafe fn setupProcessing(&self, _setup: *mut ProcessSetup) -> tresult {
@@ -188,6 +201,9 @@ impl IAudioProcessorTrait for Processor {
                 let read = unsafe { queue.getPoint(points - 1, &mut offset, &mut value) };
                 if id == GAIN_PARAMETER && read == kResultOk {
                     self.gain.store((value as f32).to_bits(), Ordering::Relaxed);
+                }
+                if id == LATENCY_PARAMETER && read == kResultOk {
+                    self.latency.store(latency_frames(value), Ordering::Release);
                 }
             }
         }
@@ -235,13 +251,25 @@ fn read_all(stream: &ComRef<'_, IBStream>) -> Vec<u8> {
     bytes
 }
 
-#[derive(Default)]
 struct Controller {
     state: std::sync::Mutex<Vec<u8>>,
     /// What it shows for the gain parameter, as `f64` bits.
     gain: std::sync::atomic::AtomicU64,
+    /// What it shows for the latency parameter, as `f64` bits (normalized).
+    latency: std::sync::atomic::AtomicU64,
     /// The host's component handler, which edits go through.
     handler: Arc<std::sync::Mutex<Option<ComPtr<IComponentHandler>>>>,
+}
+
+impl Default for Controller {
+    fn default() -> Self {
+        Self {
+            state: std::sync::Mutex::default(),
+            gain: std::sync::atomic::AtomicU64::default(),
+            latency: std::sync::atomic::AtomicU64::new((f64::from(LATENCY) / f64::from(MAX_LATENCY)).to_bits()),
+            handler: Arc::default(),
+        }
+    }
 }
 
 impl Class for Controller {
@@ -289,19 +317,21 @@ impl IEditControllerTrait for Controller {
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
-        1
+        2
     }
 
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
         // SAFETY: the host passes a struct to fill.
         let Some(info) = (unsafe { info.as_mut() }) else { return kInvalidArgument };
-        if index != 0 {
-            return kInvalidArgument;
-        }
-        info.id = GAIN_PARAMETER;
-        info.defaultNormalizedValue = 0.5;
-        info.flags = ParameterInfo_::ParameterFlags_::kCanAutomate as int32;
-        for (slot, unit) in info.title.iter_mut().zip("Gain".encode_utf16().chain(std::iter::once(0))) {
+        let (id, title, default, flags) = match index {
+            0 => (GAIN_PARAMETER, "Gain", 0.5, ParameterInfo_::ParameterFlags_::kCanAutomate as int32),
+            1 => (LATENCY_PARAMETER, "Latency", f64::from(LATENCY) / f64::from(MAX_LATENCY), 0),
+            _ => return kInvalidArgument,
+        };
+        info.id = id;
+        info.defaultNormalizedValue = default;
+        info.flags = flags;
+        for (slot, unit) in info.title.iter_mut().zip(title.encode_utf16().chain(std::iter::once(0))) {
             *slot = unit as TChar;
         }
         kResultOk
@@ -324,14 +354,26 @@ impl IEditControllerTrait for Controller {
     }
 
     unsafe fn getParamNormalized(&self, id: u32) -> f64 {
-        if id == GAIN_PARAMETER { f64::from_bits(self.gain.load(Ordering::Relaxed)) } else { 0.0 }
+        match id {
+            GAIN_PARAMETER => f64::from_bits(self.gain.load(Ordering::Relaxed)),
+            LATENCY_PARAMETER => f64::from_bits(self.latency.load(Ordering::Relaxed)),
+            _ => 0.0,
+        }
     }
 
     unsafe fn setParamNormalized(&self, id: u32, value: f64) -> tresult {
-        if id != GAIN_PARAMETER {
-            return kInvalidArgument;
+        match id {
+            GAIN_PARAMETER => self.gain.store(value.to_bits(), Ordering::Relaxed),
+            LATENCY_PARAMETER => {
+                let before = latency_frames(f64::from_bits(self.latency.swap(value.to_bits(), Ordering::Relaxed)));
+                let handler = self.handler.lock().ok().and_then(|h| h.clone());
+                if let Some(handler) = handler.filter(|_| latency_frames(value) != before) {
+                    // SAFETY: the host's live handler, kept with a reference.
+                    let _ = unsafe { handler.restartComponent(RestartFlags_::kLatencyChanged) };
+                }
+            }
+            _ => return kInvalidArgument,
         }
-        self.gain.store(value.to_bits(), Ordering::Relaxed);
         kResultOk
     }
 
@@ -536,9 +578,11 @@ impl IPluginFactoryTrait for Factory {
         // SAFETY: the host passes 16-byte ids.
         let cid = unsafe { *(cid as *const TUID) };
         let object = match cid {
-            PROCESSOR_CID => {
-                ComWrapper::new(Processor { gain: Arc::new(AtomicU32::new(0.5f32.to_bits())) }).to_com_ptr::<FUnknown>()
-            }
+            PROCESSOR_CID => ComWrapper::new(Processor {
+                gain: Arc::new(AtomicU32::new(0.5f32.to_bits())),
+                latency: AtomicU32::new(LATENCY),
+            })
+            .to_com_ptr::<FUnknown>(),
             CONTROLLER_CID => ComWrapper::new(Controller::default()).to_com_ptr::<FUnknown>(),
             COMPATIBILITY_CID => ComWrapper::new(Compatibility).to_com_ptr::<FUnknown>(),
             _ => None,
