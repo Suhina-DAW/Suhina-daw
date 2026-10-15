@@ -41,8 +41,8 @@ body:
     id: version
     attributes:
       label: Suhina version or commit
-      description: Settings > About, or `suhina-cli --version`.
-      placeholder: e.g. 0.1.0 (8791883)
+      description: Help › About Suhina (Copy version), or `suhina-cli --version`.
+      placeholder: e.g. Suhina 0.0.1-nightly.20261013+a15ad35 (windows x86_64)
     validations:
       required: true
   - type: dropdown
