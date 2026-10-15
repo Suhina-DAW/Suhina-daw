@@ -159,7 +159,7 @@ GAPS = [
     ("Recording, bounce, comping", "Recording, bounce, comp (ch 19-22)",
      "audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce"),
     ("Mixing, routing, I/O", "Mixing, routing, I/O (ch 17, 18, 38)",
-     "sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling"),
+     "sends into return chains, crossfader, meters, inputs and monitoring, resampling"),
     ("Outside a DAW's own scope", "Outside scope (ch 28, 32-37, 41)",
      "video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out"),
 ]

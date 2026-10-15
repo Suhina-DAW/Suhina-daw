@@ -30,14 +30,14 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 95
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
 CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.50, "partial",
-     "Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), "
+     "Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
@@ -84,10 +84,11 @@ CHAPTERS = [
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.30, "partial",
+    (18, "Mixing", 18, 0.35, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, "
+     "cue output on a second pair of the device (previews, per-track cue, cue volume), "
      "return tracks imported and drawn. Return tracks are silent: sends live in the model and in "
-     "the .als importer only, so nothing feeds them. Missing crossfader, cue, meters, track delay."),
+     "the .als importer only, so nothing feeds them. Missing crossfader, meters, track delay."),
     (19, "Recording New Clips", 13, 0.00, "absent",
      "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",

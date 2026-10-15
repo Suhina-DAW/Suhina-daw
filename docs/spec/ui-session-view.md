@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -115,7 +115,8 @@ One knob per return track (A, B, …). Return tracks show pre/post toggles on th
 ### Mixer (toggleable, resizable height)
 
 Per track, top to bottom: pan, volume with numeric field and meter, track on/off (shows the
-track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
+track number), solo, cue (**C**: the track is also heard on the cue output, headphones,
+`track.setCue`; [spec](cue-output.md)), arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no

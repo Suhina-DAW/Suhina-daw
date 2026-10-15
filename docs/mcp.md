@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -67,8 +67,15 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   default output and the result's `notice` says so. The engine renders in blocks of
   `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
-  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns` and
-  `failed`. Without `--audio`, `audio.devices` returns an error.
+  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns`,
+  `failed`, `channels` (opened) and `cue_pair`. Without `--audio`, `audio.devices` returns an
+  error.
+- **The cue (headphones).** `output.setCuePair {pair}` plays previews and the tracks whose cue
+  is on (`track.setCue {track, cue}`, an edit) on another pair of the same device's outputs
+  (1 is outputs 3/4; 0 plays them with the main output), reopening the output like
+  `audio.setOutput`; a pair the device lacks is refused. `output.setCueVolume {db}` sets their
+  level without reopening. `suhina-cli render --cue cue.wav` writes the cue beside the main mix
+  ([spec](spec/cue-output.md)).
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the

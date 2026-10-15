@@ -3,7 +3,7 @@ description: The layout of Suhina's own project file (.suhina; .locr from before
 read_when: .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/project-file/src/lib.rs
 ---
@@ -48,7 +48,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 |---|---|
 | `transport` | `tempo_bpm` (1–999, default 120); `time_signature` `[numerator, denominator]`, each 1–255 (default `[4, 4]`) |
 | track | `id`; `name`; `color` `"#RRGGBB"` or `null`; `notes`, `audio` (what it plays); `channel` (its mixer channel) and `parent` (its group) or `null` |
-| channel | `id`; `name`; `role` `regular`, `master`, `effect` (a return) or `submix`; `volume` (linear, not negative, default 1), `pan` (−1 to 1); `mute`, `solo`; `output` (a channel, `null` for the audio output); `sends` `[{ target, level, pre_fader }]`; `devices` |
+| channel | `id`; `name`; `role` `regular`, `master`, `effect` (a return) or `submix`; `volume` (linear, not negative, default 1), `pan` (−1 to 1); `mute`, `solo`; `cue` (also heard on the cue output; written only when true, [spec](cue-output.md)); `output` (a channel, `null` for the audio output); `sends` `[{ target, level, pre_fader }]`; `devices` |
 | device | `name`; `kind` `{ "type": "builtin", "id" }`, `clap`, `vst3` (32 hex digits), `vst2` (a whole number) or `foreign` `{ format, id }`; `enabled` (default true); `state` (base64, plug-ins); `params` `[{ id, value }]` (built-in effects and instruments). A VST3 controller's state is the extension `Vst3ControllerState` |
 | content | `id`; `name`; `length` (beats); `lanes`, each `{ target, notes }` or `{ target, audio }` (`target` a track for a shared pattern, else `null`) |
 | note | `time`, `duration` (beats); `key` 0–127; `velocity`, `release_velocity` 0–1; `channel` 0–15 |

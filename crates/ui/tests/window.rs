@@ -582,6 +582,29 @@ fn solo_is_exclusive_unless_ctrl_is_held() {
     assert_eq!(solos(&harness), Some(vec![false, false, false, true]));
 }
 
+#[test]
+fn the_cue_button_cues_a_track_in_both_views_and_undoes() {
+    let mut harness = window(demo_app());
+    let cues = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().channels.iter().take(4).map(|c| c.cue).collect::<Vec<_>>())
+    };
+    harness.get_by_label("Cue Keys on the headphones").click();
+    harness.run();
+    harness.get_by_label("Cue Drums on the headphones").click();
+    harness.run();
+    // Not exclusive: several tracks can be cued at once.
+    assert_eq!(cues(&harness), Some(vec![true, false, true, false]));
+
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("Stop cueing Keys").click();
+    harness.run();
+    assert_eq!(cues(&harness), Some(vec![true, false, false, false]));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(cues(&harness), Some(vec![true, false, true, false]));
+}
+
 /// The demo project with a group track, "Group", that tracks can play into.
 fn project_with_a_group() -> suhina_engine::model::Project {
     use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};

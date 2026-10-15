@@ -30,7 +30,7 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 2. **Automation:** device, plug-in and mixer parameters first, then tempo
    ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
 3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
-4. **Sends, returns, cue and level meters:** return tracks are shown but play nothing yet.
+4. **Sends, returns and level meters:** return tracks are shown but play nothing yet.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
@@ -340,6 +340,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
+- A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
+  **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
+  up, `output.setCuePair`) at their own volume (`output.setCueVolume`), while the main outputs
+  stay as they are; `suhina-cli render --cue` writes the cue beside the mix
+  ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or

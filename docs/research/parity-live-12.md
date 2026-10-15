@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **92**, every one reachable from the UI, the CLI and MCP |
+| Commands | **95**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -122,7 +122,7 @@ documented behaviour that exists today.
 | # | Chapter | Manual pages | Suhina covers | Status | What exists / what is missing |
 |---|---|---|---|---|---|
 | 1 | Welcome to Live | 1 | — | n/a | Front matter. |
-| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 50 % | partial | Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
+| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 50 % | partial | Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 45 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
 | 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
@@ -138,7 +138,7 @@ documented behaviour that exists today.
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
 | 16 | Launching Clips | 12 | 35 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, warped launched clips. Missing launch modes, legato, velocity amount, clip offset/nudge, follow actions. |
 | 17 | Routing and I/O | 22 | 10 % | absent | Only track output to main or a group (track.setOutput); track input is a model field read from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral. |
-| 18 | Mixing | 18 | 30 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, return tracks imported and drawn. Return tracks are silent: sends live in the model and in the .als importer only, so nothing feeds them. Missing crossfader, cue, meters, track delay. |
+| 18 | Mixing | 18 | 35 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, cue output on a second pair of the device (previews, per-track cue, cue volume), return tracks imported and drawn. Return tracks are silent: sends live in the model and in the .als importer only, so nothing feeds them. Missing crossfader, meters, track delay. |
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP); no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
@@ -174,7 +174,7 @@ documented behaviour that exists today.
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
-| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
+| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 23 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
@@ -349,7 +349,7 @@ or does something Live does not:
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
-| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 21 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
+| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 23 % | sends into return chains, crossfader, meters, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 1 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
 
