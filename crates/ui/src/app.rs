@@ -1894,9 +1894,14 @@ impl App {
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        // The piano roll's own keys only while it has the keyboard.
+        // The piano roll's own keys only while it has the keyboard; the selected slot's keys
+        // only while it does not, as the two share keys.
         let notes = self.piano_roll.focused;
-        let pressed = ui.input_mut(|i| self.keymap.pressed(i, |id| notes || !crate::keymap::piano_roll_only(id)));
+        let pressed = ui.input_mut(|i| {
+            self.keymap.pressed(i, |id| {
+                if notes { !crate::keymap::slot_only(id) } else { !crate::keymap::piano_roll_only(id) }
+            })
+        });
         for action in pressed {
             self.do_action(&action, actions);
         }

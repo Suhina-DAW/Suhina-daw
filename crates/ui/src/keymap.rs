@@ -147,6 +147,17 @@ pub fn piano_roll_only(action: &str) -> bool {
     action.starts_with("pianoRoll.") && action != "pianoRoll.quantize"
 }
 
+/// Whether `action` works only on a selected clip slot in the Session view: the piano roll keys
+/// never do (it edits arrangement clips), so the two may share keys.
+pub fn slot_only(action: &str) -> bool {
+    matches!(action, "selection.launch" | "selection.up" | "selection.down" | "selection.left" | "selection.right")
+}
+
+/// Whether `a` and `b` can both run on the same key press, so one key for both is a conflict.
+fn overlap(a: &str, b: &str) -> bool {
+    !((piano_roll_only(a) && slot_only(b)) || (slot_only(a) && piano_roll_only(b)))
+}
+
 /// Every action a key can be bound to: the window's, then each command that needs no
 /// parameters.
 pub fn actions() -> Vec<Action> {
@@ -395,7 +406,7 @@ impl Keymap {
                 }
             }
         }
-        seen.retain(|(_, ids)| ids.len() > 1);
+        seen.retain(|(_, ids)| ids.iter().enumerate().any(|(i, a)| ids[i + 1..].iter().any(|b| overlap(a, b))));
         seen
     }
 
@@ -583,5 +594,9 @@ mod tests {
         let conflicts = keymap.conflicts();
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].1.len(), 2);
+        // The selected slot and the piano roll share the arrows: they never work at once.
+        assert_eq!(Keymap::default().keys("selection.up"), Keymap::default().keys("pianoRoll.up"));
+        assert!(!overlap("selection.up", "pianoRoll.up"));
+        assert!(overlap("selection.up", "transport.play"));
     }
 }
