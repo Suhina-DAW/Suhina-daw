@@ -13,6 +13,11 @@
 //! whole block, each split at the events, rather than piece by piece. The output is the same
 //! for built-in effects and instruments, which only ever see their own input.
 //!
+//! Consecutive plug-ins that run in the same host process run as one: the first takes the
+//! block with the others named after it, and the host runs them all in one round trip
+//! ([`PluginProcessor::send_joint`], ADR 0006 decision 2). A disabled plug-in between them is
+//! passed over; a built-in device, or a plug-in in another process or not running, ends the run.
+//!
 //! A group track whose channel holds devices is a bus (see `buses`): the chains of the tracks
 //! that play into it add their output to its buffer instead of the output, and its devices run
 //! over the sum.
@@ -22,7 +27,7 @@ use std::time::Instant;
 use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
 use suhina_model::{DeviceKind, Project, TrackId};
 
-use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
+use crate::plugin::{Delay, Followed, MAX_JOINED, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
 
 /// The most frames one block of a chain holds; the renderer splits longer blocks.
 pub(crate) const MAX_BLOCK: usize = 1024;
@@ -81,6 +86,8 @@ pub(crate) struct Chain {
     /// run, and the plug-in slot whose block is out, if one is.
     stage: usize,
     waiting: Option<usize>,
+    /// The plug-ins that follow the waiting one in its joint block.
+    joined: Joined,
     /// Per key, the renderer frame its note ends at, or `NOT_HELD`.
     held: [u64; 128],
     next_off: u64,
@@ -183,6 +190,7 @@ impl Chain {
             done: 0,
             stage: 0,
             waiting: None,
+            joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
         })
@@ -212,6 +220,7 @@ impl Chain {
             done: 0,
             stage: 0,
             waiting: None,
+            joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
         }
@@ -254,7 +263,7 @@ impl Chain {
             return true;
         }
         let to = frames.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, .. } = self;
+        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, joined, .. } = self;
         let from = (*done).min(to);
         while let Some(slot) = slots.get_mut(*stage) {
             match slot {
@@ -267,25 +276,33 @@ impl Chain {
                         device.event(event);
                     }
                     process(device, buffer, at_done, to, context);
+                    *stage += 1;
                 }
-                Slot::Plugin(plugin) => {
+                Slot::Plugin(_) => {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
-                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        match plugin.send(span, span_events, *deadline) {
-                            Sent::Out => {
-                                *waiting = Some(*stage);
-                                return true;
+                    let Some(span) = buffer.get_mut(from * 2..to * 2) else {
+                        *stage += 1;
+                        continue;
+                    };
+                    let (sent, next) = send_plugins(slots, *stage, span, span_events, *deadline, joined);
+                    match sent {
+                        Sent::Out => {
+                            *waiting = Some(*stage);
+                            return true;
+                        }
+                        // A miss already counted: running it again would count it twice.
+                        Sent::Refused => {}
+                        Sent::Unsupported => {
+                            if let Some(Slot::Plugin(plugin)) = slots.get_mut(*stage) {
+                                plugin.run(span, span_events, *deadline);
                             }
-                            // A miss already counted: running it again would count it twice.
-                            Sent::Refused => {}
-                            Sent::Unsupported => plugin.run(span, span_events, *deadline),
                         }
                     }
+                    *stage = next;
                 }
             }
-            *stage += 1;
         }
         pending.clear();
         *done = to;
@@ -297,12 +314,11 @@ impl Chain {
         let Some(index) = self.waiting.take() else { return };
         let to = frames.min(MAX_BLOCK);
         let from = self.done.min(to);
-        if let (Some(Slot::Plugin(plugin)), Some(span)) =
-            (self.slots.get_mut(index), self.buffer.get_mut(from * 2..to * 2))
-        {
-            plugin.finish(span, self.deadline);
-        }
-        self.stage = index + 1;
+        let Self { slots, buffer, span_events, deadline, joined, stage, .. } = self;
+        *stage = match buffer.get_mut(from * 2..to * 2) {
+            Some(span) => collect_plugins(slots, index, span, span_events, *deadline, joined),
+            None => index + 1,
+        };
     }
 
     /// Adds a frame of the track's sound at `frame` of the block.
@@ -396,9 +412,10 @@ impl Chain {
     /// event over at its frame.
     fn run(&mut self, frame: usize) {
         let to = frame.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, .. } = self;
+        let Self { slots, buffer, pending, span_events, done, deadline, context, joined, .. } = self;
         let from = (*done).min(to);
-        for slot in slots.iter_mut() {
+        let mut index = 0;
+        while let Some(slot) = slots.get_mut(index) {
             match slot {
                 Slot::Device(device) => {
                     let mut at_done = from;
@@ -409,14 +426,27 @@ impl Chain {
                         device.event(event);
                     }
                     process(device, buffer, at_done, to, context);
+                    index += 1;
                 }
-                Slot::Plugin(plugin) => {
+                Slot::Plugin(_) => {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
-                    if let Some(span) = buffer.get_mut(from * 2..to * 2) {
-                        plugin.run(span, span_events, *deadline);
-                    }
+                    let Some(span) = buffer.get_mut(from * 2..to * 2) else {
+                        index += 1;
+                        continue;
+                    };
+                    let (sent, next) = send_plugins(slots, index, span, span_events, *deadline, joined);
+                    index = match sent {
+                        Sent::Out => collect_plugins(slots, index, span, span_events, *deadline, joined),
+                        Sent::Refused => next,
+                        Sent::Unsupported => {
+                            if let Some(Slot::Plugin(plugin)) = slots.get_mut(index) {
+                                plugin.run(span, span_events, *deadline);
+                            }
+                            next
+                        }
+                    };
                 }
             }
         }
@@ -505,6 +535,113 @@ impl Chain {
     pub(crate) fn missed(&mut self) -> u64 {
         self.plugin_slots().map(|slot| slot.missed).sum()
     }
+}
+
+/// The plug-ins that run after another in its joint block, by slot index.
+#[derive(Default)]
+struct Joined {
+    indices: [usize; MAX_JOINED],
+    len: usize,
+}
+
+impl Joined {
+    fn indices(&self) -> &[usize] {
+        self.indices.get(..self.len).unwrap_or_default()
+    }
+}
+
+/// Finds the plug-ins that can run after the one at `at` in the same round trip: the enabled
+/// plug-ins after it in the same host process, up to the first built-in device or plug-in that
+/// runs elsewhere or cannot take part now (disabled plug-ins pass the sound and are passed
+/// over). Their slot indices go to `joined`, their numbers in the process to `members`.
+fn find_joined(slots: &[Slot], at: usize, joined: &mut Joined, members: &mut [u32; MAX_JOINED]) {
+    joined.len = 0;
+    let Some(lead) = (match slots.get(at) {
+        Some(Slot::Plugin(first)) => first.joint(),
+        _ => None,
+    }) else {
+        return;
+    };
+    for (index, slot) in slots.iter().enumerate().skip(at + 1) {
+        let Slot::Plugin(plugin) = slot else { break };
+        if !plugin.enabled {
+            continue;
+        }
+        let Some(joint) = plugin.joint().filter(|j| j.process == lead.process) else { break };
+        let (Some(at_index), Some(member)) = (joined.indices.get_mut(joined.len), members.get_mut(joined.len)) else {
+            break;
+        };
+        *at_index = index;
+        *member = joint.member;
+        joined.len += 1;
+    }
+}
+
+/// Hands `span` with `events` to the plug-in at `at`, together with the plug-ins after it that
+/// run in the same host process when there are any. Returns what became of it and the slot to
+/// go on with: [`Sent::Out`], wait with [`collect_plugins`]; [`Sent::Refused`], a miss already
+/// counted for each (the sound passes, an instrument is silent); [`Sent::Unsupported`], nothing
+/// was sent and the plug-in at `at` runs on its own. Never allocates.
+fn send_plugins(
+    slots: &mut [Slot],
+    at: usize,
+    span: &mut [f32],
+    events: &[(usize, NoteEvent)],
+    deadline: Option<Instant>,
+    joined: &mut Joined,
+) -> (Sent, usize) {
+    let mut members = [0u32; MAX_JOINED];
+    find_joined(slots, at, joined, &mut members);
+    if joined.len > 0
+        && let Some(Slot::Plugin(first)) = slots.get_mut(at)
+    {
+        let followers = members.get(..joined.len).unwrap_or_default();
+        match first.send_joint(span, events, followers, deadline) {
+            Sent::Out => return (Sent::Out, at + 1),
+            Sent::Refused => {
+                let next = joined.indices().last().map_or(at + 1, |last| last + 1);
+                for &index in joined.indices() {
+                    if let Some(Slot::Plugin(plugin)) = slots.get_mut(index) {
+                        plugin.followed(span, events, Followed::Refused);
+                    }
+                }
+                joined.len = 0;
+                return (Sent::Refused, next);
+            }
+            Sent::Unsupported => joined.len = 0,
+        }
+    }
+    joined.len = 0;
+    match slots.get_mut(at) {
+        Some(Slot::Plugin(plugin)) => (plugin.send(span, events, deadline), at + 1),
+        _ => (Sent::Unsupported, at + 1),
+    }
+}
+
+/// Waits for the block [`send_plugins`] handed to the plug-in at `at`, puts the result in
+/// `span` and tells the plug-ins that followed it in the block how it went. Returns the slot
+/// to go on with. Never allocates.
+fn collect_plugins(
+    slots: &mut [Slot],
+    at: usize,
+    span: &mut [f32],
+    events: &[(usize, NoteEvent)],
+    deadline: Option<Instant>,
+    joined: &mut Joined,
+) -> usize {
+    let answered = match slots.get_mut(at) {
+        Some(Slot::Plugin(plugin)) => plugin.finish(span, deadline),
+        _ => false,
+    };
+    let how = if answered { Followed::Answered } else { Followed::Late };
+    let next = joined.indices().last().map_or(at + 1, |last| last + 1);
+    for &index in joined.indices() {
+        if let Some(Slot::Plugin(plugin)) = slots.get_mut(index) {
+            plugin.followed(span, events, how);
+        }
+    }
+    joined.len = 0;
+    next
 }
 
 /// What [`Chain::place`] did with a processor.

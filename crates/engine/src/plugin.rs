@@ -7,6 +7,11 @@
 //! waits only until the block's deadline: a plug-in that misses it, or whose host has crashed,
 //! leaves the chain's sound as it was (an effect) or silent (an instrument) for that block.
 //!
+//! Consecutive plug-ins of a chain that run in the same host process share one round trip a
+//! block (ADR 0006, decision 2): the first takes the block with the others named after it
+//! ([`PluginProcessor::send_joint`]), its host runs them all in turn, and the others are told how
+//! it went ([`PluginProcessor::followed`]). The sound is the same as one round trip each.
+//!
 //! Plug-in devices are told apart by a [`plugin_key`], so a processor finds its slot again in
 //! every graph built after an edit, and one that arrives while no graph has its slot waits for
 //! one.
@@ -35,6 +40,28 @@ pub enum Sent {
     Refused,
     /// The processor does not split a block into sending and waiting; `process` runs it.
     Unsupported,
+}
+
+/// Where a plug-in runs, for running several in one round trip: plug-ins with the same
+/// `process` live in one host process, where `member` is this one's number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Joint {
+    pub process: u64,
+    pub member: u32,
+}
+
+/// Most plug-ins one joint round trip runs after the first.
+pub const MAX_JOINED: usize = 15;
+
+/// How a joint block went, for a plug-in that followed the first in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Followed {
+    /// Answered in time: the chain's sound holds its output.
+    Answered,
+    /// Sent, but not answered in time.
+    Late,
+    /// Not sent: the first plug-in's host was still busy with an earlier block.
+    Refused,
 }
 
 /// The audio half of a running plug-in, as the engine sees it. Implemented outside the engine
@@ -66,6 +93,34 @@ pub trait PluginProcessor: Send {
     fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
         let _ = (buffer, timeout);
         false
+    }
+
+    /// Where the plug-in runs while it can take part in a joint round trip now; `None` (the
+    /// default) when it cannot, and it runs on its own.
+    fn joint(&self) -> Option<Joint> {
+        None
+    }
+
+    /// [`PluginProcessor::send`] for a block that the plug-ins `followers` (their
+    /// [`Joint::member`]s, all in this one's process) run after this one, in order, with the
+    /// same events, in the same round trip; [`PluginProcessor::wait`] then takes the last one's
+    /// output. A processor that cannot says [`Sent::Unsupported`] (the default) and the chain
+    /// runs each plug-in on its own.
+    fn send_joint(
+        &mut self,
+        buffer: &[f32],
+        events: &[(usize, NoteEvent)],
+        followers: &[u32],
+        patience: Duration,
+    ) -> Sent {
+        let _ = (buffer, events, followers, patience);
+        Sent::Unsupported
+    }
+
+    /// Tells a plug-in that followed in a joint round trip how it went, with the block's
+    /// `events` (which a refused block did not deliver). Never allocates.
+    fn followed(&mut self, events: &[(usize, NoteEvent)], how: Followed) {
+        let _ = (events, how);
     }
 }
 
@@ -229,13 +284,63 @@ impl PluginSlot {
 
     /// Waits for the block handed over with [`PluginSlot::send`] until `deadline` and puts the
     /// result in `span`; a miss passes the sound through, or is silent for an instrument.
-    pub(crate) fn finish(&mut self, span: &mut [f32], deadline: Option<Instant>) {
+    /// Returns whether it was answered.
+    pub(crate) fn finish(&mut self, span: &mut [f32], deadline: Option<Instant>) -> bool {
         let timeout = deadline.map_or(OFFLINE_TIMEOUT, |d| d.saturating_duration_since(Instant::now()));
         let answered = self.processor.as_mut().is_some_and(|processor| processor.wait(span, timeout));
         if !answered {
             if self.processor.is_some() {
                 self.missed += 1;
             }
+            if self.instrument {
+                span.fill(0.0);
+            }
+        }
+        answered
+    }
+
+    /// Where the plug-in runs, when it is enabled and can take part in a joint round trip now.
+    pub(crate) fn joint(&self) -> Option<Joint> {
+        if !self.enabled {
+            return None;
+        }
+        self.processor.as_ref()?.joint()
+    }
+
+    /// [`PluginSlot::send`] for a joint block that `followers` run after this plug-in
+    /// ([`PluginProcessor::send_joint`]). [`Sent::Unsupported`]: nothing was sent, and the
+    /// plug-ins run on their own.
+    pub(crate) fn send_joint(
+        &mut self,
+        span: &mut [f32],
+        events: &[(usize, NoteEvent)],
+        followers: &[u32],
+        deadline: Option<Instant>,
+    ) -> Sent {
+        if !self.enabled || span.is_empty() {
+            return Sent::Unsupported;
+        }
+        let Some(processor) = self.processor.as_mut() else { return Sent::Unsupported };
+        let patience = if deadline.is_some() { Duration::ZERO } else { OFFLINE_TIMEOUT };
+        let sent = processor.send_joint(span, events, followers, patience);
+        if sent == Sent::Refused {
+            self.missed += 1;
+            if self.instrument {
+                span.fill(0.0);
+            }
+        }
+        sent
+    }
+
+    /// Takes in how a joint block it followed in went: one that was not answered is a miss for
+    /// it too, so the sound passes it, or it is silent for an instrument, as when every plug-in
+    /// of the joint block misses on its own.
+    pub(crate) fn followed(&mut self, span: &mut [f32], events: &[(usize, NoteEvent)], how: Followed) {
+        if let Some(processor) = self.processor.as_mut() {
+            processor.followed(events, how);
+        }
+        if how != Followed::Answered {
+            self.missed += 1;
             if self.instrument {
                 span.fill(0.0);
             }

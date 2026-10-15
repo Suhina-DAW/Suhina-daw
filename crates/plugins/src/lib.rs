@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -120,6 +120,20 @@ pub enum Health {
 pub struct PluginAudio {
     link: Link,
     unanswered: Arc<AtomicU32>,
+    /// The instance's number in its host process.
+    instance: u32,
+    /// The host process it was loaded into (its group's generation then).
+    process: u64,
+}
+
+/// Where a plug-in instance runs, for a block that several instances of one host process run
+/// in one round trip ([`PluginAudio::send_joint`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Seat {
+    /// The host process: the same for every instance loaded into the same process.
+    pub process: u64,
+    /// The instance's number in it.
+    pub instance: u32,
 }
 
 impl PluginAudio {
@@ -158,6 +172,43 @@ impl PluginAudio {
             self.note(Outcome::Busy);
         }
         sent
+    }
+
+    /// Where the instance runs, while it can take part in a joint block: its link has no block
+    /// out and every block sent has been answered (one that has not would make the others in the
+    /// joint block wait for it).
+    pub fn seat(&self) -> Option<Seat> {
+        self.link.ready().then_some(Seat { process: self.process, instance: self.instance })
+    }
+
+    /// [`PluginAudio::send`] for a block that the instances `followers` of the same host process
+    /// run after this one, in order, with the same events, before the host answers
+    /// ([`Link::send_joint`]); [`PluginAudio::finish`] takes the last one's output. Their own
+    /// links stay idle; tell each how the block went with [`PluginAudio::followed`].
+    /// Real-time safe.
+    pub fn send_joint(
+        &mut self,
+        input: &[f32],
+        events: &[Event],
+        followers: &[u32],
+        room: usize,
+        patience: Duration,
+    ) -> bool {
+        let mut sent = self.link.send_joint(input, events, followers, room);
+        if !sent && !patience.is_zero() && self.link.wait_ready(Instant::now() + patience) {
+            sent = self.link.send_joint(input, events, followers, room);
+        }
+        if !sent {
+            self.note(Outcome::Busy);
+        }
+        sent
+    }
+
+    /// Counts a joint block this instance followed in, as another instance's link said it went:
+    /// a block its host did not answer counts against this instance too, as it may be the one
+    /// that is stuck. Real-time safe.
+    pub fn followed(&self, outcome: Outcome) {
+        self.note(outcome);
     }
 
     /// The second half: waits at most `timeout` for the block sent with [`PluginAudio::send`]
@@ -282,7 +333,8 @@ impl HostProcess {
 struct Group {
     process: Option<HostProcess>,
     /// Goes up with every process started for the group: an instance loaded into an earlier
-    /// one has lost its process.
+    /// one has lost its process. Taken from a counter all groups share, so it also tells
+    /// processes apart: instances with the same generation run in the same process.
     generation: u64,
     /// Instances whose editor the host said was closed, not yet taken in by them.
     closed_editors: Vec<u32>,
@@ -312,7 +364,7 @@ impl Group {
     /// Ends the current process and starts a new one for the group.
     fn spawn(&mut self, launch: &Launch) -> Result<(), PluginError> {
         self.end();
-        self.generation += 1;
+        self.generation = next_generation();
         self.process = Some(HostProcess::start(launch)?);
         let hello = self.request(None, &Message::Hello { version: VERSION }, "hello", launch.timeout, |m| {
             matches!(m, Message::Hello { .. })
@@ -474,6 +526,12 @@ fn group_for_launch(launch: &Launch) -> Arc<Mutex<Group>> {
     group
 }
 
+/// A fresh generation for a group's new process, unique in this process.
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 /// A fresh instance number, unique in this process.
 fn next_instance() -> u32 {
     static NEXT: AtomicU32 = AtomicU32::new(1);
@@ -524,7 +582,7 @@ impl Plugin {
             editor_size: None,
             last_health: Health::Running,
         };
-        Ok((plugin, PluginAudio { link, unanswered }))
+        Ok((plugin, PluginAudio { link, unanswered, instance, process: generation }))
     }
 
     /// Delay the plug-in adds, in frames, as it reported when it loaded.
@@ -792,7 +850,7 @@ impl Plugin {
         // What `health` says while the group is busy (#188): the new instance, not the old one's
         // `Crashed` or `Hung`.
         self.last_health = Health::Running;
-        let audio = PluginAudio { link, unanswered: self.unanswered.clone() };
+        let audio = PluginAudio { link, unanswered: self.unanswered.clone(), instance, process: generation };
         let params = std::mem::take(&mut self.params_since);
         if let Some(state) = self.last_state.clone() {
             self.load_state(state)?;

@@ -551,3 +551,27 @@ fn a_plug_in_that_could_not_start_starts_again_on_restart() {
     assert_eq!(status["status"], "stopped", "removed, to be started again");
     until(&mut session, &mut renderer, "failing again", |s| s["status"] == "failed");
 }
+
+#[test]
+fn plug_ins_sharing_a_process_render_the_same_as_each_in_its_own() {
+    // Four plug-ins in a row (the test processor and the CLAP test plug-in, twice each).
+    let devices = vec![plugin_device("gain"), plugin_device("clap"), plugin_device("gain"), plugin_device("clap")];
+    let p = project(2.0, true, devices);
+    let render = |group: Box<dyn Fn(&PluginInfo) -> Option<String> + std::marker::Send + Sync>| {
+        let env = PluginEnv { catalog: catalog(), host: host(), group };
+        let started = suhina_session::start_offline(&p, &env, SR);
+        assert_eq!(started.running(), 4, "{:?}", started.notices);
+        let processes = started.process_ids();
+        let out = render_offline_with_plugins(&p, &AudioPool::new(), SR, 512, started.plugins).unwrap();
+        (out, processes)
+    };
+    // Each in its own process: four round trips a block.
+    let (alone, processes) = render(Box::new(|_| None));
+    assert!(processes.windows(2).all(|w| w[0] != w[1]), "{processes:?}");
+    // All in one process: one round trip a block runs the four, one after another.
+    let (together, processes) = render(Box::new(|_| Some("one".into())));
+    assert!(processes.windows(2).all(|w| w[0] == w[1]), "{processes:?}");
+    assert_eq!(alone.len(), together.len());
+    assert!(alone.iter().zip(&together).all(|(a, b)| a.to_bits() == b.to_bits()), "{}", max_diff(&alone, &together));
+    assert!(together.iter().any(|s| *s != 0.0));
+}
