@@ -18,6 +18,7 @@
     "text.playing": "#000000",
     "accent": "#5A54D6",
     "recording": "#D93036",
+    "recording.background": "#DCC7C1",
     "meter.normal": "#3F9B4A",
     "meter.hot": "#C9A227",
     "slot.empty": "#BDB7AD",

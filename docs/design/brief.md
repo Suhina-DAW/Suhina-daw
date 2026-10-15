@@ -63,7 +63,8 @@ From [research](#sources) and the first design rounds:
   tracks and the main track after the regular tracks.
 - Arrangement view: timeline left, track headers on the right with their controls.
 - Interactions: click to launch, pending state while quantised, drag from the browser, double-click
-  to open a clip, Tab between Session and Arrangement; keyboard shortcuts and menu structure.
+  to open a clip (on an empty slot or lane of a MIDI track, to make one), Tab between Session and
+  Arrangement; keyboard shortcuts and menu structure.
 - Number fields that are their own sliders (drag to change, the fill shows the value).
 
 ## Make our own (appearance)
@@ -125,6 +126,7 @@ a theme file can change any of them (see Themes). Current values:
 | `text.playing` | `#FFFFFF` | The name of a playing clip |
 | `accent` | `#A6A3FF` | The playhead, queued clips, a key being set |
 | `recording` | `#E5484D` | Recording and errors |
+| `recording.background` | `#3A2B2A` | Behind an armed track's arm button and a recording clip |
 | `meter.normal` | `#8BC48A` | A level meter below the top |
 | `meter.hot` | `#E3C86A` | A level meter near the top |
 | `slot.empty` | `#4A4743` | The mark in an empty clip slot |

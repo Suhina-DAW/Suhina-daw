@@ -1,6 +1,6 @@
 //! Clip fades in the renderer (`docs/spec/arrangement-editing.md` › Fades): golden renders of a
 //! fade-in and a fade-out, the same envelope on stretched clips, block-size independence, and
-//! launched clips, which have none.
+//! launched clips (`docs/spec/clip-launching.md` › Fades).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +31,7 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -41,6 +42,8 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
             content: ContentKinds { notes: false, audio: true },
             channel: Some(ChannelId(1)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }],
         channels: vec![Channel {
@@ -70,6 +73,7 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
             markers: Vec::new(),
         },
         launcher: Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default()],
             columns: vec![LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(clip), has_stop: true }] }],
         },
@@ -339,17 +343,83 @@ fn region_for_stretch() -> AudioRegion {
     region("sine.wav", true, StretchMode::Smooth, 2.0)
 }
 
-#[test]
-fn launched_clips_ignore_arrangement_fades() {
-    let (region, pool) = constant();
-    let commands = [
+/// Launches the project's slot at once and renders `seconds`, with `more` commands after the
+/// launch: the left channel. The arrangement is cleared, so only the launched clip sounds.
+fn launch(mut p: Project, pool: &AudioPool, seconds: f64, more: &[(f64, LaunchCommand)]) -> Vec<f32> {
+    p.arrangement.lanes.clear();
+    let mut commands = vec![
         (0.0, LaunchCommand::SetQuantization(crate::Quantization::None)),
         (0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 }),
     ];
-    let launch = |fade_in, fade_out| {
-        let mut p = project(region.clone(), 2.0, fade_in, fade_out);
-        p.arrangement.lanes.clear();
-        render_launches(&p, &pool, SR, &commands, 1.0).unwrap()
-    };
-    assert_eq!(launch(1.0, 0.5), launch(0.0, 0.0));
+    commands.extend_from_slice(more);
+    left(&render_launches(&p, pool, SR, &commands, seconds).unwrap())
+}
+
+/// `p` with its slot clip looping over its whole length.
+fn looping(mut p: Project) -> Project {
+    if let Some(clip) = p.launcher.columns[0].slots[0].clip.as_mut() {
+        clip.loop_range = Some(LoopRange { start: 0.0, end: clip.length });
+    }
+    p
+}
+
+/// A launched clip without a loop fades in from the launch and out at its end marker, the same
+/// envelope an arrangement clip has.
+#[test]
+fn a_launched_clip_fades_in_and_out_like_an_arrangement_clip() {
+    let (region, pool) = constant();
+    let out = launch(project(region, 2.0, 1.0, 0.5), &pool, 1.5, &[]);
+    let arranged = render_constant(1.0, 0.5, 512);
+    assert_eq!(&out[..arranged.len()], &arranged[..]);
+    assert!(out[arranged.len()..].iter().all(|s| *s == 0.0));
+    let full = render_constant(0.0, 0.0, 512)[BEAT];
+    for (frame, sample) in arranged.iter().enumerate() {
+        let expected = f64::from(full) * expected_gain(frame, arranged.len(), BEAT as f64, BEAT as f64 / 2.0);
+        assert!((f64::from(*sample) - expected).abs() < 1e-6, "frame {frame}: {sample}, expected {expected}");
+    }
+}
+
+/// A looping launched clip fades in once, from the launch; the loop passes after it play at
+/// full level and its fade-out never sounds, since it never ends by itself.
+#[test]
+fn a_looping_launched_clip_fades_in_once_like_its_golden_file() {
+    let (region, pool) = constant();
+    // A 2-beat loop with a 1-beat fade-in and a half-beat fade-out, for three passes.
+    let out = launch(looping(project(region, 2.0, 1.0, 0.5)), &pool, 3.0, &[]);
+    assert_eq!(out.len(), 6 * BEAT);
+    let full = render_constant(0.0, 0.0, 512)[BEAT];
+    for (frame, sample) in out.iter().enumerate() {
+        let guard = (frame as f64 / GUARD).min(1.0);
+        let expected = f64::from(full) * guard * (frame as f64 / BEAT as f64).min(1.0);
+        assert!((f64::from(*sample) - expected).abs() < 1e-6, "frame {frame}: {sample}, expected {expected}");
+    }
+    assert_golden("launched-loop-fade-in", &out);
+}
+
+/// Stopping a looping launched clip uses the short stop fade, not the clip's fade-out, so the
+/// stop stays where it was quantised.
+#[test]
+fn a_stopped_launched_clip_does_not_play_its_fade_out() {
+    let (region, pool) = constant();
+    let stop = [(1.5, LaunchCommand::StopColumn { column: 0 })];
+    let with_fade_out = launch(looping(project(region.clone(), 2.0, 0.0, 1.0)), &pool, 2.0, &stop);
+    let without = launch(looping(project(region, 2.0, 0.0, 0.0)), &pool, 2.0, &stop);
+    assert_eq!(with_fade_out, without);
+    // Silent within the 5 ms stop fade.
+    let silent_from = (1.5 * f64::from(SR)) as usize + (0.005 * f64::from(SR)) as usize + 1;
+    assert!(with_fade_out[silent_from..].iter().all(|s| *s == 0.0));
+}
+
+/// A launched warped clip, read through the stretcher, has the same fade-in.
+#[test]
+fn a_launched_stretched_clip_fades_in() {
+    let pool = sine();
+    let warped = looping(project(region_for_stretch(), 4.0, 1.0, 0.0));
+    let plain = looping(project(region_for_stretch(), 4.0, 0.0, 0.0));
+    let (faded, plain) = (launch(warped, &pool, 1.5, &[]), launch(plain, &pool, 1.5, &[]));
+    assert!(plain[BEAT / 2..BEAT].iter().any(|s| s.abs() > 0.1), "the stretcher plays");
+    for (frame, (p, f)) in plain.iter().zip(&faded).enumerate() {
+        let expected = f64::from(*p) * (frame as f64 / BEAT as f64).min(1.0);
+        assert!((f64::from(*f) - expected).abs() < 1e-5, "frame {frame}: {f}, expected {expected}");
+    }
 }

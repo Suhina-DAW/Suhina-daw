@@ -90,8 +90,30 @@ workspace forbids.
    process. The hosting choice per plug-in (`Hosting`: `binary`, the default, `instance` or
    `vendor`) is kept in `plugin-hosting.json` in the settings folder; `library::group_for`
    turns it into the group: `file:<path>` (every plug-in in one file or shell together),
-   `vendor:<name>` (the file's group when the vendor is unknown) or none. Chains do not yet run
-   several plug-ins of one process in one round trip.
+   `vendor:<name>` (the file's group when the vendor is unknown) or none.
+   *Built (#108): one round trip for consecutive plug-ins of a process.* A block may name
+   instances of the same process to run after the link's own (`Link::send_joint`, up to 63;
+   the engine sends at most 16 plug-ins a block). The host keeps each instance's audio
+   processing (its started CLAP processor or VST3 processor with its buffers) behind a lock of
+   its own while the instance's audio thread serves, by instance number
+   (`crates/plugin-host/src/audio.rs`), so the audio thread that has the block runs the
+   followers in turn, in place, each with the block's events, and answers once. A thread
+   holds one lock at a time, so two threads running each other's instances never wait on each
+   other; a follower that is gone passes the sound through. In a chain, the plug-ins after a
+   plug-in that are enabled, run in the same process (the same generation: generations come
+   from one counter for every group, so they tell processes apart) and can take part now
+   (`PluginProcessor::joint`: no block of their own still out, no releases waiting to be sent)
+   follow it; a disabled plug-in is passed over, a built-in device or any other plug-in ends
+   the run. Each follower counts the block as its own (`PluginProcessor::followed`): a block
+   that is late or refused is a miss for every plug-in in it (the sound passes, an instrument
+   is silent, as when each misses alone), counts against each one's *hung* count, and a refused
+   block's releases wait in each. A hang anywhere in the block so makes every plug-in of it
+   *hung*, as the engine cannot tell which one is stuck; the process is restarted either way.
+   A plug-in with parameter events in the block (#109) runs on its own, and ends the run: a
+   joint block carries one event list, which every plug-in in it is given, so one plug-in's
+   values would reach the others. An instance restarted for a latency change (#110) serves
+   under the same number again, so blocks go on naming it.
+   The output is the same, sample for sample, as one round trip each.
 3. **The boundary.**
    - **Shared memory**, one region per plug-in instance (instances sharing a host process each
      have their own): a block header (frame count, transport,
@@ -99,7 +121,8 @@ workspace forbids.
      note and parameter events with sample offsets, so automation stays sample-accurate.
      *Built:* each block carries up to 1024 events (note on and off, MIDI controller, pitch
      bend, parameter value) as fixed 16-byte records with their frame (`crates/ipc/src/events.rs`, region
-     version 2); the host reads them into a list made beforehand, so neither side allocates.
+     version 2; version 3 adds the block's followers, decision 2); the host reads them into a
+     list made beforehand, so neither side allocates.
      A VST3 host hands notes to `process` as an `IEventList` on event bus 0, and controllers
      and pitch bend as parameter changes at their frame through the plug-in's `IMidiMapping`
      (asked for the first MIDI channel only: some plug-ins crash when asked about the second); a
@@ -410,9 +433,16 @@ workspace forbids.
 ## Consequences
 
 - Every host process costs a round trip per block, tens of microseconds; at small blocks with
-  many plug-in products this is noticeable. Grouping by product, and running different chains'
-  plug-ins at the same time (decision 4), keep it bounded; running several plug-ins of one
-  process in one round trip is not built yet. *In process* is not offered.
+  many plug-in products this is noticeable. Grouping by product, running consecutive
+  plug-ins of one process in one round trip (decision 2), and running different chains'
+  plug-ins at the same time (decision 4), keep it bounded. *In process* is not offered.
+- Measured on Linux (4 cores, a container, the host at normal priority; test
+  `measure_joint_round_trips`, release build, four `test:gain` instances in one process, blocks
+  paced as in playback): at 64 frames four round trips took 350 to 365 µs a block on average
+  (99 %: 0.68 to 0.85 ms) and one joint round trip 120 to 140 µs (99 %: 0.31 to 0.54 ms); at
+  128 frames 395 to 450 µs (99 %: 1.06 to 1.77 ms) against 140 to 165 µs (99 %: 0.32 to
+  0.47 ms). The saving grows with the number of plug-ins, as each one left out of the chain of
+  round trips is a wake-up of each side less.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
 - Host processes and scan workers start without a window of their own (`host_command`; on
   Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a
@@ -477,8 +507,6 @@ workspace forbids.
   the tracks are lined up again. Blocks that come during the restart (milliseconds) go
   unanswered, as a late block does. An offline render started with its plug-ins keeps the
   latencies they had when they started.
-- Not built yet: consecutive plug-ins of one process in one round trip; automating plug-in
-  parameters from the engine.
 
 ## Sources
 

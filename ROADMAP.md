@@ -9,9 +9,9 @@ primary platform; Windows and macOS are supported.
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, follow actions and the metronome work; launch modes to come |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, follow actions, the metronome, launch modes, legato, per-clip quantisation and launch keys work; launching from live MIDI notes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation lanes in the UI, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
+| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation lanes in the UI, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
 | M7 | **More formats:** DAWproject import and export | not started |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | in progress: Session and Arrangement views, browser, sample map, settings, themes and a nightly build work; installers and signed builds to come ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)) |
 
@@ -29,13 +29,15 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
    [spec](docs/spec/ui-clip-editor.md)).
 2. **Automation:** device, plug-in and mixer parameters first, then tempo
    ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
-3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
+3. **Recording and inputs:** audio and MIDI recording, audio inputs, monitoring, count-in
+   ([#263](https://github.com/suhina-daw/suhina-daw/issues/263); arming and playing from MIDI
+   controllers work).
 4. **The crossfader and track delay:** sends and return tracks play, level meters are done and
    the cue output works.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)).
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
-7. **Launch modes, legato and per-clip quantisation** (the rest of M4).
+7. **Launching from live MIDI notes** (the rest of M4, [#264](https://github.com/suhina-daw/suhina-daw/issues/264)).
 
 Finishing what is in flight (M3's commands, M6's automation and editors, M7, M8's installers and
 detail area) goes alongside this list, not after it.
@@ -248,7 +250,17 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Launching a slot clip selects it, and the detail area shows its follow action: an on switch,
   the follow time and a switch that links it to the clip's length, actions A and B (a jump picks
   its scene) and their chances, each change one undo step (`clip.setFollowAction`).
-- Still to do: launch modes, per-clip quantisation, fades on launched clips
+- Launch modes (trigger, gate, toggle, repeat), legato and per-clip launch quantisation:
+  `clip.setLaunchMode`, `clip.setLegato`, `clip.setQuantization`, and `clip.release` for the
+  release of a slot's launch button; in the Session view a slot launches as the mouse button goes
+  down, and right-clicking a clip sets its launch settings
+  ([spec](docs/spec/clip-launching.md#launch-settings)).
+- Computer keys launch slots, scenes and stop buttons: Ctrl+M or **Map keys** in the title bar maps
+  the next key to the clicked control, and a key down and up are the press and release, so gate
+  and repeat clips play from the keyboard. `launcher.addMapping` maps MIDI notes too, kept in the
+  project; playing them waits for MIDI input
+  ([spec](docs/spec/clip-launching.md#launching-from-keys-and-notes)).
+- Still to do: launching from live MIDI notes, fades on launched clips
   ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.
@@ -310,12 +322,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   without setup: `SCHED_FIFO` where the user has real-time rights, otherwise through rtkit, the
   desktop's own service for it; on Windows they join MMCSS "Pro Audio". Where the system refuses,
   Suhina plays on and says once that the sound may drop out under load.
-- Still to do: plug-ins of one process in one round trip
-  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), waiting for each chain's
-  plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)),
-  checking an imported Live Set with real plug-ins
-  ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and macOS editors, VST2
-  hosting (not decided).
+- Plug-ins next to each other in a chain that run in the same host process (by default every
+  instance of one plug-in file) share one round trip a block: the host runs them one after
+  another and answers once, which at small buffers takes about a third of the time of a round
+  trip each, with the same sound
+  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
+- Still to do: waiting for each chain's plug-in as it answers
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+  with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
+  macOS editors, VST2 hosting (not decided).
 
 ### M8 UI (in progress)
 - `suhina` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it
@@ -324,10 +339,24 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   playing with progress), scene launch, stop buttons, and a mixer strip with pan, volume and
   track on/off
   ([ADR 0009](docs/decisions/0009-ui-toolkit-and-look.md), [spec](docs/spec/ui-session-view.md)).
+- A **splash** while Suhina starts: a 300 × 200 px panel centred in the window with the logo and
+  the version, shown while the browser's library, the sample map and the project asked for start,
+  then fading into the ready window ([components](docs/design/components.md#splash)).
+- **At start** (Settings › General): with no project given, Suhina opens the start panel,
+  a new blank project, a new one from a chosen template, or the project opened last
+  ([ADR 0010](docs/decisions/0010-project-files.md)).
+- A **start panel** while no project is open: New, a template or Open, the recent projects with
+  when each was saved and a search field, and the audio output with a button to its settings
+  ([components](docs/design/components.md#start-panel)).
+- **Browse…** beside every path field (the projects and templates folders, the start template,
+  Save as, Open, + Add folder) picks the path in the system's own file or folder dialog.
+- With **no project open**, the browser works as with one: browsing, searching, the sample map
+  and previews, which then play through an output of their own
+  ([ADR 0011](docs/decisions/0011-preview-and-added-audio.md)).
 - The **Arrangement view** (Tab switches): bar ruler, one lane per track with its clips and their
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
-  by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+  by dragging (`clip.move`), snapped to the grid (Ctrl and the wheel zoom).
 - A track's pan and volume (the mixer strip in the Session view, the track headers in the
   Arrangement view) are heard while they are dragged, and one drag is one undo step
   (`track.setPan`, `track.setVolume` with `continue`;
@@ -341,6 +370,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip**) makes Play and Space do the same; the marker moves to the clip's start, so Stop returns
   there (`transport.play {from: "clip", track, index}`, `play <track> <i>` in
   `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
+- The grid value in the control bar (`1 bar`, `1/16`, `1/8T` … `none`) is also the Arrangement
+  view's grid: lines at every step, coarser as the view zooms out, and moved clips, dropped files,
+  fade handles and ruler clicks snap to them (Alt held, or `none`: off the grid); each project tab
+  keeps its own value ([spec](docs/spec/arrangement-editing.md#the-grid)).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **Markers** on the arrangement's timeline, in a row under the ruler: M adds one at the
@@ -466,6 +499,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   nesting, and a fold arrow on a group's header hides its tracks in both views. Drag a header
   into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
   groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
+- A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
+  makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
+  the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
@@ -479,6 +515,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   fades are drawn over the waveform, and
   the engine plays them sample-accurately in renders and playback (`clip.setFades`,
   [spec](docs/spec/arrangement-editing.md#fades)).
+- Launched audio clips play their own fades: the fade-in once from the launch, the fade-out at
+  the end marker of a clip without a loop (`clip.setFades` with `scene`,
+  [spec](docs/spec/clip-launching.md#suhina-decisions)).
 - Several projects in **tabs** (ADR 0007): a tab row once two are open, Ctrl+Tab between them,
   only the active one plays; opening one while another is open asks (new tab or replace, with
   Remember and a setting). A project file dragged over the window darkens it.
@@ -497,6 +536,28 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   place (Settings › Audio › Now says "until … is back"); Suhina looks every few seconds and moves
   back to the chosen device when it is connected again, with a notice
   ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)).
+- **MIDI controllers** play the armed tracks' instruments, built in or plug-ins, with the
+  transport running or stopped, and with the sustain pedal
+  ([ADR 0017](docs/decisions/0017-inputs-and-latency.md)): an arm button in the Session mixer
+  and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
+  input port opened and Settings › Audio › MIDI inputs to turn one off (`midi.inputs`,
+  `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
+  the buffer size. Still to do: recording
+  ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
+- **Audio input and monitoring:** choose an input device in Settings › Audio (off by default);
+  each audio track hears one channel or a stereo pair of it, monitored while armed (Auto),
+  always (In) or never (Off), through its devices and mix (`track.setAudioInput`); arm many
+  tracks at once to hear a band on separate tracks
+  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017). Recording is next
+  ([#268](https://github.com/suhina-daw/suhina-daw/issues/268)).
+- **A MIDI input per track:** each track hears every MIDI port, one port, or none, and every
+  channel or one, so a keyboard and a pad controller (or two players) each play their own armed
+  track; set from the track's menu or the Arrangement header (`track.setMidiInput`), saved with
+  the project ([#278](https://github.com/suhina-daw/suhina-daw/issues/278), ADR 0017).
+- **Lower latency for live playing:** while a track is armed the engine keeps one block queued
+  ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
+  takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
+  ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
@@ -544,6 +605,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
+- In the Session view a click on a clip's name selects it and its mark launches it; the detail area
+  shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
+  Interface › Detail area › Select on launch), Enter launches the selected slot and the arrow keys
+  move through the slots ([spec](docs/spec/ui-session-view.md)).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
   input routing, arm, level meters, device editing
   ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the rest of the clip editor

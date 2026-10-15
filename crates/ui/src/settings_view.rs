@@ -6,8 +6,9 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
+use crate::pick::PickField;
 use crate::settings::{
-    DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn,
+    AtStart, DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn,
 };
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
@@ -24,19 +25,24 @@ const SETTING_ROW: f32 = 34.0;
 const SEGMENT: f32 = 15.0;
 /// A folder field on the right of its row; empty shows the default folder.
 const FOLDER_FIELD: f32 = 300.0;
+/// The Browse… button at the end of a path field.
+const BROWSE_WIDTH: f32 = 60.0;
 /// Themes shown before their list scrolls.
 const THEME_ROWS: usize = 8;
 /// A dropdown on the right of its row (Settings › Audio).
 const DROPDOWN_FIELD: f32 = 260.0;
 
 /// Facts the page shows but does not change.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct About {
     /// What the active project plays on now, read every frame (`audio.info`).
     pub audio_live: Option<suhina_session::OutputInfo>,
     /// The audio hosts and their output devices, listed when Settings › Audio opens or is
     /// refreshed (`audio.devices`).
     pub audio_hosts: Vec<suhina_session::audio::HostInfo>,
+    /// The MIDI input ports, listed with the audio devices (`midi.inputs`), or why they could
+    /// not be listed.
+    pub midi_inputs: Result<Vec<MidiPort>, String>,
     /// How the window is drawn right now.
     pub graphics_now: Option<Graphics>,
     /// Plug-in editors can open inside the device panel here (the window is a Win32 or X11
@@ -48,6 +54,31 @@ pub struct About {
     pub templates_default: String,
     /// The active project's newest backup, as Settings › General shows it: when and where.
     pub last_backup: String,
+}
+
+impl Default for About {
+    fn default() -> Self {
+        Self {
+            audio_live: None,
+            audio_hosts: Vec::new(),
+            midi_inputs: Ok(Vec::new()),
+            graphics_now: None,
+            editors_embeddable: false,
+            projects_default: String::new(),
+            templates_default: String::new(),
+            last_backup: Default::default(),
+        }
+    }
+}
+
+/// A MIDI input port as Settings › Audio shows it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MidiPort {
+    pub name: String,
+    pub enabled: bool,
+    pub open: bool,
+    /// Why it could not be opened.
+    pub error: Option<String>,
 }
 
 /// The plug-in library as the page shows it, read through the `plugins.*` commands.
@@ -173,6 +204,10 @@ pub struct Outcome {
     pub audio_output: Option<suhina_session::OutputChoice>,
     /// The audio devices should be listed again.
     pub audio_refresh: bool,
+    /// A MIDI input port was turned on or off: the app runs `midi.setInput`.
+    pub midi_input: Option<(String, bool)>,
+    /// A field's Browse… was clicked: the app shows the system's dialog for it.
+    pub pick: Option<PickField>,
 }
 
 /// What the page shows and changes besides the settings.
@@ -280,29 +315,66 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.on_open = choice;
                 outcome.changed = true;
             }
-            let folders = [
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "At start",
+                "With no project given: the start panel, a new one, one from a template, or the last",
+            );
+            let options = [
+                ("Panel", AtStart::Panel),
+                ("New", AtStart::Blank),
+                ("Template", AtStart::Template),
+                ("Last", AtStart::Last),
+            ];
+            if let Some(choice) = segmented(ui, &painter, control_rect(r, 4), "At start", &options, settings.at_start) {
+                settings.at_start = choice;
+                outcome.changed = true;
+            }
+            let template_hint = String::from("A template's file name, or a path");
+            let starts_from_template = settings.at_start == AtStart::Template;
+            let mut folders = vec![
                 (
                     "Projects folder",
                     "Where a new project is saved first",
                     &mut settings.projects_folder,
                     &about.projects_default,
+                    PickField::ProjectsFolder,
                 ),
                 (
                     "Templates folder",
                     "Projects listed under New › From a template, and where Save as template puts one",
                     &mut settings.templates_folder,
                     &about.templates_default,
+                    PickField::TemplatesFolder,
                 ),
             ];
-            for (name, note, value, default) in folders {
+            if starts_from_template {
+                folders.push((
+                    "Start template",
+                    "The template At start makes a new project from",
+                    &mut settings.start_template,
+                    &template_hint,
+                    PickField::StartTemplate,
+                ));
+            }
+            for (name, note, value, default, pick) in folders {
                 let r = row(&mut y);
                 // The note is cut where the field starts.
                 let left =
                     Rect::from_min_size(r.min, Vec2::new(r.width() - FOLDER_FIELD - 8.0 + LABEL_WIDTH, r.height()));
                 label(&painter, left, name, note);
+                let browse = Rect::from_min_size(
+                    Pos2::new(r.right() - BROWSE_WIDTH, r.top() + 1.0),
+                    Vec2::new(BROWSE_WIDTH, SEGMENT),
+                );
+                if crate::project_dialog::button(ui, &painter, browse, "Browse…", &format!("Browse for {name}")) {
+                    outcome.pick = Some(pick);
+                }
                 let field = Rect::from_min_size(
                     Pos2::new(r.right() - FOLDER_FIELD, r.top()),
-                    Vec2::new(FOLDER_FIELD, SEGMENT + 2.0),
+                    Vec2::new(FOLDER_FIELD - BROWSE_WIDTH - 4.0, SEGMENT + 2.0),
                 );
                 let edit = ui.put(
                     field,
@@ -566,6 +638,14 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.device_layout = layout;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(&painter, r, "Select on launch", "Launching a clip in the Session view shows it here");
+            if let Some(on) =
+                segmented(ui, &painter, control_rect(r, 2), "Select on launch", &on_off, settings.select_on_launch)
+            {
+                settings.select_on_launch = on;
+                outcome.changed = true;
+            }
         }
         Page::Graphics => {
             section(&mut y, "Graphics");
@@ -589,6 +669,8 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             }
             let (picked, refresh) = audio_page(ui, &painter, page, &mut y, settings, about);
             outcome.audio_refresh |= refresh;
+            y += 8.0;
+            outcome.midi_input = midi_section(ui, &painter, page, &mut y, about);
             if let Some(choice) = picked {
                 settings.set_output_choice(&choice);
                 outcome.audio_output = Some(choice);
@@ -1159,6 +1241,31 @@ fn audio_page(
         picked = choice.with_params(&serde_json::json!({ "exclusive": on })).ok();
     }
 
+    // Input device (ADR 0017): off until chosen, so nothing opens a microphone unasked.
+    let r = row(y);
+    let inputs = host.map_or(&[][..], |h| h.inputs.as_slice());
+    let note = match &choice.input {
+        suhina_session::InputChoice::Named(name)
+            if !inputs.iter().any(|i| suhina_session::InputChoice::Named(i.name.clone()) == choice.input) =>
+        {
+            format!("{name} is not there on this driver")
+        }
+        _ => "What tracks with an audio input hear: microphones, an interface's inputs".to_string(),
+    };
+    label(painter, r, "Input", &note);
+    let default_input = inputs.iter().find(|i| i.default).map_or("none", |i| i.name.as_str());
+    let mut options: Vec<(String, suhina_session::InputChoice)> = vec![
+        ("Off".to_string(), suhina_session::InputChoice::Off),
+        (format!("Default ({default_input})"), suhina_session::InputChoice::Default),
+    ];
+    options.extend(inputs.iter().map(|i| {
+        let label = format!("{} ({} in)", i.name, i.channels);
+        (label, suhina_session::InputChoice::Named(i.name.clone()))
+    }));
+    if let Some(input) = choice_dropdown(ui, painter, r, "Input", &options, &choice.input) {
+        picked = choice.with_params(&serde_json::json!({ "input": input.as_text() })).ok();
+    }
+
     *y += 8.0;
     section(y, "Cue");
     // The cue's output pair: the device's pairs after the main output's.
@@ -1226,6 +1333,34 @@ fn audio_page(
     );
     let r = row(y);
     label(painter, r, "Latency", &format!("Engine to speaker, measured: {latency}"));
+    // A key on a MIDI controller (ADR 0017): the engine keeps less ahead while a track is armed.
+    let r = row(y);
+    let key = match &about.audio_live {
+        Some(info) if info.live => {
+            format!("Up to {:.1} ms; a track is armed, so the engine keeps one block ahead", info.live_latency_ms)
+        }
+        Some(info) => format!(
+            "Up to {:.1} ms now; arming a track keeps one block ahead, so less. Smaller buffers are quicker",
+            info.live_latency_ms
+        ),
+        None => "-".to_string(),
+    };
+    label(painter, r, "Key to sound", &key);
+    let r = row(y);
+    let input = match &about.audio_live {
+        Some(info) => match &info.input {
+            Some(name) => format!(
+                "{name}, {} channel{}; {} underrun{}",
+                info.input_channels,
+                if info.input_channels == 1 { "" } else { "s" },
+                info.input_underruns,
+                if info.input_underruns == 1 { "" } else { "s" }
+            ),
+            None => "None: no input device is open".to_string(),
+        },
+        None => "-".to_string(),
+    };
+    label(painter, r, "Input now", &input);
     (picked, response.clicked())
 }
 
@@ -1266,6 +1401,57 @@ fn now_playing(info: &suhina_session::OutputInfo, choice: &suhina_session::Outpu
         Some(wanted) if info.fallback => format!("{}, until {wanted} is back", info.describe()),
         _ => info.describe(),
     }
+}
+
+/// Settings › Audio › MIDI inputs: each port with On and Off. What the ports that are on play
+/// goes to the armed tracks. Returns a port turned on or off.
+fn midi_section(ui: &Ui, painter: &egui::Painter, page: Rect, y: &mut f32, about: &About) -> Option<(String, bool)> {
+    section_title(painter, page, y, "MIDI inputs");
+    let mut picked = None;
+    let ports = match &about.midi_inputs {
+        Ok(ports) if ports.is_empty() => {
+            let r = setting_row(page, y);
+            label(painter, r, "None", "No MIDI controller is connected; one plugged in is found within seconds");
+            return None;
+        }
+        Ok(ports) => ports,
+        Err(e) => {
+            let r = setting_row(page, y);
+            label(painter, r, "Not available", e);
+            return None;
+        }
+    };
+    for port in ports {
+        let r = setting_row(page, y);
+        let note = match (&port.error, port.enabled, port.open) {
+            (Some(e), true, _) => format!("Could not be opened: {e}"),
+            (_, true, true) => "Plays the armed tracks".to_string(),
+            (_, true, false) => "Opening…".to_string(),
+            (_, false, _) => "Off".to_string(),
+        };
+        label(painter, r, &port.name, &note);
+        let on_off = [("On", true), ("Off", false)];
+        let name = format!("MIDI input {}", port.name);
+        if let Some(on) = segmented(ui, painter, control_rect(r, 2), &name, &on_off, port.enabled) {
+            picked = Some((port.name.clone(), on));
+        }
+    }
+    picked
+}
+
+/// A section's title over a hairline, as the other pages draw it.
+fn section_title(painter: &egui::Painter, page: Rect, y: &mut f32, name: &str) {
+    let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SIDEBAR_ROW));
+    widgets::text_in(painter, rect, Align2::LEFT_CENTER, name, theme::ui_font(theme::TEXT_SMALL), theme::text_hint());
+    painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::border()));
+    *y = rect.bottom() + 8.0;
+}
+
+/// A setting's row under `y`, moving `y` past it.
+fn setting_row(page: Rect, y: &mut f32) -> Rect {
+    let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SETTING_ROW));
+    *y += SETTING_ROW;
+    rect
 }
 
 /// A dropdown on the right of `row` listing `options` (text, value). Returns the value picked,

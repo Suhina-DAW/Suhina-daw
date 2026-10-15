@@ -109,7 +109,9 @@ t-SNE or UMAP. What remains is choosing the features, the methods and the crates
    the view's job.
 7. **Kinds** are found before the layout, in feature space, never from positions on the map
    (*amended 2026-10-15, #325*: an item without a name took the kind of its 7 nearest
-   neighbours when 4 agreed, and a folder's kind always stood). Evidence comes in three
+   neighbours when 4 agreed, and a folder's kind always stood; #303's vote of the nearest named
+   items on the 2D map was set aside for this). Names are read as the spec says: the file name,
+   then its two nearest folders, the most specific kind in a name winning. Evidence comes in three
    strengths: a kind **set by hand** wins over everything; a kind from the **file name** stands;
    a kind from a **folder** gives way to a clear sound. A light classifier is learned from the
    scope's own items, so no model is shipped: for each kind, its examples are the items whose

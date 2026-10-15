@@ -1,6 +1,6 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), how clips are split and consolidated, and named markers on the timeline
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -10,6 +10,7 @@ covers:
   - crates/ui/src/arrangement_view.rs
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
+  - crates/engine/src/fade_cost_tests.rs
   - crates/engine/src/launcher.rs
   - crates/engine/src/loop_tests.rs
   - apps/suhina-cli/src/play.rs
@@ -21,6 +22,8 @@ covers:
   - crates/ui/src/keymap.rs
   - crates/session/src/editing.rs
   - crates/engine/src/track_render.rs
+  - crates/ui/src/app.rs
+  - crates/session/src/lib.rs
 ---
 
 # Arrangement editing
@@ -35,6 +38,39 @@ from pattern-based DAWs where clips **stack** and all play; two settings allow t
 at least 0), on its own track or on `to_track`, which must take the clip's kind: a MIDI clip goes
 to a track that plays notes, an audio clip to an audio track. A clip that moves to another track
 plays through that track's instrument and effects. The move is one undo step.
+
+In the Arrangement view a clip is moved by dragging it, along its lane or onto another; it lands
+on the nearest line of [the grid](#the-grid), or where it is let go with Alt held (at the end of
+the drag; the clip is drawn where it will land while it is dragged).
+
+## The grid
+
+The Arrangement view has one grid, drawn as vertical lines across the lanes and used by
+everything that snaps. Its value is the box in the control bar next to the tempo and the time
+signature (`none`, `8 bars` … `1 bar`, `1/2`, `1/2T` … `1/16T`, `1/32`), the same value that sets
+when launched clips start ([clip launching](clip-launching.md) › Launch quantisation): changing it
+runs `launcher.setQuantization`. Note values are quarter-note beats (`1/16` is a quarter of a beat,
+a `T` triplet two thirds of that note), and bars are the time signature's bar. The value is kept by
+each open project's session, so every project tab has its own; it is not saved in the project
+file and is not an undo step (a new or opened project starts on `1 bar`).
+
+**Lines follow the zoom.** A line is drawn at every step of the value, starting again at every bar
+line, and bar lines are stronger than the lines between them. Lines are never drawn closer than
+**8 points**: where they would be, the grid coarsens until they are at least that far apart. A
+straight note value doubles (`1/16` to `1/8` to `1/4`) up to the beat; a triplet finer than a beat
+goes straight to the beat, so lines stay on the bar; from the beat it goes to the bar, then 2, 4,
+8 bars and so on. A value of a bar or more is never drawn finer than it is. So with `1/16`, zoomed
+in, a beat has four lines; zoomed out, lines fall on beats, then on bars.
+
+**What snaps.** Everything placed in the view goes to the nearest line of the grid as it is drawn
+at that zoom (never before the start): a clip moved by dragging ([moving a clip](#moving-a-clip)),
+samples and MIDI files dragged from the browser onto a lane or the empty space below the tracks
+([browser](browser.md) › Dragging into the project), fade handles ([fades](#fades)) and ruler
+clicks ([play position](#play-position)). With **Alt** held, each of them goes exactly where the
+pointer is instead (off the grid).
+
+**`none`** launches clips at once, and in the Arrangement view nothing snaps (as if Alt were held);
+lines show beats and bars by the zoom alone.
 
 ## Duplicating and deleting
 
@@ -51,6 +87,23 @@ selection of points, and selecting points ends the clip's selection
 Under a track, the lanes of its automation, shown and hidden with the envelope button on its
 header; a track's row grows by their height, and the next track moves down. Their gestures are
 in the [automation spec](automation.md#in-the-arrangement-view).
+
+## Making an empty MIDI clip
+
+`clip.create {track, scene? | start?, length?, stack?}` makes an empty MIDI clip, named "MIDI
+clip", on a track that plays notes; an audio track, a group or a return is refused. It goes
+either in clip slot `scene` (from 1, an existing scene; the slot must be empty), where it loops
+over its length, or at beat `start` in the arrangement (0 up to the engine's last beat), where it
+replaces what it covers unless stacked, as a pasted clip does. `length` is in beats, one bar of
+the project's time signature by default (four beats in 4/4, three in 3/4), more than 0. It is
+one undo step and returns the track and the scene, or the start and the clip's index as
+`project.clips` counts it.
+
+In the Arrangement view a double-click on an empty spot of a lane that plays notes makes one a
+bar long, starting at the grid line before the pointer (with Alt, exactly at the pointer), and
+selects it; it stacks when the MIDI stacking setting is on. A double-click on a clip is the
+clip's own. In the Session view a double-click on an empty slot makes one there
+([Session view](ui-session-view.md) › Clip slots).
 
 ## Copy, cut and paste
 
@@ -158,6 +211,8 @@ so a project without them sounds as it did before shapes existed.
 `clip.setFades {track, index, in?, out?, inShape?, outShape?, inCurve?, outCurve?}` sets any of
 them, lengths in beats; one undo step. It refuses a negative length, fades together longer than
 the clip, an unknown shape, a curve outside −1 … +1, a MIDI clip, and a call with none of them.
+With `scene` instead of `index` it sets the fades of the clip in that track's launcher slot
+([clip launching](clip-launching.md) › Clip fades).
 `project.clips` lists each clip's `fade_in` and `fade_out` and their shapes and curves
 (`fade_in_shape`, `fade_in_curve`, `fade_out_shape`, `fade_out_curve`).
 
@@ -204,7 +259,7 @@ clip's bottom corner to where the fade ends at the top, following the fade's sha
 and the waveform is scaled by the fades.
 While the clip is hovered or selected, a small square **handle** sits at its top-left corner
 (fade-in) and top-right corner (fade-out); with a fade, the handle sits where the fade ends. A
-horizontal drag sets the fade with its end on the grid (Alt held: free), up to the other fade;
+horizontal drag sets the fade with its end on [the grid](#the-grid) (Alt held: free), up to the other fade;
 the clip's own edge and the other fade snap like grid lines, so a clip that does not start or
 end on the grid can be faded over its whole length; the clip shows the fade while it is dragged, and letting go runs `clip.setFades`. A
 double-click on a handle removes that fade. A right-click on a handle opens a menu of the shapes,
@@ -216,6 +271,35 @@ for +, down for −), until it reaches −1 or +1, the line following live, and 
 with `t` in beats (`length − beats` for the fade-out), without the one-frame term above, which
 is less than a pixel at any zoom. Measurements are in
 [components](../design/components.md) › Arrangement view.
+
+### What fades cost the audio thread
+
+The engine works out each frame's gain inside a fade from its shape and curve: a curve other
+than 0 is one `powf` per frame (its exponent is worked out once per clip), equal power one `sin`.
+Past the fade nothing is computed. Measured 2026-10-13 on a 4-core Xeon at 2.8 GHz (a cloud
+container), release build, `crates/engine/src/fade_cost_tests.rs`: 64 audio tracks of 16
+back-to-back clips, each faded in over its first half and out over its second, so every frame of
+every track is inside a fade. 512-frame blocks at 48 kHz, budget 10.67 ms; the fastest of three
+runs. A second run gave the same figures within about 10 %.
+
+| Fades | Mean block | Load | 99th percentile | Per frame, `Fades::gain` alone |
+|---|---|---|---|---|
+| none | 447 µs | 4.2 % | 1.27 ms | 8 ns |
+| linear, curve 0 | 476 µs | 4.5 % | 1.42 ms | 9 ns |
+| S-curve, curve 0 | 480 µs | 4.5 % | 1.51 ms | 11 ns |
+| equal power, curve 0 | 588 µs | 5.5 % | 1.83 ms | 19 ns |
+| linear, curve ±1 | 839–881 µs | 7.9–8.3 % | 2.46–3.04 ms | 31 ns |
+| fast +0.5, slow −0.5, S-curve +1 | 931–952 µs | 8.7–8.9 % | 2.61–3.50 ms | 33–35 ns |
+| equal power, curve ±1 | 1.13 ms | 10.6–10.7 % | 2.91–3.09 ms | 47 ns |
+
+A curve adds about 22 ns per frame per clip inside a fade; at 48 kHz that is about 0.1 % of one
+core for each clip that is fading at the time. The worst case above, 64 tracks all inside curved
+equal-power fades at once, adds 6.5 points of load and stays well within the budget. A project
+fades a few clips at a time, so the cost is not worth a cheaper curve, and the engine keeps the
+exact `powf`. A lookup table was weighed and left out: near the silent end, `t^¼` (curve +1)
+rises too steeply for a table of reasonable size to stay within 10⁻⁶ of the exact gain, which the
+fade tests check. Measure again with
+`cargo test --release -p suhina-engine fade_cost -- --ignored --nocapture --test-threads=1`.
 
 ## Start marker and loop
 
@@ -274,7 +358,7 @@ waiting are queued again for the next boundary from the new beat. Time-stretched
 silent until the stretch worker has caught up with the new place (about one block in practice).
 
 **In the Arrangement view** a click on the ruler runs `transport.setPosition`: the beat under the
-pointer, on the same grid clips snap to at that zoom (Alt held: free, to a thousandth of a beat).
+pointer, on [the grid](#the-grid) (Alt held, or the grid `none`: free, to a thousandth of a beat).
 The marker is a small triangle hanging from the ruler's lower edge; the playhead is a line through
 the ruler and the lanes, at the marker while stopped (measurements in
 [components](../design/components.md) › Arrangement view). The Stop button and the play/stop key

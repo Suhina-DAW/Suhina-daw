@@ -45,6 +45,8 @@ pub fn demo_project() -> Project {
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(id)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         let mut channel = channel(ChannelId(id), name, ChannelRole::Regular, Some(main));
@@ -87,12 +89,15 @@ pub fn demo_project() -> Project {
             content: ContentKinds::default(),
             channel: Some(*channel_id),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         project.channels.push(channel(*channel_id, name, ChannelRole::Effect, Some(main)));
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.launcher = Launcher {
+        mappings: Vec::new(),
         scenes: SCENES.iter().map(|name| Scene { name: (*name).into(), ..Scene::default() }).collect(),
         columns,
     };
@@ -152,6 +157,7 @@ fn clip_of(content: ContentId) -> Clip {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     }
 }

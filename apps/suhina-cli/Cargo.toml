@@ -22,6 +22,7 @@ suhina-media.workspace = true
 suhina-library.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread"] }  # MIT
 suhina-output.workspace = true
+suhina-midi.workspace = true
 serde_json.workspace = true
 suhina-device-api.workspace = true
 suhina-device-registry.workspace = true

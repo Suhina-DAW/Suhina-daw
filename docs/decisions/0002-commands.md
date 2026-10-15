@@ -61,6 +61,11 @@ the project and record no undo step. Without an attached engine they return an e
 how to start one. `launcher.state` reads the engine's state the same way. See
 `docs/spec/clip-launching.md`.
 
+`launcher.setQuantization` is the one exception (2026-10-14): its value is also the Arrangement
+view's grid, so the session keeps it (not the project, no undo step) and the command works without
+an engine; an engine attached later is sent the session's value
+([arrangement editing](../spec/arrangement-editing.md) › The grid).
+
 ## Amendment: project commands (2026-10-11)
 
 With several projects open ([ADR 0007](0007-several-open-projects.md)), a fifth kind,
@@ -103,7 +108,11 @@ and output devices, `audio.setOutput` chooses one (host, device, sample rate, bu
 WASAPI exclusive mode) and reopens the active project's output there, and `audio.info` says what
 plays now. The session only describes the choice; the output layer lists devices and opens
 streams through the `AudioSystem` trait it implements and the front end hands to `Projects`
-(the desktop app always, the MCP server with `--audio`). It never changes a project.
+(the desktop app always, the MCP server with `--audio`). It never changes a project. The MIDI
+inputs belong to it too ([ADR 0017](0017-inputs-and-latency.md)): `midi.inputs` lists the ports
+and `midi.setInput` turns one on or off, through the `MidiSystem` trait the MIDI layer
+implements. Arming a track (`track.setArm`) is a transport command that, unlike the others, works
+without an engine: the session keeps the armed tracks and tells each new player.
 
 ## Amendment: device commands (2026-10-12)
 

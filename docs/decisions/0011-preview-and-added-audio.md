@@ -8,6 +8,7 @@ covers:
   - crates/engine/src/preview.rs
   - crates/engine/src/swap.rs
   - crates/session/src/preview.rs
+  - crates/session/src/projects.rs
   - crates/session/src/files.rs
   - crates/session/src/lib.rs
   - crates/media/src/lib.rs
@@ -85,6 +86,12 @@ run the same code.
    they fail when no player is attached, like `transport.play`. The window decodes a preview
    on a thread and passes it with `Session::provide_audio` first, so the command finds it
    decoded.
+9. **Previews with no project open** (#234): `Projects` keeps an empty session of the previews'
+   own while no project is open (`Projects::preview_session_mut`), and `preview.play` and
+   `preview.stop` run on it. Its player opens on the chosen output at the first preview
+   (`preview.stop` opens nothing); it is closed before a project opens its output
+   (`Projects::close_preview_output`, which the desktop app calls first and `Projects::add`
+   calls too) and when another output is chosen, so there is still one stream at a time.
 
 ## Consequences
 
@@ -92,7 +99,8 @@ run the same code.
   decoding.
 - Previews use the same output device as the project (no second stream to open, which some
   drivers refuse), and are heard after the main channel, or on the cue pair of that device when
-  one is chosen.
+  one is chosen. With no project open they have the output to themselves, closed again before a
+  project's opens.
 - The key column's notes are previews like any other: they never touch the project, the undo
   history or the transport, and an agent can play a track's instrument over MCP with the same
   commands the UI uses.

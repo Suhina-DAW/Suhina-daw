@@ -1,6 +1,9 @@
 //! From features to positions: standardising, PCA, t-SNE and similar items (ADR 0013 ›
 //! Distances, Layout).
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use bhtsne::tSNE;
 
 use crate::features::{FEATURE_COUNT, Features, GROUP_WEIGHTS, GROUPS};
@@ -12,6 +15,26 @@ const EPOCHS: usize = 1000;
 const THETA: f32 = 0.5;
 /// Below this many items t-SNE says little; the first two principal components are used.
 const MIN_TSNE_ITEMS: usize = 16;
+/// How far a layout is, shared between the thread that computes it and the one that shows it.
+/// Clones share the same count.
+#[derive(Debug, Clone, Default)]
+pub struct Progress(Arc<AtomicU32>);
+
+impl Progress {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// From 0 to 1: the share of t-SNE's epochs done. It stays at 0 while the neighbours are
+    /// worked out, before the first epoch.
+    pub fn fraction(&self) -> f32 {
+        (self.0.load(Ordering::Relaxed) as f32 / EPOCHS as f32).clamp(0.0, 1.0)
+    }
+
+    fn set(&self, epochs_done: usize) {
+        self.0.store(u32::try_from(epochs_done).unwrap_or(u32::MAX), Ordering::Relaxed);
+    }
+}
 
 /// Features standardised across a scope: each to mean 0 and deviation 1, each group scaled so
 /// that its size does not matter and then weighted by [`GROUP_WEIGHTS`].
@@ -102,6 +125,11 @@ fn distance(a: &Features, b: &Features) -> f32 {
 /// Positions in 0–1 for every item. `seed` comes from the scope; the same input gives the same
 /// map, up to t-SNE's parallel sums, whose last digits follow the thread schedule (ADR 0013).
 pub fn layout(standardised: &Standardised, seed: u64) -> Vec<[f32; 2]> {
+    layout_with_progress(standardised, seed, &Progress::new())
+}
+
+/// [`layout`], counting t-SNE's epochs in `progress` as they are done.
+pub fn layout_with_progress(standardised: &Standardised, seed: u64, progress: &Progress) -> Vec<[f32; 2]> {
     let n = standardised.len();
     match n {
         0 => return Vec::new(),
@@ -110,10 +138,11 @@ pub fn layout(standardised: &Standardised, seed: u64) -> Vec<[f32; 2]> {
     }
     let projected = pca(&standardised.rows, PCA_DIMENSIONS);
     let positions = if n >= MIN_TSNE_ITEMS {
-        tsne(&projected, seed).unwrap_or_else(|| first_two(&projected))
+        tsne(&projected, seed, progress).unwrap_or_else(|| first_two(&projected))
     } else {
         first_two(&projected)
     };
+    progress.set(EPOCHS);
     normalise(positions)
 }
 
@@ -121,7 +150,7 @@ fn first_two(rows: &[Vec<f32>]) -> Vec<[f32; 2]> {
     rows.iter().map(|r| [r.first().copied().unwrap_or(0.0), r.get(1).copied().unwrap_or(0.0)]).collect()
 }
 
-fn tsne(rows: &[Vec<f32>], seed: u64) -> Option<Vec<[f32; 2]>> {
+fn tsne(rows: &[Vec<f32>], seed: u64, progress: &Progress) -> Option<Vec<[f32; 2]>> {
     let n = rows.len();
     let perplexity = PERPLEXITY.min((n - 1) / 3).max(1);
     // A seeded start, so the same scope gives the same map: the first two principal
@@ -142,10 +171,12 @@ fn tsne(rows: &[Vec<f32>], seed: u64) -> Option<Vec<[f32; 2]>> {
     let vectors: Vec<&[f32]> = rows.iter().map(Vec::as_slice).collect();
     // The crate checks its inputs with assertions; ours are checked above, and a panic left in
     // it must not take the caller down.
+    let counter = progress.clone();
     let result = std::panic::catch_unwind(|| {
         let mut fit: tSNE<f32, &[f32]> = tSNE::new(&vectors);
         fit.perplexity(perplexity as f32)
             .epochs(EPOCHS)
+            .epoch_callback(move |epoch, _| counter.set(epoch + 1))
             .initial_embedding(initial)
             .barnes_hut(THETA, |a, b| a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum::<f32>().sqrt());
         fit.embedding()

@@ -18,11 +18,19 @@ mod cue;
 #[cfg(test)]
 mod cue_tests;
 #[cfg(test)]
+mod fade_cost_tests;
+#[cfg(test)]
 mod fade_tests;
 mod follow;
 #[cfg(test)]
 mod follow_tests;
+mod input;
+#[cfg(test)]
+mod input_tests;
 mod launcher;
+mod live;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod loop_tests;
 mod meters;
@@ -57,14 +65,17 @@ use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
 pub use cue::MAX_CUE_GAIN;
+pub use input::MAX_INPUT_CHANNELS;
 use launcher::Launcher;
 pub use launcher::{
     ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
 };
+pub use live::{LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, port_id};
 pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
-    OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
+    Followed, Joint, MAX_JOINED, OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent,
+    plugin_devices, plugin_key,
 };
 pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
@@ -202,6 +213,9 @@ struct ArrangedAudio {
 /// Everything a renderer derives from the project. An edit builds a new one off the audio thread
 /// and the renderer swaps it in (ADR 0005).
 pub(crate) struct Graph {
+    /// The tracks that hear the audio input, and whether each is heard this block.
+    inputs: Vec<input::InputRoute>,
+    inputs_heard: Vec<bool>,
     events: Vec<NoteEvent>,
     audio_events: Vec<ArrangedAudio>,
     /// Warped clips stretched as they play (ADR 0003), rendered ahead and mixed block by block.
@@ -265,6 +279,10 @@ pub struct Renderer {
     preview: preview::Preview,
     /// The cue bus: cued tracks and the preview, for headphones (`cue.rs`).
     cue: cue::Cue,
+    /// Notes played on a MIDI controller, and the armed tracks that hear them (ADR 0017).
+    live: live::Live,
+    /// The audio input device's frames, for the tracks that hear it (ADR 0017).
+    input: input::Input,
     /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
     cpu: cpu::CpuMeter,
     /// The level meters, published to the controller's `MeterMonitor`.
@@ -324,6 +342,8 @@ impl Renderer {
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
             cue: cue::Cue::new(),
+            live: live::Live::new(),
+            input: input::Input::new(),
             cpu: cpu::CpuMeter::new(),
             meters,
             follow_loop: true,
@@ -413,6 +433,25 @@ impl Renderer {
     }
 
     /// Frames of stretched clips that were not ready in time and played as silence.
+    /// Reads the audio input device's frames from `ring`, `channels` (1 to
+    /// [`MAX_INPUT_CHANNELS`]) interleaved per frame, from now on; the tracks with an audio input
+    /// hear them as their monitoring says (ADR 0017). Blocks that find too little input count in
+    /// `underruns`. Call it before the renderer moves to the audio thread.
+    pub fn set_audio_input(
+        &mut self,
+        ring: rtrb::Consumer<f32>,
+        channels: usize,
+        underruns: Arc<std::sync::atomic::AtomicU64>,
+    ) {
+        self.input.attach(ring, channels, underruns);
+    }
+
+    /// Whether a track is armed to play the live input (ADR 0017): someone may be playing, so
+    /// the output keeps less queued ahead of the device. Lock-free; for the render thread.
+    pub fn live_armed(&self) -> bool {
+        self.live.any_armed()
+    }
+
     pub fn stretch_underruns(&self) -> u64 {
         self.underruns_before + self.graph.ahead.underruns()
     }
@@ -510,6 +549,17 @@ impl Renderer {
         self.preview.begin(&self.graph.chains);
         self.preview.receive(&mut self.graph.chains);
         self.preview.begin(&self.graph.chains);
+        // Live notes after the commands, so a track armed in this block hears them.
+        self.live.receive(&mut self.graph.chains, self.position);
+        // This block's audio input, and which tracks hear it: In always, Auto while armed.
+        self.input.read(frames);
+        for (route, heard) in self.graph.inputs.iter().zip(self.graph.inputs_heard.iter_mut()) {
+            *heard = match route.monitor {
+                suhina_model::Monitor::In => true,
+                suhina_model::Monitor::Auto => self.live.is_armed(route.track),
+                suhina_model::Monitor::Off => false,
+            };
+        }
         self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
         // ready again by the next start.
@@ -589,6 +639,20 @@ impl Renderer {
                     Some(chain) => chain.add(frame, l, r),
                     None => {
                         self.graph.levels.add(voice.meter, frame, l, r);
+                        left += l;
+                        right += r;
+                    }
+                }
+            }
+            for (route, heard) in self.graph.inputs.iter().zip(&self.graph.inputs_heard) {
+                if !heard {
+                    continue;
+                }
+                let l = self.input.sample(frame, route.left) * route.gains.0;
+                let r = self.input.sample(frame, route.right) * route.gains.1;
+                match bus_chain(&mut self.graph.chains, route.bus) {
+                    Some(chain) => chain.add(frame, l, r),
+                    None => {
                         left += l;
                         right += r;
                     }
@@ -927,7 +991,23 @@ impl Graph {
             return Err(RenderError::TooLong { seconds });
         }
 
+        let inputs: Vec<input::InputRoute> = project
+            .tracks
+            .iter()
+            .filter_map(|t| {
+                let (left, right) = match t.audio_input.channels {
+                    suhina_model::InputChannels::None => return None,
+                    suhina_model::InputChannels::Mono(c) => (usize::from(c.checked_sub(1)?), usize::from(c - 1)),
+                    suhina_model::InputChannels::Stereo(c) => (usize::from(c.checked_sub(1)?), usize::from(c)),
+                };
+                let (bus, (gain_left, gain_right)) = route(project, &chains, t.id)?;
+                let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
+                Some(input::InputRoute { track: t.id, left, right, monitor: t.audio_input.monitor, bus, gains })
+            })
+            .collect();
         Ok(Box::new(Graph {
+            inputs_heard: vec![false; inputs.len()],
+            inputs,
             events,
             audio_events,
             stretch_events,
@@ -1229,6 +1309,8 @@ mod tests {
                     content: ContentKinds { notes: true, audio: false },
                     channel: Some(ChannelId(i)),
                     parent: None,
+                    midi_input: Default::default(),
+                    audio_input: Default::default(),
                     extensions: Extensions::default(),
                 })
                 .collect(),
@@ -1277,6 +1359,7 @@ mod tests {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         }
     }

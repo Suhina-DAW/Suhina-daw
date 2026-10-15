@@ -25,6 +25,7 @@ fn clip(content: u32) -> Clip {
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
         extensions: Extensions::default(),
+        launch: Default::default(),
     }
 }
 
@@ -48,6 +49,8 @@ fn project(notes: Vec<Note>) -> Project {
             channel: None,
             parent: None,
             extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         contents: vec![content(1, lane(notes.clone())), content(2, Vec::new()), content(3, lane(notes))],
         arrangement: Arrangement {
@@ -64,6 +67,7 @@ fn project(notes: Vec<Note>) -> Project {
                 track: TrackId(1),
                 slots: vec![Slot { clip: Some(clip(3)), has_stop: true }],
             }],
+            mappings: Default::default(),
         },
         ..Project::default()
     }

@@ -132,6 +132,46 @@ pub fn cue_button(
     response.clicked().then(|| Action::new("track.setCue", serde_json::json!({ "track": track, "cue": !cue })))
 }
 
+/// A track's arm button (components › Arm): a ring off, a filled red dot on its dark red
+/// background when armed. Returns the command a click asks for: a click arms the track alone;
+/// with Ctrl (Cmd) held it is added to the tracks armed already. Arming a track that plays
+/// notes lets a MIDI controller play it; one that plays audio hears its audio input.
+#[allow(clippy::too_many_arguments)]
+pub fn arm_button(
+    ui: &Ui,
+    painter: &Painter,
+    rect: Rect,
+    id: egui::Id,
+    track: u32,
+    name: &str,
+    armed: bool,
+    notes: bool,
+) -> Option<Action> {
+    let label = match (armed, notes) {
+        (true, _) => format!("Disarm {name}"),
+        (false, true) => format!("Arm {name} to play it from a MIDI controller"),
+        (false, false) => format!("Arm {name} to hear its audio input"),
+    };
+    let response = button_area(ui, rect, id, label);
+    let lit = motion::toward(ui.ctx(), response.id.with("on"), armed, motion::VALUE);
+    let off = motion::mix(theme::control_background(), theme::control_hover(), hover(ui, &response));
+    painter.rect_filled(rect, 0.0, motion::mix(off, theme::recording_background(), lit));
+    let radius = (rect.height().min(rect.width()) * 0.22).clamp(2.5, 4.0);
+    let ring = motion::mix(theme::text_secondary(), theme::recording(), lit);
+    painter.circle_stroke(rect.center(), radius, Stroke::new(1.2, ring));
+    if lit > 0.0 {
+        painter.circle_filled(rect.center(), radius, theme::recording().gamma_multiply(lit));
+    }
+    if !response.clicked() {
+        return None;
+    }
+    let adding = ui.input(|i| i.modifiers.command);
+    Some(Action::new(
+        "track.setArm",
+        serde_json::json!({ "track": track, "armed": !armed, "exclusive": !armed && !adding }),
+    ))
+}
+
 /// A dropdown field (components › Dropdown): the current choice and a chevron; the caller opens
 /// its menu from `response`.
 pub fn dropdown(ui: &Ui, painter: &Painter, rect: Rect, response: &Response, text: &str) {

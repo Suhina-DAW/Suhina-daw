@@ -16,8 +16,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use suhina_engine::{
-    DeviceEvent, MAX_BLOCK_FRAMES, MAX_BLOCK_PARAMS, ParamEvent, PluginProcessor, PluginSlotInfo, Plugins, Sent,
-    model::DeviceKind, plugin_devices,
+    DeviceEvent, Followed, Joint, MAX_BLOCK_FRAMES, MAX_BLOCK_PARAMS, ParamEvent, PluginProcessor, PluginSlotInfo,
+    Plugins, Sent, model::DeviceKind, plugin_devices,
 };
 use suhina_model::{Device, Project};
 use suhina_plugins::library::{Hosting, group_for};
@@ -385,12 +385,36 @@ impl PluginProcessor for Hosted {
     /// once as a late block here and in the engine; when it was the host that was busy, once as
     /// unanswered too (`PluginAudio::send`).
     fn send(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)], patience: Duration) -> Sent {
+        self.send_joint(buffer, events, &[], patience)
+    }
+
+    fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
+        self.wait_for(buffer, timeout)
+    }
+
+    /// Its host process and number there, unless releases from a block it could not take wait
+    /// to be sent (they go on its own link first) or its link still has a block out.
+    fn joint(&self) -> Option<Joint> {
+        if !self.carried.is_empty() {
+            return None;
+        }
+        self.audio.seat().map(|seat| Joint { process: seat.process, member: seat.instance })
+    }
+
+    /// As [`Hosted::send`]; the followers run in the same host process (ADR 0006, decision 2).
+    fn send_joint(
+        &mut self,
+        buffer: &[f32],
+        events: &[(usize, DeviceEvent)],
+        followers: &[u32],
+        patience: Duration,
+    ) -> Sent {
         // A block longer than the link holds (none is, today) cannot be taken in at all.
         let Some(input) = self.take(buffer, events).then(|| self.input.get(..buffer.len())).flatten() else {
             self.counts.late.fetch_add(1, Ordering::Relaxed);
             return Sent::Refused;
         };
-        if self.audio.send(input, &self.events, buffer.len(), patience) {
+        if self.audio.send_joint(input, &self.events, followers, buffer.len(), patience) {
             return Sent::Out;
         }
         // The host is still busy with an earlier block: this one is lost to it, as a miss; its
@@ -400,8 +424,27 @@ impl PluginProcessor for Hosted {
         Sent::Refused
     }
 
-    fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
-        self.wait_for(buffer, timeout)
+    /// Counts a block it followed in like one of its own: given, late unless answered, and
+    /// a refused one's releases kept for its next block.
+    fn followed(&mut self, events: &[(usize, DeviceEvent)], how: Followed) {
+        self.counts.blocks.fetch_add(1, Ordering::Relaxed);
+        let outcome = match how {
+            Followed::Answered => suhina_plugins::Outcome::Done,
+            Followed::Late => suhina_plugins::Outcome::Missed,
+            Followed::Refused => suhina_plugins::Outcome::Busy,
+        };
+        self.audio.followed(outcome);
+        if how == Followed::Answered {
+            return;
+        }
+        self.counts.late.fetch_add(1, Ordering::Relaxed);
+        if how == Followed::Refused {
+            self.events.clear();
+            for &(frame, event) in events {
+                push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
+            }
+            carry_releases(&self.events, &mut self.carried);
+        }
     }
 
     fn automate(&mut self, params: &[ParamEvent]) {
@@ -1285,6 +1328,12 @@ impl OfflinePlugins {
     /// Plug-ins running for this render.
     pub fn running(&self) -> usize {
         self.controls.len()
+    }
+
+    /// The ids of the host processes the running plug-ins are in, in the order they started:
+    /// consecutive plug-ins in one process share a round trip a block (ADR 0006, decision 2).
+    pub fn process_ids(&self) -> Vec<u32> {
+        self.controls.iter().map(Plugin::process_id).collect()
     }
 }
 

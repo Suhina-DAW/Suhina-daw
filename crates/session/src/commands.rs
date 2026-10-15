@@ -5,10 +5,12 @@ use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, MAX_GROUP_DEPTH,
-    Marker, Project, Scene, Slot, TimeSignature, Track, TrackId,
+    Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, editing, files, follow, meters, notes, preview};
+use crate::{
+    CommandError, Session, automation, devices, editing, files, follow, launch, mapping, meters, notes, preview,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -33,8 +35,9 @@ pub enum CommandKind {
     /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
     /// to Suhina, not to one project. Runs on [`crate::Projects`].
     Library,
-    /// Lists or chooses the audio output (host, device, sample rate, buffer size) or reports
-    /// on it; belongs to Suhina, not to one project. Runs on [`crate::Projects`].
+    /// Lists or chooses the audio output (host, device, sample rate, buffer size) or the MIDI
+    /// inputs, or reports on them; belongs to Suhina, not to one project. Runs on
+    /// [`crate::Projects`].
     Audio,
 }
 
@@ -262,7 +265,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.tracks",
-        label: "List tracks with id, name, volume (dB), pan, mute and devices",
+        label: "List tracks with id, name, volume (dB), pan, mute, whether armed, the MIDI and audio inputs it hears, and devices",
         params: &[],
         kind: CommandKind::Read,
         run: tracks,
@@ -404,10 +407,15 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.setFades",
-        label: "Set an audio clip's fade-in and fade-out: lengths in beats (together at most the clip's length), shapes and curves",
+        label: "Set an audio clip's fade-in and fade-out: lengths in beats (together at most the clip's length), shapes and curves; an arrangement clip by index, a launcher clip by scene",
         params: &[
             TRACK,
-            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            optional("index", ParamType::Integer, "arrangement clip index on the track, from project.clips"),
+            optional(
+                "scene",
+                ParamType::Integer,
+                "instead of index: the clip in the track's slot of this scene, from 1",
+            ),
             optional("in", ParamType::Number, "fade-in length in beats from the clip's start, at least 0; 0 is none"),
             optional("out", ParamType::Number, "fade-out length in beats before the clip's end, at least 0; 0 is none"),
             optional("inShape", ParamType::Text, "fade-in shape: linear, equal_power, fast, slow or s_curve"),
@@ -675,6 +683,47 @@ static COMMANDS: &[CommandSpec] = &[
         run: meters::reset_clip,
     },
     CommandSpec {
+        id: "track.setMidiInput",
+        label: "Choose which MIDI controllers a track hears while armed: every port, one port by name (from midi.inputs), or none, and every channel or one; saved with the project",
+        params: &[
+            TRACK,
+            optional(
+                "port",
+                ParamType::Text,
+                "\"all\" (the default), \"none\", or a port's name; left out keeps the port",
+            ),
+            optional("channel", ParamType::Integer, "1 to 16, or 0 for every channel; left out keeps the channel"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_midi_input,
+    },
+    CommandSpec {
+        id: "track.setAudioInput",
+        label: "Choose which channels of the audio input device a track hears (none, one channel, or a stereo pair) and when it is heard through the track: auto (while armed), in (always) or off; saved with the project",
+        params: &[
+            TRACK,
+            optional(
+                "input",
+                ParamType::Text,
+                "\"none\", a channel from 1 (\"3\"), or a pair (\"1/2\"); left out keeps it",
+            ),
+            optional("monitor", ParamType::Text, "auto (the default), in or off; left out keeps it"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_audio_input,
+    },
+    CommandSpec {
+        id: "track.setArm",
+        label: "Arm a track or disarm it: an armed track's instrument plays what the MIDI inputs play (midi.inputs), whether the transport runs or not. Arming is not an edit: it is not undone and not saved",
+        params: &[
+            TRACK,
+            param("armed", ParamType::Bool, "true arms the track"),
+            optional("exclusive", ParamType::Bool, "true also disarms every other track (false by default)"),
+        ],
+        kind: CommandKind::Transport,
+        run: set_arm,
+    },
+    CommandSpec {
         id: "clip.launch",
         label: "Launch the clip in a track's slot at the next quantisation boundary (an empty slot with a stop button stops the track)",
         params: &[TRACK, SCENE],
@@ -771,7 +820,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "launcher.setQuantization",
-        label: "Set the grid launches wait for (default 1 bar)",
+        label: "Set the grid launches wait for and the Arrangement view snaps to (default 1 bar)",
         params: &[param(
             "value",
             ParamType::Text,
@@ -811,6 +860,77 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: follow::set_follow_action,
+    },
+    CommandSpec {
+        id: "clip.release",
+        label: "Release a slot's launch button (clip.launch is the press): stops a clip in gate mode, ends the repeats of one in repeat mode",
+        params: &[TRACK, SCENE],
+        kind: CommandKind::Transport,
+        run: launch::release_clip,
+    },
+    CommandSpec {
+        id: "clip.setLaunchMode",
+        label: "Set what launching a slot's clip does: trigger (plays until stopped), gate (plays while held), toggle (a second launch stops it) or repeat (relaunches at its quantisation while held)",
+        params: &[TRACK, SCENE, param("mode", ParamType::Text, "trigger, gate, toggle or repeat")],
+        kind: CommandKind::Edit,
+        run: launch::set_launch_mode,
+    },
+    CommandSpec {
+        id: "clip.setLegato",
+        label: "Set whether a slot's clip starts at the position of the clip it replaces on its track (legato) instead of at its start",
+        params: &[TRACK, SCENE, param("on", ParamType::Bool, "true for legato")],
+        kind: CommandKind::Edit,
+        run: launch::set_legato,
+    },
+    CommandSpec {
+        id: "clip.setQuantization",
+        label: "Set the grid a slot's clip waits for when launched: global (the launcher's), none, or its own",
+        params: &[
+            TRACK,
+            SCENE,
+            param(
+                "value",
+                ParamType::Text,
+                "global, none, 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T or 1/32",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: launch::set_quantization,
+    },
+    CommandSpec {
+        id: "launcher.addMapping",
+        label: "Map a computer key or a MIDI note to a slot, a scene or a track's stop button: its press launches it (and its release releases a gate or repeat clip); a source already mapped moves to the new target",
+        params: &[
+            param(
+                "source",
+                ParamType::Text,
+                "key:<name> (key:Q, key:1, key:Space) or note:<channel 1-16>:<note 0-127>",
+            ),
+            param("target", ParamType::Text, "slot, scene or stop"),
+            optional("track", ParamType::Track, "track id or name, for slot and stop"),
+            optional("scene", ParamType::Integer, "scene number, from 1, for slot and scene"),
+        ],
+        kind: CommandKind::Edit,
+        run: mapping::add_mapping,
+    },
+    CommandSpec {
+        id: "launcher.removeMapping",
+        label: "Remove a key or note mapping: the one of a source, or every mapping of a target",
+        params: &[
+            optional("source", ParamType::Text, "key:<name> or note:<channel>:<note>"),
+            optional("target", ParamType::Text, "slot, scene or stop, instead of source"),
+            optional("track", ParamType::Track, "track id or name, for slot and stop"),
+            optional("scene", ParamType::Integer, "scene number, from 1, for slot and scene"),
+        ],
+        kind: CommandKind::Edit,
+        run: mapping::remove_mapping,
+    },
+    CommandSpec {
+        id: "launcher.mappings",
+        label: "List the keys and MIDI notes mapped to slots, scenes and stop buttons (source, target, track, scene, whether the target is gone)",
+        params: &[],
+        kind: CommandKind::Read,
+        run: mapping::list_mappings,
     },
     CommandSpec {
         id: "devices.list",
@@ -918,6 +1038,19 @@ static COMMANDS: &[CommandSpec] = &[
         run: files::add_files,
     },
     CommandSpec {
+        id: "clip.create",
+        label: "Make an empty MIDI clip on a track that plays notes: in an empty clip slot, or at a beat in the arrangement, replacing what it covers unless stacked",
+        params: &[
+            TRACK,
+            optional("scene", ParamType::Integer, "scene number, from 1, of an empty clip slot"),
+            optional("start", ParamType::Number, "arrangement beat it starts at, at least 0"),
+            optional("length", ParamType::Number, "length in beats (default one bar of the time signature)"),
+            optional("stack", ParamType::Bool, "in the arrangement, keep the clips the new one covers (default false)"),
+        ],
+        kind: CommandKind::Edit,
+        run: files::create_clip,
+    },
+    CommandSpec {
         id: "preview.play",
         label: "Preview a sample or a MIDI file once, at its own speed, after the main channel; a MIDI file plays through a track's instrument or the FM synth",
         params: &[
@@ -928,6 +1061,13 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Transport,
         run: preview::play,
+    },
+    CommandSpec {
+        id: "preview.setGain",
+        label: "Change the level of the preview playing now, gliding there without a click; the next preview gets its own gain",
+        params: &[param("gain", ParamType::Number, "level in dB, at most 12")],
+        kind: CommandKind::Transport,
+        run: preview::set_gain,
     },
     CommandSpec {
         id: "preview.stop",
@@ -1418,6 +1558,9 @@ fn tracks(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
                     "volume_db": channel.map(|c| to_db(c.volume)),
                     "pan": channel.map(|c| c.pan),
                     "mute": channel.map(|c| c.mute),
+                    "armed": session.is_armed(t.id),
+                    "midi_input": midi_input_json(&t.midi_input),
+                    "audio_input": audio_input_json(&t.audio_input),
                     "devices": channel.map(|c| c.devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>()),
                     "sends": channel.map(|c| crate::sends::sends_json(p, c)),
                     "arrangement_clips": clips,
@@ -1639,6 +1782,8 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         content: Default::default(),
         channel: Some(channel_id),
         parent,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Default::default(),
     };
     p.tracks.splice(at..at, std::iter::once(group).chain(moved));
@@ -1844,6 +1989,47 @@ pub(crate) fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usiz
     Ok((lane, index))
 }
 
+/// Where a clip an edit command names is: on the arrangement (`index`) or in a launcher slot
+/// (`scene`).
+#[derive(Debug, Clone, Copy)]
+enum ClipAt {
+    Arrangement { lane: usize, index: usize },
+    Slot { column: usize, scene: usize },
+}
+
+impl ClipAt {
+    fn get(self, p: &Project) -> Option<&Clip> {
+        match self {
+            Self::Arrangement { lane, index } => p.arrangement.lanes.get(lane)?.clips.get(index),
+            Self::Slot { column, scene } => p.launcher.columns.get(column)?.slots.get(scene)?.clip.as_ref(),
+        }
+    }
+
+    fn get_mut(self, p: &mut Project) -> Option<&mut Clip> {
+        match self {
+            Self::Arrangement { lane, index } => p.arrangement.lanes.get_mut(lane)?.clips.get_mut(index),
+            Self::Slot { column, scene } => p.launcher.columns.get_mut(column)?.slots.get_mut(scene)?.clip.as_mut(),
+        }
+    }
+}
+
+/// The clip `params` names: an arrangement clip by `index`, or the clip in a launcher slot by
+/// `scene`.
+fn clip_at(p: &Project, params: &Value) -> Result<ClipAt, CommandError> {
+    match (params.get("index"), params.get("scene")) {
+        (Some(_), Some(_)) => Err("give index or scene, not both".into()),
+        (None, Some(_)) => {
+            let (column, scene) = (column_index(p, params)?, scene_index(p, params)?);
+            match p.launcher.columns.get(column).and_then(|c| c.slots.get(scene)) {
+                Some(slot) if slot.clip.is_some() => Ok(ClipAt::Slot { column, scene }),
+                _ => Err(format!("the slot of scene {} is empty", scene + 1).into()),
+            }
+        }
+        (Some(_), None) => lane_and_index(p, params).map(|(lane, index)| ClipAt::Arrangement { lane, index }),
+        (None, None) => Err("give index (an arrangement clip) or scene (a launcher clip)".into()),
+    }
+}
+
 fn set_clip_gain(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let db = number_or_neg_infinity(params, "db")?;
     if db > 24.0 {
@@ -1921,9 +2107,9 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
     {
         return Err("give in, out (beats), inShape, outShape, inCurve or outCurve".into());
     }
-    let (lane, index) = lane_and_index(&session.project, params)?;
+    let at = clip_at(&session.project, params)?;
     let p = &mut session.project;
-    let clip = p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?;
+    let clip = at.get(p).ok_or("the clip is missing")?;
     let audio = p.content(clip.content).is_some_and(|c| c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))));
     if !audio {
         return Err("only an audio clip has fades".into());
@@ -1959,8 +2145,8 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
         "fade_out_shape": changed.fade_out_curve.shape.name(),
         "fade_out_curve": changed.fade_out_curve.curve,
     });
-    if let Some(slot) = p.arrangement.lanes.get_mut(lane).and_then(|l| l.clips.get_mut(index)) {
-        *slot = changed;
+    if let Some(target) = at.get_mut(p) {
+        *target = changed;
     }
     Ok(result)
 }
@@ -2155,6 +2341,117 @@ fn set_cue(session: &mut Session, params: &Value) -> Result<Value, CommandError>
     let cue = params.get("cue").and_then(Value::as_bool).ok_or("cue must be true or false")?;
     channel_param(session, params)?.cue = cue;
     Ok(json!({ "cue": cue }))
+}
+
+fn set_midi_input(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let id = track_id(&session.project, params)?;
+    let port = match params.get("port") {
+        None => None,
+        Some(Value::String(s)) => Some(match s.trim() {
+            "" => return Err("port must be \"all\", \"none\" or a port's name".into()),
+            "all" => MidiPort::All,
+            "none" => MidiPort::Nothing,
+            name => MidiPort::Named(name.to_string()),
+        }),
+        Some(_) => return Err("port must be a text".into()),
+    };
+    let channel = match params.get("channel") {
+        None => None,
+        Some(v) => match v.as_u64() {
+            Some(0) => Some(None),
+            Some(c @ 1..=16) => Some(u8::try_from(c).ok()),
+            _ => return Err("channel must be 0 (every channel) or 1 to 16".into()),
+        },
+    };
+    let track = session.project.tracks.iter_mut().find(|t| t.id == id).ok_or("the track is missing")?;
+    if let Some(port) = port {
+        track.midi_input.port = port;
+    }
+    if let Some(channel) = channel {
+        track.midi_input.channel = channel;
+    }
+    Ok(json!({ "midi_input": midi_input_json(&track.midi_input) }))
+}
+
+fn set_audio_input(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    use suhina_model::{InputChannels, MAX_INPUT_CHANNEL, Monitor};
+    let id = track_id(&session.project, params)?;
+    let bad = || {
+        CommandError(format!("input must be \"none\", a channel from 1 to {MAX_INPUT_CHANNEL} or a pair like \"1/2\""))
+    };
+    let channel = |text: &str| text.trim().parse::<u16>().ok().filter(|c| (1..=MAX_INPUT_CHANNEL).contains(c));
+    let channels = match params.get("input") {
+        None => None,
+        Some(Value::String(text)) => Some(match text.trim() {
+            "none" => InputChannels::None,
+            pair if pair.contains('/') => {
+                let (left, right) = pair.split_once('/').ok_or_else(bad)?;
+                let (left, right) = (channel(left).ok_or_else(bad)?, channel(right).ok_or_else(bad)?);
+                if left.checked_add(1) != Some(right) {
+                    return Err("a stereo pair is two neighbouring channels, like \"1/2\" or \"3/4\"".into());
+                }
+                InputChannels::Stereo(left)
+            }
+            one => InputChannels::Mono(channel(one).ok_or_else(bad)?),
+        }),
+        Some(_) => return Err(bad()),
+    };
+    let monitor = match params.get("monitor") {
+        None => None,
+        Some(v) => Some(match v.as_str() {
+            Some("auto") => Monitor::Auto,
+            Some("in") => Monitor::In,
+            Some("off") => Monitor::Off,
+            _ => return Err("monitor must be auto, in or off".into()),
+        }),
+    };
+    let track = session.project.tracks.iter_mut().find(|t| t.id == id).ok_or("the track is missing")?;
+    if let Some(channels) = channels {
+        track.audio_input.channels = channels;
+    }
+    if let Some(monitor) = monitor {
+        track.audio_input.monitor = monitor;
+    }
+    Ok(json!({ "audio_input": audio_input_json(&track.audio_input) }))
+}
+
+/// A track's audio input as commands show it: `input` "none", "3" or "1/2", and `monitor`.
+pub(crate) fn audio_input_json(input: &suhina_model::AudioInput) -> Value {
+    use suhina_model::{InputChannels, Monitor};
+    let channels = match input.channels {
+        InputChannels::None => "none".to_string(),
+        InputChannels::Mono(c) => c.to_string(),
+        InputChannels::Stereo(c) => format!("{c}/{}", c.saturating_add(1)),
+    };
+    let monitor = match input.monitor {
+        Monitor::Auto => "auto",
+        Monitor::In => "in",
+        Monitor::Off => "off",
+    };
+    json!({ "input": channels, "monitor": monitor })
+}
+
+/// A track's MIDI input as commands show it: `port` "all", "none" or the port's name, and
+/// `channel` 1 to 16 or null for every one.
+pub(crate) fn midi_input_json(input: &suhina_model::MidiInput) -> Value {
+    let port = match &input.port {
+        MidiPort::All => "all",
+        MidiPort::Nothing => "none",
+        MidiPort::Named(name) => name.as_str(),
+    };
+    json!({ "port": port, "channel": input.channel })
+}
+
+fn set_arm(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let armed = params.get("armed").and_then(Value::as_bool).ok_or("armed must be true or false")?;
+    let exclusive = match params.get("exclusive") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("exclusive must be true or false")?,
+    };
+    let track = track_id(&session.project, params)?;
+    session.set_armed(track, armed, exclusive);
+    let tracks: Vec<u32> = session.armed().iter().map(|t| t.0).collect();
+    Ok(json!({ "armed": armed, "armed_tracks": tracks, "playing": session.player().is_some() }))
 }
 
 fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -2412,6 +2709,9 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
                         "loop": clip.loop_range.is_some(),
                         "enabled": clip.enabled,
                         "follow_action": follow::describe(&clip.follow_action),
+                        "launch_mode": clip.launch.mode.name(),
+                        "legato": clip.launch.legato,
+                        "quantization": clip.launch.quantization.name(),
                     }),
                     None => json!({ "scene": number, "clip": null, "stop_button": slot.has_stop }),
                 })
@@ -2741,7 +3041,7 @@ fn stop_all(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
 fn set_quantization(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let text = params.get("value").and_then(Value::as_str).ok_or("value must be a string such as \"1 bar\"")?;
     let quantization = parse_quantization(text)?;
-    send(session, LaunchCommand::SetQuantization(quantization))?;
+    session.set_quantization(quantization)?;
     Ok(json!({ "quantization": text.trim() }))
 }
 

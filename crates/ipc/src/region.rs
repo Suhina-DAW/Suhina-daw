@@ -1,5 +1,6 @@
 //! The shared-memory region: a header of atomics, then the input and the output buffer, then
-//! the block's events.
+//! the block's events, then the instances that run the block after this link's own (its
+//! followers).
 //!
 //! The region is a file mapped by both processes (in `/dev/shm` on Linux, so it stays in
 //! memory; in the temporary directory elsewhere). The engine creates it and removes it when the
@@ -12,10 +13,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use memmap2::MmapMut;
 
 use crate::events::{EVENT_BYTES, Event, MAX_EVENTS};
-use crate::{IpcError, MAX_CHANNELS, MAX_FRAMES};
+use crate::{IpcError, MAX_CHANNELS, MAX_FOLLOWERS, MAX_FRAMES};
 
 const MAGIC: u32 = 0x4C57_4950;
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 /// The header's size; the buffers start after it.
 const HEADER_BYTES: usize = 256;
 // Byte offsets of the header fields. The words the two sides write sit on cache lines of their
@@ -30,11 +31,18 @@ const AT_FRAMES: usize = 192;
 const AT_EVENTS: usize = 196;
 /// Bytes of the events area.
 const EVENTS_BYTES: usize = MAX_EVENTS * EVENT_BYTES;
+/// Bytes of the followers area: their count, then each one's instance number.
+const FOLLOWERS_BYTES: usize = 4 * (1 + MAX_FOLLOWERS);
 
-/// Bytes a region for `channels` × `max_frames` needs: the header, two buffers and the events.
+/// Bytes a region for `channels` × `max_frames` needs: the header, two buffers, the events and
+/// the followers.
 fn size(channels: u32, max_frames: u32) -> Option<usize> {
     let samples = (channels as usize).checked_mul(max_frames as usize)?;
-    samples.checked_mul(2 * size_of::<f32>())?.checked_add(HEADER_BYTES)?.checked_add(EVENTS_BYTES)
+    samples
+        .checked_mul(2 * size_of::<f32>())?
+        .checked_add(HEADER_BYTES)?
+        .checked_add(EVENTS_BYTES)?
+        .checked_add(FOLLOWERS_BYTES)
 }
 
 /// Where new regions go.
@@ -230,6 +238,49 @@ impl Region {
             if let Some(event) = Event::decode(&bytes) {
                 out.push(event);
             }
+        }
+    }
+
+    /// Start of the followers area, after the events.
+    fn followers_area(&mut self) -> *mut u8 {
+        let offset = HEADER_BYTES + 2 * self.samples() * size_of::<f32>() + EVENTS_BYTES;
+        self.map.as_mut_ptr().wrapping_add(offset)
+    }
+
+    /// Stores the instances that run the block after this link's own (the first
+    /// [`MAX_FOLLOWERS`]), in order, and their count.
+    pub(crate) fn write_followers(&mut self, followers: &[u32]) {
+        let count = followers.len().min(MAX_FOLLOWERS);
+        let area = self.followers_area();
+        for (index, follower) in followers.iter().take(count).enumerate() {
+            let bytes = follower.to_le_bytes();
+            let to = area.wrapping_add(4 * (1 + index));
+            // SAFETY: the followers area holds a count and `MAX_FOLLOWERS` numbers of 4 bytes
+            // (the region's size includes it, checked on create and open) and `index` is below
+            // that; the source is a local array. The host does not read the area until the
+            // request is published, after this copy.
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), to, 4) };
+        }
+        let bytes = (count as u32).to_le_bytes();
+        // SAFETY: as above, the count's 4 bytes at the start of the area.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), area, 4) };
+    }
+
+    /// Reads the block's followers into `out` (emptied first; it should have room for
+    /// [`MAX_FOLLOWERS`], so this does not allocate).
+    pub(crate) fn read_followers(&mut self, out: &mut Vec<u32>) {
+        out.clear();
+        let area = self.followers_area();
+        let mut bytes = [0u8; 4];
+        // SAFETY: as in `write_followers`, the other way: the count is inside the area, and
+        // the engine wrote it before publishing the request this block answers.
+        unsafe { std::ptr::copy_nonoverlapping(area, bytes.as_mut_ptr(), 4) };
+        let count = (u32::from_le_bytes(bytes) as usize).min(MAX_FOLLOWERS);
+        for index in 0..count {
+            let from = area.wrapping_add(4 * (1 + index));
+            // SAFETY: as above; `index` is below `MAX_FOLLOWERS`.
+            unsafe { std::ptr::copy_nonoverlapping(from, bytes.as_mut_ptr(), 4) };
+            out.push(u32::from_le_bytes(bytes));
         }
     }
 
