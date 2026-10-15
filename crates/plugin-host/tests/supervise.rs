@@ -165,6 +165,30 @@ fn a_real_clap_file_when_one_is_given() {
     assert!(plugin.ping());
 }
 
+/// Runs a real VST3 file or bundle through the host when `SUHINA_TEST_VST3` names one
+/// (`path/to/Name.vst3`, optionally `#<class id>`); skipped otherwise.
+#[test]
+fn a_real_vst3_bundle_when_one_is_given() {
+    let Ok(spec) = std::env::var("SUHINA_TEST_VST3") else {
+        eprintln!("SUHINA_TEST_VST3 not set; skipped");
+        return;
+    };
+    let (mut plugin, mut audio) = start(&format!("vst3:{spec}"));
+    let mut done = 0;
+    for _ in 0..100 {
+        if block(&mut audio, PATIENT).0 == Outcome::Done {
+            done += 1;
+        }
+    }
+    assert_eq!(done, 100);
+    let state = plugin.save_state();
+    eprintln!("{spec}: latency {}, state {:?} bytes", plugin.latency(), state.as_ref().map(|s| s.data.len()));
+    if let Ok(state) = state {
+        plugin.load_state(state).unwrap();
+    }
+    assert!(plugin.ping());
+}
+
 #[test]
 fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     use suhina_plugins::offline::render;
@@ -194,8 +218,26 @@ fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     assert!(refused.state_refused.is_some());
     assert_eq!(refused.samples, default.samples);
 
+    // A host that dies in a block is reported as a crash, not as a plug-in that stopped answering.
     let crashing = render(launch("test:crash-after:2"), &input, 0);
-    assert!(matches!(crashing, Err(PluginError::Timeout(_))), "{crashing:?}");
+    assert!(matches!(&crashing, Err(PluginError::Protocol(why)) if why.contains("crashed")), "{crashing:?}");
+    let hanging = render(launch("test:hang-after:2"), &input, 0);
+    assert!(matches!(hanging, Err(PluginError::Timeout(_))), "{hanging:?}");
+}
+
+#[test]
+fn a_clap_plugin_gets_every_audio_port_it_declares() {
+    use suhina_plugins::offline::render;
+    // `test:clap-ports` declares an 8-channel main input and output and a stereo side input and
+    // output, reads all of them, and refuses (silence) a block laid out otherwise: a host that
+    // gave it only the link's two channels left it without most of what it reads (#327).
+    let input: Vec<f32> = (0..1_500).flat_map(|n| [n as f32 + 1.0, -(n as f32) - 1.0]).collect();
+    let rendered = render(launch("test:clap-ports"), &input, 0).unwrap();
+    assert_eq!(rendered.samples, input);
+
+    // In real time too: the link's stereo goes through the main ports.
+    let (_plugin, mut audio) = start("test:clap-ports");
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 1.0));
 }
 
 #[test]

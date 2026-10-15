@@ -27,7 +27,7 @@ use suhina_model::{Project, TrackId};
 use crate::ahead::StretchThread;
 use crate::audio::AudioPool;
 use crate::chain::Placed;
-use crate::launcher::Controller;
+use crate::launcher::{Controller, SceneShift};
 use crate::plugin::{PluginProcessor, PluginSlotInfo, Plugins};
 use crate::{Graph, MAX_AUDIO_VOICES, Renderer};
 
@@ -66,6 +66,9 @@ pub(crate) struct Swap {
     /// The arrangement frame the graph's stretch voices were moved to for `at`, or `None` if the
     /// transport was stopped (they are at the start).
     arrangement: Option<u64>,
+    /// How the graph's scenes line up with the graph before it, when a scene was inserted or
+    /// removed.
+    scenes: Option<SceneShift>,
 }
 
 /// The renderer's end of the swap queues.
@@ -216,7 +219,7 @@ impl Renderer {
             self.time_at_origin = rescale(self.time(), old_beat_frames, self.graph.frames_per_beat);
             self.origin = self.position;
         }
-        self.graph.launcher.adopt(&mut old.launcher);
+        self.graph.launcher.adopt(&mut old.launcher, swap.scenes);
         // A chain with the same devices on the same track keeps them running, so held notes,
         // envelopes and tails carry on; the new parameter values apply (ADR 0004).
         for chain in &mut self.graph.chains {
@@ -244,6 +247,7 @@ impl Renderer {
             }
         }
         self.graph.direct_delay.adopt(&mut old.direct_delay);
+        self.meters.assign(self.graph.levels.tracks());
         // Parameter messages newer than the new graph's project apply to it again, in order.
         let mut newer = [usize::MAX; RECENT_PARAMS];
         let mut count = 0;
@@ -265,9 +269,16 @@ impl Renderer {
         // Sounding voices follow their track: its mix (volume, pan, mute) and its chain in the
         // new graph. A voice whose track is gone ends.
         for voice in self.voices.iter_mut().filter(|v| v.active) {
-            match self.graph.routes.iter().find(|(track, _, _)| track.0 == voice.track) {
-                Some(&(_, bus, (left, right))) => {
+            match self.graph.routes.iter().position(|(track, _, _)| track.0 == voice.track) {
+                Some(index) => {
+                    let Some(&(_, bus, (left, right))) = self.graph.routes.get(index) else { continue };
                     voice.bus = bus;
+                    // The routes are in the project's track order, as the meter slots are.
+                    voice.meter = if index < crate::MAX_METERED_TRACKS {
+                        u32::try_from(index).unwrap_or(crate::meters::NO_METER)
+                    } else {
+                        crate::meters::NO_METER
+                    };
                     voice.gain_left = left * voice.velocity;
                     voice.gain_right = right * voice.velocity;
                 }
@@ -422,6 +433,13 @@ impl Controller {
     /// it on this thread and swaps it in about [`SWAP_AHEAD_SECONDS`] from now. Fails if the
     /// project cannot be rendered or the renderer has not taken the previous updates yet.
     pub fn update(&mut self, project: &Project) -> Result<(), String> {
+        self.update_with_scenes(project, None)
+    }
+
+    /// Like [`Controller::update`], for a project whose launcher differs from the one sent
+    /// before by the inserted or removed scene `scenes` ([`SceneShift::between`]): what each
+    /// column plays and has queued moves with its slot.
+    pub fn update_with_scenes(&mut self, project: &Project, scenes: Option<SceneShift>) -> Result<(), String> {
         let updater = &mut self.updater;
         updater.collect();
         let mut plugins = Plugins { info: updater.plugin_info.clone(), processors: HashMap::new() };
@@ -450,7 +468,7 @@ impl Controller {
         }
         updater
             .swaps
-            .push(Swap { graph, at, arrangement, param_seq: updater.param_seq })
+            .push(Swap { graph, at, arrangement, param_seq: updater.param_seq, scenes })
             .map_err(|_| "the audio engine has not taken the previous edits yet".to_string())
     }
 
@@ -525,6 +543,20 @@ impl Controller {
     pub fn preview_notes(&mut self, notes: crate::PreviewNotes, gain: f32) -> Result<(), String> {
         let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
         self.preview.send(crate::preview::PreviewCommand::Notes { notes: Box::new(notes), gain })
+    }
+
+    /// Starts the notes ([`crate::preview_notes`] makes them) and holds them until
+    /// [`Controller::preview_note_off`]: the piano roll's key column (`preview.noteOn`).
+    /// Replaces any preview. Fails if the queue is full.
+    pub fn preview_note_on(&mut self, notes: crate::PreviewNotes, gain: f32) -> Result<(), String> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Hold { notes: Box::new(notes), gain })
+    }
+
+    /// Releases the held note of `key`, or every held note when `key` is `None`. Fails if the
+    /// queue is full.
+    pub fn preview_note_off(&mut self, key: Option<u8>) -> Result<(), String> {
+        self.preview.send(crate::preview::PreviewCommand::Release { key })
     }
 
     /// A fallback instrument for [`crate::preview_notes`]: the FM synth with its first voice,

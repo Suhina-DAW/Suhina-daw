@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use suhina_device_api::NoteEvent;
 use suhina_model::{ChannelId, DeviceKind, Project, TrackId};
 
+use crate::plugin_params::{ParamEvent, SlotParams};
+
 /// How long a slot waits for a block when rendering offline, where there is no deadline: long
 /// enough for any plug-in that still works.
 pub const OFFLINE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -66,6 +68,15 @@ pub trait PluginProcessor: Send {
     fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
         let _ = (buffer, timeout);
         false
+    }
+
+    /// Parameter values for the block that [`PluginProcessor::process`] or
+    /// [`PluginProcessor::send`] hands over next, at frames counted from the start of its
+    /// buffer, in frame order (#109). The engine calls it before every block (with none, too);
+    /// a processor keeps them for that block only. One that cannot set parameters ignores them.
+    /// Never allocates.
+    fn automate(&mut self, params: &[ParamEvent]) {
+        let _ = params;
     }
 }
 
@@ -180,9 +191,22 @@ pub(crate) struct PluginSlot {
     pub(crate) enabled: bool,
     /// Round trips it did not answer in time or refused; tests read it.
     pub(crate) missed: u64,
+    /// The parameter values it sends: set ones and automation.
+    pub(crate) params: SlotParams,
 }
 
 impl PluginSlot {
+    /// Hands the processor the parameter events of the block's frames `from..to`, the span it
+    /// runs next. Never allocates.
+    pub(crate) fn automate(&mut self, from: usize, to: usize) {
+        if !self.enabled {
+            return;
+        }
+        if let Some(processor) = self.processor.as_mut() {
+            processor.automate(self.params.span(from, to));
+        }
+    }
+
     /// Runs `span` through the plug-in with `events` (frames counted from the start of the
     /// span) until `deadline`, or [`OFFLINE_TIMEOUT`] without one. A disabled slot passes the
     /// sound through; one that misses passes it through too, or is silent for an instrument.
@@ -295,6 +319,7 @@ mod tests {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         }
     }

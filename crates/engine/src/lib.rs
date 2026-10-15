@@ -4,6 +4,9 @@
 
 mod ahead;
 mod audio;
+mod automation;
+#[cfg(test)]
+mod automation_render_tests;
 mod buses;
 #[cfg(test)]
 mod buses_tests;
@@ -15,14 +18,26 @@ mod cpu;
 mod fade_cost_tests;
 #[cfg(test)]
 mod fade_tests;
+mod follow;
+#[cfg(test)]
+mod follow_tests;
 mod launcher;
+mod meters;
+#[cfg(test)]
+mod meters_tests;
 mod metronome;
 mod plugin;
+mod plugin_params;
+#[cfg(test)]
+mod plugin_params_tests;
 #[cfg(test)]
 mod plugin_tests;
 mod preview;
 #[cfg(test)]
 mod preview_tests;
+mod sends;
+#[cfg(test)]
+mod sends_tests;
 mod stretch;
 mod swap;
 
@@ -38,11 +53,15 @@ use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
 use launcher::Launcher;
-pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
+pub use launcher::{
+    ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
+};
+pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
     OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
 };
+pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
@@ -116,6 +135,8 @@ struct StretchEvent {
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
     bus: u32,
+    /// The track's meter slot (`meters::meter_slot`).
+    meter: u32,
 }
 
 /// A note with its position resolved to sample frames and its mix resolved from the channel.
@@ -133,6 +154,8 @@ struct NoteEvent {
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
     bus: u32,
+    /// The track's meter slot.
+    meter: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -152,6 +175,8 @@ pub(crate) struct Voice {
     column: u32,
     /// 0 for the output, or 1 + the index of the track's chain.
     bus: u32,
+    /// The track's meter slot.
+    meter: u32,
 }
 
 /// An arrangement audio clip and the launcher column of its track.
@@ -160,6 +185,7 @@ struct ArrangedAudio {
     event: AudioEvent,
     column: u32,
     bus: u32,
+    meter: u32,
     /// Which clip of the project this is (arrangement lane, clip, content lane), so a graph swap
     /// can find the same clip in the old graph (ADR 0005).
     key: (usize, usize, usize),
@@ -187,6 +213,8 @@ pub(crate) struct Graph {
     /// everything that does not go through a chain (each chain delays itself up to it).
     latency: u32,
     direct_delay: Delay,
+    /// Every track's block of sound, for its level meter.
+    levels: meters::Levels,
 }
 
 pub struct Renderer {
@@ -228,6 +256,8 @@ pub struct Renderer {
     preview: preview::Preview,
     /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
     cpu: cpu::CpuMeter,
+    /// The level meters, published to the controller's `MeterMonitor`.
+    meters: meters::MeterWriter,
 }
 
 impl Renderer {
@@ -250,6 +280,8 @@ impl Renderer {
     ) -> Result<Self, RenderError> {
         let graph = Graph::build(project, audio, sample_rate, &mut plugins)?;
         graph.launcher.monitor.running.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut meters = meters::MeterWriter::new(sample_rate);
+        meters.assign(graph.levels.tracks());
         graph
             .launcher
             .monitor
@@ -279,6 +311,7 @@ impl Renderer {
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
             cpu: cpu::CpuMeter::new(),
+            meters,
         })
     }
 
@@ -439,6 +472,14 @@ impl Renderer {
             beat: self.graph.launcher.beat_and_bar().0,
             playing: self.running,
         };
+        // Plug-in parameter events (set values, automation) are planned before any of the
+        // block runs: a chain may run part of it early, when notes crowd it.
+        let at = self.running.then(|| self.time());
+        let time = self.time();
+        for chain in &mut self.graph.chains {
+            chain.automate(at, frames);
+            chain.automate_mix(time, frames, self.running);
+        }
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
@@ -451,8 +492,8 @@ impl Renderer {
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
-            let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
-            let click = self.metronome.frame(self.running, beat, bar_beats);
+            let (beat, bar_beats, bar_origin) = self.graph.launcher.beat_and_bar();
+            let click = self.metronome.frame(self.running, beat, bar_beats, bar_origin);
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running
@@ -473,6 +514,7 @@ impl Renderer {
                         gains: (event.gain_left, event.gain_right),
                         column: event.column,
                         bus: event.bus,
+                        meter: event.meter,
                     };
                     let Self { voices, graph, position, sample_rate, .. } = self;
                     start_note(voices, &mut graph.chains, frame, *position, *sample_rate, end, start);
@@ -499,6 +541,7 @@ impl Renderer {
                 match bus_chain(&mut self.graph.chains, voice.bus) {
                     Some(chain) => chain.add(frame, l, r),
                     None => {
+                        self.graph.levels.add(voice.meter, frame, l, r);
                         left += l;
                         right += r;
                     }
@@ -531,17 +574,12 @@ impl Renderer {
                 chain.collect(frames);
             }
         }
-        // In order, so a bus has every chain that plays into it before it runs.
-        for i in 0..self.graph.chains.len() {
-            let (done, later) = self.graph.chains.split_at_mut(i + 1);
-            let Some(chain) = done.last_mut() else { continue };
-            match chain.target.and_then(|t| t.checked_sub(i + 1)).and_then(|t| later.get_mut(t)) {
-                Some(bus) => chain.finish(bus.input(frames), frames, &context),
-                None => chain.finish(out, frames, &context),
-            }
-        }
+        // In order, so a bus or a return has every chain that plays into it before it runs.
+        sends::finish(&mut self.graph.chains, out, frames, &context);
+        self.graph.levels.finish(&self.graph.chains, frames, &mut self.meters);
         // The preview comes after every track and the main channel's mix (ADR 0011).
         self.preview.finish(out, frames, &mut self.graph.chains);
+        self.meters.measure(meters::Meter::Main, out, frames);
         self.block_frame = 0;
     }
 
@@ -556,6 +594,7 @@ impl Renderer {
         let launcher = &self.graph.launcher;
         let ahead = &mut self.graph.ahead;
         let chains = &mut self.graph.chains;
+        let levels = &mut self.graph.levels;
         self.stretch_fresh = false;
         for (index, event) in self.graph.stretch_events.iter().enumerate() {
             if event.end <= time_start || event.start >= time_end {
@@ -582,6 +621,7 @@ impl Renderer {
                     } else if let Some([ol, or]) =
                         out.get_mut(at * 2..at * 2 + 2).and_then(|s| <&mut [f32; 2]>::try_from(s).ok())
                     {
+                        levels.add(event.meter, at, l, r);
                         *ol += l;
                         *or += r;
                     }
@@ -618,6 +658,7 @@ impl Renderer {
                         match bus_chain(&mut self.graph.chains, arranged.bus) {
                             Some(chain) => chain.add(frame, l, r),
                             None => {
+                                self.graph.levels.add(arranged.meter, frame, l, r);
                                 left += l;
                                 right += r;
                             }
@@ -651,6 +692,7 @@ pub(crate) struct NoteStart {
     pub(crate) gains: (f32, f32),
     pub(crate) column: u32,
     pub(crate) bus: u32,
+    pub(crate) meter: u32,
 }
 
 /// The chain behind `bus`, or `None` for the output.
@@ -692,6 +734,7 @@ pub(crate) fn start_note(
             velocity: note.velocity,
             column: note.column,
             bus: note.bus,
+            meter: note.meter,
         };
     }
 }
@@ -724,6 +767,10 @@ impl Graph {
             return Err(RenderError::InvalidTempo(bpm));
         }
         project.validate().map_err(RenderError::InvalidProject)?;
+        // Mixer parameters that follow lanes are built at their neutral values and applied
+        // after the track's chain, frame by frame (#395).
+        let neutral = automation::neutral(project);
+        let project = neutral.as_ref().unwrap_or(project);
 
         let frames_per_beat = 60.0 / bpm * f64::from(sample_rate);
         let column_of = |track: TrackId| {
@@ -749,12 +796,13 @@ impl Graph {
                     let Some(track) = content_lane.target.or(lane.track) else { continue };
                     let Some((bus, (gain_left, gain_right))) = route(project, &chains, track) else { continue };
                     let column = column_of(track);
+                    let meter = meters::meter_slot(project, track);
                     match &content_lane.data {
                         LaneData::Notes(_) => collect_notes(
                             clip,
                             content_lane,
                             frames_per_beat,
-                            (track, gain_left, gain_right, column, bus),
+                            (track, gain_left, gain_right, column, bus, meter),
                             &mut events,
                         ),
                         LaneData::Audio(region) => {
@@ -778,6 +826,7 @@ impl Graph {
                                     fades: Fades::new(clip, frames_per_beat, sample_rate),
                                     column,
                                     bus,
+                                    meter,
                                 });
                                 continue;
                             }
@@ -787,6 +836,7 @@ impl Graph {
                                     event,
                                     column,
                                     bus,
+                                    meter,
                                     key: (lane_index, clip_index, content_index),
                                 },
                             ));
@@ -830,6 +880,7 @@ impl Graph {
                     (t.id, bus, gains)
                 })
                 .collect(),
+            levels: meters::Levels::build(project, &chains),
             chains,
             latency,
             direct_delay: Delay::new(latency as usize),
@@ -994,7 +1045,7 @@ fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
     frames_per_beat: f64,
-    (track, gain_left, gain_right, column, bus): (TrackId, f32, f32, u32, u32),
+    (track, gain_left, gain_right, column, bus, meter): (TrackId, f32, f32, u32, u32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
     let LaneData::Notes(notes) = &lane.data else { return };
@@ -1026,6 +1077,7 @@ fn collect_notes(
                 gain_right: gain_right * note_velocity(note.velocity),
                 column,
                 bus,
+                meter,
             });
         }
     };
@@ -1086,6 +1138,7 @@ mod tests {
                     sends: Vec::new(),
                     devices: Vec::new(),
                     extensions: Extensions::default(),
+                    automation: Vec::new(),
                 })
                 .collect(),
             contents: vec![ClipContent {
@@ -1114,6 +1167,7 @@ mod tests {
             fade_out: 0.0,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
+            follow_action: Default::default(),
             extensions: Extensions::default(),
         }
     }
@@ -1705,6 +1759,7 @@ mod tests {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         });
     }

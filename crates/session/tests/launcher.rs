@@ -32,6 +32,7 @@ fn project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let content = |id: u32, name: &str, key: u8| ClipContent {
         id: ContentId(id),
@@ -61,6 +62,7 @@ fn project() -> Project {
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     let slot = |clip: Option<Clip>, has_stop: bool| Slot { clip, has_stop };
@@ -70,8 +72,8 @@ fn project() -> Project {
         contents: vec![content(1, "Beat", 36), content(2, "Line", 40), content(3, "Off", 50)],
         launcher: Launcher {
             scenes: vec![
-                Scene { name: "Intro".into(), tempo_bpm: None },
-                Scene { name: "Drop".into(), tempo_bpm: Some(128.0) },
+                Scene { name: "Intro".into(), ..Scene::default() },
+                Scene { name: "Drop".into(), tempo_bpm: Some(128.0), time_signature: None },
             ],
             columns: vec![
                 LauncherColumn {
@@ -114,7 +116,7 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
     for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport) {
-        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0 });
+        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0, "key": 60 });
         let params: Value = params
             .as_object()
             .unwrap()
@@ -272,6 +274,30 @@ fn edits_and_undo_are_heard_while_playing() {
 }
 
 #[test]
+fn a_drag_that_outruns_the_engine_is_kept_and_heard_once_it_catches_up() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "clip.launch", json!({ "track": "Drums", "scene": 1 })).unwrap();
+    let loud = beat_peaks(&mut renderer, 2)[1];
+    // Edits while the audio thread takes none fill the engine's queue of new graphs.
+    let mut full = None;
+    for i in 0..64 {
+        let db = -f64::from(i % 2 + 1);
+        if let Err(e) = run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": db })) {
+            full = Some(e);
+            break;
+        }
+    }
+    assert!(full.is_some_and(|e| e.contains("could not follow")));
+    // A continued edit (a drag) is not an error then: the project has it, the engine catches up.
+    run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": -12, "continue": true })).unwrap();
+    assert!((session.project().channels[0].volume - 0.2512).abs() < 1e-3);
+    beat_peaks(&mut renderer, 1);
+    session.catch_up_player();
+    let quieter = beat_peaks(&mut renderer, 2)[1];
+    assert!((quieter / loud - 0.25).abs() < 0.01, "{loud} -> {quieter}");
+}
+
+#[test]
 fn the_metronome_is_a_transport_command() {
     let (mut session, mut renderer) = playing();
     let set = run(&mut session, "transport.setMetronome", json!({ "on": true, "db": -12 })).unwrap();
@@ -395,6 +421,150 @@ fn bad_positions_and_stop_returns_are_errors() {
     assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(2.0), Some(false)));
     // The largest position is accepted.
     run(&mut session, "transport.setPosition", json!({ "beats": 120_000 })).unwrap();
+}
+
+/// [`playing`] with arrangement clips on Drums at beats 4 and 10, and on Bass at beat 2.
+fn playing_with_clips() -> (Session, Renderer) {
+    let mut project = project();
+    let clip = |start: f64| Clip {
+        content: ContentId(1),
+        start,
+        length: 1.0,
+        offset: 0.0,
+        loop_range: None,
+        enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        follow_action: Default::default(),
+        extensions: Extensions::default(),
+    };
+    let lane =
+        |track: u32, clips: Vec<Clip>| ArrangementLane { name: String::new(), track: Some(TrackId(track)), clips };
+    project.arrangement.lanes = vec![lane(1, vec![clip(4.0), clip(10.0)]), lane(2, vec![clip(2.0)])];
+    let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+    let mut session = Session::new(project);
+    session.attach_player(Player::new(renderer.controller(), None));
+    advance(&mut renderer, 1);
+    (session, renderer)
+}
+
+#[test]
+fn play_from_a_clip_moves_the_marker_to_its_start() {
+    let (mut session, mut renderer) = playing_with_clips();
+    let played = run(&mut session, "transport.play", json!({ "from": "clip", "track": "Drums", "index": 1 })).unwrap();
+    assert_eq!(played, json!({ "transport": "playing", "start_beat": 10.0 }));
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(10.0), Some(true)));
+    assert_eq!(state["position"], "3.3");
+
+    // Stop goes back to the clip's start, where the marker now is.
+    advance(&mut renderer, 2 * BEAT);
+    run(&mut session, "transport.stop", json!({})).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["position"].as_str()), (Some(10.0), Some("3.3")));
+
+    // While playing, another clip is a jump to its start.
+    run(&mut session, "transport.play", json!({})).unwrap();
+    advance(&mut renderer, BEAT);
+    run(&mut session, "transport.play", json!({ "from": "clip", "track": 2, "index": 0 })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(2.0), Some(true)));
+    assert_eq!(state["position"], "1.3");
+
+    // from: marker is the plain play: the marker stays.
+    run(&mut session, "transport.stop", json!({})).unwrap();
+    run(&mut session, "transport.play", json!({ "from": "marker" })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(2.0), Some(true)));
+}
+
+#[test]
+fn bad_play_sources_are_errors_and_leave_the_transport() {
+    let (mut session, mut renderer) = playing_with_clips();
+    let bad = [
+        json!({ "from": "clip" }),
+        json!({ "from": "clip", "track": "Drums" }),
+        json!({ "from": "clip", "index": 0 }),
+        json!({ "from": "clip", "track": "Drums", "index": 2 }),
+        json!({ "from": "clip", "track": "Drums", "index": -1 }),
+        json!({ "from": "clip", "track": "Drums", "index": "0" }),
+        json!({ "from": "clip", "track": "Nobody", "index": 0 }),
+        // Pad has no arrangement lane.
+        json!({ "from": "clip", "track": "Pad", "index": 0 }),
+        json!({ "from": "selection" }),
+        json!({ "from": true }),
+        json!({ "track": "Drums", "index": 0 }),
+        json!({ "from": "marker", "index": 0 }),
+    ];
+    for params in bad {
+        assert!(run(&mut session, "transport.play", params.clone()).is_err(), "{params}");
+    }
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(0.0), Some(false)));
+}
+
+#[test]
+fn a_key_column_note_plays_until_it_is_let_go() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "fm-synth" })).unwrap();
+    advance(&mut renderer, 2);
+    let before = session.project().clone();
+    let on = run(&mut session, "preview.noteOn", json!({ "track": "Drums", "key": 60 })).unwrap();
+    assert_eq!(on, json!({ "track": 1, "key": 60, "velocity": 100.0 }));
+    // The note holds while the transport is stopped, taking no undo step.
+    let held = beat_peaks(&mut renderer, 2)[1];
+    assert!(held > 0.01, "the track's FM synth plays the key: {held}");
+    assert!(session.player().unwrap().preview_monitor().playing());
+    let later = beat_peaks(&mut renderer, 4)[3];
+    assert!(later > held * 0.2, "{held} -> {later}");
+    // Playing and letting go of a key is no edit: the only undo step is the device added above.
+    assert_eq!(session.project(), &before);
+    assert_eq!(run(&mut session, "edit.undo", json!({})).unwrap()["undone"], true);
+    run(&mut session, "edit.redo", json!({})).unwrap();
+
+    // Letting go releases it.
+    assert_eq!(
+        run(&mut session, "preview.noteOff", json!({ "track": "Drums", "key": 60 })).unwrap(),
+        json!({ "key": 60 })
+    );
+    let tail = beat_peaks(&mut renderer, 2)[1];
+    assert!(tail < held * 0.05, "released: {tail} of {held}");
+    assert!(!session.player().unwrap().preview_monitor().playing());
+    // Letting go again, of a key that is not held, is not an error.
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums", "key": 64 })).unwrap();
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums" })).unwrap();
+    assert_eq!(session.project(), &before);
+}
+
+#[test]
+fn bad_key_column_notes_are_refused_and_change_nothing() {
+    let (mut session, mut renderer) = playing();
+    let before = session.project().clone();
+    let bad = [
+        ("preview.noteOn", json!({ "track": "Drums" })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 128 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": -1 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 1.5 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 0 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 128 })),
+        ("preview.noteOn", json!({ "track": "Nope", "key": 60 })),
+        ("preview.noteOff", json!({ "track": "Drums", "key": 200 })),
+        ("preview.noteOff", json!({ "track": "Nope" })),
+    ];
+    for (id, params) in bad {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    advance(&mut renderer, 4);
+    assert_eq!(session.project(), &before);
+    assert!(!session.can_undo());
+    assert!(!session.player().unwrap().preview_monitor().playing(), "nothing was started");
 }
 
 #[test]

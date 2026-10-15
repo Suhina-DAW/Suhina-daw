@@ -42,6 +42,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
         fade_out: fade,
         fade_in_curve: curve,
         fade_out_curve: curve,
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     let region = AudioRegion {
@@ -81,6 +82,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
                 output: None,
                 sends: Vec::new(),
                 devices: Vec::new(),
+                automation: Vec::new(),
                 extensions: Extensions::default(),
             })
             .collect(),

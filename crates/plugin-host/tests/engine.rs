@@ -62,6 +62,7 @@ fn plugin_device(id: &str) -> Device {
         enabled: true,
         state: None,
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }
@@ -94,6 +95,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),
@@ -117,6 +119,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
                     fade_out: 0.0,
                     fade_in_curve: Default::default(),
                     fade_out_curve: Default::default(),
+                    follow_action: Default::default(),
                     extensions: Extensions::default(),
                 }],
             }],

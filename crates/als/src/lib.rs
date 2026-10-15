@@ -326,6 +326,7 @@ impl Reader {
                 enabled,
                 state: None,
                 params,
+                automation: Vec::new(),
                 extensions,
             });
         }
@@ -337,6 +338,7 @@ impl Reader {
                 enabled,
                 state: None,
                 params: Vec::new(),
+                automation: Vec::new(),
                 extensions,
             });
         }
@@ -410,6 +412,7 @@ impl Reader {
             enabled,
             state,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions,
         })
     }
@@ -439,6 +442,8 @@ impl Reader {
                 } else {
                     None
                 },
+                // The scene's time signature element is not recorded in the spec yet.
+                time_signature: None,
             })
             .collect()
     }
@@ -546,6 +551,7 @@ impl Reader {
             fade_out: 0.0,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
+            follow_action: Default::default(),
             extensions: Extensions::default(),
         })
     }
@@ -714,6 +720,7 @@ fn empty_channel(id: ChannelId, name: &str, role: ChannelRole) -> Channel {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     }
 }
 

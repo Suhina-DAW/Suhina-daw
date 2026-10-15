@@ -1,16 +1,22 @@
 ---
-description: How versions are numbered, how release builds, the nightly and test builds of pull requests are made
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, development build, download, test build, pull request build, try a pull request, Discord announcement, release notes, changelog
+description: How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog
 type: howto
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
+  - .github/workflows/ci.yml
   - .github/workflows/release.yml
   - .github/workflows/discord.yml
   - .github/workflows/test-build.yml
   - .github/workflows/test-build-links.yml
+  - scripts/branch_update.py
   - scripts/release_notes.py
   - scripts/discord_post.py
+  - scripts/discord_merged.py
+  - scripts/discord_test_build.py
+  - scripts/discord_test_build_backfill.py
+  - scripts/discord_api.py
 ---
 
 # Releasing
@@ -61,16 +67,24 @@ nothing. Running the workflow by hand from `main` with **nightly** checked publi
 
 The nightly's version is the workspace version without a pre-release suffix, the date and the
 commit: `0.0.1-nightly.20261013+a15ad35`. The workflow writes it into `Cargo.toml` and
-`Cargo.lock` before building (nothing is committed), so `suhina-cli --version` and bug reports
-say which build it is. Its packages keep one name, `suhina-nightly-<platform>`, so a link to
-the latest one never changes:
+`Cargo.lock` before building (nothing is committed), so `suhina-cli --version`, the desktop
+app's Help › About Suhina ([spec](spec/about.md)) and bug reports say which build it is. Its
+packages keep one name, `suhina-nightly-<platform>`, so a link to the latest one never changes:
 
 ```text
 https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightly-linux-x86_64.tar.gz
 ```
 
+Each night is also kept as a pre-release of its own under the tag **`nightly-YYYYMMDD`**
+(`nightly-20261013`), with the same packages and notes, published on the same commit and never
+the latest. A tester can go back to an earlier night to check when something broke, or return
+to a build that opens their project. A second nightly on the same day, one run by hand, replaces
+that day's. The nightly job deletes the dated nightlies older than `NIGHTLY_KEEP_DAYS` (30) with
+their tags; it touches no other release, and a failure there leaves the new nightly published.
+
 Each new nightly is posted to Discord's releases channel (see [Discord](#discord)): the version,
-the download link and the changes since the previous nightly (at most 15, as described under
+a link to its dated release, so the link still leads to the build it announced after the next
+night, and the changes since the previous nightly (at most 15, as described under
 [Release notes](#release-notes)). A failed post leaves the nightly published.
 
 Until Suhina has a release of its own (published, not a release candidate), the nightly is the
@@ -89,6 +103,14 @@ them from the pull request in one comment that each new build updates, with a pl
 linked to its log. Downloading an artifact needs a GitHub sign-in, and an artifact is always a
 zip: on Windows it holds the package folder, on Linux and macOS the package's `.tar.gz`, because a
 zip drops the executable bit.
+
+The linking run belongs to the build it links, and says so in what it starts: only a run that built
+something is answered, so a run that was skipped (its *what to build* job decided not to build),
+cancelled or superseded by a newer push links nothing and takes no runner from the builds that do
+have something to link. A failed build is answered like a successful one, with the platform that
+failed linked to its log. The runs that do link wait as one run per pull request rather than one per
+platform, a newer build's link replacing one that is still waiting; a run from a fork lists no pull
+request there, and is grouped by its head repository and branch instead.
 
 | Pull request | Built |
 |---|---|
@@ -110,6 +132,18 @@ The version says which pull request and commit it is: `0.0.1-pr.302+abc1234` in 
 bug reports. Test builds use the release profile without LTO and with 16 codegen units, so they
 build faster and run slightly slower than the nightly.
 
+**A branch update is not built.** A push that only merges `main` into the pull request, as
+*Update branch* does, leaves the pull request's own changes as they were, so the build already
+linked from it is still the one to try. A small first job, *what to build*, asks
+[`scripts/branch_update.py`](../scripts/branch_update.py) whether the new head is a merge commit
+whose first parent is the previous head, whose second parent is on `main`, and whose own diff is
+the same patch as the previous head's (a resolved conflict, or `main` changing lines next to the
+pull request's own, makes it a new patch). It also checks that the previous head's run succeeded,
+so a failed or cancelled build is never kept as the last one. When all hold, the platforms are
+skipped, and `test-build-links.yml`, finding nothing built, leaves the comment linking the last
+real build. Anything else, a new commit, a rewritten history or an unknown previous head, is built
+as before. The merge queue's branches (below) are never built.
+
 **Several pull requests together:** Actions › Test build › Run workflow with their numbers
 (`302 303 304`) merges them onto `main` in that order and builds the result, named
 `suhina-prs-302-303-304-<platform>`; each platform's summary links its package. A pull request that does not
@@ -118,6 +152,45 @@ merge cleanly fails the run and is named in the error.
 The build has a read-only token and no secrets, and for a fork GitHub runs `test-build.yml` as the
 fork has it; so `test-build-links.yml`, which runs from `main` and never runs pull request code,
 links only runs a maintainer started. The maintainers are listed in both workflows.
+
+Each linked build is also posted to the pull request's thread in the Discord testing forum
+(see [Discord](#discord)).
+
+## Merging many pull requests
+
+With many pull requests waiting, merging them one by one through *Update branch* costs a CI run per
+pull request per merge, and every merge makes the rest out of date again. Two things help.
+
+**The merge queue.** [`ci.yml`](../.github/workflows/ci.yml) runs on `merge_group`, so the queue's
+temporary branch (`gh-readonly-queue/main/...`: `main` with the queued pull requests merged onto it
+in order) gets the same jobs as a pull request, and the `ci` check that `main` requires reports
+there. Code checks compare the group with the `main` it is built on; the steps that need a pull
+request (the sign-off check for forks, the list of documents to update, the guard on generated
+files) were run on each pull request before it was queued and skip in the queue. With the queue on,
+a maintainer presses *Merge when ready* on each green pull request: the queue tests several of them
+in one CI run, merges them in order, and takes out a pull request that fails, with no *Update
+branch* by hand. The test build never runs on the queue.
+
+**Which changes build Rust.** In a pull request, the merge queue and on `main`, `ci.yml`'s
+`changes` job skips fmt, clippy and the tests when every changed file is documentation (`docs/`,
+any `.md`, `LICENSE`, `NOTICE`), a script under `scripts/` or a file under `.github/`: no Rust
+build or test reads them. A change to `ci.yml` itself still runs every job. The `docs` job runs on
+every change, so the script tests and the claim bot's test still run; in the Actions tab the
+skipped jobs show as skipped and `ci` passes.
+
+The queue is a setting, not code: Settings › Rules (or Branches) › the rule for `main` › **Require
+merge queue**, with the merge method used today, a group size of about 5 and *Only merge
+non-failing pull requests*. With a queue, *Require branches to be up to date before merging* is not
+needed. Every check the rule requires must come from a workflow that runs on `merge_group`; today
+that is only `ci`, and a check required from another workflow would keep the queue waiting.
+
+Without a queue, turn off *Require branches to be up to date before merging* and merge each green
+pull request without updating it; CI on `main`, which runs on every push, catches the rare
+conflict in meaning between two of them.
+
+**One build of several pull requests.** To try a batch before merging it, run Actions › Test build
+› Run workflow with their numbers (`302 303 304`), as described under [Test builds](#test-builds):
+one build of `main` with all of them merged on, in that order.
 
 ## Release notes
 
@@ -138,7 +211,7 @@ Its tests run in CI: `python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
 ## Discord
 
-Two channels get posts from GitHub Actions, each through a webhook (Discord: channel settings ›
+Three channels get posts from GitHub Actions, each through a webhook (Discord: channel settings ›
 Integrations › Webhooks) whose URL is a repository secret (GitHub: Settings › Secrets and
 variables › Actions). A channel without its secret gets nothing, and a failed post fails nothing
 else. No mention in a post pings anyone.
@@ -147,12 +220,53 @@ else. No mention in a post pings anyone.
 |---|---|---|
 | releases | `DISCORD_WEBHOOK_RELEASES` | each nightly (`release.yml`); each release when a person publishes it, with its *New and changed* section (`discord.yml`) |
 | events | `DISCORD_WEBHOOK_EVENTS` | pull requests opened, merged, closed and reopened; issues opened, closed and reopened (`discord.yml`) |
+| testing (a forum) | `DISCORD_WEBHOOK_TESTING` | each linked test build, in its pull request's thread (`test-build-links.yml`) |
 
 [`scripts/discord_post.py`](../scripts/discord_post.py) writes the posts of `discord.yml` from
 the event. The nightly never reaches `discord.yml`: it is created with the workflow's own token,
 which starts no other workflow. `discord.yml` runs on `pull_request_target`, so pull requests from
 forks are posted too; it checks out the base branch and never runs the pull request's code. No
-repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice.
+repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice. Two
+events about one item (an issue opened and then closed, a pull request pushed and then merged) share
+a `concurrency` group keyed on that item, so a newer event replaces one that is still waiting and a
+burst waits as one run per item instead of one per event; a post that is already running is never
+cut off, because a half-posted notification is one nobody sees.
+
+The testing forum has a thread per pull request, named `#<number> <title>`; the number always
+comes first, because the bot *Suhina GitHub* finds a pull request's thread by it, among the
+server's active threads and then the forum's archived ones
+([`scripts/discord_api.py`](../scripts/discord_api.py)). The bot only finds and marks threads; the
+webhook posts. Both need the secret `DISCORD_BOT_TOKEN` and the variables `DISCORD_GUILD_ID` and
+`DISCORD_TESTING_FORUM_ID`, and the bot may manage posts and add reactions in that forum only.
+
+Each test build that `test-build-links.yml` links is posted there
+([`scripts/discord_test_build.py`](../scripts/discord_test_build.py)), from the same data as the
+pull request comment: the commit, each platform's download and size or its state and log, a link
+to the comment, and that downloading needs a GitHub sign-in. The first build opens the thread
+(only if some platform built); later builds post *New build is available for testing* in it,
+which unarchives it. An existing thread is never renamed. Discord refuses a post in a locked
+thread; that is logged.
+
+**Builds linked before.** A build linked before the forum was set up, or while a setting was
+missing, reaches Discord only by hand: Actions › Test build links › Run workflow (a maintainer
+only), with pull request numbers (`302 303`) or empty for every open pull request.
+[`scripts/discord_test_build_backfill.py`](../scripts/discord_test_build_backfill.py) reads each
+pull request's test build comment into the same data and posts it the same way, opening the thread
+or posting in it. It skips a pull request with no comment, a build whose artifacts have expired,
+and a thread whose latest 100 messages already name the commit, so running it twice posts nothing
+twice. The run's summary lists what happened to each pull request.
+
+A webhook secret must be the whole URL Discord shows (*Copy Webhook URL*,
+`https://discord.com/api/webhooks/…`). One that is not is reported as *the URL does not start with
+https://*, never with the URL itself, and nothing is posted.
+
+When a pull request is merged, its thread in the testing forum is marked by the bot
+*Suhina GitHub* (`discord.yml`, [`scripts/discord_merged.py`](../scripts/discord_merged.py)). The
+bot finds the thread, adds ✅ to its first post, renames it `#<number> [Merged] <title>` (the
+number stays first) and archives it. A thread already marked is not renamed again. A merged pull request
+cannot be reopened, so a marked thread gets no more builds. No thread, a missing setting or a
+Discord error is logged and fails nothing. Discord allows two renames of a thread in ten minutes,
+so a rate limit is waited out.
 
 ## Packages
 
@@ -169,6 +283,14 @@ three stay side by side. The smoke test runs the VST3 test plug-in built into th
 packaged CLI; the desktop app needs a window, so only its libraries are checked. Each archive also holds
 `LICENSE`, `NOTICE`, `README.md`, `ATTRIBUTION.md` and the licences of the ported code,
 `LICENSE-APACHE` (the FM synth) and `LICENSE-signalsmith.txt` (the time stretcher).
+
+## Reminders
+
+Secrets that expire, so a release checks them before they stop a bot in the middle of the next one:
+
+| Secret | Used by | Expires | Renew |
+|---|---|---|---|
+| `PROJECT_TOKEN` | the claim bot and Project sync ([`claim-bot.md`](claim-bot.md)) | fill in | [`claim-bot.md`](claim-bot.md) › Setting it up |
 
 ## Not yet
 

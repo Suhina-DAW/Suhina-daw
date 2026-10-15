@@ -4,17 +4,21 @@
 
 mod app;
 pub mod arrangement_view;
+pub mod automation_lanes;
 pub mod browser;
 pub mod browser_view;
 pub mod demo;
 pub mod detail_view;
 pub mod drop;
+pub mod follow_view;
 pub mod grid;
 pub mod keymap;
 pub mod loading_dialog;
 pub mod menus;
+pub mod meter;
 pub mod missing_files;
 pub mod motion;
+pub mod piano_roll;
 pub mod project_dialog;
 pub mod sample_map;
 mod sample_map_crowd;

@@ -22,7 +22,7 @@ pub const MAX_FILES: usize = 256;
 /// Scenes a drop may add up to.
 const MAX_SCENES: usize = 1024;
 /// Tracks a project may have before adding refuses.
-const MAX_TRACKS: usize = 1024;
+pub(crate) const MAX_TRACKS: usize = 1024;
 
 /// What a new track plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +123,7 @@ pub(crate) fn insert_track(
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Default::default(),
+        automation: Vec::new(),
     });
     let track = Track {
         id,
@@ -560,6 +561,7 @@ fn place_clip(
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Default::default(),
     };
     match row {
@@ -859,6 +861,7 @@ fn place_stems(
                 enabled: setting.enabled,
                 state: None,
                 params: setting.params.iter().map(|(id, v)| suhina_model::DeviceParam::new(*id, *v)).collect(),
+                automation: Vec::new(),
                 extensions: Default::default(),
             });
         }

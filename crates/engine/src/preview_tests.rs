@@ -173,6 +173,46 @@ fn audio_set_on_the_controller_is_heard_from_the_next_graph() {
 }
 
 #[test]
+fn a_held_note_plays_until_it_is_let_go() {
+    let synth = project(Vec::new(), 1.0, vec![device("fm-synth", &[])]);
+    let mut renderer = stopped(&synth);
+    let mut controller = renderer.controller();
+    // The key column's note: no end of its own.
+    let notes = preview_notes([(0.0, 0.0, 60, 1.0)], 120.0, SR, Some(TrackId(1)), None);
+    controller.preview_note_on(notes, 1.0).unwrap();
+    let held = peak(&blocks(&mut renderer, 40, 1024));
+    assert!(held > 0.01, "the track's FM synth plays the held key");
+    assert!(controller.preview_monitor().playing());
+    // It is still sounding much later: nothing in the note releases it.
+    let late = peak(&blocks(&mut renderer, 200, 1024));
+    assert!(late > held * 0.2, "{late} of {held}");
+    controller.preview_note_off(Some(60)).unwrap();
+    let after = blocks(&mut renderer, 200, 1024);
+    assert!(peak(&after[190 * 2048..]) < held * 0.05, "letting go released the note");
+    assert!(!controller.preview_monitor().playing());
+}
+
+#[test]
+fn a_held_note_through_the_fallback_ends_and_a_key_off_without_one_changes_nothing() {
+    let mut renderer = stopped(&empty_project());
+    let mut controller = renderer.controller();
+    let fallback = controller.preview_instrument();
+    let notes = preview_notes([(0.0, 0.0, 64, 0.8)], 120.0, SR, None, fallback);
+    controller.preview_note_on(notes, 1.0).unwrap();
+    assert!(peak(&blocks(&mut renderer, 20, 1024)) > 0.01, "the fallback plays it");
+    // Every held note off, without naming a key; the tail of the release is silent.
+    controller.preview_note_off(None).unwrap();
+    let after = blocks(&mut renderer, 30, 1024);
+    let tail = &after[after.len() - 4096..];
+    assert!(peak(tail) < 1e-4, "{}", peak(tail));
+    // Letting go of a key that is not held does nothing, and neither does letting go twice.
+    controller.preview_note_off(Some(64)).unwrap();
+    controller.preview_note_off(None).unwrap();
+    assert!(blocks(&mut renderer, 4, 1024).iter().all(|s| s.is_finite()));
+    assert!(!controller.preview_monitor().playing());
+}
+
+#[test]
 fn hostile_preview_values_are_made_safe() {
     let mut renderer = stopped(&empty_project());
     let mut controller = renderer.controller();

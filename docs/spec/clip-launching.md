@@ -1,13 +1,19 @@
 ---
-description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launched clip fades, launcher over arrangement
-read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, fades on launched clips
+description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launched clip fades, follow actions, launcher over arrangement
+read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, fades on launched clips, follow actions
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
+  - crates/engine/src/follow.rs
+  - crates/engine/src/follow_tests.rs
+  - crates/session/src/follow.rs
   - crates/session/tests/launcher.rs
   - crates/engine/src/fade_tests.rs
+  - crates/session/tests/scenes.rs
+  - crates/ui/src/menus.rs
+  - crates/session/tests/follow.rs
 ---
 
 # Clip launching
@@ -19,9 +25,9 @@ covers:
 - **Observed with:** nothing yet. The launch behaviour has not been checked against Live 12.4.6
   by listening or watching; every statement marked **(hypothesis)** needs that check (see
   *To observe* below). The Live Set fields come from the corpus and are observed.
-- **Status:** first version, implemented in `crates/engine/src/launcher.rs` (ROADMAP M4).
-  Follow actions, per-clip launch quantisation and launch modes (trigger, gate, toggle, repeat)
-  are not specified yet; they need a corpus series of their own.
+- **Status:** first version, implemented in `crates/engine/src/launcher.rs` (ROADMAP M4);
+  follow actions in `crates/engine/src/follow.rs`. Per-clip launch quantisation and launch modes
+  (trigger, gate, toggle, repeat) are not specified yet; they need a corpus series of their own.
 
 This document describes the behaviour Suhina implements, in Suhina's terms. Where Suhina
 decides something the sources do not settle, the text says so (**Suhina:**).
@@ -55,7 +61,13 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    a clip is launched; an empty slot with a stop button stops the column; an empty slot without
    one leaves the column as it is. If the scene has a tempo, the project tempo changes to it at
    the launch moment. **(hypothesis:** at the quantised launch moment, not when the scene is
-   triggered.**)**
+   triggered.**)** A scene's time signature changes the time signature at the same moment.
+   **Suhina:** the new time signature's first bar starts at the launch moment, so bar
+   quantisation and the metronome's bar click count from there; note-value quantisation stays on
+   the beat grid from beat 0. The bar number keeps rising across the change (a bar cut short by
+   it counts as one). Stopping the transport keeps the tempo and time signature a scene set and
+   counts bars from the start again; editing the project's own tempo or time signature replaces
+   them.
 6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
    quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
    transport stops everything at once, and clears queued launches. A jump of the playhead
@@ -68,6 +80,75 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
    **Suhina:** back to arrangement stops the launched clips of those tracks (with the stop
    fade) and drops their queued launches, so a track never plays both at once.
+
+## Editing scenes
+
+- **Insert** (`scene.insert`) adds an empty scene at a position (after the last one if none is
+  given): a row of empty slots, each with a stop button, in every track.
+- **Duplicate** (`scene.duplicate`) copies a scene to a new one right below it: name, tempo, time
+  signature and every slot. **Suhina:** each copied clip plays a copy of its content, so editing
+  one clip does not change the other (as `clip.paste` does).
+- **Delete** (`scene.delete`) removes a scene and the clips in its row. **Suhina:** the last
+  scene left cannot be deleted, so the launcher always has a row to put clips in.
+- **Rename** (`scene.rename`); an empty name clears it, and the button shows the number only.
+- **Tempo** (`scene.setTempo`, 20 to 999 bpm) and **time signature** (`scene.setTimeSignature`,
+  numerator 1 to 99, denominator 1, 2, 4, 8 or 16); leaving the value out clears it, and the
+  scene then keeps what is playing.
+- Every one of these is an edit with one undo step. **While playing**, a clip that plays or is
+  queued stays with its row when a scene is inserted or deleted above it (and when that is
+  undone), so the same clip keeps playing under its new scene number; deleting the playing
+  scene stops its clips (with the stop fade). Edits to a scene's tempo or time signature apply
+  at its next launch.
+
+## Follow actions
+
+A slot clip can say what happens after it has played for a while, so clips play one after
+another without being launched by hand. The general idea (an action A and an action B, picked by
+chance after a time) comes from the public manual's description; every detail below is Suhina's
+own decision (**Suhina:**), not yet compared with Live 12 (see *To observe*).
+
+1. **Settings.** Each clip has a follow action, off by default: a **follow time** in beats, or
+   **linked** to the clip's length (the `length` that `project.launcher` lists); **action A** and
+   **action B**; and a **chance** for each, a weight from 0 to 100. Arrangement clips keep the
+   settings but never run them.
+2. **When.** The follow time counts from the moment the clip was launched, which is already on
+   the quantisation grid; the action itself is **not** quantised again and happens on the exact
+   frame the time is reached. **Suhina:** a clip without a loop that ends before its follow time
+   runs its action at its end, so a chain of one-shots does not stall in silence; a follow time
+   shorter than 1/64 beat counts as 1/64 beat.
+3. **A or B.** At the follow time the launcher picks A with the chance
+   `chance A / (chance A + chance B)`, else B. Both chances 0 means no action. The action runs
+   once per launch: a clip that keeps playing ("nothing") does not try again a follow time later.
+4. **Actions.** In the clip's own column:
+   - **nothing:** the clip keeps playing;
+   - **stop:** the column stops (with the stop fade);
+   - **again:** the clip is launched again from its start;
+   - **previous** / **next:** the nearest clip above / below that can play, wrapping around the
+     column; when the clip is alone in its column it is launched again;
+   - **first** / **last:** the top-most / bottom-most clip that can play;
+   - **any:** a clip that can play, picked at random, this one included;
+   - **other:** another clip that can play, picked at random; this one again when it is alone;
+   - **jump N:** the clip in scene N's slot; when that slot has no clip that can play, the clip
+     keeps playing.
+
+   **Suhina:** empty slots (with or without a stop button) and deactivated clips are skipped;
+   they are never a follow action's target.
+5. **Launched by hand wins.** When a launch or stop is already queued in the column at the follow
+   time, the follow action is skipped and the queued one happens on its boundary.
+6. **Random numbers.** Offline renders start from a fixed seed, so the same project and the same
+   launches always render the same picks (the engine's tests rely on it). Playback through the
+   audio device seeds from the clock when the player is attached. **Suhina:** the
+   `SeedRandom` engine command sets the seed.
+7. **Commands.** `clip.setFollowAction {track, scene, enabled?, time?, linked?, actionA?,
+   actionB?, chanceA?, chanceB?}` changes what it is given, in one undo step; actions are named
+   `nothing`, `stop`, `again`, `previous`, `next`, `first`, `last`, `any`, `other` or `jump N`
+   (N a scene number, from 1). `project.launcher` lists each slot clip's `follow_action`. The
+   project file stores it as the clip's `follow` ([suhina-format](suhina-format.md)). The
+   detail area shows a selected slot clip's follow action and changes it through the same
+   command ([Session view](ui-session-view.md) › Detail area: follow action).
+8. **While playing.** Editing a follow action swaps in a new graph (ADR 0005); a clip that is
+   playing keeps its launch time, so a follow time now shorter than what it has played runs at
+   once.
 
 ## Suhina decisions
 
@@ -100,7 +181,8 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`), sent to the audio thread through a lock-free queue and applied at the start
-  of the next audio block. **Suhina:**
+  of the next audio block. `launcher.state` reports the time signature playing and the position
+  counted in it. **Suhina:**
   `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
   beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)),
   and the engine's CPU load (`cpu`: percent), which the control bar shows. `transport.stop`
@@ -119,9 +201,18 @@ with a screen recording or notes, no audio from Live needed):
 - Launch a clip on a track that has arrangement clips, then stop it: does the track stay silent
   until "Back to Arrangement"?
 - Global quantisation: where it is stored in the Live Set, and its default in a new set.
+- Follow actions: is the follow time counted from the quantised launch, is the action itself
+  quantised, what "next" does at the bottom of a column and on empty slots, and what a one-shot
+  shorter than its follow time does. Where a Live Set stores a clip's follow action, so the
+  importer can read it.
 
 ## Not yet
 
-- Follow actions, launch modes, per-clip launch quantisation, legato.
+- Launch modes, per-clip launch quantisation, legato.
+- Follow actions: reading them from a Live Set, a follow-action multiplier or count, scene
+  follow actions, and controls for them in the detail area (they are set by command for now).
 - Reading the global launch quantisation from a Live Set (needs a corpus series).
+- Reading a scene's time signature from a Live Set: [als-format](als-format.md#scenes) notes it
+  is there, but not its elements yet.
+- Capturing the playing clips into a new scene.
 - Recording into slots.

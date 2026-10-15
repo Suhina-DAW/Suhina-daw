@@ -5,7 +5,8 @@
 - **Licence:** Suhina is GPL-3.0-or-later (`LICENSE`, `NOTICE`), and contributions are
   licensed the same way. Dependencies and bundled libraries must be GPLv3-compatible (MIT,
   Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0); GPL-2.0-only and proprietary or
-  non-commercial licences are not.
+  non-commercial licences are not. CI checks every dependency's licence with `cargo-deny`
+  (see [Dependencies](#dependencies)).
 - **Never crash:** non-test code must not panic and must not use `unsafe` (the only exceptions
   are the plug-in hosting crates `ipc` and `plugin-host`, ADR 0006). Errors go through `Result`
   and `?`; input-derived indices and sizes are checked. See `AGENTS.md`.
@@ -16,6 +17,12 @@
 - **Documentation:** a change that alters how something works updates the documents that
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
   *Before you finish a task* lists which document covers what.
+- **Parity measurement:** a pull request that adds, changes or removes something a user can do
+  updates its coverage in `scripts/parity/score.py` (and `scripts/parity/devices.json` for a
+  built-in effect or instrument), runs `python scripts/parity/update_report.py` and commits the
+  result, in the same pull request. One that moves no coverage writes `Parity: no change` and the
+  reason in its description. CI warns, without failing, when a change to `crates/`, `devices/` or
+  `apps/` does neither. `AGENTS.md` › *Before you finish a task* has the rule.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
 - **Names:** packages are `suhina-<name>` (`suhina-device-<name>` for devices), used in code as
   `suhina_<name>`; directories have no prefix. `AGENTS.md` › *Crate names* says how a new crate
@@ -30,41 +37,78 @@
   plus `windows`, `macos` or `linux` when it concerns one platform. The forms set the type, and
   `.github/workflows/issue-labels.yml` adds area and platform labels from the form's answers.
 
+## Dependencies
+
+Every crate in `Cargo.lock`, with all features on and for every platform, must have a licence
+that [`deny.toml`](deny.toml) allows: the list in AGENTS.md rule 9, plus a few exceptions, each
+named for one crate with the reason. Dependencies come from crates.io only, and a crate with an
+open RustSec advisory fails unless `deny.toml` ignores it with a reason. The **Dependencies**
+workflow (`.github/workflows/deny.yml`) runs this on every pull request. Run it locally with the
+version pinned in that workflow:
+
+```sh
+cargo install cargo-deny --version 0.20.2 --locked
+cargo deny check
+```
+
+When it rejects a licence, prefer another crate. Add an exception only for a licence that is
+GPLv3-compatible, for the crate that needs it, with a comment saying what the crate is for and
+why the licence is fine. To update `cargo-deny`, change `CARGO_DENY_VERSION` and
+`CARGO_DENY_SHA256` in the workflow together, and the version above.
+
 ## Working on an issue
 
 A task's state lives in its issue and on the [Suhina project board](https://github.com/orgs/suhina-daw/projects/1),
-never in chat or in one person's window. Before you write code, three checks:
+never in chat or in one person's window. The rules below keep two people from doing the same work
+twice without making anyone wait on someone who has gone quiet.
 
-1. **No open pull request closes it.** The issue's *Linked pull requests* box, or
-   <https://github.com/suhina-daw/suhina-daw/pulls?q=is%3Apr+is%3Aopen>, must not show one. A pull
-   request that says `Closes #N` has taken it.
-2. **Its board item is in `Backlog` or `Ready`.** `In progress` means someone is already working on
-   it, and `Do not start yet` means the order is deliberate: the issue and its comments say what the
-   work waits for, so ask there instead of starting.
-3. **Claim it in a comment** on the issue, and set the item's Status to `In progress` if you can:
+**One issue per problem.** Before you open an issue, search the open ones; when one exists,
+comment there instead. A duplicate that slips through is closed with a link to the first one.
 
-   > I'd like to take this. Plan: … When: …
+**Free work** has no assignee and no open pull request that says `Closes #N` (the issue's
+*Linked pull requests* box shows it). On the board it is in `Backlog` or `Ready`, with one
+difference: a **feature request** (`enhancement`) in `Backlog` is not agreed yet. Write your idea or
+plan in the issue; a maintainer moves it to `Ready` when Suhina wants it, and only then is it open to
+claim. A bug in `Backlog` is free. `Do not start yet` means the order is deliberate: the issue and
+its comments say what the work waits for, so ask there instead of starting.
 
-   A claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) does the same two things for a
-   comment that starts with `/claim`, and refuses the claim when an open pull request closes the
-   issue; `/unclaim` puts the card back, and a maintainer holds work with `/hold <why>` and opens it
-   again with `/ready`. Either way the comment is the claim: a bot that is down never means the
-   issue is free.
+**Claim it** in a comment on the issue before you write code:
 
-The first comment wins. If someone was faster, take another issue; if their pull request has
-stalled, offer in that pull request to take the work over rather than opening a second one. If you
-stop, say so in the issue and set the item back to `Ready`: an issue that looks taken but is not
-costs more than an honestly free one.
+> /claim Plan: … When: …
+
+The claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) moves the card to `In progress` and
+assigns you, and refuses the claim when the work is not free. Without the bot, a plain comment
+("I'd like to take this. Plan: …") is the claim, and the first one wins: a bot that is down never
+means the issue is free.
+
+A maintainer who hands an issue to someone writes `/claim @their-login`, with the plan after it if
+there is one: the bot makes the same checks for that person, assigns them and moves the card, also
+when they were assigned by hand and the card was never moved. Only a maintainer may claim for
+someone else.
+
+**Show the work within 48 hours.** Open a draft pull request that says `Closes #N` as soon as you
+have a first commit. A claim with no pull request after 48 hours lapses, and the next `/claim`
+takes it over. If you stop, comment `/unclaim`, so the card goes back to `Ready`.
+
+**One pull request per issue.** If a pull request for the issue is already open, continue there
+(push to it, or offer your change in its thread) instead of opening a second one; that holds for
+a new session of your own as well. When that pull request has stalled, ask its author in it; with
+no answer in three days, you may take the work over in that pull request, or in one that replaces
+it, names it and is linked from it.
+
+**Keep at most three pull requests open at a time**, unless you are a maintainer. Review time is
+what limits how fast Suhina moves, and a stack of open pull requests goes stale as `main` changes.
 
 `good first issue` marks work that needs no knowledge of the engine, `help wanted` work the
 maintainers would like a hand with. An `epic` is a container for other issues: claim one of its
 issues, not the epic.
 
 **An agent claims and reports like a person does.** An issue is the only context an agent gets
-apart from `AGENTS.md` and the documents those point at, so write it to stand on its own — goal,
-acceptance criteria, where the code goes — and keep the plan in the issue and the result in the
-pull request. The rules in [AI-assisted contributions](#ai-assisted-contributions) apply to what
-the agent wrote.
+apart from `AGENTS.md` and the documents those point at, so write it to stand on its own: goal,
+acceptance criteria, where the code goes. Keep the plan in the issue and the result in the pull
+request. An agent searches for an existing issue before it opens one, and for an open pull request
+before it opens one; it continues work that is open rather than starting it again. The rules in
+[AI-assisted contributions](#ai-assisted-contributions) apply to what the agent wrote.
 
 ## Trying a pull request
 
@@ -74,6 +118,16 @@ links the downloads from the pull request in a comment, updated with every new b
 built on every push. A contributor's pull request is built once a maintainer has read the diff and
 added the `test-build` label; a later push takes the label off, and the new commits are built when
 the label is added again.
+
+## Merging many pull requests
+
+For maintainers. Merge through the merge queue: on each green pull request press **Merge when
+ready**, and the queue tests the queued pull requests together on top of `main`, in groups, and
+merges them in order, so no one presses *Update branch* by hand. To try several pull requests in
+one build before they merge, run Actions › Test build › Run workflow with their numbers
+(`302 303 304`). A push that only merges `main` into a pull request is not built again; its last
+test build stays linked. [`docs/releasing.md` › Merging many pull requests](docs/releasing.md#merging-many-pull-requests)
+says how the queue is set up and what runs in it.
 
 ## Clean-room
 
@@ -168,6 +222,9 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
+- **No session links.** The repository is public: leave out links to your agent's own session
+  (such as `https://claude.ai/code/session_...`) from commit messages, pull requests, issues and
+  comments, even when the tool adds one by default.
 - **Steps anyone can follow.** A change in what Suhina does, in the app, its sound, the files it
   reads and writes, the CLI or MCP, comes with a *How to check it* section in the pull request:
   numbered steps from opening Suhina with nothing loaded, every control named as it reads on

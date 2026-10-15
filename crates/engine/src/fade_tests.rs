@@ -30,6 +30,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
         fade_out,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -54,6 +55,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),

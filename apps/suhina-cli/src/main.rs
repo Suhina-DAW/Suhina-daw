@@ -382,6 +382,7 @@ fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &suhina_device_fm_s
         enabled: true,
         state: None,
         params,
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     let channels: Vec<ChannelId> =
@@ -845,6 +846,7 @@ fn demo_project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let content = |id: u32, name: &str, notes: Vec<Note>| ClipContent {
         id: ContentId(id),
@@ -864,6 +866,7 @@ fn demo_project() -> Project {
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
 

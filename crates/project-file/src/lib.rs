@@ -21,10 +21,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
+    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
+    FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb,
+    Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation,
 };
 
 /// The file extension, without the dot.
@@ -217,7 +217,7 @@ fn project_value(p: &Project) -> Value {
     out.insert(
         "launcher".into(),
         json!({
-            "scenes": p.launcher.scenes.iter().map(|s| json!({ "name": s.name, "tempo_bpm": s.tempo_bpm.map(number) })).collect::<Vec<_>>(),
+            "scenes": p.launcher.scenes.iter().map(scene_value).collect::<Vec<_>>(),
             "columns": p.launcher.columns.iter().map(|c| json!({
                 "track": c.track.0,
                 "slots": c.slots.iter().map(|s| json!({ "clip": s.clip.as_ref().map(clip_value), "has_stop": s.has_stop })).collect::<Vec<_>>(),
@@ -264,9 +264,55 @@ fn channel_value(c: &Channel) -> Value {
         "devices": c.devices.iter().map(device_value).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        if !c.automation.is_empty() {
+            map.insert("automation".into(), lanes_value(&c.automation));
+        }
         with_extensions(map, &c.extensions);
     }
     out
+}
+
+/// Automation lanes: a lane's `enabled` and a point's `curve` are written only when they are not
+/// the default (on, a straight line), so files keep their shape.
+fn lanes_value(lanes: &[AutomationLane]) -> Value {
+    let lanes: Vec<Value> = lanes
+        .iter()
+        .map(|lane| {
+            let points: Vec<Value> = lane
+                .points
+                .iter()
+                .map(|p| {
+                    let mut point = json!({ "beat": number(p.beat), "value": number(p.value) });
+                    if p.curve != 0.0
+                        && let Some(map) = point.as_object_mut()
+                    {
+                        map.insert("curve".into(), json!(number(p.curve)));
+                    }
+                    point
+                })
+                .collect();
+            let mut out = json!({ "param": lane.param, "points": points });
+            if !lane.enabled
+                && let Some(map) = out.as_object_mut()
+            {
+                map.insert("enabled".into(), Value::Bool(false));
+            }
+            out
+        })
+        .collect();
+    Value::Array(lanes)
+}
+
+fn follow_value(f: &FollowAction) -> Value {
+    json!({
+        "enabled": f.enabled,
+        "time": number(f.time),
+        "linked": f.linked,
+        "a": f.action_a.name(),
+        "b": f.action_b.name(),
+        "chance_a": f.chance_a,
+        "chance_b": f.chance_b,
+    })
 }
 
 fn device_value(d: &Device) -> Value {
@@ -285,6 +331,10 @@ fn device_value(d: &Device) -> Value {
         "params": d.params.iter().map(|p| json!({ "id": p.id, "value": number(p.value) })).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        // Only devices with automation say so, so files without any keep their shape.
+        if !d.automation.is_empty() {
+            map.insert("automation".into(), lanes_value(&d.automation));
+        }
         with_extensions(map, &d.extensions);
     }
     out
@@ -348,6 +398,9 @@ fn clip_value(c: &Clip) -> Value {
         "fade_out_curve": number(c.fade_out_curve.curve),
     });
     if let Some(map) = out.as_object_mut() {
+        if c.follow_action != FollowAction::default() {
+            map.insert("follow".into(), follow_value(&c.follow_action));
+        }
         with_extensions(map, &c.extensions);
     }
     out
@@ -478,31 +531,37 @@ fn extensions(o: &Obj, at: &str) -> Result<Extensions, ProjectFileError> {
     Ok(Extensions(out))
 }
 
+fn scene_value(s: &Scene) -> Value {
+    let mut scene = json!({ "name": s.name, "tempo_bpm": s.tempo_bpm.map(number) });
+    if let (Some(ts), Some(object)) = (s.time_signature, scene.as_object_mut()) {
+        object.insert("time_signature".into(), json!([ts.numerator, ts.denominator]));
+    }
+    scene
+}
+
+/// A time signature written as `[numerator, denominator]`, or `None` when absent or null.
+fn read_signature(value: Option<&Value>, at: &str) -> Result<Option<TimeSignature>, ProjectFileError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(pair)) if pair.len() == 2 => {
+            let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
+            match (pair.first().and_then(part), pair.get(1).and_then(part)) {
+                (Some(numerator), Some(denominator)) => Ok(Some(TimeSignature { numerator, denominator })),
+                _ => Err(format!("{at}: expected two whole numbers").into()),
+            }
+        }
+        Some(_) => Err(format!("{at}: expected [numerator, denominator]").into()),
+    }
+}
+
 fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
     let p = object(value, "project")?;
     let transport = match p.get("transport") {
         None | Some(Value::Null) => Transport::default(),
         Some(t) => {
             let t = object(t, "project.transport")?;
-            let signature = match t.get("time_signature") {
-                Some(Value::Array(pair)) if pair.len() == 2 => {
-                    let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
-                    match (pair.first().and_then(part), pair.get(1).and_then(part)) {
-                        (Some(numerator), Some(denominator)) => TimeSignature { numerator, denominator },
-                        _ => {
-                            return Err("project.transport.time_signature: expected two whole numbers"
-                                .to_string()
-                                .into());
-                        }
-                    }
-                }
-                None | Some(Value::Null) => TimeSignature { numerator: 4, denominator: 4 },
-                Some(_) => {
-                    return Err("project.transport.time_signature: expected [numerator, denominator]"
-                        .to_string()
-                        .into());
-                }
-            };
+            let signature = read_signature(t.get("time_signature"), "project.transport.time_signature")?
+                .unwrap_or(TimeSignature { numerator: 4, denominator: 4 });
             let tempo = float_or(t, "tempo_bpm", 120.0, "project.transport")?;
             if !(1.0..=999.0).contains(&tempo) {
                 return Err(format!("project.transport.tempo_bpm: {tempo} is not a tempo").into());
@@ -555,7 +614,11 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
             for (i, v) in list(l, "scenes", "project.launcher")?.iter().enumerate() {
                 let at = format!("project.launcher.scenes[{i}]");
                 let s = object(v, &at)?;
-                scenes.push(Scene { name: text(s, "name", &at)?, tempo_bpm: optional_float(s, "tempo_bpm", &at)? });
+                scenes.push(Scene {
+                    name: text(s, "name", &at)?,
+                    tempo_bpm: optional_float(s, "tempo_bpm", &at)?,
+                    time_signature: read_signature(s.get("time_signature"), &format!("{at}.time_signature"))?,
+                });
             }
             let mut columns = Vec::new();
             for (i, v) in list(l, "columns", "project.launcher")?.iter().enumerate() {
@@ -644,8 +707,41 @@ fn read_channel(value: &Value, at: &str) -> Result<Channel, ProjectFileError> {
         output: optional_whole(c, "output", at)?.map(ChannelId),
         sends,
         devices,
+        automation: read_lanes(c, at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// The `automation` lanes of a device or channel: points in beat order (those at one beat keep
+/// their order), a curve from -1 to 1, at most `MAX_POINTS` points a lane.
+fn read_lanes(map: &Obj, at: &str) -> Result<Vec<AutomationLane>, ProjectFileError> {
+    let mut automation = Vec::new();
+    for (i, v) in list(map, "automation", at)?.iter().enumerate() {
+        let at = format!("{at}.automation[{i}]");
+        let lane = object(v, &at)?;
+        let listed = list(lane, "points", &at)?;
+        if listed.len() > automation::MAX_POINTS {
+            return Err(format!("{at}.points: more than {} points", automation::MAX_POINTS).into());
+        }
+        let mut points = Vec::with_capacity(listed.len());
+        for (j, p) in listed.iter().enumerate() {
+            let at = format!("{at}.points[{j}]");
+            let p = object(p, &at)?;
+            let curve = float_or(p, "curve", 0.0, &at)?;
+            if !(-1.0..=1.0).contains(&curve) {
+                return Err(format!("{at}.curve: must be from -1 to 1, got {curve}").into());
+            }
+            points.push(AutomationPoint { beat: float(p, "beat", &at)?, value: float(p, "value", &at)?, curve });
+        }
+        // In beat order, as the model keeps them; points at the same beat keep their order.
+        points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+        automation.push(AutomationLane {
+            param: required_text(lane, "param", &at)?,
+            points,
+            enabled: flag(lane, "enabled", true, &at)?,
+        });
+    }
+    Ok(automation)
 }
 
 fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
@@ -668,12 +764,14 @@ fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
         let p = object(v, &at)?;
         params.push(DeviceParam { id: required_text(p, "id", &at)?, value: float(p, "value", &at)? });
     }
+    let automation = read_lanes(d, at)?;
     Ok(Device {
         name: text(d, "name", at)?,
         kind,
         enabled: flag(d, "enabled", true, at)?,
         state: bytes(d, "state", at)?,
         params,
+        automation,
         extensions: extensions(d, at)?,
     })
 }
@@ -781,8 +879,50 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
         fade_out: float_or(c, "fade_out", 0.0, at)?,
         fade_in_curve: fade_curve(c, "fade_in", at)?,
         fade_out_curve: fade_curve(c, "fade_out", at)?,
+        follow_action: read_follow(c, at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// A clip's follow action, `follow`: off when missing (files written before follow actions).
+fn read_follow(c: &Obj, at: &str) -> Result<FollowAction, ProjectFileError> {
+    let at = format!("{at}.follow");
+    let f = match c.get("follow") {
+        None | Some(Value::Null) => return Ok(FollowAction::default()),
+        Some(value) => object(value, &at)?,
+    };
+    let default = FollowAction::default();
+    let kind = |key: &str, default: FollowKind| -> Result<FollowKind, ProjectFileError> {
+        match f.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(Value::String(name)) => FollowKind::from_name(name)
+                .ok_or_else(|| ProjectFileError(format!("{at}.{key}: unknown follow action {name:?}"))),
+            Some(_) => Err(format!("{at}.{key}: expected a follow action name").into()),
+        }
+    };
+    let chance = |key: &str, default: u32| -> Result<u32, ProjectFileError> {
+        match f.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(value) => value
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v <= FollowAction::MAX_CHANCE)
+                .ok_or_else(|| ProjectFileError(format!("{at}.{key}: expected a whole number from 0 to 100"))),
+        }
+    };
+    let follow = FollowAction {
+        enabled: flag(f, "enabled", default.enabled, &at)?,
+        time: float_or(f, "time", default.time, &at)?,
+        linked: flag(f, "linked", default.linked, &at)?,
+        action_a: kind("a", default.action_a)?,
+        action_b: kind("b", default.action_b)?,
+        chance_a: chance("chance_a", default.chance_a)?,
+        chance_b: chance("chance_b", default.chance_b)?,
+    };
+    if !follow.is_valid() {
+        return Err(format!("{at}.time: expected more than 0 and at most {} beats", FollowAction::MAX_TIME).into());
+    }
+    Ok(follow)
 }
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files

@@ -16,13 +16,15 @@ use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
 use crate::detail_view::{self, ClipRef};
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
+use crate::follow_view;
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
-use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
+use crate::piano_roll::{self, PianoRollState};
+use crate::project_dialog::{self, AboutChoice, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState, Step};
-use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
@@ -35,11 +37,15 @@ const QUANTIZATION: [&str; 14] = [
 ];
 /// The engine's quantisation before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
+/// The piano roll's own grid value before one is picked.
+const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
 /// The detail area's height in a row, by default, and the splitter between it and the view.
 const DETAIL_HEIGHT: f32 = 200.0;
+/// The least the view keeps above the detail area; pulled past it, the piano roll goes to the top.
+const MIN_VIEW: f32 = 160.0;
 const SPLITTER: f32 = 6.0;
 
 /// How dark the window gets while a project file is dragged over it.
@@ -128,8 +134,13 @@ enum AfterLeaving {
     Quit(Vec<ProjectId>),
 }
 
+/// How long after the level meters last moved the window keeps looking for new levels.
+const METERS_SETTLE_SECONDS: f64 = 0.3;
+
 /// The window's state.
 pub struct App {
+    /// When the level meters last showed something new (`ui.input` time).
+    meters_moved_at: f64,
     projects: Projects,
     /// The project whose view state is in the fields below; others are in `stashes`.
     shown_project: Option<ProjectId>,
@@ -177,6 +188,12 @@ pub struct App {
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
+    /// The piano roll is pulled to the top (`docs/spec/ui-clip-editor.md` › Pulled to the top),
+    /// and the detail area's height a splitter drag has reached so far, unclamped.
+    detail_max: bool,
+    detail_drag: Option<f32>,
+    /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
+    piano_grid: &'static str,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -196,6 +213,8 @@ pub struct App {
     lists_wanted: bool,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
+    /// Help › About Suhina is open.
+    about_open: bool,
     new_request: Option<NewProject>,
     /// A project file saved since the app last asked, for its recent list.
     saved_path: Option<PathBuf>,
@@ -214,6 +233,12 @@ pub struct App {
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
+    /// The piano roll a selected MIDI clip shows in the detail area.
+    piano_roll: PianoRollState,
+    /// The program's RAM (resident), as last measured, and when to measure again: the control
+    /// bar shows it and once a second is often enough for a number that moves that slowly.
+    ram: Option<u64>,
+    next_ram: Option<f64>,
 }
 
 impl Default for App {
@@ -239,6 +264,7 @@ impl App {
             closed: Vec::new(),
             shown: View::Session,
             view: SessionViewState::default(),
+            meters_moved_at: 0.0,
             arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
             quantization: DEFAULT_QUANTIZATION,
@@ -255,6 +281,9 @@ impl App {
             keymap_changed: false,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
+            detail_max: false,
+            detail_drag: None,
+            piano_grid: DEFAULT_PIANO_GRID,
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -267,6 +296,7 @@ impl App {
             project_lists: Lists::default(),
             lists_wanted: false,
             save_prompt: None,
+            about_open: false,
             new_request: None,
             saved_path: None,
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
@@ -276,6 +306,9 @@ impl App {
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
+            piano_roll: PianoRollState::default(),
+            ram: None,
+            next_ram: None,
         }
     }
 
@@ -560,6 +593,25 @@ impl App {
         Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
     }
 
+    /// Play as the Play button and the play/stop key start it: from the start of the clip
+    /// selected in the Arrangement view when the setting **Play from** says so (or `selected`
+    /// asks for it whatever the setting), from the play start marker otherwise.
+    fn play_action(&self, selected: bool) -> Action {
+        let clip =
+            (selected || self.settings.play_from == PlayFrom::Clip).then(|| self.selected_arrangement_clip()).flatten();
+        match clip {
+            Some((track, index)) => {
+                Action::new("transport.play", json!({ "from": "clip", "track": track.0, "index": index }))
+            }
+            None => Action::new("transport.play", json!({})),
+        }
+    }
+
+    /// The clip selected in the Arrangement view, while that view is shown.
+    fn selected_arrangement_clip(&self) -> Option<(TrackId, usize)> {
+        if self.shown == View::Arrangement { self.arrangement.selected_clip() } else { None }
+    }
+
     pub fn status(&self) -> &Status {
         &self.status
     }
@@ -733,6 +785,17 @@ impl App {
                 // Cancelling the name also cancels closing or quitting.
                 Some(SaveChoice::Cancel) => self.save_then = None,
                 None => self.save_prompt = Some(prompt),
+            }
+        }
+        if self.about_open {
+            match project_dialog::show_about(ui, window) {
+                Some(AboutChoice::Copy) => {
+                    let line = project_dialog::version_line();
+                    ui.ctx().copy_text(line.clone());
+                    self.status = Status::Done(format!("Copied {line}"));
+                }
+                Some(AboutChoice::Close) => self.about_open = false,
+                None => {}
             }
         }
         if let Some(leaving) = self.unsaved_prompt.take() {
@@ -916,7 +979,7 @@ impl App {
         self.poll_plugins(ui.ctx());
         // The sample map's analysis goes on in the background; take in what it finished.
         self.projects.poll_sound_map();
-        self.dropped_files(ui);
+        let dropped = self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
@@ -928,6 +991,13 @@ impl App {
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
         // The CPU load the control bar shows, from the engine's monitor, in per mille.
         let cpu = self.session().and_then(|s| s.player()).map(|p| p.cpu_monitor().load_milli());
+        // The program's own RAM, the control bar shows it beside the CPU: measured once a
+        // second, not every frame.
+        if self.next_ram.is_none_or(|at| ui.ctx().time() >= at) {
+            self.ram = memory_stats::memory_stats().map(|s| s.physical_mem as u64);
+            self.next_ram = Some(ui.ctx().time() + 1.0);
+        }
+        let ram = self.ram;
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
@@ -942,11 +1012,17 @@ impl App {
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
-            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), cpu, &mut actions));
+            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), cpu, ram, &mut actions));
         egui::Panel::bottom("status-bar")
             .exact_size(theme::STATUS_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
             .show(ui, |ui| self.status_bar(ui, grid.as_ref()));
+        // Samples and MIDI files from the system: dropped this frame, or still over the window.
+        let system = match (self.browser.drag.is_some(), dropped.is_empty()) {
+            (true, _) => None,
+            (false, false) => Some((dropped, true)),
+            (false, true) => Some((self.hovered_files(ui), false)).filter(|(items, _)| !items.is_empty()),
+        };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::border())).show(ui, |ui| {
             let area = ui.available_rect_before_wrap();
             // A 1 px gap shows the line colour between the bars and the view.
@@ -970,19 +1046,35 @@ impl App {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
+                // A hidden piano roll does not keep the keyboard, nor the view to one track.
+                self.piano_roll.focused = false;
+                self.arrangement.focus = None;
                 inner
             };
-            // A drag from the browser: the views say what is under the pointer.
-            let probe = self
-                .browser
-                .drag
-                .as_ref()
-                .and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
+            // A drag from the browser, or files from the system: the views say what is under the
+            // pointer.
+            let dragged = self.browser.drag.as_ref().or(system.as_ref().map(|(items, _)| items));
+            let probe =
+                dragged.and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
-            // The large sample map takes the main area, except while something is dragged from
-            // it, so the drop can land on a track.
-            if self.sample_map.view.large && self.browser.drag.is_none() {
+            let meters = crate::meter::Meters::read(self.session().and_then(|s| s.player()).map(|p| p.meter_monitor()));
+            // Meters fall for a moment after the sound stops: drawn again at once while they
+            // move, and looked at again soon after they last moved, as the engine renders in
+            // blocks that can be longer than a frame. An engine that stopped rendering leaves
+            // the window at rest.
+            let now = ui.input(|i| i.time);
+            if meters != self.view.meters {
+                self.meters_moved_at = now;
+                ui.ctx().request_repaint();
+            } else if meters.moving() && now - self.meters_moved_at < METERS_SETTLE_SECONDS {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+            }
+            self.view.meters = meters.clone();
+            self.arrangement.meters = meters;
+            // The large sample map takes the main area, except while something is dragged, so
+            // the drop can land on a track.
+            if self.sample_map.view.large && dragged.is_none() {
                 let (panel, browser, projects, settings) =
                     (&mut self.sample_map, &mut self.browser, &mut self.projects, &mut self.settings);
                 if panel.show(ui, inner, browser, projects, settings, self.revision) {
@@ -990,6 +1082,8 @@ impl App {
                 }
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
+                    // The piano roll pulled to the top over the whole window: no view.
+                    _ if inner.height() < 1.0 => {}
                     (Some(grid), View::Session) => {
                         self.view.keep_selection_on_launch = !self.settings.select_on_launch;
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
@@ -1028,6 +1122,9 @@ impl App {
             drop_overlay(ui, view_area);
         });
         self.browser_drag(ui);
+        if let Some((items, dropped)) = system {
+            self.system_drag(ui, items, dropped);
+        }
         self.poll_drop(ui.ctx());
 
         self.plugin_dialog(ui, window);
@@ -1050,6 +1147,15 @@ impl App {
                 continue;
             }
             self.run(action);
+            // The window gets Ctrl+V only as a paste of the system clipboard's text, which it
+            // does not send while the clipboard holds no text: copying puts a line there, so
+            // Ctrl+V reaches the keymap after a copy in Suhina (`Keymap::pressed`).
+            if matches!(action.id, "note.copy" | "note.cut" | "clip.copy" | "clip.cut")
+                && !matches!(self.status, Status::Error(_))
+            {
+                let what = if action.id.starts_with("note.") { "notes" } else { "a clip" };
+                ui.ctx().copy_text(format!("Suhina: {what} copied"));
+            }
         }
         self.guard_quit(ui.ctx());
         if grid.is_some_and(|g| {
@@ -1101,6 +1207,18 @@ impl App {
                 .fold(0.0, f32::max);
             self.detail_height = self.detail_height.max(needed);
         }
+        // A MIDI clip shows its notes in the piano roll beside its properties; under the
+        // Arrangement view it can be pulled to the top.
+        let arrangement_clip = match clip {
+            Some(detail_view::ClipRef::Arrangement(track, index)) => Some((track, index)),
+            _ => None,
+        };
+        let piano = self.piano_clip(arrangement_clip);
+        let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
+        let pulled = pullable && self.detail_max;
+        let focus =
+            arrangement_clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
             let x = area.right() - self.detail_width;
@@ -1110,25 +1228,45 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, area.top()), area.max),
             )
         } else {
-            self.detail_height = self.detail_height.clamp(80.0, (area.height() - 160.0).max(80.0));
-            let y = area.bottom() - self.detail_height;
+            self.detail_height = self.detail_height.clamp(80.0, (area.height() - MIN_VIEW).max(80.0));
+            let y = if pulled {
+                // Above it only the edited track, or nothing.
+                let above = focus.map_or(0.0, |t| self.arrangement.focus_height(t));
+                (area.top() + above.min(area.height() - 80.0) + SPLITTER).min(area.bottom() - 80.0)
+            } else {
+                area.bottom() - self.detail_height
+            };
             (
-                Rect::from_min_max(area.min, Pos2::new(area.right(), y - SPLITTER)),
+                Rect::from_min_max(area.min, Pos2::new(area.right(), (y - SPLITTER).max(area.top()))),
                 Rect::from_min_max(Pos2::new(area.left(), y - SPLITTER), Pos2::new(area.right(), y)),
                 Rect::from_min_max(Pos2::new(area.left(), y), area.max),
             )
         };
 
-        // The splitter: dragged to make the detail area bigger or smaller.
+        // The splitter: dragged to make the detail area bigger or smaller; under the
+        // Arrangement view, past the view's least height the piano roll goes to the top, and a
+        // double-click takes it there and back.
         let cursor = if stacked { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical };
-        let response = ui.interact(splitter, Id::new("detail-splitter"), Sense::drag()).on_hover_cursor(cursor);
+        let response =
+            ui.interact(splitter, Id::new("detail-splitter"), Sense::click_and_drag()).on_hover_cursor(cursor);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Detail area splitter"));
+        if response.double_clicked() && pullable {
+            self.detail_max = !self.detail_max;
+        }
         if response.dragged_by(egui::PointerButton::Primary) {
             let delta = response.drag_delta();
             if stacked {
                 self.detail_width -= delta.x;
             } else {
-                self.detail_height -= delta.y;
+                let height = self.detail_drag.unwrap_or(detail.height()) - delta.y;
+                self.detail_drag = Some(height);
+                self.detail_max = pullable && height > area.height() - MIN_VIEW;
+                if !self.detail_max {
+                    self.detail_height = height;
+                }
             }
+        } else {
+            self.detail_drag = None;
         }
         let painter = ui.painter_at(splitter);
         painter.rect_filled(splitter, 0.0, theme::control_background());
@@ -1141,16 +1279,109 @@ impl App {
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // A selected slot clip's follow action comes first, the rest of the detail beside or
+        // under it.
+        let follow = match (self.shown, self.view.selected_slot, self.session()) {
+            (View::Session, Some((t, scene)), Some(s)) => follow_view::FollowInfo::build(s.project(), t, scene),
+            _ => None,
+        };
+        let detail = match &follow {
+            Some(info) => {
+                let used = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+                    follow_view::show(ui, detail, info, stacked, actions)
+                });
+                if stacked {
+                    let top = (used.inner.bottom() + 1.0).min(detail.bottom());
+                    Rect::from_min_max(Pos2::new(detail.left(), top), detail.max)
+                } else {
+                    let left = (used.inner.right() + 1.0).min(detail.right());
+                    Rect::from_min_max(Pos2::new(left, detail.top()), detail.max)
+                }
+            }
+            None => detail,
+        };
+        if piano.is_none() {
+            self.piano_roll.hide();
+        }
         let mut places = Vec::new();
+        let options = piano_roll::Options { right_click_deletes: self.keymap.preset().right_click_deletes() };
+        // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
+        // visible on the button.
+        let keymap = self.keymap.clone();
+        let copied = self.session().and_then(Session::copied_notes);
+        // While the transport runs, the piano roll shows where playback is.
+        let playhead =
+            self.session().and_then(|s| s.player()).map(|p| p.monitor()).filter(|m| m.running()).map(|m| m.beat());
+        let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
-            if stacked {
+            if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
+                let rest = detail_view::show_clip_column(ui, info, stacked, piano_roll, actions);
+                let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
+                piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
+            } else if stacked {
                 detail_view::show_stack(ui, &shown, actions, &mut places);
             } else {
                 detail_view::show_row(ui, &shown, actions, &mut places);
             }
         });
         self.place_editors(&places);
+        // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
+        // the piano roll follows it.
+        if let Some(picked) = self.piano_roll.grid_picked.take() {
+            if self.settings.piano_grid_follows {
+                actions.push(Action::new("launcher.setQuantization", json!({ "value": picked })));
+            } else {
+                self.piano_grid = picked;
+            }
+        }
         view
+    }
+
+    /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is its
+    /// own grid value, or the control bar's when Settings says so.
+    fn piano_clip(&self, clip: Option<(TrackId, usize)>) -> Option<piano_roll::PianoClip> {
+        let (track, index) = clip?;
+        let grid = self.piano_grid_name();
+        let quantization = suhina_session::parse_quantization(grid).ok()?;
+        let mut clip = piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?;
+        clip.grid_name = grid;
+        Some(clip)
+    }
+
+    /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
+    pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
+        if self.shown != View::Arrangement {
+            return None;
+        }
+        self.piano_clip(self.arrangement.selected_clip()).map(|c| c.address)
+    }
+
+    /// The grid value the piano roll uses.
+    fn piano_grid_name(&self) -> &'static str {
+        if self.settings.piano_grid_follows { self.quantization } else { self.piano_grid }
+    }
+
+    /// What a key does in the piano roll, when it shows a clip and has the keyboard.
+    fn piano_key(&mut self, action: &str) -> Option<Action> {
+        if self.shown != View::Arrangement {
+            return None;
+        }
+        let clip = self.piano_clip(self.arrangement.selected_clip())?;
+        let playhead = self.timeline.as_ref().map_or(0.0, |(_, t)| t.beat);
+        let copied = self.session().and_then(Session::copied_notes);
+        self.piano_roll.key_action(action, &clip, playhead, copied)
+    }
+
+    /// The piano roll's state: its zoom, scroll and selected notes.
+    pub fn piano_roll(&self) -> &PianoRollState {
+        &self.piano_roll
+    }
+
+    /// The piano roll's state, to change: the ignored render test opens its quantise block with
+    /// this, where a click would toggle it back.
+    #[doc(hidden)]
+    pub fn piano_roll_mut(&mut self) -> &mut PianoRollState {
+        &mut self.piano_roll
     }
 
     /// Tells the active project where the panel shows its embedded plug-in editors this frame
@@ -1591,21 +1822,31 @@ impl App {
                     self.settings_open = true;
                 }
             });
+            ui.menu_button("Help", |ui| {
+                if ui.add(egui::Button::new("About Suhina").shortcut_text(keys("help.about"))).clicked() {
+                    self.about_open = true;
+                }
+            });
         });
     }
 
-    fn dropped_files(&mut self, ui: &Ui) {
+    /// Handles files dropped from the system: folders, themes and projects here; the samples and
+    /// MIDI files are returned, to land where the views say they are dropped.
+    fn dropped_files(&mut self, ui: &Ui) -> Vec<BrowserItem> {
         // The missing files panel takes a dropped folder as the folder to search.
         if self.missing.open {
-            return;
+            return Vec::new();
         }
         let dropped: Vec<PathBuf> = ui.input(|i| {
             i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect()
         });
         let is = |path: &PathBuf, ext: &str| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
         let mut opened = false;
+        let mut clips = Vec::new();
         for path in dropped {
-            if path.is_dir() {
+            if let Some(item) = drop::system_file(&path).filter(|_| !path.is_dir()) {
+                clips.push(item);
+            } else if path.is_dir() {
                 match self.projects.execute("library.addFolder", &json!({ "folder": path.display().to_string() })) {
                     Ok(_) => {
                         self.settings.browser_open = true;
@@ -1620,20 +1861,42 @@ impl App {
                 opened = true;
                 self.request_open(path);
             } else {
-                let what = "is not a project (.suhina), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
+                let what = "is not a sample, a MIDI file, a project (.suhina), a Live Set (.als), a theme (.json), a zip of themes or a folder for the browser";
                 self.status = Status::Error(format!("{} {what}", path.display()));
             }
         }
+        clips
+    }
+
+    /// Samples and MIDI files dragged over the window from the system, while it reports them.
+    fn hovered_files(&self, ui: &Ui) -> Vec<BrowserItem> {
+        if self.missing.open {
+            return Vec::new();
+        }
+        ui.input(|i| {
+            i.raw
+                .hovered_files
+                .iter()
+                .filter_map(|f| f.path.as_deref())
+                .filter(|p| !p.is_dir())
+                .filter_map(drop::system_file)
+                .collect()
+        })
     }
 
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
+        let dialog = self.project_dialog.is_some()
+            || self.save_prompt.is_some()
+            || self.unsaved_prompt.is_some()
+            || self.about_open;
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        let pressed = ui.input_mut(|i| self.keymap.pressed(i));
+        // The piano roll's own keys only while it has the keyboard.
+        let notes = self.piano_roll.focused;
+        let pressed = ui.input_mut(|i| self.keymap.pressed(i, |id| notes || !crate::keymap::piano_roll_only(id)));
         for action in pressed {
             self.do_action(&action, actions);
         }
@@ -1645,8 +1908,13 @@ impl App {
         let has_project = !self.projects.is_empty();
         match action {
             "settings.open" => self.settings_open = !self.settings_open,
+            "help.about" => self.about_open = !self.about_open,
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
+            "view.browser" if self.keymap.keys("view.browser").is_empty() => {
+                // A keymap preset (Draw-first) may leave the browser with no key: the window's own
+                // action then does nothing, so the file and what happens on a key press agree.
+            }
             "view.browser" => self.toggle_browser(),
             "view.sampleMap" => {
                 self.settings_open = false;
@@ -1689,9 +1957,36 @@ impl App {
             }
             "transport.toggle" => {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
-                actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
+                actions.push(if running { self.stop_action() } else { self.play_action(false) });
             }
+            "transport.playFromSelection" => actions.push(self.play_action(true)),
+            // Quantise in the piano roll, while it shows a clip.
+            "pianoRoll.quantize" => {
+                let showing = self.detail_open
+                    && matches!(self.shown, View::Arrangement)
+                    && self.piano_clip(self.arrangement.selected_clip()).is_some();
+                if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
+                    actions.push(quantize);
+                }
+            }
+            // Delete in the piano roll deletes its selected notes, not the clip.
+            "selection.delete" if let Some(delete) = self.piano_roll.delete_selected() => actions.push(delete),
+            // Copy, cut, paste and duplicate in the piano roll act on its notes, when it has some
+            // to act on; its own keys act only there.
+            "selection.copy" | "selection.cut" | "selection.paste" | "selection.duplicate"
+                if let Some(edit) = self.piano_key(action) =>
+            {
+                actions.push(edit)
+            }
+            _ if crate::keymap::piano_roll_only(action) => actions.extend(self.piano_key(action)),
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
+                // Points selected on an automation lane are deleted before any clip.
+                if action == "selection.delete"
+                    && let Some(delete) = self.arrangement.automation.delete_selected()
+                {
+                    actions.push(delete);
+                    return;
+                }
                 let Some((track, index)) = self.arrangement.selected_clip() else { return };
                 let id = match action {
                     "selection.copy" => "clip.copy",
@@ -1977,7 +2272,7 @@ impl App {
             let keys = if embedded || ui.ctx().egui_wants_keyboard_input() {
                 Vec::new()
             } else {
-                ui.input_mut(|i| keymap.pressed(i))
+                ui.input_mut(|i| keymap.pressed(i, |id| !crate::keymap::piano_roll_only(id)))
             };
             ui.input(|i| MapWindowFrame {
                 changed,
@@ -2094,42 +2389,15 @@ impl App {
             (released, escape, ctrl) = (remote.released, remote.escape, remote.ctrl);
             pointer = self.drag_pointer(ui.ctx());
         }
-        let mut target = match self.shown {
-            View::Session => self.view.drop.as_ref().and_then(|p| p.target),
-            View::Arrangement => self.arrangement.drop.as_ref().and_then(|p| p.target),
-        };
-        if let (None, Some(pointer), Some((detail, track))) = (target, pointer, self.detail_drop)
-            && detail.contains(pointer)
-            && items.iter().any(|i| i.kind.is_device())
-        {
-            target = Some(DropTarget::Track(track));
-        }
+        let target = self.drop_target(&items, pointer);
         if escape {
             self.browser.drag = None;
             self.map_window.drag = None;
             return;
         }
         let separate = ctrl != self.settings.drop_separate;
-        let label = target.and_then(|t| self.plan_drop(&items, t, separate)).map(|p| p.label);
         if let Some(pointer) = pointer {
-            let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("browser-drag"));
-            let painter = ui.ctx().layer_painter(layer);
-            let text = label.clone().unwrap_or_else(|| match items.as_slice() {
-                [one] => one.name.clone(),
-                many => format!("{} items", many.len()),
-            });
-            let font = theme::ui_font(theme::TEXT_SMALL);
-            let galley = widgets::fitted(&painter, &text, font, theme::text_primary(), 280.0);
-            let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(PAD * 2.0, 6.0));
-            painter.rect_filled(rect, 0.0, theme::control_active());
-            painter.rect_stroke(
-                rect,
-                0.0,
-                theme::hairline(if label.is_some() { theme::accent() } else { theme::border_strong() }),
-                egui::StrokeKind::Inside,
-            );
-            painter.galley(rect.min + Vec2::new(PAD, 3.0), galley, theme::text_primary());
-            ui.ctx().request_repaint();
+            self.drag_label(ui, pointer, &items, target, separate);
         }
         if released {
             self.browser.drag = None;
@@ -2142,6 +2410,70 @@ impl App {
                 self.drop_items(&items, target, separate);
             }
         }
+    }
+
+    /// Samples and MIDI files from the system over the window: the label beside the pointer while
+    /// they hover, and the drop where the views say. Without a pointer position (an OS drag on a
+    /// platform that does not report one) they go where Enter puts them.
+    fn system_drag(&mut self, ui: &Ui, items: Vec<BrowserItem>, dropped: bool) {
+        let pointer = self.drag_pointer(ui.ctx());
+        let target = self.drop_target(&items, pointer);
+        let separate = ui.input(|i| i.modifiers.command) != self.settings.drop_separate;
+        if !dropped {
+            if let Some(pointer) = pointer {
+                self.drag_label(ui, pointer, &items, target, separate);
+            }
+            return;
+        }
+        self.view.drop = None;
+        self.arrangement.drop = None;
+        match (target, pointer) {
+            _ if self.session().is_none() => self.status = Status::Hint("Open a project to add the files to".into()),
+            (Some(target), _) => self.drop_items(&items, target, separate),
+            (None, None) => self.add_to_selected(items),
+            (None, Some(_)) => {
+                self.status = Status::Hint("Drop samples and MIDI files on a slot, a lane or the empty area".into());
+            }
+        }
+    }
+
+    /// The target the views found under the pointer, or the detail area's track for devices.
+    fn drop_target(&self, items: &[BrowserItem], pointer: Option<Pos2>) -> Option<DropTarget> {
+        let target = match self.shown {
+            View::Session => self.view.drop.as_ref().and_then(|p| p.target),
+            View::Arrangement => self.arrangement.drop.as_ref().and_then(|p| p.target),
+        };
+        match (target, pointer, self.detail_drop) {
+            (None, Some(pointer), Some((detail, track)))
+                if detail.contains(pointer) && items.iter().any(|i| i.kind.is_device()) =>
+            {
+                Some(DropTarget::Track(track))
+            }
+            _ => target,
+        }
+    }
+
+    /// The label beside the pointer while dragging: what a drop there does, or what is dragged.
+    fn drag_label(&self, ui: &Ui, pointer: Pos2, items: &[BrowserItem], target: Option<DropTarget>, separate: bool) {
+        let label = target.and_then(|t| self.plan_drop(items, t, separate)).map(|p| p.label);
+        let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("browser-drag"));
+        let painter = ui.ctx().layer_painter(layer);
+        let text = label.clone().unwrap_or_else(|| match items {
+            [one] => one.name.clone(),
+            many => format!("{} items", many.len()),
+        });
+        let font = theme::ui_font(theme::TEXT_SMALL);
+        let galley = widgets::fitted(&painter, &text, font, theme::text_primary(), 280.0);
+        let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(PAD * 2.0, 6.0));
+        painter.rect_filled(rect, 0.0, theme::control_active());
+        painter.rect_stroke(
+            rect,
+            0.0,
+            theme::hairline(if label.is_some() { theme::accent() } else { theme::border_strong() }),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(rect.min + Vec2::new(PAD, 3.0), galley, theme::text_primary());
+        ui.ctx().request_repaint();
     }
 
     fn plan_drop(&self, items: &[BrowserItem], target: DropTarget, separate: bool) -> Option<drop::DropPlan> {
@@ -2297,7 +2629,14 @@ impl App {
             .collect()
     }
 
-    fn control_bar(&mut self, ui: &mut Ui, grid: Option<&Grid>, cpu: Option<u32>, actions: &mut Vec<Action>) {
+    fn control_bar(
+        &mut self,
+        ui: &mut Ui,
+        grid: Option<&Grid>,
+        cpu: Option<u32>,
+        ram: Option<u64>,
+        actions: &mut Vec<Action>,
+    ) {
         let bar = ui.max_rect();
         ui.allocate_rect(bar, Sense::hover());
         let painter = ui.painter_at(bar);
@@ -2342,9 +2681,10 @@ impl App {
             theme::text_primary(),
         );
         x = tempo_rect.right() + PAD;
-        let session = self.session();
-        let signature = session.map(|s| s.project().transport.time_signature);
-        let signature = signature.map_or_else(String::new, |ts| format!("{} / {}", ts.numerator, ts.denominator));
+        // The time signature playing, like the tempo: a launched scene may have changed it.
+        let ts = grid.meter.time_signature;
+        let signature =
+            if self.session().is_some() { format!("{} / {}", ts.numerator, ts.denominator) } else { String::new() };
         let ts_rect = row(x, 40.0);
         widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::text_secondary());
         x = ts_rect.right() + PAD;
@@ -2370,7 +2710,7 @@ impl App {
         let play = row(x, 28.0);
         let response = widgets::button_area(ui, play, Id::new("play"), "Play");
         if response.clicked() {
-            actions.push(Action::new("transport.play", json!({})));
+            actions.push(self.play_action(false));
         }
         let running = motion::toward(ui.ctx(), response.id.with("running"), grid.running, motion::VALUE);
         let hover = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
@@ -2406,11 +2746,34 @@ impl App {
             theme::text_primary(),
         );
 
-        // Right: the view switch; the current view is underlined. Left of it, the CPU
-        // load, from the engine's monitor (per mille, smoothed): how much of the time the
-        // audio engine spends rendering.
+        // Right, from the edge in: the view switch, the current view underlined, so it is
+        // the last control at the right end. Left of it the CPU load, from the engine's monitor
+        // (per mille, smoothed): how much of the time the audio engine spends rendering. In a
+        // narrow window a block that would reach the position readout is left out, the RAM
+        // first, so nothing overlaps and the order stays.
+        let centre_end = position.right() + PAD;
+        let fits = |right: f32, width: f32| right - width >= centre_end;
         let mut right = bar.right() - PAD;
-        if let Some(milli) = cpu {
+        let mut underline_at = None;
+        for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
+            let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
+            let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
+            let size = galley.size();
+            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
+            let response = widgets::button_area(ui, rect, Id::new(("view", name)), format!("{name} view"));
+            if response.clicked() {
+                self.shown = view;
+            }
+            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
+            let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
+            painter.galley(pos, galley, color);
+            if self.shown == view {
+                underline_at = Some((pos.x, pos.y + size.y + 1.0, size.x));
+            }
+            right = rect.left() - 12.0;
+        }
+        right += 12.0 - PAD;
+        if let Some(milli) = cpu.filter(|_| fits(right, 56.0)) {
             let rect = row(right - 56.0, 56.0);
             let percent = f64::from(milli.min(1000)) / 10.0;
             painter.rect_filled(rect, 0.0, theme::window_background());
@@ -2446,23 +2809,31 @@ impl App {
             });
             right = rect.left() - PAD;
         }
-        let mut underline_at = None;
-        for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
-            let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
-            let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
-            let size = galley.size();
-            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
-            let response = widgets::button_area(ui, rect, Id::new(("view", name)), format!("{name} view"));
-            if response.clicked() {
-                self.shown = view;
-            }
-            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
-            let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
-            painter.galley(pos, galley, color);
-            if self.shown == view {
-                underline_at = Some((pos.x, pos.y + size.y + 1.0, size.x));
-            }
-            right = rect.left() - 12.0;
+        // Left of that, the program's own RAM (its resident memory), in megabytes or gigabytes.
+        if let Some(bytes) = ram.filter(|_| fits(right, 76.0)) {
+            let rect = row(right - 76.0, 76.0);
+            painter.rect_filled(rect, 0.0, theme::window_background());
+            let inner = rect.shrink2(Vec2::new(PAD - 2.0, 0.0));
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::LEFT_CENTER,
+                "RAM",
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_hint(),
+            );
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::RIGHT_CENTER,
+                &ram_text(bytes),
+                theme::mono_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
+            let response = ui.interact(rect, Id::new("ram-usage"), Sense::hover());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("RAM usage {}", ram_text(bytes)))
+            });
         }
         // The underline slides to the view that was picked.
         if let Some((x, y, width)) = underline_at {
@@ -2623,6 +2994,12 @@ fn describe(action: &Action) -> Option<String> {
     })
 }
 
+/// The RAM as the control bar shows it: megabytes, or gigabytes with a decimal from 1 GiB on.
+fn ram_text(bytes: u64) -> String {
+    let mib = bytes as f64 / (1024.0 * 1024.0);
+    if mib >= 1024.0 { format!("{:.1} GB", mib / 1024.0) } else { format!("{mib:.0} MB") }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2645,6 +3022,36 @@ mod tests {
     }
 
     #[test]
+    fn files_from_the_system_outline_the_target_they_hover_and_change_nothing_until_dropped() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = App::new();
+        app.set_session(suhina_session::Session::new(crate::demo::demo_project()), &[]);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(Vec2::new(1280.0, 800.0))
+            .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        harness.run();
+        let before = harness.state().session().map(|s| s.project().clone());
+        let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+        harness.hover_at(at);
+        harness.run();
+        let file = egui::HoveredFile { path: Some(PathBuf::from("/x/Groove.mid")), ..Default::default() };
+        harness.input_mut().hovered_files.push(file);
+        harness.step();
+        let target = harness.state().view.drop.as_ref().and_then(|p| p.target);
+        assert!(matches!(target, Some(DropTarget::Slot { scene: 0, .. })), "{target:?}");
+        // A project or a theme hovering is not a drag into the project.
+        let file = egui::HoveredFile { path: Some(PathBuf::from("/x/Song.suhina")), ..Default::default() };
+        harness.input_mut().hovered_files = vec![file];
+        harness.step();
+        assert_eq!(harness.state().view.drop, None);
+        // Taken away again (the windowing layer clears them): nothing outlined, nothing added.
+        harness.input_mut().hovered_files.clear();
+        harness.step();
+        assert_eq!(harness.state().view.drop, None);
+        assert_eq!(harness.state().session().map(|s| s.project().clone()), before);
+    }
+
+    #[test]
     fn a_drag_from_the_map_window_lands_where_the_pointer_is_on_the_main_window() {
         let mut app = App::new();
         let main = Rect::from_min_size(Pos2::new(1920.0, 100.0), Vec2::new(1280.0, 800.0));
@@ -2657,5 +3064,17 @@ mod tests {
         // Where the map's window cannot tell (no pointer over it yet), nothing is under the drag.
         app.map_window.drag = Some(RemoteDrag { screen: None, released: false, escape: false, ctrl: false });
         assert_eq!(drag_pointer_in(&app, main, None), None);
+    }
+
+    #[test]
+    fn ram_is_shown_in_megabytes_or_gigabytes() {
+        assert_eq!(ram_text(0), "0 MB");
+        assert_eq!(ram_text(512 * 1024 * 1024), "512 MB");
+        assert_eq!(ram_text(700_000_000), "668 MB");
+        // From a gibibyte on, gigabytes with a decimal.
+        assert_eq!(ram_text(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(ram_text(2 * 1024 * 1024 * 1024 + 555_745_280), "2.5 GB");
+        // The measurement itself answers on this machine.
+        assert!(memory_stats::memory_stats().is_some_and(|s| s.physical_mem > 0));
     }
 }

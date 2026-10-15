@@ -1,10 +1,9 @@
-//! From features to positions: standardising, PCA, t-SNE, similar items and guessed kinds
-//! (ADR 0013 › Distances, Layout, Kinds).
+//! From features to positions: standardising, PCA, t-SNE and similar items (ADR 0013 ›
+//! Distances, Layout).
 
 use bhtsne::tSNE;
 
-use crate::features::{FEATURE_COUNT, Features, GROUPS};
-use crate::kinds::Kind;
+use crate::features::{FEATURE_COUNT, Features, GROUP_WEIGHTS, GROUPS};
 
 /// Dimensions kept by PCA before t-SNE.
 const PCA_DIMENSIONS: usize = 20;
@@ -13,12 +12,9 @@ const EPOCHS: usize = 1000;
 const THETA: f32 = 0.5;
 /// Below this many items t-SNE says little; the first two principal components are used.
 const MIN_TSNE_ITEMS: usize = 16;
-/// Neighbours asked when a kind is guessed, and how many of them must agree.
-const GUESS_NEIGHBOURS: usize = 7;
-const GUESS_AGREE: usize = 4;
 
-/// Features standardised across a scope: each to mean 0 and deviation 1, each group weighted
-/// so that it counts as much as any other whatever its size.
+/// Features standardised across a scope: each to mean 0 and deviation 1, each group scaled so
+/// that its size does not matter and then weighted by [`GROUP_WEIGHTS`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Standardised {
     rows: Vec<Features>,
@@ -40,8 +36,8 @@ impl Standardised {
             }
         }
         let mut weight = [0.0f32; FEATURE_COUNT];
-        for group in GROUPS {
-            let w = 1.0 / (group.len().max(1) as f32).sqrt();
+        for (group, group_weight) in GROUPS.into_iter().zip(GROUP_WEIGHTS) {
+            let w = group_weight / (group.len().max(1) as f32).sqrt();
             for slot in weight.get_mut(group).into_iter().flatten() {
                 *slot = w;
             }
@@ -58,6 +54,16 @@ impl Standardised {
             })
             .collect();
         Standardised { rows }
+    }
+
+    /// Rows already standardised, as they are (the layout's input with the kinds added).
+    pub(crate) fn from_rows(rows: Vec<Features>) -> Self {
+        Standardised { rows }
+    }
+
+    /// The standardised rows, one per item.
+    pub(crate) fn rows(&self) -> &[Features] {
+        &self.rows
     }
 
     pub fn len(&self) -> usize {
@@ -87,43 +93,14 @@ impl Standardised {
         all.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
         all
     }
-
-    /// Kinds for the items whose name gives none: the kind most of their nearest named
-    /// neighbours have, when enough agree. Returns the kind per item and whether it was guessed.
-    pub fn guess_kinds(&self, named: &[Option<Kind>]) -> Vec<(Kind, bool)> {
-        let labelled: Vec<usize> = named.iter().enumerate().filter(|(_, k)| k.is_some()).map(|(i, _)| i).collect();
-        named
-            .iter()
-            .enumerate()
-            .map(|(i, kind)| {
-                if let Some(kind) = kind {
-                    return (*kind, false);
-                }
-                let Some(from) = self.rows.get(i) else { return (Kind::Other, false) };
-                let mut nearest: Vec<(f32, Kind)> = labelled
-                    .iter()
-                    .filter_map(|&j| Some((distance(from, self.rows.get(j)?), (*named.get(j)?)?)))
-                    .collect();
-                nearest.sort_by(|a, b| a.0.total_cmp(&b.0));
-                nearest.truncate(GUESS_NEIGHBOURS);
-                let mut best = (0usize, Kind::Other);
-                for kind in Kind::ALL {
-                    let votes = nearest.iter().filter(|(_, k)| *k == kind).count();
-                    if votes > best.0 {
-                        best = (votes, kind);
-                    }
-                }
-                if best.0 >= GUESS_AGREE { (best.1, true) } else { (Kind::Other, false) }
-            })
-            .collect()
-    }
 }
 
 fn distance(a: &Features, b: &Features) -> f32 {
     a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f32>().sqrt()
 }
 
-/// Positions in 0–1 for every item, the same for the same input. `seed` comes from the scope.
+/// Positions in 0–1 for every item. `seed` comes from the scope; the same input gives the same
+/// map, up to t-SNE's parallel sums, whose last digits follow the thread schedule (ADR 0013).
 pub fn layout(standardised: &Standardised, seed: u64) -> Vec<[f32; 2]> {
     let n = standardised.len();
     match n {
@@ -312,10 +289,10 @@ mod tests {
             let mean: f32 = s.rows.iter().map(|r| r[f]).sum::<f32>() / 10.0;
             assert!(mean.abs() < 1e-5);
         }
-        // Every group has total variance 1, so it counts as much as any other.
-        for group in GROUPS {
+        // Every group's total variance is its weight squared, whatever its size.
+        for (group, weight) in GROUPS.into_iter().zip(GROUP_WEIGHTS) {
             let total: f32 = group.clone().map(|f| s.rows.iter().map(|r| r[f] * r[f]).sum::<f32>() / 10.0).sum();
-            assert!((total - 1.0).abs() < 1e-3, "{total}");
+            assert!((total - weight * weight).abs() < 1e-3, "{total}");
         }
         // A feature that never changes contributes nothing.
         let flat = Standardised::new(&[[3.0; FEATURE_COUNT], [3.0; FEATURE_COUNT]]);
@@ -332,25 +309,6 @@ mod tests {
         assert!(similar.windows(2).all(|w| w[0].1 <= w[1].1));
         assert!(s.similar(999, 5).is_empty());
         assert_eq!(s.similar(0, 1000).len(), 59);
-    }
-
-    #[test]
-    fn kinds_are_guessed_from_named_neighbours() {
-        let (rows, labels) = clusters(10);
-        let s = Standardised::new(&rows);
-        let named: Vec<Option<Kind>> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, l)| if i % 10 == 0 { None } else { Some([Kind::Kick, Kind::Snare, Kind::Hat][*l]) })
-            .collect();
-        let guessed = s.guess_kinds(&named);
-        assert_eq!(guessed[0], (Kind::Kick, true));
-        assert_eq!(guessed[10], (Kind::Snare, true));
-        assert_eq!(guessed[20], (Kind::Hat, true));
-        assert_eq!(guessed[1], (Kind::Kick, false));
-        // With nothing named, nothing is guessed.
-        let none = s.guess_kinds(&vec![None; rows.len()]);
-        assert!(none.iter().all(|k| *k == (Kind::Other, false)));
     }
 
     #[test]
@@ -375,11 +333,13 @@ mod tests {
                 .unwrap();
             assert_eq!(labels[nearest], labels[i]);
         }
-        let b = layout(&s, 42);
-        let moved = a.iter().zip(&b).map(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs()).fold(0.0f32, f32::max);
-        // t-SNE sums in parallel, so runs may differ in the last digits; the map looks the same.
-        // (The sound map keeps layouts, so a scope opens with the map it had.)
-        assert!(moved < 0.05, "moved {moved}");
+        // t-SNE sums in parallel, and the order of a float sum follows the thread schedule, so
+        // two runs may differ in the last digits, which its epochs can grow by any amount (the
+        // sound map keeps layouts, so a scope opens with the map it had). On one thread the order
+        // is fixed: the layout is then exactly a function of its input and seed.
+        let one = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let (b, c) = one.install(|| (layout(&s, 42), layout(&s, 42)));
+        assert_eq!(b, c);
     }
 
     #[test]

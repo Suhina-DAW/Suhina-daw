@@ -200,6 +200,7 @@ mod tests {
                 sends: Vec::new(),
                 devices: Vec::new(),
                 extensions: Extensions::default(),
+                automation: Vec::new(),
             }],
             contents: vec![ClipContent {
                 id: ContentId(1),
@@ -234,6 +235,7 @@ mod tests {
                             fade_out: 0.0,
                             fade_in_curve: Default::default(),
                             fade_out_curve: Default::default(),
+                            follow_action: Default::default(),
                             extensions: Extensions::default(),
                         }),
                         has_stop: true,

@@ -7,6 +7,8 @@
 use std::collections::HashSet;
 use std::fmt;
 
+pub mod automation;
+
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(pub u32);
@@ -100,6 +102,9 @@ pub struct Channel {
     pub output: Option<ChannelId>,
     pub sends: Vec<Send>,
     pub devices: Vec<Device>,
+    /// The channel's mixer parameters over the arrangement: lanes for `volume` (linear gain, as
+    /// `volume`), `pan` (-1 to 1) and `mute` (0 or 1).
+    pub automation: Vec<AutomationLane>,
     pub extensions: Extensions,
 }
 
@@ -143,10 +148,41 @@ pub struct Device {
     /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
     /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,
-    /// Parameter values of a built-in effect or instrument (`DeviceKind::Builtin`); empty for plug-ins and
-    /// placeholders. Parameters that are not listed keep their defaults.
+    /// Parameter values set on the device. A built-in effect or instrument's
+    /// (`DeviceKind::Builtin`) go by the parameter's stable id; a plug-in's by its parameter id
+    /// (the number the plug-in gives it, written in decimal) in the plug-in's own range, and are
+    /// set over the state it loads with. Parameters that are not listed keep their defaults (a
+    /// plug-in's, what its state says).
     pub params: Vec<DeviceParam>,
+    /// The device's parameters over the arrangement, one lane per parameter (by the same id as
+    /// in `params`), for plug-ins and built-in effects and instruments alike.
+    pub automation: Vec<AutomationLane>,
     pub extensions: Extensions,
+}
+
+/// A parameter's value over the arrangement (an envelope): points in beat order, the value
+/// moving from one to the next along the first one's curve and holding before the first and
+/// after the last. Two points at the same beat make a jump. See `docs/spec/automation.md`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationLane {
+    /// The parameter, by the id `Device::params` uses, or a mixer parameter of a channel
+    /// (`volume`, `pan`, `mute`).
+    pub param: String,
+    pub points: Vec<AutomationPoint>,
+    /// Whether the lane plays. A manual change to the parameter turns it off, so the value set
+    /// by hand holds until the lane is turned on again.
+    pub enabled: bool,
+}
+
+/// A value at an arrangement beat, in the parameter's own unit or range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutomationPoint {
+    pub beat: f64,
+    pub value: f64,
+    /// The shape of the segment from this point to the next, -1 to 1: 0 is a straight line,
+    /// above 0 it moves fast first and slow later, below 0 slow first (see
+    /// [`automation::shape`]).
+    pub curve: f64,
 }
 
 /// One parameter value of a built-in effect or instrument, by the parameter's stable id (ADR 0004). The value
@@ -301,6 +337,8 @@ pub struct Clip {
     /// default.
     pub fade_in_curve: FadeCurve,
     pub fade_out_curve: FadeCurve,
+    /// What a launched clip does after it has played for a while; arrangement clips ignore it.
+    pub follow_action: FollowAction,
     pub extensions: Extensions,
 }
 
@@ -442,6 +480,117 @@ pub struct LoopRange {
     pub end: f64,
 }
 
+/// What a launched clip does after it has played for its follow time: action A or action B,
+/// picked by chance with their weights (`docs/spec/clip-launching.md` › Follow actions).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FollowAction {
+    pub enabled: bool,
+    /// Beats from the launch to the action, when not `linked`.
+    pub time: f64,
+    /// The follow time is the clip's length instead of `time`.
+    pub linked: bool,
+    pub action_a: FollowKind,
+    pub action_b: FollowKind,
+    /// Weights of A and B, 0 to [`FollowAction::MAX_CHANCE`]; both 0 means no action.
+    pub chance_a: u32,
+    pub chance_b: u32,
+}
+
+impl FollowAction {
+    pub const MAX_CHANCE: u32 = 100;
+    /// The longest follow time, in beats (over 13 hours at 120 bpm).
+    pub const MAX_TIME: f64 = 100_000.0;
+
+    /// Whether the time is finite and within 0 (exclusive) … [`FollowAction::MAX_TIME`], the
+    /// chances at most [`FollowAction::MAX_CHANCE`].
+    pub fn is_valid(&self) -> bool {
+        self.time.is_finite()
+            && self.time > 0.0
+            && self.time <= Self::MAX_TIME
+            && self.chance_a <= Self::MAX_CHANCE
+            && self.chance_b <= Self::MAX_CHANCE
+    }
+}
+
+impl Default for FollowAction {
+    /// Off; when turned on, the next clip after one clip length.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            time: 4.0,
+            linked: true,
+            action_a: FollowKind::Next,
+            action_b: FollowKind::Nothing,
+            chance_a: Self::MAX_CHANCE,
+            chance_b: 0,
+        }
+    }
+}
+
+/// One follow action. Slots are 0-based scene indices in the clip's column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowKind {
+    /// The clip keeps playing.
+    Nothing,
+    /// The column stops.
+    Stop,
+    /// The clip is launched again from its start.
+    Again,
+    /// The clip above, or the last one at the top of the column.
+    Previous,
+    /// The clip below, or the first one at the bottom of the column.
+    Next,
+    First,
+    Last,
+    /// Any clip in the column, this one included.
+    Any,
+    /// Any other clip in the column.
+    Other,
+    /// The clip in this slot.
+    Jump(u32),
+}
+
+impl FollowKind {
+    /// The kinds without a slot, by name.
+    pub const NAMED: [FollowKind; 9] = [
+        Self::Nothing,
+        Self::Stop,
+        Self::Again,
+        Self::Previous,
+        Self::Next,
+        Self::First,
+        Self::Last,
+        Self::Any,
+        Self::Other,
+    ];
+
+    /// The name in files and commands: `next`, or `jump 3` for the slot of scene 3 (from 1).
+    pub fn name(self) -> String {
+        match self {
+            Self::Nothing => "nothing".into(),
+            Self::Stop => "stop".into(),
+            Self::Again => "again".into(),
+            Self::Previous => "previous".into(),
+            Self::Next => "next".into(),
+            Self::First => "first".into(),
+            Self::Last => "last".into(),
+            Self::Any => "any".into(),
+            Self::Other => "other".into(),
+            Self::Jump(slot) => format!("jump {}", u64::from(slot) + 1),
+        }
+    }
+
+    /// Reads [`FollowKind::name`]; the case and spaces around are ignored.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let name = name.trim().to_ascii_lowercase();
+        if let Some(scene) = name.strip_prefix("jump") {
+            let scene: u32 = scene.trim().parse().ok()?;
+            return scene.checked_sub(1).map(Self::Jump);
+        }
+        Self::NAMED.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Arrangement {
     pub lanes: Vec<ArrangementLane>,
@@ -468,6 +617,8 @@ pub struct Scene {
     pub name: String,
     /// Tempo the scene switches to when launched, if any.
     pub tempo_bpm: Option<f64>,
+    /// Time signature the scene switches to when launched, if any.
+    pub time_signature: Option<TimeSignature>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -666,6 +817,7 @@ mod tests {
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }
     }
 
@@ -681,8 +833,31 @@ mod tests {
             fade_out: 0.0,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
+            follow_action: Default::default(),
             extensions: Extensions::default(),
         }
+    }
+
+    #[test]
+    fn follow_kinds_read_back_their_names() {
+        for kind in FollowKind::NAMED.into_iter().chain([FollowKind::Jump(0), FollowKind::Jump(41)]) {
+            assert_eq!(FollowKind::from_name(&kind.name()), Some(kind));
+        }
+        assert_eq!(FollowKind::Jump(2).name(), "jump 3");
+        assert_eq!(FollowKind::from_name(" Jump  12 "), Some(FollowKind::Jump(11)));
+        for bad in ["", "jump", "jump 0", "jump -1", "jump 1.5", "jump 99999999999", "nextt", "stop 2"] {
+            assert_eq!(FollowKind::from_name(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_follow_action_needs_a_time_and_chances_in_range() {
+        assert!(FollowAction::default().is_valid());
+        for time in [0.0, -1.0, f64::NAN, f64::INFINITY, FollowAction::MAX_TIME * 2.0] {
+            assert!(!FollowAction { time, ..FollowAction::default() }.is_valid(), "{time}");
+        }
+        assert!(!FollowAction { chance_a: 101, ..FollowAction::default() }.is_valid());
+        assert!(!FollowAction { chance_b: 101, ..FollowAction::default() }.is_valid());
     }
 
     #[test]

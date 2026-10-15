@@ -5,8 +5,28 @@ name: Test build links
 # new build updates, and takes the `test-build` label off a pull request when someone other than a
 # maintainer pushes to it, so the new commits wait for review before they are built.
 #
+# A run that built nothing (a push that only merged main, see test-build.yml) leaves the comment
+# as it is, so it keeps linking the last real build. A build that was skipped, cancelled or
+# superseded linked nothing either, and starts no run at all: see the `link` job's `if`.
+#
+# The runs are grouped by the pull request they link (a run from a fork lists none there, so those
+# are grouped by their head repository and branch), so a burst of builds for one pull request waits
+# as one run instead of one per platform: the runners are a shared, limited resource
+# (docs/releasing.md › Test builds).
+#
 # test-build.yml from a fork runs as the fork has it, so a build is linked only when a maintainer
 # started its run: their own push, or the label they added. See docs/releasing.md › Test builds.
+#
+# Each linked build is also posted to the Discord testing forum (scripts/discord_test_build.py):
+# the bot (secret DISCORD_BOT_TOKEN, variables DISCORD_GUILD_ID and DISCORD_TESTING_FORUM_ID) finds
+# the pull request's thread, `#<number> …`, and the webhook (secret DISCORD_WEBHOOK_TESTING) posts
+# into it, or opens it when there is none. Without them nothing is posted, and a failed post fails
+# nothing else. See docs/releasing.md › Discord.
+#
+# Run by hand (Actions › Test build links › Run workflow, a maintainer only), it posts the builds
+# already linked from open pull requests, or from the numbers given, the same way
+# (scripts/discord_test_build_backfill.py): for pull requests whose build was linked before
+# Discord was set up. An expired build, or a thread that already has the commit, gets nothing.
 
 on:
   workflow_run:
@@ -14,23 +34,46 @@ on:
     types: [completed]
   pull_request_target:
     types: [synchronize]
+  workflow_dispatch:
+    inputs:
+      pull_requests:
+        description: "Pull request numbers to post, e.g. 302 303; empty posts every open pull request"
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
 jobs:
   link:
     name: link the build
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    # Only a run that built and has platforms to report is answered, so that a run with nothing to
+    # link takes no runner from the builds that do: it was skipped (the *what to build* job decided
+    # not to build), cancelled or superseded, or it is a fork's first run, waiting for a
+    # maintainer's *Approve and run*. A failed build is answered: its comment names the platform
+    # that failed and links its log.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      contains(fromJSON('["success", "failure", "timed_out"]'), github.event.workflow_run.conclusion)
+    # The pull request's newest build is the one to try, and each platform finishing is its own
+    # event, so a newer link replaces one that is still waiting. cancel-in-progress: true also
+    # drops a link that is running: the newer run writes the same comment afterwards.
+    concurrency:
+      group: test-build-links-${{ github.event.workflow_run.pull_requests[0].number || format('{0}:{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_branch) }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
       issues: write
       pull-requests: write
     steps:
       - uses: actions/github-script@v7
+        id: link
         with:
           script: |
-            // The maintainers are listed here and in test-build.yml.
+            // The maintainers are listed here, in the backfill job and in test-build.yml.
             const MAINTAINERS = ['juhamikael'];
             const MARKER = '<!-- suhina-test-build -->';
             const { owner, repo } = context.repo;
@@ -47,7 +90,7 @@ jobs:
             const builds = jobs.filter((job) => job.name.startsWith('test build ('));
             const ran = builds.filter((job) => !['skipped', 'cancelled'].includes(job.conclusion));
             if (ran.length === 0) {
-              core.info(`Run ${run.id} built nothing.`);
+              core.info(`Run ${run.id} built nothing; the comment keeps linking the last build.`);
               return;
             }
 
@@ -75,6 +118,8 @@ jobs:
               ['macos-universal', 'macOS 11+, Apple silicon and Intel', 'unzip, then `tar -xzf` the `.tar.gz`'],
               ['linux-x86_64', 'Linux x86-64, needs libasound2', 'unzip, then `tar -xzf` the `.tar.gz`'],
             ];
+            // The same rows for the Discord post.
+            const posted = [];
             const rows = PLATFORMS.map(([platform, label, how]) => {
               const job = builds.find((j) => j.name === `test build (${platform})`);
               const artifact = artifacts.find(
@@ -83,9 +128,11 @@ jobs:
               if (job && job.conclusion === 'success' && artifact) {
                 const url = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
                 const size = (artifact.size_in_bytes / 1048576).toFixed(0);
+                posted.push({ label, artifact: { name: artifact.name, url, size_mb: size } });
                 return `| ${label} | [${artifact.name}](${url}) (${size} MB) | ${how} |`;
               }
               const state = job ? (job.conclusion || job.status) : 'not built';
+              posted.push({ label, state, log: job ? job.html_url : null });
               return `| ${label} | ${state}${job ? ` ([log](${job.html_url}))` : ''} | |`;
             });
             const expires = artifacts.length
@@ -116,16 +163,64 @@ jobs:
             const previous = comments.find(
               (c) => c.user.type === 'Bot' && c.body.startsWith(MARKER),
             );
+            let comment;
             if (previous) {
-              await github.rest.issues.updateComment({
+              ({ data: comment } = await github.rest.issues.updateComment({
                 owner, repo, comment_id: previous.id, body: body.join('\n'),
-              });
+              }));
             } else {
-              await github.rest.issues.createComment({
+              ({ data: comment } = await github.rest.issues.createComment({
                 owner, repo, issue_number: number, body: body.join('\n'),
-              });
+              }));
             }
             core.info(`Linked run ${run.id} from #${number}.`);
+
+            // For the Discord post: data in a file, never in a shell command.
+            const file = `${process.env.RUNNER_TEMP}/test-build.json`;
+            require('fs').writeFileSync(file, JSON.stringify({
+              number, title: pr.title, pr_url: pr.html_url, comment_url: comment.html_url,
+              run_url: run.html_url, commit, contributor: !MAINTAINERS.includes(pr.user.login),
+              rows: posted,
+            }));
+            core.setOutput('build', file);
+
+      # main, for the script; never the pull request's code.
+      - uses: actions/checkout@v4
+        if: steps.link.outputs.build != ''
+        with:
+          persist-credentials: false
+      - name: Post the build to Discord
+        if: steps.link.outputs.build != ''
+        env:
+          BUILD: ${{ steps.link.outputs.build }}
+          DISCORD_WEBHOOK_TESTING: ${{ secrets.DISCORD_WEBHOOK_TESTING }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
+        run: python3 scripts/discord_test_build.py "$BUILD"
+
+  backfill:
+    name: post linked builds to Discord
+    # The maintainers are listed here, in the link job and in test-build.yml.
+    if: github.event_name == 'workflow_dispatch' && contains(fromJSON('["juhamikael"]'), github.triggering_actor)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Post the linked builds to Discord
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUESTS: ${{ inputs.pull_requests }}
+          DISCORD_WEBHOOK_TESTING: ${{ secrets.DISCORD_WEBHOOK_TESTING }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
+        run: python3 scripts/discord_test_build_backfill.py
 
   unlabel:
     name: take the label off new commits
