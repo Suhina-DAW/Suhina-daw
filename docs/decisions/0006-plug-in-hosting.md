@@ -50,7 +50,9 @@ and state (`DeviceKind::Clap`, `Vst3`, `Vst2` with `Device::state`); nothing run
   licensed. Its SDK licence is not GPL-compatible. Free headers exist (VeSTige, GPLv2+; FST,
   GPLv3+), but VeSTige's origin is known only second-hand and was the target of a DMCA notice in
   2018, and FST takes names from JUCE sources that shipped Steinberg's headers, which our
-  clean-room rules do not allow.
+  clean-room rules do not allow. A third one exists, Xaymar's `vst2sdk` (BSD-3-Clause, used by
+  DPF and by Lemon Studio); it is a reverse-engineering result like the others, and
+  [ADR 0022](0022-vst2-interface-description.md) decides it is not a source for us either.
 - VST3 has a documented way to replace a VST2 plug-in: the VST3 version declares the VST2 class
   it replaces (`moduleinfo.json` `Compatibility`, SDK 3.7.5 and later, or
   `IPluginCompatibility`, or the documented class-id convention built from the VST2 id and
@@ -345,10 +347,12 @@ workspace forbids.
 
 ## Not decided yet
 
-- **Hosting VST2 directly.** It would need our own clean-room description of the VST2 ABI
-  (observed from plug-ins and hosts we may use, written in `docs/spec/`), an optional crate kept
-  apart from the rest, no use of the VST trademark, and legal advice before release. Decided
-  when we know which plug-ins people still use only as VST2.
+- **Hosting VST2 directly.** The interface description and where it comes from is
+  [ADR 0022](0022-vst2-interface-description.md) (proposed): our own clean-room description,
+  observed and written in `docs/spec/`, with no third-party reverse-engineered header as a source.
+  The process, scanning, editor and format decisions above are unchanged, and legal advice still
+  precedes a release that ships it. The work starts when we know which plug-ins people still use
+  only as VST2.
 - **Our own Wine host** for Windows plug-ins on Linux (`suhina-plugin-host` built for Wine,
   speaking the same protocol, so one hop instead of two and one place for crashes, scanning and
   editors). Decided after native CLAP and VST3 work and the cost of the yabridge path has been
