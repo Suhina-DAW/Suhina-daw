@@ -21,10 +21,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
+    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
+    FadeCurve, FadeShape, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot,
+    StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -285,6 +285,22 @@ fn device_value(d: &Device) -> Value {
         "params": d.params.iter().map(|p| json!({ "id": p.id, "value": number(p.value) })).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        // Only devices with automation say so, so files without any keep their shape.
+        if !d.automation.is_empty() {
+            let lanes: Vec<Value> = d
+                .automation
+                .iter()
+                .map(|lane| {
+                    let points: Vec<Value> = lane
+                        .points
+                        .iter()
+                        .map(|p| json!({ "beat": number(p.beat), "value": number(p.value) }))
+                        .collect();
+                    json!({ "param": lane.param, "points": points })
+                })
+                .collect();
+            map.insert("automation".into(), Value::Array(lanes));
+        }
         with_extensions(map, &d.extensions);
     }
     out
@@ -668,12 +684,27 @@ fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
         let p = object(v, &at)?;
         params.push(DeviceParam { id: required_text(p, "id", &at)?, value: float(p, "value", &at)? });
     }
+    let mut automation = Vec::new();
+    for (i, v) in list(d, "automation", at)?.iter().enumerate() {
+        let at = format!("{at}.automation[{i}]");
+        let lane = object(v, &at)?;
+        let mut points = Vec::new();
+        for (j, p) in list(lane, "points", &at)?.iter().enumerate() {
+            let at = format!("{at}.points[{j}]");
+            let p = object(p, &at)?;
+            points.push(AutomationPoint { beat: float(p, "beat", &at)?, value: float(p, "value", &at)? });
+        }
+        // In beat order, as the model keeps them; points at the same beat keep their order.
+        points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+        automation.push(AutomationLane { param: required_text(lane, "param", &at)?, points });
+    }
     Ok(Device {
         name: text(d, "name", at)?,
         kind,
         enabled: flag(d, "enabled", true, at)?,
         state: bytes(d, "state", at)?,
         params,
+        automation,
         extensions: extensions(d, at)?,
     })
 }

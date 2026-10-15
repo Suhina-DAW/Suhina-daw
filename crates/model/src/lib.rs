@@ -143,10 +143,34 @@ pub struct Device {
     /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
     /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,
-    /// Parameter values of a built-in effect or instrument (`DeviceKind::Builtin`); empty for plug-ins and
-    /// placeholders. Parameters that are not listed keep their defaults.
+    /// Parameter values set on the device. A built-in effect or instrument's
+    /// (`DeviceKind::Builtin`) go by the parameter's stable id; a plug-in's by its parameter id
+    /// (the number the plug-in gives it, written in decimal) in the plug-in's own range, and are
+    /// set over the state it loads with. Parameters that are not listed keep their defaults (a
+    /// plug-in's, what its state says).
     pub params: Vec<DeviceParam>,
+    /// The device's parameters over the arrangement, one lane per parameter (by the same id as
+    /// in `params`). Plays only on plug-in devices so far; built-in effects and instruments
+    /// follow later.
+    pub automation: Vec<AutomationLane>,
     pub extensions: Extensions,
+}
+
+/// A parameter's value over the arrangement: points in beat order, the value moving in a
+/// straight line from one to the next and holding before the first and after the last. Two
+/// points at the same beat make a jump.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationLane {
+    /// The parameter, by the id `Device::params` uses.
+    pub param: String,
+    pub points: Vec<AutomationPoint>,
+}
+
+/// A value at an arrangement beat, in the parameter's own unit or range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutomationPoint {
+    pub beat: f64,
+    pub value: f64,
 }
 
 /// One parameter value of a built-in effect or instrument, by the parameter's stable id (ADR 0004). The value

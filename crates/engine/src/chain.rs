@@ -23,6 +23,7 @@ use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
 use suhina_model::{DeviceKind, Project, TrackId};
 
 use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
+use crate::plugin_params::SlotParams;
 
 /// The most frames one block of a chain holds; the renderer splits longer blocks.
 pub(crate) const MAX_BLOCK: usize = 1024;
@@ -103,6 +104,7 @@ impl Chain {
         let channel = project.tracks.iter().find(|t| t.id == track)?.channel?;
         let channel = project.channels.iter().find(|c| c.id == channel)?;
         let keys = plugin_devices(project);
+        let frames_per_beat = 60.0 / project.transport.tempo_bpm * f64::from(sample_rate);
         let mut slots: Vec<Slot> = Vec::new();
         let mut positions = Vec::new();
         let mut ids = Vec::new();
@@ -128,6 +130,7 @@ impl Chain {
                         latency: info.latency,
                         enabled: stored.enabled,
                         missed: 0,
+                        params: SlotParams::new(stored, frames_per_beat),
                     }));
                     positions.push(position);
                     ids.push(format!("plugin:{key:016x}"));
@@ -242,6 +245,16 @@ impl Chain {
         self.deadline = deadline;
     }
 
+    /// Plans the parameter events of its plug-ins for a block of `frames` frames starting at
+    /// arrangement frame `time` (`None` while the transport is stopped): call it after
+    /// [`Chain::begin`], before any of the block runs. Never allocates.
+    pub(crate) fn automate(&mut self, time: Option<u64>, frames: usize) {
+        let frames = frames.min(MAX_BLOCK);
+        for slot in self.plugin_slots() {
+            slot.params.plan(time, frames);
+        }
+    }
+
     /// Runs the devices over the rest of the block one stage further, for chains that run
     /// their plug-ins at the same time: built-in effects and instruments run here, with the block's `context`;
     /// at the next plug-in that takes the block without waiting, the block is handed over and
@@ -272,6 +285,7 @@ impl Chain {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    plugin.automate(from, to);
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
                         match plugin.send(span, span_events, *deadline) {
                             Sent::Out => {
@@ -414,6 +428,7 @@ impl Chain {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    plugin.automate(from, to);
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
                         plugin.run(span, span_events, *deadline);
                     }
@@ -440,13 +455,23 @@ impl Chain {
 
     /// Sets parameter `param` of the device at `position` among the channel's devices, as a
     /// parameter message does (ADR 0005, amendment). Never allocates.
+    /// For a plug-in, `param` is its parameter id, and the value goes at the start of the next
+    /// block.
     pub(crate) fn set_param(&mut self, position: usize, param: usize, value: f64) {
         let Some(index) = self.positions.iter().position(|&p| p == position) else { return };
-        if let Some(Slot::Device(device)) = self.slots.get_mut(index) {
-            device.set_param(param, value);
-            if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
-                *slot = device.param(param).unwrap_or(value);
+        match self.slots.get_mut(index) {
+            Some(Slot::Device(device)) => {
+                device.set_param(param, value);
+                if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
+                    *slot = device.param(param).unwrap_or(value);
+                }
             }
+            Some(Slot::Plugin(plugin)) => {
+                if let Ok(id) = u32::try_from(param) {
+                    plugin.params.set(id, value);
+                }
+            }
+            None => {}
         }
     }
 
@@ -469,9 +494,12 @@ impl Chain {
                     running.enabled = fresh.enabled;
                     running.instrument = fresh.instrument;
                     running.latency = fresh.latency;
-                    // A processor that reached the new graph's slot (a restart) wins.
+                    running.params.adopt(&mut fresh.params);
+                    // A processor that reached the new graph's slot (a restart) wins, and gets
+                    // the set values again.
                     if fresh.processor.is_some() {
                         std::mem::swap(&mut running.processor, &mut fresh.processor);
+                        running.params.restart();
                     }
                 }
                 (Slot::Plugin(_), Slot::Device(_)) => {}
@@ -495,7 +523,10 @@ impl Chain {
     /// one it replaces; gives `processor` back when there is no such slot. Never allocates.
     pub(crate) fn place(&mut self, key: u64, processor: Box<dyn PluginProcessor>) -> Placed {
         match self.plugin_slots().find(|slot| slot.key == key) {
-            Some(slot) => Placed::Replaced(slot.processor.replace(processor)),
+            Some(slot) => {
+                slot.params.restart();
+                Placed::Replaced(slot.processor.replace(processor))
+            }
             None => Placed::NoSlot(processor),
         }
     }

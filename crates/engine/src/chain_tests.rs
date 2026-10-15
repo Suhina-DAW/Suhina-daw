@@ -20,6 +20,7 @@ pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
         enabled: true,
         state: None,
         params: params.iter().map(|(p, v)| DeviceParam::new(*p, *v)).collect(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }

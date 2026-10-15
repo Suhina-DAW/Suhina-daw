@@ -382,6 +382,7 @@ fn put_fm_synth_on_note_tracks(project: &mut Project, patch: &suhina_device_fm_s
         enabled: true,
         state: None,
         params,
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     let channels: Vec<ChannelId> =

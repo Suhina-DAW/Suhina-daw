@@ -1108,6 +1108,7 @@ fn project_with_a_device() -> suhina_engine::model::Project {
         enabled: true,
         state: None,
         params: vec![DeviceParam::new("gain", -3.5), DeviceParam::new("width", 1.2)],
+        automation: Vec::new(),
         extensions: Extensions::default(),
     });
     project

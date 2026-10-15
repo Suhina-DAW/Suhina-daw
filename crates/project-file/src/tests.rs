@@ -44,6 +44,7 @@ fn everything() -> Project {
             enabled: true,
             state: None,
             params: vec![DeviceParam::new("volume", -6.0)],
+            automation: Vec::new(),
             extensions: Extensions::default(),
         },
         Device {
@@ -52,6 +53,7 @@ fn everything() -> Project {
             enabled: false,
             state: Some(vec![9, 8, 7, 0, 255]),
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: ext("Vst3ControllerState"),
         },
         Device {
@@ -60,6 +62,7 @@ fn everything() -> Project {
             enabled: true,
             state: Some(Vec::new()),
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         },
         Device {
@@ -68,6 +71,7 @@ fn everything() -> Project {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         },
         Device {
@@ -76,6 +80,7 @@ fn everything() -> Project {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: ext("GlueCompressor"),
         },
     ];

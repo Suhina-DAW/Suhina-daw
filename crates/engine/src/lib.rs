@@ -16,6 +16,9 @@ mod fade_tests;
 mod launcher;
 mod metronome;
 mod plugin;
+mod plugin_params;
+#[cfg(test)]
+mod plugin_params_tests;
 #[cfg(test)]
 mod plugin_tests;
 mod preview;
@@ -41,6 +44,7 @@ use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
     OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
 };
+pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
@@ -437,6 +441,12 @@ impl Renderer {
             beat: self.graph.launcher.beat_and_bar().0,
             playing: self.running,
         };
+        // Plug-in parameter events (set values, automation) are planned before any of the
+        // block runs: a chain may run part of it early, when notes crowd it.
+        let at = self.running.then(|| self.time());
+        for chain in &mut self.graph.chains {
+            chain.automate(at, frames);
+        }
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
@@ -1703,6 +1713,7 @@ mod tests {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         });
     }

@@ -196,6 +196,7 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
             .as_ref()
             .map_or_else(Vec::new, |p| p.params.iter().map(|(id, value)| DeviceParam::new(*id, *value)).collect()),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     channel.devices.insert(position, device);
     Ok(json!({ "device": position, "id": info.id, "name": info.name, "preset": preset.map(|p| p.name) }))
@@ -304,6 +305,7 @@ pub(crate) fn add_plugin(session: &mut Session, params: &Value) -> Result<Value,
         enabled: true,
         state: None,
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     channel.devices.insert(position, device);
