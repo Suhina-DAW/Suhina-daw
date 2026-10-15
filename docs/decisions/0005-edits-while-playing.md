@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -70,7 +70,8 @@ clip; devices (ADR 0004) will add many more parameters.
    worker joins it before the graph is sent, and a worker leaves when its graph has been dropped.
 8. **The session notifies the player.** After an edit or undo/redo command changes the project,
    `Session::execute` calls `Player::update`, so the CLI, MCP and the window all get the same
-   behaviour.
+   behaviour. The arrangement's loop region is part of the graph too, so a loop edit takes
+   effect at the swap, as any other edit does.
 
 ## Amendment: running plug-ins across graphs (2026-10-12)
 

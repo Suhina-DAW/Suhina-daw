@@ -133,7 +133,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 26] = [
+const DEFAULTS: [(&str, &[&str]); 27] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -158,6 +158,7 @@ const DEFAULTS: [(&str, &[&str]); 26] = [
     ("selection.delete", &["Delete", "Backspace"]),
     ("selection.group", &["Ctrl+G"]),
     ("marker.addAtPlayhead", &["M"]),
+    ("transport.setLoopEnabled", &["Ctrl+L"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
 ];

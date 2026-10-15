@@ -4,8 +4,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Marker, Project, Track,
-    TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, Marker, Project,
+    Track, TrackId,
 };
 
 use crate::{CommandError, Session, devices, files, preview};
@@ -223,6 +223,24 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[param("bpm", ParamType::Number, "beats per minute, 20 to 999")],
         kind: CommandKind::Edit,
         run: set_tempo,
+    },
+    CommandSpec {
+        id: "transport.setLoop",
+        label: "Set the arrangement's loop region, the span playback repeats while looping is on",
+        params: &[
+            param("start", ParamType::Number, "where the loop starts, in beats from the beginning, 0 … 120000"),
+            param("end", ParamType::Number, "where it ends, in beats, after start and at most 120000"),
+            optional("enabled", ParamType::Bool, "true turns looping on, false off (default: as it is)"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_loop,
+    },
+    CommandSpec {
+        id: "transport.setLoopEnabled",
+        label: "Turn looping on or off; on without a loop region first makes one over the first 4 bars",
+        params: &[optional("enabled", ParamType::Bool, "true turns looping on, false off (default: the other way)")],
+        kind: CommandKind::Edit,
+        run: set_loop_enabled,
     },
     CommandSpec {
         id: "track.setVolume",
@@ -808,6 +826,7 @@ fn info(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
         "arrangement_clips": arrangement_clips,
         "launcher_clips": launcher_clips,
         "markers": p.arrangement.markers.len(),
+        "loop": loop_value(p),
         "can_undo": session.can_undo(),
         "can_redo": session.can_redo(),
     }))
@@ -892,6 +911,52 @@ fn set_tempo(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     }
     session.project.transport.tempo_bpm = bpm;
     Ok(json!({ "tempo_bpm": bpm }))
+}
+
+/// The loop region and whether it is on, as `transport.setLoop` and `project.info` report it.
+fn loop_value(p: &Project) -> Value {
+    match p.transport.loop_range {
+        Some(range) => json!({ "start": range.start, "end": range.end, "enabled": p.transport.loop_enabled }),
+        None => Value::Null,
+    }
+}
+
+/// `params.enabled`: true or false, or `None` when left out.
+fn optional_enabled(params: &Value) -> Result<Option<bool>, CommandError> {
+    match params.get("enabled") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v.as_bool().map(Some).ok_or_else(|| "enabled must be true or false".into()),
+    }
+}
+
+fn set_loop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let (start, end) = (number(params, "start")?, number(params, "end")?);
+    if !(0.0..MAX_START_BEAT).contains(&start) {
+        return Err(format!("start must be from 0 and before {MAX_START_BEAT}, got {start}").into());
+    }
+    if !(end > start && end <= MAX_START_BEAT) {
+        return Err(format!("end must be after start ({start}) and at most {MAX_START_BEAT}, got {end}").into());
+    }
+    let enabled = optional_enabled(params)?;
+    let transport = &mut session.project.transport;
+    transport.loop_range = Some(LoopRange { start, end });
+    if let Some(enabled) = enabled {
+        transport.loop_enabled = enabled;
+    }
+    Ok(loop_value(&session.project))
+}
+
+fn set_loop_enabled(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let transport = &mut session.project.transport;
+    let enabled = optional_enabled(params)?.unwrap_or(!transport.loop_enabled);
+    if enabled && transport.loop_range.is_none() {
+        let signature = transport.time_signature;
+        let bar = f64::from(signature.numerator) * 4.0 / f64::from(signature.denominator.max(1));
+        let end = if bar.is_finite() && bar > 0.0 { (4.0 * bar).min(MAX_START_BEAT) } else { 16.0 };
+        transport.loop_range = Some(LoopRange { start: 0.0, end });
+    }
+    transport.loop_enabled = enabled;
+    Ok(loop_value(&session.project))
 }
 
 fn set_volume(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

@@ -7,6 +7,9 @@ playback: both run the same `Renderer::process` (AGENTS.md › One render path).
 - `fade-in.f32`: a 2-beat audio clip at 120 bpm, 8 kHz, playing a constant 0.25, with a
   1-beat fade-in.
 - `fade-out.f32`: the same clip with a half-beat fade-out.
+- `loop-1-2.f32` (`src/loop_tests.rs`): a 4-beat audio clip playing a rising ramp, with the loop
+  region from beat 1 to beat 2 on, played for 3 seconds: two beats straight, then the second beat
+  four times. The test also checks each pass against a render without the loop.
 
 Each file is little-endian 32-bit floats, one channel, one per frame. The tests also check every
 frame against the envelope written out in the test (linear fades times the 2 ms click guard,

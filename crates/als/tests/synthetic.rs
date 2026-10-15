@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use suhina_als::{AlsError, read_gzip, read_xml};
-use suhina_model::{ChannelRole, LaneData};
+use suhina_model::{ChannelRole, LaneData, LoopRange};
 
 fn mixer(volume: &str, pan: &str, on: &str, sends: &[&str]) -> String {
     let sends: String = sends
@@ -280,4 +280,33 @@ fn reads_locators_as_markers() {
 
     assert!(read_xml(&set("")).unwrap().project.arrangement.markers.is_empty());
     assert!(read_xml(&set("<Locators><Locators/></Locators>")).unwrap().project.arrangement.markers.is_empty());
+}
+
+/// The transport's loop region and its on/off are read; a region without a length, or one that
+/// does not end after it starts, is skipped with a warning (`docs/spec/als-format.md` ›
+/// Arrangement loop).
+#[test]
+fn reads_the_arrangement_loop() {
+    let set = |transport: &str| format!(r#"<Ableton><LiveSet><Tracks/>{transport}</LiveSet></Ableton>"#);
+    let transport = |on: &str, start: &str, length: &str| {
+        format!(
+            r#"<Transport><PhaseNudgeTempo Value="10"/><LoopOn Value="{on}"/><LoopStart Value="{start}"/>
+               <LoopLength Value="{length}"/><LoopIsSongStart Value="false"/><CurrentTime Value="0"/></Transport>"#
+        )
+    };
+    let read = |xml: &str| read_xml(&set(xml)).unwrap();
+
+    let on = read(&transport("true", "8", "16")).project.transport;
+    assert_eq!((on.loop_range, on.loop_enabled), (Some(LoopRange { start: 8.0, end: 24.0 }), true));
+    let off = read(&transport("false", "0", "4")).project.transport;
+    assert_eq!((off.loop_range, off.loop_enabled), (Some(LoopRange { start: 0.0, end: 4.0 }), false));
+
+    for bad in [transport("true", "8", "0"), transport("true", "-4", "8"), transport("true", "x", "8")] {
+        let import = read(&bad);
+        assert_eq!(import.project.transport.loop_range, None, "{bad}");
+        assert!(!import.project.transport.loop_enabled);
+        assert_eq!(import.warnings.iter().filter(|w| w.contains("loop")).count(), 1, "{:?}", import.warnings);
+    }
+    let none = read("").project.transport;
+    assert_eq!((none.loop_range, none.loop_enabled), (None, false));
 }

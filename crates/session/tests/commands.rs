@@ -643,3 +643,55 @@ fn bad_marker_edits_are_errors_and_change_nothing() {
     }
     assert_eq!(session.project(), &before);
 }
+
+#[test]
+fn the_loop_region_is_set_and_turned_on_and_off_with_undo() {
+    let mut session = Session::new(project());
+    let looped = |s: &Session| (s.project().transport.loop_range, s.project().transport.loop_enabled);
+    assert_eq!(run(&mut session, "project.info", json!({})).unwrap()["loop"], Value::Null);
+
+    // Setting the region leaves looping as it is unless `enabled` says otherwise.
+    let set = run(&mut session, "transport.setLoop", json!({ "start": 4, "end": 12 })).unwrap();
+    assert_eq!(set, json!({ "start": 4.0, "end": 12.0, "enabled": false }));
+    run(&mut session, "transport.setLoop", json!({ "start": 8, "end": 9.5, "enabled": true })).unwrap();
+    assert_eq!(looped(&session), (Some(LoopRange { start: 8.0, end: 9.5 }), true));
+    assert_eq!(run(&mut session, "project.info", json!({})).unwrap()["loop"]["end"], 9.5);
+
+    // Without `enabled` it toggles; off keeps the region for the next time it is on.
+    run(&mut session, "transport.setLoopEnabled", json!({})).unwrap();
+    assert_eq!(looped(&session), (Some(LoopRange { start: 8.0, end: 9.5 }), false));
+    run(&mut session, "transport.setLoopEnabled", json!({ "enabled": true })).unwrap();
+    assert!(session.project().transport.loop_enabled);
+
+    for _ in 0..4 {
+        run(&mut session, "edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(session.project(), &project());
+
+    // On without a region makes one over the first 4 bars, in the project's time signature.
+    let mut waltz = project();
+    waltz.transport.time_signature = TimeSignature { numerator: 3, denominator: 4 };
+    let mut session = Session::new(waltz);
+    let on = run(&mut session, "transport.setLoopEnabled", json!({ "enabled": true })).unwrap();
+    assert_eq!(on, json!({ "start": 0.0, "end": 12.0, "enabled": true }));
+}
+
+#[test]
+fn bad_loop_edits_are_errors_and_change_nothing() {
+    let mut session = Session::new(project());
+    run(&mut session, "transport.setLoop", json!({ "start": 4, "end": 8 })).unwrap();
+    let before = session.project().clone();
+    for (id, params) in [
+        ("transport.setLoop", json!({ "start": 8, "end": 8 })),
+        ("transport.setLoop", json!({ "start": 8, "end": 4 })),
+        ("transport.setLoop", json!({ "start": -1, "end": 4 })),
+        ("transport.setLoop", json!({ "start": 0, "end": 120_000.5 })),
+        ("transport.setLoop", json!({ "start": 0 })),
+        ("transport.setLoop", json!({ "start": "0", "end": 4 })),
+        ("transport.setLoop", json!({ "start": 0, "end": 4, "enabled": "yes" })),
+        ("transport.setLoopEnabled", json!({ "enabled": 1 })),
+    ] {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    assert_eq!(session.project(), &before);
+}

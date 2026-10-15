@@ -61,6 +61,22 @@ const MARKER: Vec2 = Vec2::new(9.0, 6.0);
 /// The row of arrangement markers under the ruler, and the widest a marker's name tag gets.
 const MARKER_ROW: f32 = 16.0;
 const MARKER_TAG_MAX: f32 = 120.0;
+/// The loop brace row under the ruler, the brace's bar in it, and how near an end of the brace
+/// the pointer grabs that end.
+const LOOP_ROW: f32 = 14.0;
+const LOOP_BAR: f32 = 6.0;
+const LOOP_GRAB: f32 = 4.0;
+
+/// What a drag in the loop brace row changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LoopGrab {
+    /// Draws a new region from this beat (on the grid) to the pointer.
+    New(f64),
+    Start,
+    End,
+    /// Moves the whole region; the pointer was this many beats into it.
+    Body(f64),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -178,6 +194,9 @@ pub struct ArrangementViewState {
     marker_menu_beat: f64,
     /// The name being typed for a marker in its menu.
     marker_name: Option<(usize, String)>,
+    /// A drag in the loop brace row: what it changes and where the pointer is, in beats before
+    /// snapping.
+    loop_drag: Option<(LoopGrab, f64)>,
 }
 
 impl Default for ArrangementViewState {
@@ -204,6 +223,7 @@ impl Default for ArrangementViewState {
             marker_drag: None,
             marker_menu_beat: 0.0,
             marker_name: None,
+            loop_drag: None,
         }
     }
 }
@@ -409,8 +429,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     };
     let time = Rect::from_x_y_ranges(time_x, area.y_range());
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
+    let loop_row = Rect::from_min_size(Pos2::new(time.left(), ruler.bottom() + 1.0), Vec2::new(time.width(), LOOP_ROW));
     let marker_row =
-        Rect::from_min_size(Pos2::new(time.left(), ruler.bottom() + 1.0), Vec2::new(time.width(), MARKER_ROW));
+        Rect::from_min_size(Pos2::new(time.left(), loop_row.bottom() + 1.0), Vec2::new(time.width(), MARKER_ROW));
     // Return tracks and the main track are fixed rows along the bottom.
     let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
     let fixed_rows = returns.len() + usize::from(timeline.main_volume_db.is_some());
@@ -511,6 +532,8 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         }
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border()));
+    painter.rect_filled(loop_row, 0.0, theme::panel_background());
+    painter.hline(area.x_range(), loop_row.bottom() + 0.5, theme::hairline(theme::border()));
     painter.rect_filled(marker_row, 0.0, theme::panel_background());
     painter.hline(area.x_range(), marker_row.bottom() + 0.5, theme::hairline(theme::border_strong()));
 
@@ -548,6 +571,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             }
         });
     }
+    loop_brace(ui, timeline, state, actions, loop_row, &x_of);
     marker_flags(ui, timeline, state, actions, marker_row, &x_of);
     // The marker: a small triangle hanging from the ruler's lower edge.
     let marker_x = x_of(timeline.start_beat).round() + 0.5;
@@ -907,6 +931,145 @@ fn marker_flags(
     if state.marker_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
         state.marker_drag = None;
     }
+}
+
+/// The loop region as the row under the ruler draws it while `state.loop_drag` changes it, on the
+/// ruler's grid (Alt: free). `None` while a new region is no wider than a grid step.
+fn dragged_loop(
+    timeline: &Timeline,
+    state: &ArrangementViewState,
+    free: bool,
+    grab: LoopGrab,
+    raw: f64,
+) -> Option<(f64, f64)> {
+    let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
+    let snap = |beat: f64| ruler_beat(beat, bar_beats, state.beat_width, free);
+    let brace = timeline.loop_brace.map(|b| (b.start, b.end));
+    let (start, end) = match (grab, brace) {
+        (LoopGrab::New(anchor), _) => {
+            let to = snap(raw);
+            (anchor.min(to), anchor.max(to))
+        }
+        (LoopGrab::Start, Some((_, end))) => (snap(raw).min(end), end),
+        (LoopGrab::End, Some((start, _))) => (start, snap(raw).max(start)),
+        (LoopGrab::Body(into), Some((start, end))) => {
+            let to = snap((raw - into).max(0.0));
+            (to, to + (end - start))
+        }
+        _ => return None,
+    };
+    (end > start && start >= 0.0 && end <= suhina_engine::MAX_START_BEAT).then_some((start, end))
+}
+
+/// The loop brace in its row under the ruler: a bar from the loop start to the loop end, bright
+/// while looping is on. Dragging on the row draws a new region and turns looping on; dragging an
+/// end of the brace moves that end, dragging its middle moves it (on the ruler's grid; Alt:
+/// free); a click on it turns looping on or off (`docs/spec/arrangement-editing.md` › Loop region).
+fn loop_brace(
+    ui: &Ui,
+    timeline: &Timeline,
+    state: &mut ArrangementViewState,
+    actions: &mut Vec<Action>,
+    row: Rect,
+    x_of: &dyn Fn(f64) -> f32,
+) {
+    let painter = ui.painter_at(row);
+    let free = ui.input(|i| i.modifiers.alt);
+    let raw_at = |x: f32, state: &ArrangementViewState| f64::from((x - row.left() + state.scroll.x) / state.beat_width);
+    let response = ui.interact(row, Id::new("arrangement-loop-row"), Sense::click_and_drag());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Loop brace"));
+
+    // Which part of the brace is under `x`.
+    let brace_x = timeline.loop_brace.map(|b| (x_of(b.start), x_of(b.end)));
+    let part = |x: f32| -> Option<LoopGrab> {
+        let (left, right) = brace_x?;
+        if (x - left).abs() <= LOOP_GRAB {
+            Some(LoopGrab::Start)
+        } else if (x - right).abs() <= LOOP_GRAB {
+            Some(LoopGrab::End)
+        } else if (left..=right).contains(&x) {
+            Some(LoopGrab::Body(0.0))
+        } else {
+            None
+        }
+    };
+    if let Some(pointer) = response.hover_pos() {
+        match part(pointer.x) {
+            Some(LoopGrab::Start | LoopGrab::End) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
+            Some(_) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+            None => {}
+        }
+    }
+
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin()).or(response.interact_pointer_pos())
+    {
+        let raw = raw_at(origin.x, state);
+        let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
+        let grab = match (part(origin.x), timeline.loop_brace) {
+            (Some(LoopGrab::Body(_)), Some(brace)) => LoopGrab::Body(raw - brace.start),
+            (Some(grab), _) => grab,
+            (None, _) => LoopGrab::New(ruler_beat(raw, bar_beats, state.beat_width, free)),
+        };
+        state.loop_drag = Some((grab, raw));
+    }
+    if response.dragged_by(egui::PointerButton::Primary)
+        && let Some(pointer) = response.interact_pointer_pos()
+        && state.loop_drag.is_some()
+    {
+        let at = raw_at(pointer.x, state);
+        if let Some((_, raw)) = state.loop_drag.as_mut() {
+            *raw = at;
+        }
+    }
+    let dragged = state.loop_drag.and_then(|(grab, raw)| dragged_loop(timeline, state, free, grab, raw));
+    if response.drag_stopped()
+        && let Some((grab, _)) = state.loop_drag.take()
+        && let Some((start, end)) = dragged
+    {
+        let unchanged = timeline.loop_brace.is_some_and(|b| b.start == start && b.end == end);
+        match grab {
+            // A new region is meant to be heard: it turns looping on.
+            LoopGrab::New(_) => {
+                actions.push(Action::new("transport.setLoop", json!({ "start": start, "end": end, "enabled": true })));
+            }
+            _ if !unchanged => actions.push(Action::new("transport.setLoop", json!({ "start": start, "end": end }))),
+            _ => {}
+        }
+    }
+    if response.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+        && part(pointer.x).is_some()
+    {
+        actions.push(Action::new("transport.setLoopEnabled", json!({})));
+    }
+    response.context_menu(|ui| {
+        let on = timeline.loop_brace.is_some_and(|b| b.enabled);
+        if ui.button(if on { "Turn loop off" } else { "Turn loop on" }).clicked() {
+            actions.push(Action::new("transport.setLoopEnabled", json!({ "enabled": !on })));
+            ui.close();
+        }
+    });
+    // A drag that lost its row (the view changed under it) ends.
+    if state.loop_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+        state.loop_drag = None;
+    }
+
+    let shown = dragged.or_else(|| timeline.loop_brace.map(|b| (b.start, b.end)));
+    let Some((start, end)) = shown else { return };
+    let enabled = timeline.loop_brace.is_none_or(|b| b.enabled) || state.loop_drag.is_some();
+    let (left, right) = (x_of(start).round(), x_of(end).round());
+    let bar = Rect::from_min_max(
+        Pos2::new(left, row.center().y - LOOP_BAR / 2.0),
+        Pos2::new(right.max(left + 1.0), row.center().y + LOOP_BAR / 2.0),
+    );
+    let (fill, edge) = if enabled {
+        (theme::control_active(), theme::text_secondary())
+    } else {
+        (theme::control_background(), theme::text_hint())
+    };
+    painter.rect_filled(bar, 0.0, fill);
+    painter.rect_stroke(bar, 0.0, theme::hairline(edge), StrokeKind::Inside);
 }
 
 /// The part of a lane a clip in sub-row `row` of `rows` is drawn in.
