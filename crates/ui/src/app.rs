@@ -463,6 +463,11 @@ impl App {
     /// Opens `path` as asked; in place of a project with unsaved changes only after the user
     /// answered whether to save them.
     fn open_as(&mut self, path: PathBuf, how: OpenAs) {
+        if how == OpenAs::Replace
+            && let Some(active) = self.projects.active()
+        {
+            self.check_plugin_edits(active);
+        }
         match self.projects.active() {
             Some(active) if how == OpenAs::Replace && self.unsaved(active) => {
                 self.unsaved_prompt = Some(Leaving { project: active, then: AfterLeaving::Replace(path) });
@@ -473,6 +478,14 @@ impl App {
 
     fn unsaved(&self, id: ProjectId) -> bool {
         self.projects.get(id).is_some_and(Session::has_unsaved_changes)
+    }
+
+    /// Reads the project's running plug-ins' states now, so a change made only in a plug-in's
+    /// editor counts as unsaved before the window asks whether to save.
+    fn check_plugin_edits(&mut self, id: ProjectId) {
+        if let Some(session) = self.projects.get_mut(id) {
+            session.check_plugin_edits();
+        }
     }
 
     /// The open projects with unsaved changes, in tab order.
@@ -496,6 +509,11 @@ impl App {
         }
         if !ctx.input(|i| i.viewport().close_requested()) || self.quit_confirmed {
             return;
+        }
+        if !self.unsaved_prompt_open() {
+            for id in self.projects.ids() {
+                self.check_plugin_edits(id);
+            }
         }
         let Some(first) = self.unsaved_projects().first().copied() else { return };
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1025,6 +1043,9 @@ impl App {
             let closing = (action.id == "projects.close")
                 .then(|| action.params["project"].as_u64().and_then(|n| u32::try_from(n).ok()).map(ProjectId))
                 .flatten();
+            if let Some(project) = closing {
+                self.check_plugin_edits(project);
+            }
             if let Some(project) = closing
                 && self.unsaved(project)
             {

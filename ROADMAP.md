@@ -285,6 +285,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Save as template writes a copy to the templates folder. The tab and window title mark unsaved
   changes with a dot, and closing a project, opening another in its place or quitting with
   unsaved changes asks whether to save them.
+- A change made only in a plug-in's editor counts as an unsaved change: the dot appears within
+  about a minute, and closing or quitting asks whether to save it.
 - The **browser** (Ctrl+B shows and hides it, left or right of the view): search (Ctrl+F),
   category filters (All, Samples, MIDI, Instruments, Effects, Presets, Plug-ins), a sidebar of
   Pinned, Recent (by kind) and the folders the user added (a path, or a folder dropped on the

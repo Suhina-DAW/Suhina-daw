@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -80,7 +80,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Saving.** `project.save { path?, copy? }` (through `command_run`) writes the project as a
   Suhina project (`.suhina`, [spec](spec/suhina-format.md)) with its plug-ins' state as it is now;
   without a path, to the project file it came from (a `.locr` from before October 2026 stays `.locr`); `copy: true` writes a copy (a template) and the
-  project keeps its own file. `project.info` reports `unsaved_changes`. `project_open` opens
+  project keeps its own file. `project.info` reports `unsaved_changes`, which a change made only in
+  a plug-in's editor sets too, within about a minute (two state reads that agree). `project_open` opens
   `.suhina` (and older `.locr`) files as well as Live Sets.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades

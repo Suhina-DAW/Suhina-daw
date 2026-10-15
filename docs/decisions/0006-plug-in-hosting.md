@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -405,7 +405,9 @@ workspace forbids.
   names it. Every 30 s the session reads each running plug-in's state, so a restart after a
   crash gets back what was set in its editor (decision 5); saving the project
   (`project.save`) reads each one's state then and writes it into the project, so a reopened
-  project, or a plug-in started again from scratch, gets the same settings. Crashes and hangs are noticed within 250 ms and shown on the
+  project, or a plug-in started again from scratch, gets the same settings. Those reads also
+  tell when a setting was changed in the editor since the project was saved, which makes the
+  project unsaved without an undo step ([ADR 0010](0010-project-files.md), decision 7). Crashes and hangs are noticed within 250 ms and shown on the
   device; `device.restart` starts it again (one that could not start at all is started from
   scratch with the project's state).
 - **Latency** is compensated: every track is heard as late as the one whose devices (built-in

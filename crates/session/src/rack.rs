@@ -25,6 +25,7 @@ use suhina_plugins::{
     Event, EventKind, Health, Launch, MAX_EVENTS, Placement, Plugin, PluginAudio, PluginError, SavedState,
 };
 
+use crate::plugin_edits::PluginEdits;
 use crate::{CommandError, Player};
 
 /// How long starting a plug-in (the host process, loading it, its state) may take. Generous:
@@ -385,8 +386,9 @@ struct Started {
 enum Done {
     Opened(Result<(u32, u32), String>),
     Closed(Result<(), String>),
-    /// Its state was read (now and then, for a restart).
-    Saved,
+    /// Its state was read (now and then, for a restart, and to notice changes made in its
+    /// editor); `None` when it did not answer.
+    Saved(Option<SavedState>),
     /// It was stopped; its last state, for when it starts again.
     Stopped(Option<SavedState>),
 }
@@ -472,6 +474,8 @@ pub struct Rack {
     returned: Receiver<Returned>,
     /// What happened while the project was saved, for the next [`Rack::sync`] to tell.
     notices: Vec<String>,
+    /// The states read compared with the ones last saved: changes made in plug-in editors.
+    pub(crate) edits: PluginEdits,
 }
 
 impl Default for Rack {
@@ -493,6 +497,7 @@ impl Default for Rack {
             saved: Instant::now(),
             owner: None,
             embed: false,
+            edits: PluginEdits::default(),
         }
     }
 }
@@ -518,26 +523,7 @@ impl Rack {
     /// window) cannot hold the window: one that has not answered by then gives the state it last
     /// gave, and a stopped one the state it left.
     pub(crate) fn current_states(&mut self) -> HashMap<u64, SavedState> {
-        let running: Vec<u64> = self.instances.iter().filter(|(_, i)| i.control.is_some()).map(|(k, _)| *k).collect();
-        let asked: Vec<u64> = running
-            .into_iter()
-            .filter(|key| {
-                self.lend(*key, |control| {
-                    let _kept_by_the_control_half = control.save_state();
-                    Done::Saved
-                })
-                .is_ok()
-            })
-            .collect();
-        let deadline = Instant::now() + SAVE_WAIT;
-        let mut notices = Vec::new();
-        while asked.iter().any(|key| self.instances.get(key).is_some_and(|i| i.control.is_none()))
-            && Instant::now() < deadline
-        {
-            std::thread::sleep(Duration::from_millis(2));
-            self.take_returned(&mut notices);
-        }
-        self.notices.extend(notices);
+        self.read_states();
         let mut states = self.kept.clone();
         for (key, instance) in &self.instances {
             if let Some(state) = instance.control.as_ref().and_then(Plugin::last_state) {
@@ -545,6 +531,49 @@ impl Rack {
             }
         }
         states
+    }
+
+    /// Asks every running plug-in for its state, each on a thread of its own, and waits for the
+    /// answers: at most [`SAVE_WAIT`] in all, with the time it takes a plug-in lent out for
+    /// something else (a read just after it started) to come back first.
+    fn read_states(&mut self) {
+        let deadline = Instant::now() + SAVE_WAIT;
+        let mut notices = Vec::new();
+        let lent = |rack: &Self, keys: Option<&[u64]>| {
+            rack.instances.iter().any(|(key, i)| {
+                i.control.is_none() && keys.map_or(i.status == PluginStatus::Running, |keys| keys.contains(key))
+            })
+        };
+        while lent(self, None) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+            self.take_returned(&mut notices);
+        }
+        let running: Vec<u64> = self.instances.iter().filter(|(_, i)| i.control.is_some()).map(|(k, _)| *k).collect();
+        let asked: Vec<u64> = running.into_iter().filter(|key| self.lend(*key, read_state).is_ok()).collect();
+        while lent(self, Some(&asked)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+            self.take_returned(&mut notices);
+        }
+        self.notices.extend(notices);
+    }
+
+    /// Reads the running plug-ins' states twice in a row, so a change made in an editor since
+    /// the last read counts now, not after the next two reads ([`SAVE_EVERY`] apart): before
+    /// the window asks whether to save. Waits at most [`SAVE_WAIT`] for each read.
+    pub(crate) fn check_edits(&mut self) {
+        self.read_states();
+        self.read_states();
+    }
+
+    /// Whether a plug-in's state changed since the project was last saved or opened, without
+    /// a change to the project itself (a setting made in the plug-in's editor).
+    pub(crate) fn edited(&self) -> bool {
+        self.edits.changed()
+    }
+
+    /// The project was saved with `states` (from [`Rack::current_states`]).
+    pub(crate) fn saved(&mut self, states: &HashMap<u64, SavedState>) {
+        self.edits.saved(states);
     }
 
     /// Stops every plug-in, keeping each one's last state for when it starts again. The host
@@ -588,8 +617,15 @@ impl Rack {
     fn take_returned(&mut self, notices: &mut Vec<String>) {
         while let Ok(returned) = self.returned.try_recv() {
             let Returned { key, generation, control, done } = returned;
+            if let Done::Saved(s) = &done {
+                eprintln!("SAVED {key} {}", s.is_some());
+            }
+            if let Done::Saved(Some(state)) = &done {
+                self.edits.read(key, state);
+            }
             if let Done::Stopped(state) = done {
                 if let Some(state) = state {
+                    self.edits.read(key, &state);
                     self.kept.insert(key, state);
                 }
                 continue;
@@ -612,7 +648,7 @@ impl Rack {
                                 notices.push(format!("{name}: its editor did not close ({why})"));
                             }
                         }
-                        Done::Saved | Done::Stopped(_) => {}
+                        Done::Saved(_) | Done::Stopped(_) => {}
                     }
                     instance.control = Some(control);
                 }
@@ -776,6 +812,7 @@ impl Rack {
     /// whether what the graphs need to know changed (a latency).
     fn receive(&mut self, player: &mut Player, notices: &mut Vec<String>) -> bool {
         let mut changed = false;
+        let mut started_now = Vec::new();
         while let Ok(started) = self.receiver.try_recv() {
             let Some(instance) = self.instances.get_mut(&started.key) else { continue };
             if instance.generation != started.generation {
@@ -800,12 +837,18 @@ impl Rack {
                         Err(e) => instance.status = PluginStatus::Failed(e.0),
                     }
                     instance.control = Some(control);
+                    started_now.push(started.key);
                 }
                 Err(why) => {
                     notices.push(format!("{name} could not start: {why}"));
                     instance.status = PluginStatus::Failed(why);
                 }
             }
+        }
+        // Its state as it runs, for later reads to be compared with (a plug-in may report a
+        // state it was given in a form of its own).
+        for key in started_now {
+            let _busy_then_next_time = self.lend(key, read_state);
         }
         changed
     }
@@ -848,10 +891,7 @@ impl Rack {
         }
         // Kept by the control half for a restart; read where waiting does not matter.
         for key in to_save {
-            let _busy_then_next_time = self.lend(key, |control| {
-                let _kept_for_a_restart = control.save_state();
-                Done::Saved
-            });
+            let _busy_then_next_time = self.lend(key, read_state);
         }
     }
 
@@ -1023,6 +1063,11 @@ fn missing_notice(env: &PluginEnv, missing: &[String]) -> String {
         if missing.len() == 1 { "its" } else { "their" },
         missing.join(", ")
     )
+}
+
+/// Reads a plug-in's state; its control half keeps it for a restart.
+fn read_state(control: &mut Plugin) -> Done {
+    Done::Saved(control.save_state().ok())
 }
 
 /// Starts a plug-in on a thread of its own and sends the result.

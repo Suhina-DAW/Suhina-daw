@@ -101,7 +101,8 @@ CHAPTERS = [
      "hot-swap, preset browser depth, defaults, device delay review."),
     (24, "Using Plug-Ins", 12, 0.55, "partial",
      "CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency "
-     "compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, "
+     "compensation, saved state (a change in an editor counts as unsaved), VST2 read and matched "
+     "to VST3. Missing AU, VST2 hosting, "
      "configure mode, VST preset banks, sidechain parameters."),
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
      "A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/"

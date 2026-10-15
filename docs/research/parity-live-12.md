@@ -144,7 +144,7 @@ documented behaviour that exists today.
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). |
 | 23 | Working with Instruments and Effects (Device View) | 34 | 30 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
-| 24 | Using Plug-Ins | 12 | 55 % | partial | CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
+| 24 | Using Plug-Ins | 12 | 55 % | partial | CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency compensation, saved state (a change in an editor counts as unsaved), VST2 read and matched to VST3. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
 | 26 | Automation and Editing Envelopes | 22 | 0 % | absent | No automation lanes, no recording or drawing of automation. |
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |

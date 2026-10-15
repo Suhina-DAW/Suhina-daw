@@ -8,6 +8,7 @@ mod commands;
 mod devices;
 mod files;
 mod library;
+mod plugin_edits;
 mod plugins;
 mod preview;
 mod projects;
@@ -470,9 +471,18 @@ impl Session {
         self.audio_folder.as_deref()
     }
 
-    /// Whether the project changed since it was opened or last saved.
+    /// Whether the project changed since it was opened or last saved, by a command or in a
+    /// plug-in's editor (noticed as its state is read now and then; see
+    /// [`Session::check_plugin_edits`]).
     pub fn has_unsaved_changes(&self) -> bool {
-        self.changes != self.saved_at
+        self.changes != self.saved_at || self.plugins.edited()
+    }
+
+    /// Reads the running plug-ins' states now, so a change made in a plug-in's editor since
+    /// the last read shows in [`Session::has_unsaved_changes`]: before asking whether to save
+    /// on close or quit. Waits at most a second or two for plug-ins that do not answer.
+    pub fn check_plugin_edits(&mut self) {
+        self.plugins.check_edits();
     }
 
     /// Saves the project as a Suhina project at `path` (`.suhina` is added when it has neither
@@ -522,6 +532,7 @@ impl Session {
         if !copy {
             self.source = Some(path.clone());
             self.saved_at = self.changes;
+            self.plugins.saved(&states);
         }
         Ok(path)
     }
@@ -654,5 +665,44 @@ fn unknown_command(id: &str) -> CommandError {
         CommandError(format!("unknown command {id}; commands.list shows them all"))
     } else {
         CommandError(format!("unknown command {id}; did you mean one of: {}", similar.join(", ")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use suhina_plugins::SavedState;
+
+    use super::*;
+
+    /// Two reads of plug-in device `key` that agree, as the rack makes them now and then.
+    fn read_twice(session: &mut Session, key: u64, byte: u8) {
+        for _ in 0..2 {
+            session.plugins.edits.read(key, &SavedState::from(vec![byte]));
+        }
+    }
+
+    #[test]
+    fn a_change_in_a_plug_ins_editor_is_unsaved_until_the_project_is_saved() {
+        let dir = std::env::temp_dir().join(format!("suhina-plugin-edits-{}", std::process::id()));
+        let mut session = Session::new(blank_project());
+        read_twice(&mut session, 7, 1);
+        assert!(!session.has_unsaved_changes(), "the state a plug-in runs with is not a change");
+
+        read_twice(&mut session, 7, 2);
+        assert!(session.has_unsaved_changes());
+        assert_eq!(session.execute("project.info", &json!({})).unwrap()["unsaved_changes"], true);
+        assert!(!session.can_undo(), "an editor tweak is not an undo step");
+
+        // A copy (a template, a backup) is not the project saved.
+        let path = dir.join("song.suhina").display().to_string();
+        session
+            .execute("project.save", &json!({ "path": dir.join("copy").display().to_string(), "copy": true }))
+            .unwrap();
+        assert!(session.has_unsaved_changes());
+
+        session.execute("project.save", &json!({ "path": path })).unwrap();
+        assert!(!session.has_unsaved_changes());
+        let _clean = std::fs::remove_dir_all(&dir);
     }
 }
