@@ -787,6 +787,32 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     }
     loop_brace(ui, timeline, state, actions, loop_row, &x_of);
     marker_flags(ui, timeline, state, actions, marker_row, &x_of);
+    // Back to arrangement, while tracks play launched clips instead of their arrangement
+    // clips: it returns every track to its arrangement clips and the lanes light up again.
+    if timeline.overrides {
+        let small = theme::ui_font(theme::TEXT_SMALL);
+        let label = "Back to arrangement";
+        let width = widgets::text_width(ui, label, small.clone()) + PAD * 2.0;
+        let back = Rect::from_min_size(
+            Pos2::new(time.left() + 8.0, ruler.center().y - (ruler.height() - 6.0) / 2.0),
+            Vec2::new(width, ruler.height() - 6.0),
+        );
+        let response = widgets::button_area(ui, back, Id::new("back-to-arrangement"), label.to_string());
+        if response.clicked() {
+            actions.push(Action::new("launcher.backToArrangement", json!({})));
+        }
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(
+            back,
+            0.0,
+            motion::mix(
+                idle,
+                theme::text_value(),
+                motion::toward(ui.ctx(), response.id.with("on"), false, motion::VALUE),
+            ),
+        );
+        widgets::text_in(&painter, back, Align2::CENTER_CENTER, label, small, theme::text_primary());
+    }
     // The marker: a small triangle hanging from the ruler's lower edge.
     let marker_x = x_of(timeline.start_beat).round() + 0.5;
     if (time.left()..=time.right()).contains(&marker_x) {
@@ -911,6 +937,11 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
         let nest = Nest { places: &places, groups: &groups };
         track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &nest, timeline, state, actions);
+        // The track plays launched clips instead of its arrangement clips: the lane dims
+        // until Back to arrangement returns it.
+        if lane.overrides {
+            lanes_painter.rect_filled(lane_rect, 0.0, theme::window_background().gamma_multiply(0.45));
+        }
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::border_strong()));
         // The track's automation lanes, under it.
         let lanes = automation::TrackLanes {

@@ -106,7 +106,8 @@ CHAPTERS = [
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
     (16, "Launching Clips", 12, 0.77, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time "
-     "signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by "
+     "signature), stop, loop, back to arrangement (the arrangement's dimmed lanes and the ruler's "
+     "button), warped launched clips, follow actions (A/B by "
      "chance, linked or timed, jump to a slot; by command and in the detail area), samples looping "
      "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), "
      "launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch "

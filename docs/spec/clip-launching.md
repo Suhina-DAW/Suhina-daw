@@ -92,7 +92,10 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    arrangement clips, even after that column stops, until "back to arrangement" returns every
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
    **Suhina:** back to arrangement stops the launched clips of those tracks (with the stop
-   fade) and drops their queued launches, so a track never plays both at once.
+   fade) and drops their queued launches, so a track never plays both at once. In the window:
+   the Arrangement view dims a lane whose track plays launched clips, and its ruler shows
+   **Back to arrangement** while any lane is dimmed; clicking it runs
+   `launcher.backToArrangement`.
 
 ## Editing scenes
 

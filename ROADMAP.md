@@ -222,7 +222,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - One clip per track; a clip loops until it is stopped or replaced, a clip without a loop plays
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
-- A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- A track that launched a clip leaves its arrangement clips until "back to arrangement": in
+  the Arrangement view its lane dims and the ruler shows **Back to arrangement** while any
+  track plays launched clips, which returns every track to the arrangement.
 - Scenes are edited with commands and from the scene button's right-click menu: insert,
   duplicate (with copies of its clips), delete, rename, and a tempo and time signature that
   apply when the scene launches (bars and the metronome count in the new time signature from

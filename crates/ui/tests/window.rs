@@ -3264,3 +3264,48 @@ fn escape_or_a_drop_on_nothing_leaves_the_project_alone() {
         assert_eq!(project(&harness), before);
     }
 }
+
+/// Needs an audio device, so it is ignored by default, like the preview test.
+#[test]
+#[ignore]
+fn launching_a_clip_greys_the_arrangement_until_back_to_arrangement() {
+    let mut session = Session::new(demo_project());
+    let (player, _) = suhina_output::open_player(session.project(), session.audio()).unwrap();
+    session.attach_player(player);
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    // Launch a clip while the transport plays, on a fine grid so it fires at once.
+    harness.state_mut().projects_mut().execute("transport.play", &json!({})).unwrap();
+    harness.state_mut().projects_mut().execute("launcher.setQuantization", &json!({ "value": "1/32" })).unwrap();
+    harness.state_mut().projects_mut().execute("clip.launch", &json!({ "track": 1, "scene": 1 })).unwrap();
+    for _ in 0..30 {
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    eprintln!(
+        "LAUNCHER STATE: {:?}",
+        harness.state_mut().projects_mut().execute("launcher.state", &json!({})).unwrap()
+    );
+    // The Arrangement view: the Drums lane dims and Back to arrangement shows in the ruler.
+    harness.get_by_label("Arrangement view").click();
+    harness.run_steps(5);
+    assert!(
+        harness.query_by_label("Back to arrangement").is_some(),
+        "the button shows while a track plays launched clips"
+    );
+    // Clicking it returns every track to its arrangement clips: the launched clip stops at
+    // the next boundary (a 32nd here) with its fade, so wait for it.
+    harness.get_by_label("Back to arrangement").click();
+    let mut back = true;
+    for _ in 0..200 {
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if harness.query_by_label("Back to arrangement").is_none() {
+            back = false;
+            break;
+        }
+    }
+    assert!(!back, "the arrangement is back");
+}
