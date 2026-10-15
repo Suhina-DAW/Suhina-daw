@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use suhina_engine::LauncherMonitor;
 
-use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Meter, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, default_track_colour, gain_to_db};
 use crate::waveform::Waveforms;
@@ -112,6 +112,11 @@ pub struct Timeline {
     /// Where the last clip ends, in beats.
     pub end: f64,
     pub bar_beats: f64,
+    /// Bars through the time-signature changes; the ruler numbers bars with it.
+    pub meter: Meter,
+    /// Tempo and time-signature changes, as the ruler marks them (`docs/spec/tempo-map.md` ›
+    /// The Arrangement).
+    pub marks: Vec<RulerMark>,
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
@@ -121,11 +126,49 @@ pub struct Timeline {
     pub waveforms: Arc<Waveforms>,
 }
 
+/// A change marked on the ruler: where it is and what it says ("140 bpm", "→ 140 bpm" for a ramp,
+/// "3/4"); a tempo and a signature change on one beat share one mark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RulerMark {
+    pub beat: f64,
+    pub text: String,
+}
+
+/// The ruler's marks for `project`'s tempo and time-signature changes, in beat order.
+fn ruler_marks(project: &Project, meter: &Meter) -> Vec<RulerMark> {
+    let bpm = |bpm: f64| {
+        let rounded = (bpm * 100.0).round() / 100.0;
+        if rounded.fract() == 0.0 { format!("{rounded:.0} bpm") } else { format!("{rounded} bpm") }
+    };
+    let tempo = project
+        .transport
+        .tempo_changes
+        .iter()
+        .filter(|p| p.beat.is_finite() && p.beat > 0.0)
+        .map(|p| (p.beat, if p.ramp { format!("→ {}", bpm(p.bpm)) } else { bpm(p.bpm) }));
+    let signatures = meter.changes().map(|(_, beat, ts)| (beat, format!("{}/{}", ts.numerator, ts.denominator)));
+    let mut all: Vec<(f64, String)> = tempo.chain(signatures).collect();
+    all.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut marks: Vec<RulerMark> = Vec::new();
+    for (beat, text) in all {
+        match marks.last_mut() {
+            Some(last) if last.beat == beat => {
+                last.text.push_str("  ");
+                last.text.push_str(&text);
+            }
+            _ => marks.push(RulerMark { beat, text }),
+        }
+    }
+    marks
+}
+
 impl Timeline {
     pub fn build(project: &Project, monitor: Option<&LauncherMonitor>) -> Self {
         let ts = project.transport.time_signature;
         let bar_beats =
             if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
+        let meter = project.transport.meter();
+        let marks = ruler_marks(project, &meter);
         let mut lanes = Vec::new();
         let mut returns = Vec::new();
         for (position, track) in project.tracks.iter().enumerate() {
@@ -197,6 +240,8 @@ impl Timeline {
             main_volume_db,
             end,
             bar_beats,
+            meter,
+            marks,
             running: false,
             beat: 0.0,
             start_beat: 0.0,
@@ -330,6 +375,22 @@ pub fn note_marks(content: &ClipContent, clip: &Clip) -> Vec<NoteMark> {
 mod tests {
     use super::*;
     use crate::demo::demo_project;
+
+    #[test]
+    fn the_ruler_marks_tempo_and_time_signature_changes() {
+        use suhina_engine::model::{TempoPoint, TimeSignature, TimeSignatureChange};
+        let mut project = demo_project();
+        project.transport.tempo_changes =
+            vec![TempoPoint { beat: 16.0, bpm: 140.0, ramp: false }, TempoPoint { beat: 32.0, bpm: 97.5, ramp: true }];
+        project.transport.time_signature_changes =
+            vec![TimeSignatureChange { bar: 4, time_signature: TimeSignature { numerator: 7, denominator: 8 } }];
+        let timeline = Timeline::build(&project, None);
+        let marks: Vec<(f64, &str)> = timeline.marks.iter().map(|m| (m.beat, m.text.as_str())).collect();
+        // Bar 5 (counted from 1) starts on beat 16, where the tempo changes too.
+        assert_eq!(marks, [(16.0, "140 bpm  7/8"), (32.0, "→ 97.5 bpm")]);
+        assert_eq!(timeline.meter.bar_start(5), 19.5);
+        assert!(Timeline::build(&demo_project(), None).marks.is_empty());
+    }
 
     #[test]
     fn lanes_follow_the_tracks_with_returns_last() {

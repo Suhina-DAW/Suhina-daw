@@ -259,6 +259,13 @@ pub struct Meter {
     segments: Vec<MeterSegment>,
 }
 
+impl Default for Meter {
+    /// 4/4 throughout.
+    fn default() -> Self {
+        Self::new(TimeSignature { numerator: 4, denominator: 4 }, &[])
+    }
+}
+
 impl Meter {
     /// The meter of a start signature and its changes. Changes at bar 0, with an invalid
     /// signature ([`TimeSignature::is_valid`]) or past [`MAX_TIME_SIGNATURE_CHANGES`] are

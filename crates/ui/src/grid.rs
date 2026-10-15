@@ -2,7 +2,7 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Meter, Project, Rgb, TrackId};
 use suhina_engine::{LauncherMonitor, Queued};
 
 use crate::theme;
@@ -100,6 +100,8 @@ pub struct Grid {
     pub tempo_bpm: f64,
     /// Beats per bar, from the time signature.
     pub bar_beats: f64,
+    /// Bars through the time-signature changes, for the position.
+    pub meter: Meter,
 }
 
 impl Grid {
@@ -197,14 +199,18 @@ impl Grid {
             None => (false, 0.0, project.transport.tempo_bpm),
         };
         let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
-        Self { columns, scenes, running, beat, tempo_bpm, bar_beats }
+        Self { columns, scenes, running, beat, tempo_bpm, bar_beats, meter: project.transport.meter() }
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.
     pub fn position(&self) -> String {
-        let bar_beats = if self.bar_beats > 0.0 { self.bar_beats } else { 4.0 };
-        let bar = (self.beat / bar_beats).floor() as u64 + 1;
-        let in_bar = self.beat % bar_beats;
+        let (bar, in_bar) = if self.meter.is_constant() {
+            let bar_beats = if self.bar_beats > 0.0 { self.bar_beats } else { 4.0 };
+            ((self.beat / bar_beats).floor() as u64 + 1, self.beat % bar_beats)
+        } else {
+            let here = self.meter.position(self.beat);
+            (u64::from(here.bar) + 1, (self.beat - here.bar_start).max(0.0))
+        };
         let beat = in_bar.floor() as u64 + 1;
         let sixteenth = ((in_bar.fract()) * 4.0).floor() as u64 + 1;
         format!("{bar}.{beat}.{sixteenth}")
@@ -270,5 +276,11 @@ mod tests {
         assert_eq!(grid.position(), "2.2.3");
         let start = Grid { bar_beats: 4.0, ..Grid::default() };
         assert_eq!(start.position(), "1.1.1");
+        // 4/4 for bar 1, then 3/4: beat 8.5 is in bar 3, on its second beat.
+        use suhina_engine::model::{TimeSignature, TimeSignatureChange};
+        let changes = [TimeSignatureChange { bar: 1, time_signature: TimeSignature { numerator: 3, denominator: 4 } }];
+        let meter = Meter::new(TimeSignature { numerator: 4, denominator: 4 }, &changes);
+        let changing = Grid { beat: 8.5, bar_beats: 4.0, meter, ..Grid::default() };
+        assert_eq!(changing.position(), "3.2.3");
     }
 }

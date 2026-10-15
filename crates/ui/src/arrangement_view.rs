@@ -456,12 +456,13 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let first_beat = f64::from(state.scroll.x / state.beat_width);
     let last_beat = f64::from((state.scroll.x + time.width()) / state.beat_width);
 
-    // Ruler: bar numbers, a line at each labelled bar.
+    // Ruler: bar numbers through the time-signature changes, a line at each labelled bar.
     painter.rect_filled(ruler, 0.0, theme::panel_background());
+    let meter = &timeline.meter;
     let bar_width = bar_beats as f32 * state.beat_width;
     let label_every = [1u32, 2, 4, 8, 16, 32, 64].into_iter().find(|n| *n as f32 * bar_width >= 40.0).unwrap_or(128);
-    let first_bar = (first_beat / bar_beats).floor() as u32;
-    let last_bar = (last_beat / bar_beats).ceil() as u32;
+    let first_bar = meter.position(first_beat).bar;
+    let last_bar = meter.position(last_beat).bar.saturating_add(1);
     let ruler_painter = painter.with_clip_rect(ruler);
     // The grid covers the tracks and the fixed rows, not the empty space below the tracks.
     let tracks_bottom = (lanes_area.top() - state.scroll.y + content_height).min(lanes_area.bottom());
@@ -470,7 +471,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let grid_painter = painter
         .with_clip_rect(Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(lanes_area.top(), area.bottom())));
     for bar in first_bar..=last_bar {
-        let x = x_of(f64::from(bar) * bar_beats).round() + 0.5;
+        let start = meter.bar_start(bar);
+        let this_bar_beats = meter.position(start).bar_beats;
+        let x = x_of(start).round() + 0.5;
         if bar % label_every == 0 {
             ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::border()));
             let label = Rect::from_min_max(Pos2::new(x + 3.0, ruler.top()), Pos2::new(x + 40.0, ruler.bottom()));
@@ -478,7 +481,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
                 &ruler_painter,
                 label,
                 Align2::LEFT_CENTER,
-                &(bar + 1).to_string(),
+                &(u64::from(bar) + 1).to_string(),
                 theme::mono_font(theme::TEXT_SMALL),
                 theme::text_secondary(),
             );
@@ -489,12 +492,27 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
                 grid_painter.vline(x, *band, theme::hairline(theme::border()));
             }
             if state.beat_width >= 10.0 {
-                for beat in 1..bar_beats.ceil() as u32 {
-                    let x = x_of(f64::from(bar) * bar_beats + f64::from(beat)).round() + 0.5;
+                for beat in 1..this_bar_beats.ceil() as u32 {
+                    let x = x_of(start + f64::from(beat)).round() + 0.5;
                     grid_painter.vline(x, *band, theme::hairline(theme::panel_background()));
                 }
             }
         }
+    }
+    // Tempo and time-signature changes: a line in the accent colour and what changes, after
+    // room for the bar number.
+    for mark in timeline.marks.iter().filter(|m| m.beat >= first_beat - 64.0 && m.beat <= last_beat) {
+        let x = x_of(mark.beat).round() + 0.5;
+        ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::accent()));
+        let label = Rect::from_min_max(Pos2::new(x + 30.0, ruler.top()), Pos2::new(x + 140.0, ruler.bottom()));
+        widgets::text_in(
+            &ruler_painter,
+            label,
+            Align2::LEFT_CENTER,
+            &mark.text,
+            theme::mono_font(theme::TEXT_TINY),
+            theme::accent(),
+        );
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border_strong()));
 

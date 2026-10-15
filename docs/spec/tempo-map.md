@@ -129,7 +129,7 @@ signature outside the ranges, a missing or mistyped param is an error and change
 ## The Arrangement
 
 The bar ruler numbers bars through the meter and marks each change: a tempo change with its bpm
-(and `↗` for a ramp), a signature change with the new signature. **Suhina:** editing the changes
+(with `→` before it for a ramp), a signature change with the new signature. **Suhina:** editing the changes
 in the window comes later; the commands edit them now (MCP and `suhina-cli`).
 
 ## Live Sets
