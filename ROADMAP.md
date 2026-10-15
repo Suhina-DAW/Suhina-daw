@@ -230,6 +230,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   apply when the scene launches (bars and the metronome count in the new time signature from
   there). Playing clips stay with their row when scenes are inserted or deleted while playing
   ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
+- A slot's mark is the shape its click does: a play triangle in the track colour while stopped,
+  a stop square while playing — a playing trigger clip's click stops it, and a playing scene's
+  row stops on its button's click (`scene.stop`). The Delete key takes a selected slot's clip
+  off its slot.
 - A sample dropped into a slot loops over the whole file even when its tempo is not known (it
   plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
 - An arrangement clip goes into a clip slot, and a slot's clip onto the arrangement, as a copy
