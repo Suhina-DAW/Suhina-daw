@@ -128,7 +128,15 @@ decision 9.
    other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
    tracks routed through it, with no buffer of its own.
 
-11. **Sends feed return chains** (added 2026-10-15, #396; behaviour in the
+11. **Automation splits a chain on the arrangement's grid** (added 2026-10-15, #395). A built-in
+   device's lanes (`Device::automation`, ADR 0001) set its parameters at their points and at
+   every 64th frame of the arrangement where the value moved, at a block's first frame only when
+   the transport started or moved; the chain splits the device's block there, with note events,
+   a parameter change before a note at one frame. So the sound does not depend on the block size,
+   as 5 asks, and the device smooths each step. A track whose mixer has lanes runs through a
+   chain, one without devices when it has none, whose gains move frame by frame after its devices.
+   [The automation spec](../spec/automation.md) has the details.
+12. **Sends feed return chains** (added 2026-10-15, #396; behaviour in the
    [sends and returns spec](../spec/sends-and-returns.md)). Every track with a heard send gets a
    chain (one without devices when it has none), and every return fed by a send gets one too,
    which is a bus like a group's. After its devices, before its own delay line and gains, a
@@ -144,9 +152,8 @@ decision 9.
 
 ## Not decided yet
 
-- **Automation lanes** for device parameters (LOOP-39).
 - **A chain on the master channel:** how it runs after every other chain, and how latency
-  compensation (10 and 11 above) extends to it. Return chains and sends are 11.
+  compensation (10, 11 and 12 above) extends to it.
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI

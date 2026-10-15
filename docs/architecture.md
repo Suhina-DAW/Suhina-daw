@@ -48,7 +48,8 @@ L2  session ------- library, soundmap ------- media
       commands, undo,   the browser's folders,    finds and decodes audio files,
       the player,       index, pins, tags;        reads MIDI and Stems files,
       the project's     the sample map            metadata, detects tempo
-      audio, plug-ins
+      audio, plug-ins   separation: the stem
+                        separation pipeline
         |        \                                  |
 L1  als, flp, project-file  engine ------------------+      plugins
       Live Set, .flp,   rendering, launcher,                   plug-in host processes
@@ -59,7 +60,8 @@ L0        model        stretch      dsp, device-api, device-registry      ipc
 ```
 
 Within layer 2, `session` uses `library`, `soundmap` and `media`; `library` and `soundmap` use
-`media`; and `media` uses neither. The built-in effects and instruments sit apart: `dsp` and `device-api` depend on nothing in Suhina, and each
+`media`; and `media` uses neither. `separation` sits beside them and uses none of them yet; the
+session will hold it and `media` will write its stems (planned, #146). The built-in effects and instruments sit apart: `dsp` and `device-api` depend on nothing in Suhina, and each
 device crate under `devices/` depends only on those two ([ADR 0004](decisions/0004-built-in-devices.md)).
 The engine runs them in chains on tracks, made through `device-registry`.
 
@@ -74,17 +76,18 @@ The engine runs them in chains on tracks, made through `device-registry`.
 | `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`; what a file in the browser is (`info`: kind by extension, length, tempo and key from metadata and the name), standard MIDI files (`midi`: notes per MIDI track, every count capped) tempo detection for loops (`tempo`) ([browser spec](spec/browser.md)), and Stems files (`stems`: the master and each stem as audio, with their names, colours and mastering settings; [spec](spec/stems-format.md)). | engine, project-file, devices/compressor, devices/limiter |
 | `library` | The browser's library ([ADR 0012](decisions/0012-file-library.md)): the folders the user added, an index of their samples, MIDI files, presets and projects kept on disk and up to date (checked at start, then watched with `notify` or polled), search, pins, recent items and colour tags in `browser.json`; finding files by name in the index or by walking a folder (`find`, for missing files). | media |
 | `soundmap` | The sample map ([spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)): features of samples (MFCC, spectral shape, envelope, pitch), analysed on background threads and cached per library folder; layouts of a scope by PCA and t-SNE, kept; grids; kinds from names or guessed from neighbours; similar items. The session holds one (`Projects::sound_map_mut`) and runs the `soundmap.*` commands on it; the window shows its maps. | media |
+| `separation` | Stem separation ([spec](spec/stem-separation.md), planned in steps): a source brought to a model's sample rate and channels (`resample`, a windowed-sinc resampler), cut into the model's windows with the last one padded, each handed to a `Backend`, and the windows' outputs added back with their weighting divided out (`chunk`); limits on every shape and source (`shape`); progress per window and cancel between windows. `BandSplitter` is a backend with no weights that runs the pipeline in tests. No model, runtime, command or session wiring yet. | nothing |
 | `session` | An open project with its undo history (`Session`) and its decoded audio (ADR 0011), the open projects with one active, like tabs (`Projects`, [ADR 0007](decisions/0007-several-open-projects.md)), the command registry ([ADR 0002](decisions/0002-commands.md)), the `Player` that connects a session to a running engine, the audio output chosen and the `audio.*` commands (`audio`: the `AudioSystem` the output layer implements, reopening the active project's output with the transport where it was), the project's running plug-ins (`rack`: each plug-in device found in the catalog, started with its saved state off the audio thread, handed to the engine, watched and restarted; `start_offline` for renders), adding tracks and placing files (`files`: `track.add`, `clip.addFiles`), previews (`preview.*`) and the browser's commands (`library.*`, on the `Library` `Projects` holds) and the sample map's (`soundmap.*`, on its `SoundMap`), missing files (`relink`: `project.missingFiles`, `project.relinkFiles`), the device commands (`devices`), sends and return tracks (`sends`: `track.setSend`, `track.setSendMode`, `return.*`) and the blank project (`blank`). | model, engine, media, library, soundmap, als, project-file, plugins, device-api, device-registry, devices/fm-synth |
 | `automation` | The MCP server over the open projects, file roots for agents (every path a command reads is checked against the read root), the user's browser library, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media, library |
 | `output` | The audio device: lists the hosts and their output devices (`devices`: cpal's WASAPI, ASIO with the `asio` feature, ALSA, JACK, CoreAudio; sample rates and the buffer sizes the driver allows) and plays a `Renderer` on the output an `OutputChoice` names, or the default one, falling back with a notice when it is gone. The engine renders ahead on a real-time render thread in blocks of the chosen buffer size (64 … 4096 frames, 1024 when none is chosen) into a lock-free ring the device's callback reads. WASAPI exclusive mode goes through the `wasapi` crate (`exclusive`), since cpal opens WASAPI shared only. `open_chosen` gives a `Player` whose stream lives on its own thread; `DeviceOutput` is the session's `AudioSystem`. The only code that opens an audio device. | engine, session |
-| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the browser ([spec](spec/browser.md): `browser`, `browser_view`, and `drop` for dragging into the views), the Session and Arrangement views, the detail area (device chain, clip properties, embedded plug-in editors), the sample map, the missing-files dialog and the Settings dialog, drawn with egui from the project and the `LauncherMonitor`; every change is a command. `memory-stats`
+| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the browser ([spec](spec/browser.md): `browser`, `browser_view`, and `drop` for dragging into the views), the Session and Arrangement views (the Arrangement's automation lanes in `automation_lanes`), the detail area (device chain, clip properties, embedded plug-in editors), the sample map, the missing-files dialog and the Settings dialog, drawn with egui from the project and the `LauncherMonitor`; every change is a command. `memory-stats`
 reads the program's RAM for the control bar. Design tokens in `theme.rs`; the colours are the theme in use (`themes.rs` keeps the list). No windowing or GPU code, so tests drive it headless (egui_kittest). | engine, session, plugins, library, media, output, soundmap, device-api, device-registry |
 | `suhina-cli` | The command line: render, play, mcp. | all of the above |
 | `suhina` | The desktop app: opens a project (argument, a dropped `.suhina`, `.locr` or `.als`, or the project dialog), makes new ones (blank or from a template), keeps the recent projects, decodes its audio into the session, plays it stopped through `output` and runs `ui` in an eframe window; starts the browser's library (`browser.json` and its indexes in the app-data folder) and records opened projects among its recent ones; folders dropped on the window join the browser, and samples and MIDI files dropped on it land like a drag from the browser; loads and saves the settings, keymap and theme files (a theme file saved elsewhere is read again; theme backups and the theme template are zips in `exports/`, and theme files or zips dropped on the window are added). | engine, session, media, library, plugins, output, ui |
 | `dsp` | Signal-processing blocks for devices: dB conversions, parameter smoothing, biquad filters, a DC blocker, Linkwitz-Riley crossovers (24 and 48 dB/octave), LFO waveforms, waveshapers and a 2× oversampler. Real-time safe, panic-free on any input. | nothing |
 | `device-registry` | Every built-in effect or instrument by its stable id: makes the device a project's `DeviceKind::Builtin` names, and lists them. | device-api, devices/* |
 | `device-api` | The `Device` trait, `DeviceInfo` (an effect or an instrument) and `ParamInfo` (plain values in their unit, conversion to knob travel), `NoteEvent` for instruments, and the contract tests every device runs (`conformance::check`, with note checks for instruments). | nothing |
-| `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region with each block's notes and controllers (`Event`, up to 1024 a block), one block in flight, a doorbell per direction (a futex on Linux, events on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Linked into the engine's process through `plugins`. | nothing |
+| `ipc` | Audio blocks between the engine and a plug-in host process ([ADR 0006](decisions/0006-plug-in-hosting.md)): a shared-memory region with each block's notes and controllers (`Event`, up to 1024 a block), one block in flight, a doorbell per direction (a futex on Linux, events with a high-resolution timer on Windows, yielding elsewhere for now) and a deadline; a crashed or hung host costs missed blocks, never a stall. One of the two crates allowed `unsafe`. Linked into the engine's process through `plugins`. | nothing |
 | `plugins` | The engine's side of plug-in hosting: `Plugin::start` loads an instance into a `suhina-plugin-host` process (the one its group shares, `Launch::group`, or one of its own) and returns a control half (health, ping, state, parameters, restart) and an audio half (`PluginAudio::process`, real-time safe). Control messages are JSON lines over a local socket (`protocol`). A host that exits is *crashed*; one that leaves 32 blocks in a row unanswered is *hung*; `restart` brings it back with its last saved state. `scan` and `scan_pool` find installed CLAP and VST3 plug-ins (standard folders, `CLAP_PATH`, folders the user adds), read VST3 bundles' `moduleinfo.json` without loading them and load the rest in a few long-lived `--scan-worker` processes with per-file timeouts, into a catalog that can be saved. `PluginAudio::process_with_events` sends an instrument its notes. `offline::render` runs audio (and `render_with_events` notes) through a plug-in without a deadline (`suhina-cli plugin run`, `plugin run-device`). The session starts a project's plug-ins with it and hands their audio halves to the engine. | ipc |
 | `plugin-host` | The `suhina-plugin-host` executable: answers control messages and serves plug-ins' main-thread callbacks on its main thread, and runs several instances, each with its own link and audio thread. Loads CLAP plug-ins (`clap:<file>[#<id>]`, through `clack-host`) and VST3 plug-ins (`vst3:<bundle>[#<class id>]`, through the `vst3` bindings), every audio port a CLAP plug-in declares with its channels (the link's stereo on the main ports), stereo in and out for VST3 (no input for an instrument), notes and controllers, parameters, editors in a window of their own or embedded as a child in the engine's window where the engine says (Windows, X11 on Linux), with state and latency, and test plug-ins (`test:clap`, `test:clap-ports`, `test:vst3`, `test:gain`, `test:crash-after:<n>`, `test:hang-after:<n>`, `test:slow-load:<ms>`). `--scan <file>` and `--scan-worker` describe plug-in files for the scanner. The second crate allowed `unsafe`: opening plug-in files and the VST3 COM calls, each block documented. | ipc, plugins, clack |
 | `devices/utility` | The utility device: gain, balance, width, mid/side, mono, bass mono (with listening to the low band alone), phase inversion, channel selection, DC filter, mute. | dsp, device-api |
@@ -192,7 +195,24 @@ thread swaps it in at the start of the next block (0.15 s ahead when stretched a
 need their voices moved first), carrying over the playhead (on the same beat when the tempo
 changed), the transport, sounding notes (which take their track's new mix), device chains and
 the launcher's playing and queued clips. A device parameter is not a new graph: it goes to the
-audio thread as a message, applied at the next block (ADR 0005, amendment).
+audio thread as a message, applied at the next block (ADR 0005, amendment); a plug-in's goes
+to its slot, which sends it to the plug-in as a parameter event.
+
+**Plug-in parameters and automation** (#109, ADR 0006 › 3): each block, before any of it runs,
+every plug-in slot plans its parameter events (`engine::plugin_params`): the project's values
+for the device when its processor starts, values set while playing, and its automation lanes'
+values at their frames while the transport runs. Each span the slot runs hands its share to
+the processor (`PluginProcessor::automate`), and the session's `Hosted` merges them with the
+block's notes for the host, which applies them sample-accurately.
+
+**Automation of built-in devices and the mixer** (#395, [spec](spec/automation.md)):
+`engine::automation` turns lanes into arrangement frames when the graph is built. A chain's
+`DeviceLanes` plan each block's parameter changes with the plug-in events, and the chain splits
+its built-in devices' blocks at them; a track whose mixer has lanes gets a chain (one without
+devices when it has none) whose `MixLanes` give its gains frame by frame after its devices. The
+graph is built from a copy of the project with those mixer parameters at rest (volume 1, centred,
+not muted), so routing and gains need no second path. A manual change to an automated parameter
+turns its lane off, which is an edit that builds a new graph rather than a parameter message.
 
 **Plug-ins** (ADR 0006): `Projects::poll_plugins` (the window calls it every frame, commands
 call it too) keeps the active project's running plug-ins in line with it. A new plug-in device
@@ -228,11 +248,12 @@ renderer without a deadline.
   launched clips' stretch voices still run on the audio thread.
 - **Project files:** autosave, and a
   package that carries its audio ([ADR 0010](decisions/0010-project-files.md) › Not decided yet).
-- **Device automation and more chains:** automation of device parameters, and a chain on the
-  master channel ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
-  Chains on tracks, groups and returns run, with plug-ins, sends and latency compensation, and
-  `device.*` commands edit them.
+- **Device automation and more chains:** drawing lanes in the UI, automation of sends and the
+  master channel, and a chain on the master channel
+  ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet). Chains on tracks, groups
+  and returns run, with plug-ins, sends and latency compensation; lanes play on devices and
+  track mixers since #395, and `device.*` commands edit the chains.
 - **Plug-ins:** consecutive plug-ins of a chain that share a host process in one round trip per
-  block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
+  block; a VST3 editor that follows automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, clip editor), meters, and the commands they still
   need (arm) (M8). The browser's open questions are in its spec › Not decided yet.

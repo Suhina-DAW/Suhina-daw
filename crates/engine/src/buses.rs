@@ -9,6 +9,7 @@
 
 use suhina_model::{ChannelId, ChannelRole, Project, TrackId};
 
+use crate::automation::{self, MixLanes};
 use crate::chain::Chain;
 use crate::plugin::{Delay, Plugins};
 use crate::sends::{self, SendOut};
@@ -38,6 +39,13 @@ pub(crate) fn build(
         .iter()
         .filter_map(|track| Chain::build(project, track.id, column_of(track.id), (0.0, 0.0), sample_rate, plugins))
         .collect();
+    // A track whose mixer follows lanes applies its gains after a chain, one without devices
+    // when it has none (#395); a group's chain makes it a bus.
+    for track in &project.tracks {
+        if chains.iter().all(|c| c.track != track.id) && automation::mixer_automated(project, track.id) {
+            chains.push(Chain::passthrough(track.id, column_of(track.id)));
+        }
+    }
 
     // Sends (see `sends`): every track with a heard send, and every return fed by one, has a
     // chain, so the send has a buffer to read and one to add to.
@@ -118,6 +126,9 @@ pub(crate) fn build(
         let post = gains_until(project, chain.track, target.map(|(_, ch)| ch), !is_bus).unwrap_or((0.0, 0.0));
         chain.set_post(post);
         chain.target = target.map(|(index, _)| index);
+        let frames_per_beat = 60.0 / project.transport.tempo_bpm * f64::from(sample_rate);
+        chain.mix = automation::channel_of(project, chain.track)
+            .and_then(|channel| MixLanes::new(channel, frames_per_beat, !is_bus));
     }
     for index in 0..chains.len() {
         let fed = targets.iter().any(|t| t.is_some_and(|(target, _)| target == index))
@@ -159,6 +170,9 @@ pub(crate) fn build(
             _ => latency,
         };
         chain.delay = Delay::new(to.saturating_sub(arrived) as usize);
+        if let Some(mix) = chain.mix.as_mut() {
+            mix.set_latency(to);
+        }
         let sends = send_targets
             .get(i)
             .into_iter()

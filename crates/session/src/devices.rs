@@ -4,9 +4,10 @@
 
 use serde_json::{Value, json};
 use suhina_device_api::{DeviceInfo, ParamKind, Role, Unit};
-use suhina_model::{Device, DeviceKind, DeviceParam, Extensions};
+use suhina_engine::param_id;
+use suhina_model::{AutomationLane, AutomationPoint, Device, DeviceKind, DeviceParam, Extensions};
 
-use crate::commands::{channel_param, number, track_id};
+use crate::commands::{channel_param, number, track_id, with_override};
 use crate::{CommandError, ParamEdit, Session};
 
 /// Devices one track may hold.
@@ -95,7 +96,17 @@ fn device_json(index: usize, device: &Device) -> Value {
             })
             .collect::<Vec<_>>()
     });
-    json!({
+    // A plug-in's: the values set on it, by parameter id (the rest are as its state says).
+    let params = params.or_else(|| {
+        is_plugin(&device.kind).then(|| {
+            device
+                .params
+                .iter()
+                .filter_map(|p| Some(json!({ "id": param_id(&p.id)?, "value": p.value })))
+                .collect::<Vec<_>>()
+        })
+    });
+    let mut value = json!({
         "index": index,
         "name": device.name,
         "kind": kind,
@@ -103,11 +114,26 @@ fn device_json(index: usize, device: &Device) -> Value {
         "enabled": device.enabled,
         "known": kind != "builtin" || info.is_some(),
         "params": params,
-    })
+    });
+    if !device.automation.is_empty() {
+        value["automation"] = device
+            .automation
+            .iter()
+            .map(|lane| {
+                let points: Vec<[f64; 2]> = lane.points.iter().map(|p| [p.beat, p.value]).collect();
+                json!({ "param": param_id(&lane.param), "points": points })
+            })
+            .collect();
+    }
+    value
+}
+
+pub(crate) fn is_plugin(kind: &DeviceKind) -> bool {
+    matches!(kind, DeviceKind::Clap { .. } | DeviceKind::Vst3 { .. } | DeviceKind::Vst2 { .. })
 }
 
 /// The `device` index parameter, checked against the track's devices.
-fn device_index(len: usize, params: &Value) -> Result<usize, CommandError> {
+pub(crate) fn device_index(len: usize, params: &Value) -> Result<usize, CommandError> {
     let index = params
         .get("device")
         .and_then(Value::as_u64)
@@ -196,6 +222,7 @@ pub(crate) fn add(session: &mut Session, params: &Value) -> Result<Value, Comman
             .as_ref()
             .map_or_else(Vec::new, |p| p.params.iter().map(|(id, value)| DeviceParam::new(*id, *value)).collect()),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     channel.devices.insert(position, device);
     Ok(json!({ "device": position, "id": info.id, "name": info.name, "preset": preset.map(|p| p.name) }))
@@ -233,9 +260,12 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
     let track = track_id(&session.project, params)?;
     let channel = channel_param(session, params)?;
     let index = device_index(channel.devices.len(), params)?;
+    if channel.devices.get(index).is_some_and(|d| is_plugin(&d.kind)) {
+        return set_plugin_param(session, params, track, index, param, value);
+    }
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
     let DeviceKind::Builtin(id) = &device.kind else {
-        return Err("only built-in effects and instruments have parameters here; plug-in parameters come later".into());
+        return Err("this device has no parameters Suhina can set (it is from another program)".into());
     };
     let info = suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
     let param_index = info
@@ -248,9 +278,152 @@ pub(crate) fn set_param(session: &mut Session, params: &Value) -> Result<Value, 
         Some(stored) => stored.value = value,
         None => device.params.push(DeviceParam::new(param, value)),
     }
-    // A playing engine takes this as a message, without a new graph.
-    session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
-    Ok(json!({ "device": index, "param": param, "value": value }))
+    let off = crate::automation::override_lane(&mut device.automation, |l| l.param == param);
+    // A playing engine takes this as a message, without a new graph; one that turned a lane
+    // off needs the new graph, which holds the value too.
+    if !off {
+        session.param_edit = Some(ParamEdit { track, device: index, param: param_index, value });
+    }
+    Ok(with_override(json!({ "device": index, "param": param, "value": value }), off))
+}
+
+/// Sets parameter `param` (its id) of the plug-in device at `index` on `track`: kept in the
+/// project, and heard from the next block of a playing engine.
+fn set_plugin_param(
+    session: &mut Session,
+    params: &Value,
+    track: suhina_model::TrackId,
+    index: usize,
+    param: &str,
+    value: f64,
+) -> Result<Value, CommandError> {
+    let id = plugin_param_id(param)?;
+    let value = plugin_value(session, track, index, id, value)?;
+    let channel = channel_param(session, params)?;
+    let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
+    match device.params.iter_mut().find(|p| param_id(&p.id) == Some(id)) {
+        Some(stored) => {
+            stored.id = id.to_string();
+            stored.value = value;
+        }
+        None => device.params.push(DeviceParam::new(id.to_string(), value)),
+    }
+    let off = crate::automation::override_lane(&mut device.automation, |l| param_id(&l.param) == Some(id));
+    // A plug-in's parameter goes to the engine by its id.
+    let param = usize::try_from(id).map_err(|_| "the parameter id is too large")?;
+    if !off {
+        session.param_edit = Some(ParamEdit { track, device: index, param, value });
+    }
+    Ok(with_override(json!({ "device": index, "param": id, "value": value }), off))
+}
+
+/// Most points one automation lane holds.
+const MAX_POINTS: usize = 65_536;
+
+/// Sets or removes the automation lane of one parameter of a device: a plug-in's by its id, a
+/// built-in effect or instrument's by its stable id (#395).
+pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    const POINTS: &str = "points must be a list of numbers, a beat then a value for each point: [0, 0.2, 4, 0.8]";
+    let param = params.get("param").and_then(Value::as_str).ok_or("param must be a parameter id")?;
+    let numbers = params.get("points").and_then(Value::as_array).ok_or(POINTS)?;
+    if numbers.len() % 2 != 0 {
+        return Err(POINTS.into());
+    }
+    if numbers.len() / 2 > MAX_POINTS {
+        return Err(format!("a lane holds at most {MAX_POINTS} points").into());
+    }
+    let track = track_id(&session.project, params)?;
+    let channel = channel_param(session, params)?;
+    let index = device_index(channel.devices.len(), params)?;
+    // A built-in device's parameter: its spec, to keep values as the device takes them.
+    let builtin = match channel.devices.get(index).map(|d| &d.kind) {
+        Some(kind) if is_plugin(kind) => None,
+        Some(DeviceKind::Builtin(id)) => {
+            let info =
+                suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
+            let spec = info
+                .param_index(param)
+                .and_then(|i| info.params.get(i))
+                .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
+            Some(spec)
+        }
+        _ => return Err("this device has no parameters Suhina can automate (it is from another program)".into()),
+    };
+    let id = match builtin {
+        Some(_) => 0,
+        None => plugin_param_id(param)?,
+    };
+    let mut points = Vec::with_capacity(numbers.len() / 2);
+    for [beat, value] in numbers.as_chunks::<2>().0 {
+        let number = |v: &Value| v.as_f64().filter(|n| n.is_finite());
+        let (Some(beat), Some(value)) = (number(beat), number(value)) else {
+            return Err(POINTS.into());
+        };
+        if !(0.0..=suhina_engine::MAX_START_BEAT).contains(&beat) {
+            return Err(format!("a point's beat must be from 0 to {}", suhina_engine::MAX_START_BEAT).into());
+        }
+        let value = match builtin {
+            Some(spec) => spec.clamp(value),
+            None => plugin_value(session, track, index, id, value)?,
+        };
+        points.push(AutomationPoint { beat, value, curve: 0.0 });
+    }
+    // In beat order; points given at one beat keep their order (a jump).
+    points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+    let count = points.len();
+    let channel = channel_param(session, params)?;
+    let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
+    let name = if builtin.is_some() { param.to_string() } else { id.to_string() };
+    device.automation.retain(|lane| match builtin {
+        Some(_) => lane.param != name,
+        None => param_id(&lane.param) != Some(id),
+    });
+    if !points.is_empty() {
+        device.automation.push(AutomationLane { param: name.clone(), points, enabled: true });
+    }
+    let param = if builtin.is_some() { json!(name) } else { json!(id) };
+    Ok(json!({ "device": index, "param": param, "points": count }))
+}
+
+/// The parameters of a running plug-in device, as its plug-in lists them.
+pub(crate) fn plugin_params(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let key = plugin_key(session, params)?;
+    let list = session.plugins.params(key)?;
+    Ok(Value::Array(
+        list.iter()
+            .filter(|p| !p.hidden)
+            .map(|p| {
+                json!({
+                    "id": p.id, "name": p.name, "group": p.group, "min": p.min, "max": p.max,
+                    "default": p.default, "value": p.value, "text": p.text, "steps": p.steps,
+                    "automatable": p.automatable, "read_only": p.read_only,
+                })
+            })
+            .collect(),
+    ))
+}
+
+pub(crate) fn plugin_param_id(param: &str) -> Result<u32, CommandError> {
+    param_id(param).ok_or_else(|| {
+        format!("{param:?} is not a plug-in parameter id (a whole number); device.pluginParams lists them").into()
+    })
+}
+
+/// `value` for parameter `id` of the plug-in device at `index` on `track`, limited to its range
+/// when its parameters have been listed (`device.pluginParams`); as given otherwise.
+pub(crate) fn plugin_value(
+    session: &Session,
+    track: suhina_model::TrackId,
+    index: usize,
+    id: u32,
+    value: f64,
+) -> Result<f64, CommandError> {
+    let key = crate::plugin_key_at(&session.project, track, index);
+    match key.and_then(|key| session.plugins.param_range(key, id)) {
+        Some(Some((min, max))) => Ok(value.clamp(min, max)),
+        Some(None) => Err(format!("the plug-in has no parameter {id}; device.pluginParams lists them").into()),
+        None => Ok(value),
+    }
 }
 
 /// The key of the plug-in device the `track` and `device` parameters name.
@@ -304,6 +477,7 @@ pub(crate) fn add_plugin(session: &mut Session, params: &Value) -> Result<Value,
         enabled: true,
         state: None,
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     channel.devices.insert(position, device);

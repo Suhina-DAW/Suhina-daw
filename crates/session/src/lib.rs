@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 pub mod audio;
+mod automation;
 mod blank;
 mod commands;
 mod devices;
@@ -207,6 +208,12 @@ pub struct Session {
     audio_changed: bool,
     /// Files decoded ahead of a command that uses them (`provide_audio`), newest last.
     decoded: Vec<(String, std::sync::Arc<suhina_engine::AudioData>)>,
+    /// The command and track of the undo step on top that a call with `continue` may join: one
+    /// drag of a value is one step. Any other edit, undo or redo ends it.
+    open_step: Option<(&'static str, suhina_model::TrackId)>,
+    /// Set when a continued edit could not reach the playing engine; [`Session::catch_up_player`]
+    /// sends the project again.
+    player_behind: bool,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -229,6 +236,8 @@ impl Session {
             audio: suhina_engine::AudioPool::new(),
             audio_changed: false,
             decoded: Vec::new(),
+            open_step: None,
+            player_behind: false,
         }
     }
 
@@ -589,12 +598,25 @@ impl Session {
             | CommandKind::Audio
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
+                self.open_step = None;
                 let value = (spec.run)(self, params)?;
                 self.update_player()?;
                 Ok(value)
             }
             CommandKind::Edit => {
                 self.param_edit = None;
+                // A command with a `continue` parameter can add to the step it made last time.
+                let step = spec
+                    .params
+                    .iter()
+                    .any(|p| p.name == "continue")
+                    .then(|| commands::track_id(&self.project, params).ok())
+                    .flatten()
+                    .map(|track| (spec.id, track));
+                let continued = params.get("continue").and_then(Value::as_bool) == Some(true);
+                if !continued || step != self.open_step {
+                    self.open_step = None;
+                }
                 let before = self.project.clone();
                 let result = (spec.run)(self, params).and_then(|value| match self.project.validate() {
                     Ok(()) => Ok(value),
@@ -603,7 +625,14 @@ impl Session {
                 match result {
                     Ok(value) => {
                         if self.project != before {
-                            self.push_undo(before);
+                            if self.open_step.is_some() {
+                                // Joins the open step, which keeps the project from before it.
+                                self.changes = self.changes.wrapping_add(1);
+                                self.redo.clear();
+                            } else {
+                                self.push_undo(before);
+                                self.open_step = step;
+                            }
                             // A parameter change goes to the engine as a message; anything else,
                             // or a message that cannot be sent, as a new graph.
                             let sent = match (self.param_edit.take(), self.player.as_mut()) {
@@ -611,7 +640,13 @@ impl Session {
                                 _ => false,
                             };
                             if !sent {
-                                self.update_player()?;
+                                match self.update_player() {
+                                    Ok(()) => self.player_behind = false,
+                                    // A drag sends a value every frame and may outrun the engine
+                                    // taking new graphs: the engine catches up on a later frame.
+                                    Err(_) if continued => self.player_behind = true,
+                                    Err(e) => return Err(e),
+                                }
                             }
                         }
                         Ok(value)
@@ -622,6 +657,14 @@ impl Session {
                     }
                 }
             }
+        }
+    }
+
+    /// Sends the project to the playing engine again if a continued edit could not reach it
+    /// (its queue was full). The window calls it every frame, through `Projects::poll_plugins`.
+    pub fn catch_up_player(&mut self) {
+        if self.player_behind && self.update_player().is_ok() {
+            self.player_behind = false;
         }
     }
 
@@ -639,6 +682,7 @@ impl Session {
     }
 
     fn push_undo(&mut self, before: Project) {
+        self.open_step = None;
         self.changes = self.changes.wrapping_add(1);
         if self.undo.len() >= MAX_UNDO {
             self.undo.remove(0);
