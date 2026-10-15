@@ -251,8 +251,10 @@ in the dropped scene, all with the master's tempo, so the parts stay locked toge
 mastering compressor and limiter go on the group, which runs them over the sum of the stems
 ([ADR 0004](../decisions/0004-built-in-devices.md) › 10); switched off when the file has them
 off. Dropped on a group, the new group goes inside it, after its tracks; dropped on a track,
-after that track; elsewhere, after the regular tracks. Ctrl does not change this. Previewing a
-Stems file plays its master.
+after that track; elsewhere, after the regular tracks. Ctrl does not change this. In the
+Arrangement view the group arrives folded, one lane until its triangle is clicked
+([arrangement editing](arrangement-editing.md) › Folded groups). Previewing a Stems file plays its
+master.
 
 **Unreadable files** (missing, damaged, too long, no notes) are left out; the others are still
 placed, and the status bar says which were skipped and why. When none can be placed nothing

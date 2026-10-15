@@ -22,11 +22,11 @@ use crate::loading_dialog;
 use crate::motion;
 use crate::project_dialog::{self, AboutChoice, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, EditorPlacement, MixerControls, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
-use crate::timeline::Timeline;
+use crate::timeline::{Folds, Timeline};
 use crate::widgets::{self, Action, Drag};
 
 /// Launch quantisation choices, as `launcher.setQuantization` takes them.
@@ -88,7 +88,7 @@ struct Stash {
     quantization: Option<&'static str>,
     launches: HashMap<TrackId, (usize, f64)>,
     revision: u64,
-    timeline: Option<(u64, Timeline)>,
+    timeline: Option<(u64, Folds, Timeline)>,
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
 }
 
@@ -163,8 +163,9 @@ pub struct App {
     open_request: Option<(PathBuf, OpenAs)>,
     /// Counts changes to the project, so views derived from it are rebuilt only when it changed.
     revision: u64,
-    /// The Arrangement view's data and the revision it was built from.
-    timeline: Option<(u64, Timeline)>,
+    /// The Arrangement view's data, the revision it was built from and the folds it was built
+    /// with: folding a group changes what the lanes are, without changing the project.
+    timeline: Option<(u64, Folds, Timeline)>,
     /// Waveforms of the open project's audio files.
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
     /// The plug-in library as Settings shows it, and a scan running in the background.
@@ -559,6 +560,12 @@ impl App {
         self.shown
     }
 
+    /// The Arrangement view's state: what is selected, how far it is scrolled and which groups are
+    /// folded. The view draws itself from it, and the window's tests read it.
+    pub fn arrangement(&self) -> &ArrangementViewState {
+        &self.arrangement
+    }
+
     /// `transport.stop`, with where the playhead goes from the settings.
     fn stop_action(&self) -> Action {
         Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
@@ -854,7 +861,7 @@ impl App {
         }
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
-            Ok(_) => {
+            Ok(result) => {
                 let changes_project = suhina_session::commands()
                     .iter()
                     .find(|c| c.id == action.id)
@@ -862,6 +869,7 @@ impl App {
                 if changes_project {
                     self.revision += 1;
                 }
+                self.fold_new_groups(&result);
                 if action.id == "launcher.setQuantization"
                     && let Some(value) = action.params["value"].as_str()
                     && let Some(known) = QUANTIZATION.iter().find(|q| **q == value)
@@ -873,6 +881,17 @@ impl App {
                 }
             }
             Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
+    /// A Stems file arrives as one group of its stems and its master (`clip.addFiles` reports
+    /// the groups it made): the group opens folded, so the drop reads as a single lane until its
+    /// triangle is clicked ([`crate::arrangement_view`]).
+    fn fold_new_groups(&mut self, result: &serde_json::Value) {
+        for group in result["groups"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            if let Some(id) = group.as_u64().and_then(|n| u32::try_from(n).ok()) {
+                self.arrangement.fold_group(TrackId(id));
+            }
         }
     }
 
@@ -914,6 +933,7 @@ impl App {
     pub fn ui(&mut self, ui: &mut Ui) {
         let window = ui.max_rect();
         let mut actions = Vec::new();
+        let revision = self.revision;
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
@@ -1006,17 +1026,24 @@ impl App {
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                     (Some(grid), View::Session) => {
+                        self.view.knobs = self.settings.mixer_controls == MixerControls::Knob;
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                             self.arrangement.stack_audio = self.settings.sample_stacking;
                             self.arrangement.stack_midi = self.settings.midi_stacking;
+                            self.arrangement.knobs = self.settings.mixer_controls == MixerControls::Knob;
                             let monitor = session.player().map(|p| p.monitor());
+                            // A folded group's row shows the track being worked on, so the folds
+                            // are brought in line before the lanes are built from them.
+                            self.arrangement.reconcile(session.project());
                             // Clips and their notes are rebuilt only after the project changed; the
                             // playhead is read every frame.
                             let timeline = match self.timeline.take() {
-                                Some((revision, mut timeline)) if revision == self.revision => {
+                                Some((revision, folds, mut timeline))
+                                    if revision == self.revision && folds == self.arrangement.folds =>
+                                {
                                     timeline.follow(monitor);
                                     timeline
                                 }
@@ -1027,7 +1054,7 @@ impl App {
                                 }
                             };
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
-                            self.timeline = Some((self.revision, timeline));
+                            self.timeline = Some((self.revision, self.arrangement.folds.clone(), timeline));
                             // The headers can be moved from the view itself; that is the setting too.
                             let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
                             if side != self.settings.track_headers {
@@ -1069,6 +1096,12 @@ impl App {
             self.run(action);
         }
         self.guard_quit(ui.ctx());
+        // The views drew before the actions and drops of this frame ran: when the project changed,
+        // ask for a frame at once, so what the user just did (a moved clip, a file that landed)
+        // is on screen without waiting for another click or pointer move.
+        if self.revision != revision {
+            ui.ctx().request_repaint();
+        }
         if grid.is_some_and(|g| {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
@@ -1737,7 +1770,10 @@ impl App {
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
             }
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
-                let Some((track, index)) = self.arrangement.selected_clip() else { return };
+                let clips = self.selected_clip_list();
+                if clips.is_empty() {
+                    return;
+                }
                 let id = match action {
                     "selection.copy" => "clip.copy",
                     "selection.cut" => "clip.cut",
@@ -1747,24 +1783,43 @@ impl App {
                 if matches!(id, "clip.cut" | "clip.delete") {
                     self.arrangement.clear_selected_clip();
                 }
-                let mut params = json!({ "track": track.0, "index": index });
-                // A copy follows the stacking setting for its kind, as a moved clip does.
-                if id == "clip.duplicate" {
-                    let audio = self
-                        .timeline
-                        .as_ref()
-                        .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
-                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
-                        .map(|c| c.audio);
-                    if audio.is_some_and(|audio| self.stacks(audio)) {
-                        params["stack"] = json!(true);
-                    }
+                let mut params = json!({ "clips": clips });
+                // A copy follows the stacking setting for its kind, as a moved clip does: with
+                // clips of both kinds selected, only a setting that covers them all stacks.
+                if id == "clip.duplicate" && self.stacks_every_selected_clip() {
+                    params["stack"] = json!(true);
                 }
                 actions.push(Action::new(id, params));
             }
+            "selection.mute" => {
+                let clips = self.selected_clip_list();
+                if clips.is_empty() {
+                    return;
+                }
+                // What the clips are now decides which way the key turns them: any of them
+                // playing turns the whole selection off, else all of them back on.
+                let enabled = self.any_selected_clip_plays();
+                actions.push(Action::new("clip.setEnabled", json!({ "clips": clips, "enabled": !enabled })));
+            }
+            "selection.selectAll" => {
+                let clips: Vec<(TrackId, usize)> = self
+                    .session()
+                    .map(|session| {
+                        session
+                            .project()
+                            .arrangement
+                            .lanes
+                            .iter()
+                            .filter_map(|lane| lane.track.map(|track| (track, lane.clips.len())))
+                            .flat_map(|(track, count)| (0..count).map(move |index| (track, index)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.arrangement.select_clips(clips);
+            }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.
-                let timeline = self.timeline.as_ref().map(|(_, t)| t);
+                let timeline = self.timeline.as_ref().map(|(_, _, t)| t);
                 let target = match self.arrangement.selected_clip() {
                     Some((track, index)) => timeline
                         .and_then(|t| t.lanes.iter().find(|l| l.track == track))
@@ -1802,6 +1857,47 @@ impl App {
     /// Options › Settings › sample stacking for audio, MIDI stacking for notes.
     fn stacks(&self, audio: bool) -> bool {
         if audio { self.settings.sample_stacking } else { self.settings.midi_stacking }
+    }
+
+    /// The clips the Arrangement view has selected, as `clip.*` commands name them.
+    fn selected_clip_list(&self) -> Vec<serde_json::Value> {
+        self.arrangement
+            .selected_clips()
+            .iter()
+            .map(|(track, index)| json!({ "track": track.0, "index": index }))
+            .collect()
+    }
+
+    /// Whether any selected clip plays now. The window reads the clips it drew; a clip it cannot
+    /// find counts as playing, so the first key press turns the selection off.
+    fn any_selected_clip_plays(&self) -> bool {
+        let Some((_, _, timeline)) = self.timeline.as_ref() else { return true };
+        self.arrangement.selected_clips().iter().any(|(track, index)| {
+            timeline
+                .lanes
+                .iter()
+                .find(|l| l.track == *track)
+                .and_then(|l| l.clips.iter().find(|c| c.index == *index))
+                .is_none_or(|c| c.enabled)
+        })
+    }
+
+    /// Whether the stacking setting covers every selected clip: with clips of both kinds picked,
+    /// only when both settings are on does a copy leave what it lands on alone.
+    fn stacks_every_selected_clip(&self) -> bool {
+        let Some((_, _, timeline)) = self.timeline.as_ref() else { return false };
+        let selected = self.arrangement.selected_clips();
+        if selected.is_empty() {
+            return false;
+        }
+        selected.iter().all(|(track, index)| {
+            timeline
+                .lanes
+                .iter()
+                .find(|l| l.track == *track)
+                .and_then(|l| l.clips.iter().find(|c| c.index == *index))
+                .is_none_or(|c| self.stacks(c.audio))
+        })
     }
 
     /// Makes the whole window `steps` zoom steps larger or smaller and keeps that in the settings.
@@ -2317,6 +2413,9 @@ impl App {
                 Ok(result) => {
                     self.revision += 1;
                     self.timeline = None;
+                    // A Stems file arrives as one group: it opens folded, so the drop reads as a
+                    // single lane until the group's triangle is clicked (`clip.addFiles`).
+                    self.fold_new_groups(&result);
                     let skipped = result["skipped"].as_array().map_or(0, Vec::len);
                     let placed = result["clips"].as_array().map_or(0, Vec::len);
                     self.status = match (id, skipped) {
@@ -2392,7 +2491,7 @@ impl App {
         let tempo_rect = row(x, 56.0);
         let tempo_shown = self.tempo_drag.unwrap_or(grid.tempo_bpm);
         let response = widgets::value_area(ui, tempo_rect, Id::new("tempo"), "Tempo", format!("{tempo_shown:.2}"));
-        match widgets::drag_value(ui, &response, &mut self.tempo_drag, grid.tempo_bpm, 0.1, (20.0, 999.0), 120.0) {
+        match widgets::drag_value(ui, &response, &mut self.tempo_drag, grid.tempo_bpm, 0.1, 1.0, (20.0, 999.0), 120.0) {
             Drag::Done(bpm) => {
                 actions.push(Action::new("transport.setTempo", json!({ "bpm": (bpm * 100.0).round() / 100.0 })))
             }

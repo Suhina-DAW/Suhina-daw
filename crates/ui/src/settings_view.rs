@@ -6,7 +6,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
-use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, Settings, Side, StopReturn};
+use crate::settings::{DeviceLayout, EditorPlacement, Graphics, MixerControls, OnOpen, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
 
@@ -484,6 +484,20 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 segmented(ui, &painter, control_rect(r, 2), "Allow MIDI stacking", &on_off, settings.midi_stacking)
             {
                 settings.midi_stacking = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Mixer controls",
+                "A track's volume and pan as a field, or as a knob: the wheel over either changes it",
+            );
+            let options = [("Field", MixerControls::Field), ("Knob", MixerControls::Knob)];
+            if let Some(controls) =
+                segmented(ui, &painter, control_rect(r, 2), "Mixer controls", &options, settings.mixer_controls)
+            {
+                settings.mixer_controls = controls;
                 outcome.changed = true;
             }
         }

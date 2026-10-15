@@ -259,7 +259,7 @@ fn edits_and_undo_are_heard_while_playing() {
     assert!(loud > 0.05);
 
     // -12 dB is a quarter of the level, from the next note on.
-    run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": -12 })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Drums"], "db": -12 })).unwrap();
     let quieter = beat_peaks(&mut renderer, 2)[1];
     assert!((quieter / loud - 0.25).abs() < 0.01, "{loud} -> {quieter}");
     // The clip kept playing: the launcher still reports it.

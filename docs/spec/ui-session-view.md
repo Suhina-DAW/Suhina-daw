@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -124,6 +124,12 @@ the return tracks (so effects stay audible); mute still wins. A click solos one 
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+The pan and the volume are dragged up or down, and the wheel over either changes it a step at a
+time (1 dB, or 0.02 of pan; Shift is finer) instead of scrolling the view. With Settings ›
+Interface › Arrangement › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
+knob, and its value stays beside them
+([arrangement editing](arrangement-editing.md) › Volume, pan, mute and solo).
 
 ## Detail area: device chain
 

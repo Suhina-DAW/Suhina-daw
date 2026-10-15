@@ -51,6 +51,15 @@ pub enum DeviceLayout {
     Stack,
 }
 
+/// How a track's volume and pan are shown: as the field they have always been (a bar for the
+/// volume, a centre bar for the pan), or as a knob beside the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MixerControls {
+    #[default]
+    Field,
+    Knob,
+}
+
 /// Where a plug-in's editor opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorPlacement {
@@ -146,6 +155,8 @@ pub struct Settings {
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
     pub device_layout: DeviceLayout,
+    /// A track's volume and pan as a field or as a knob (Settings › Interface › Arrangement).
+    pub mixer_controls: MixerControls,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
@@ -202,6 +213,7 @@ impl Default for Settings {
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
+            mixer_controls: MixerControls::Field,
             plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
@@ -299,7 +311,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nmixer_controls = {mixer}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -329,6 +341,10 @@ impl Settings {
                 Side::Right => "right",
             },
             drop = if self.drop_separate { "separate" } else { "one_track" },
+            mixer = match self.mixer_controls {
+                MixerControls::Field => "field",
+                MixerControls::Knob => "knob",
+            },
         )
     }
 
@@ -355,6 +371,8 @@ impl Settings {
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
                 ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
+                ("mixer_controls", "field") => settings.mixer_controls = MixerControls::Field,
+                ("mixer_controls", "knob") => settings.mixer_controls = MixerControls::Knob,
                 ("plugin_editors", "window") => settings.plugin_editors = EditorPlacement::Window,
                 ("plugin_editors", "device") => settings.plugin_editors = EditorPlacement::DeviceView,
                 ("projects_folder", folder) => settings.projects_folder = folder.to_string(),
@@ -460,6 +478,7 @@ mod tests {
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
+            mixer_controls: MixerControls::Knob,
             plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),

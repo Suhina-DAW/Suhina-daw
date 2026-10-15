@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 27] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -99,11 +99,13 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("view.zoomIn", "Make the whole window larger", "View"),
     ("view.zoomOut", "Make the whole window smaller", "View"),
     ("view.zoomReset", "Make the whole window its normal size", "View"),
-    ("selection.copy", "Copy the selected clip", "Edit"),
-    ("selection.cut", "Cut the selected clip", "Edit"),
+    ("selection.copy", "Copy the selected clips", "Edit"),
+    ("selection.cut", "Cut the selected clips", "Edit"),
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
-    ("selection.duplicate", "Duplicate the selected clip", "Edit"),
-    ("selection.delete", "Delete the selected clip", "Edit"),
+    ("selection.duplicate", "Duplicate the selected clips", "Edit"),
+    ("selection.delete", "Delete the selected clips", "Edit"),
+    ("selection.mute", "Mute or unmute the selected clips", "Edit"),
+    ("selection.selectAll", "Select every clip in the arrangement", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
@@ -133,7 +135,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 25] = [
+const DEFAULTS: [(&str, &[&str]); 27] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -156,6 +158,8 @@ const DEFAULTS: [(&str, &[&str]); 25] = [
     ("selection.paste", &["Ctrl+V"]),
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
+    ("selection.mute", &["Ctrl+M"]),
+    ("selection.selectAll", &["Ctrl+A"]),
     ("selection.group", &["Ctrl+G"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),

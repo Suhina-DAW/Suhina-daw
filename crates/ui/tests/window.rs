@@ -85,7 +85,7 @@ fn scenes_and_stop_buttons_send_their_commands() {
     assert_eq!(clicked(&mut harness, "Stop all clips"), [Action::new("launcher.stopAll", json!({}))]);
     assert_eq!(
         clicked(&mut harness, "Turn Vox off"),
-        [Action::new("track.setMute", json!({ "track": 4, "mute": true }))]
+        [Action::new("track.setMute", json!({ "tracks": [4], "mute": true }))]
     );
 }
 
@@ -643,6 +643,229 @@ fn selected_tracks_group_with_ctrl_g() {
     harness.run();
     assert_eq!(names(&harness)[..3], ["Group", "Drums", "Bass"]);
     assert!(harness.query_by_label("Track Group").is_some());
+}
+
+#[test]
+fn shift_clicking_a_header_takes_the_run_of_tracks_between() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.get_by_label("Track Keys").click_modifiers(Modifiers::SHIFT);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    assert_eq!(names(&harness)[..4], ["Group", "Drums", "Bass", "Keys"]);
+}
+
+/// How many arrangement clips each of the first four tracks has.
+fn clip_counts(h: &Harness<'static, App>) -> Vec<usize> {
+    h.state()
+        .session()
+        .map(|s| {
+            let p = s.project();
+            p.tracks
+                .iter()
+                .filter_map(|t| p.arrangement.lanes.iter().find(|l| l.track == Some(t.id)))
+                .map(|l| l.clips.len())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn shift_clicking_a_clip_takes_the_run_between_and_the_key_mutes_it() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click();
+    harness.run();
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click_modifiers(Modifiers::SHIFT);
+    harness.run();
+    // The run from bar 1 to bar 17 on Drums: the first two clips, and no others.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run();
+    let muted: Vec<bool> = harness
+        .state()
+        .session()
+        .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.enabled).collect())
+        .unwrap_or_default();
+    assert_eq!(muted, [false, false, true, true], "the run went quiet, the rest plays on");
+
+    // The same key again turns the selection back on.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run();
+    let back: Vec<bool> = harness
+        .state()
+        .session()
+        .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.enabled).collect())
+        .unwrap_or_default();
+    assert_eq!(back, [true, true, true, true]);
+}
+
+#[test]
+fn ctrl_clicking_adds_a_clip_and_cut_takes_the_selection_in_one_step() {
+    let mut harness = arrangement_app();
+    let before = clip_counts(&harness);
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click();
+    harness.run();
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::X);
+    harness.run();
+    assert_eq!(clip_counts(&harness)[0], before[0] - 2, "both clicked clips went together");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(clip_counts(&harness), before, "one undo brings both back");
+}
+
+#[test]
+fn select_all_and_delete_clear_the_arrangement_in_one_step() {
+    let mut harness = arrangement_app();
+    let before = clip_counts(&harness);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert!(clip_counts(&harness).iter().all(|n| *n == 0), "{:?}", clip_counts(&harness));
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(clip_counts(&harness), before, "one undo brings the whole arrangement back");
+}
+
+#[test]
+fn a_clips_menu_mutes_the_clip_it_fell_on() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Mute").click();
+    harness.run();
+    assert!(!harness.state().session().is_some_and(|s| s.project().arrangement.lanes[0].clips[0].enabled));
+
+    // With the clip off, the menu offers to turn it back on.
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click_secondary();
+    harness.run();
+    assert!(harness.query_by_label_contains("Unmute").is_some());
+}
+
+/// A linear gain in dB, as the engine keeps it.
+fn gain_of(db: f64) -> f64 {
+    10f64.powf(db / 20.0)
+}
+
+#[test]
+fn the_wheel_over_a_fader_changes_the_volume_and_not_the_scroll() {
+    let mut harness = arrangement_app();
+    let at = harness.get_by_label("Drums volume").rect().center();
+    harness.hover_at(at);
+    harness.run();
+    let scroll = harness.state().arrangement().scroll;
+    // One line of a wheel upwards, as a wheel reports it (the content moves up).
+    harness.input_mut().events.push(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, -1.0),
+        modifiers: Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    harness.run();
+    let volume = harness.state().session().map(|s| s.project().channels[0].volume).unwrap_or(1.0);
+    assert!((volume - gain_of(1.0)).abs() < 1e-6, "one tick raised it by 1 dB: {volume}");
+    assert_eq!(harness.state().arrangement().scroll, scroll, "and the view stayed where it was");
+}
+
+#[test]
+fn dragging_one_fader_of_a_selection_moves_every_track_in_proportion() {
+    let mut harness = arrangement_app();
+    harness.state_mut().run(&Action::new("track.setVolume", json!({ "tracks": [1], "db": -6.0 })));
+    harness.run();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.get_by_label("Track Bass").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    let volumes = |h: &Harness<'static, App>| -> Vec<f64> {
+        h.state().session().map(|s| s.project().channels.iter().map(|c| c.volume).collect()).unwrap_or_default()
+    };
+    let before = volumes(&harness);
+
+    // 20 points down the field is 5 dB quieter: for the track whose field was dragged, and for the
+    // other track of the selection, so what was between them stays.
+    let at = harness.get_by_label("Drums volume").rect().center();
+    harness.hover_at(at);
+    harness.run();
+    harness.drag_at(at);
+    harness.step();
+    harness.hover_at(at + egui::vec2(0.0, 20.0));
+    harness.step();
+    harness.drop_at(at + egui::vec2(0.0, 20.0));
+    harness.run();
+    let after = volumes(&harness);
+    let quieter = gain_of(-5.0);
+    assert!(before.iter().all(|v| *v > 0.0), "{before:?}");
+    for (track, (was, now)) in ["Drums", "Bass"].iter().zip(before.iter().zip(&after)) {
+        assert!((now / was - quieter).abs() < 1e-3, "{track}: {was} -> {now}");
+    }
+}
+
+#[test]
+fn a_selections_track_on_and_solo_buttons_take_the_whole_selection() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.get_by_label("Track Bass").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    harness.get_by_label("Turn Drums off").click();
+    harness.run();
+    let muted: Vec<bool> =
+        harness.state().session().map(|s| s.project().channels.iter().map(|c| c.mute).collect()).unwrap_or_default();
+    assert!(muted[0] && muted[1], "both selected tracks went quiet: {muted:?}");
+
+    harness.get_by_label("Solo Drums").click();
+    harness.run();
+    let soloed: Vec<bool> =
+        harness.state().session().map(|s| s.project().channels.iter().map(|c| c.solo).collect()).unwrap_or_default();
+    assert!(soloed[0] && soloed[1], "and both soloed together: {soloed:?}");
+}
+
+#[test]
+fn a_groups_fold_triangle_hides_its_tracks_and_shows_one_of_them() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.get_by_label("Track Bass").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_some(), "a group's tracks keep their lanes");
+
+    harness.get_by_label("Fold Group").click();
+    harness.run();
+    let row = harness.get_by_label("Track Group").rect();
+    assert!(harness.query_by_label("Track Drums").is_none(), "folding takes its tracks' lanes away");
+    assert!(harness.query_by_label("Track Bass").is_none());
+    // The group's row stands in for the track being worked on (Bass, clicked last): that track's
+    // clip is drawn on the group's row, in that track's place.
+    let clip = harness.get_by_label_contains("Clip Walk on Bass").rect();
+    assert!(
+        clip.center().y > row.top() && clip.center().y < row.bottom(),
+        "the clip of the track the fold shows is drawn on the group's row"
+    );
+
+    harness.get_by_label("Unfold Group").click();
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_some(), "unfolding brings the lanes back");
+}
+
+#[test]
+fn an_edit_asks_for_a_frame_so_the_views_show_it_at_once() {
+    let mut harness = arrangement_app();
+    harness.run();
+    assert!(!harness.ctx.has_requested_repaint(), "nothing to draw");
+    // A click on a header runs its command after the views drew: the window asks for one more
+    // frame, so the new state is on screen without a second click or a pointer move.
+    harness.get_by_label("Turn Bass off").click();
+    harness.step();
+    assert!(harness.ctx.has_requested_repaint(), "an edit asks for a frame");
+    harness.run();
+    assert!(harness.query_by_label("Turn Bass on").is_some(), "and the frame shows it");
 }
 
 #[test]

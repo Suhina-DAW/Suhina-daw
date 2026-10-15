@@ -184,8 +184,8 @@ pub struct Session {
     undo: Vec<Project>,
     redo: Vec<Project>,
     player: Option<Player>,
-    /// A copied arrangement clip and the content it plays, for `clip.paste`.
-    clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
+    /// The arrangement clips copied for `clip.paste`, with the content each plays, for `clip.paste`.
+    clipboard: Vec<(suhina_model::Clip, suhina_model::ClipContent)>,
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
     /// The project's plug-ins, running while it plays (ADR 0006).
@@ -212,7 +212,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             player: None,
-            clipboard: None,
+            clipboard: Vec::new(),
             param_edit: None,
             plugins: rack::Rack::default(),
             audio: suhina_engine::AudioPool::new(),
@@ -221,12 +221,17 @@ impl Session {
         }
     }
 
-    /// Whether the clip copied for `clip.paste` plays audio: `Some(true)` for audio, `Some(false)`
+    /// Whether the clips copied for `clip.paste` play audio: `Some(true)` for audio, `Some(false)`
     /// for notes, `None` when nothing has been copied. The window uses it to pick the stacking
     /// setting a paste follows.
     pub fn copied_clip_is_audio(&self) -> Option<bool> {
-        let (_, content) = self.clipboard.as_ref()?;
+        let (_, content) = self.clipboard.first()?;
         Some(content.lanes.iter().any(|l| matches!(l.data, suhina_model::LaneData::Audio(_))))
+    }
+
+    /// How many arrangement clips are copied for `clip.paste`.
+    pub fn copied_clips(&self) -> usize {
+        self.clipboard.len()
     }
 
     /// The project's decoded audio, which players are started with (ADR 0011).

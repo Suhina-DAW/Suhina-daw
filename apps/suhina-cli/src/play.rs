@@ -81,7 +81,7 @@ edits (heard while playing):
   vol <track> <db>      set a track's volume, e.g. vol Bass -6
   mute / unmute <track> mute or unmute a track
   undo / redo           undo or redo the last edit
-  <command.id> [json]   any command, e.g. track.setMute {\"track\": \"Bass\", \"mute\": true}
+  <command.id> [json]   any command, e.g. track.setMute {\"tracks\": [\"Bass\"], \"mute\": true}
   help, quit";
 
 /// Plays the project on the output `choice` names with the transport stopped and reads launcher
@@ -179,13 +179,13 @@ fn parse_line(line: &str) -> Result<Line, String> {
         }
         ["vol", track @ .., db] if !track.is_empty() => {
             let db: f64 = db.parse().map_err(|_| format!("{db:?} is not a level in dB"))?;
-            command("track.setVolume", json!({ "track": track_value(track), "db": db }))
+            command("track.setVolume", json!({ "tracks": [track_value(track)], "db": db }))
         }
         ["mute", track @ ..] if !track.is_empty() => {
-            command("track.setMute", json!({ "track": track_value(track), "mute": true }))
+            command("track.setMute", json!({ "tracks": [track_value(track)], "mute": true }))
         }
         ["unmute", track @ ..] if !track.is_empty() => {
-            command("track.setMute", json!({ "track": track_value(track), "mute": false }))
+            command("track.setMute", json!({ "tracks": [track_value(track)], "mute": false }))
         }
         ["metronome" | "click", state, db @ ..] if matches!(*state, "on" | "off") && db.len() <= 1 => {
             let mut params = json!({ "on": *state == "on" });
@@ -305,9 +305,12 @@ mod tests {
         assert!(parse_line("pos bar5").is_err());
         assert_eq!(parse_line("quant 2 bars"), cmd("launcher.setQuantization", json!({ "value": "2 bars" })));
         assert_eq!(parse_line("tempo 100"), cmd("transport.setTempo", json!({ "bpm": 100.0 })));
-        assert_eq!(parse_line("vol Lead Vox -6"), cmd("track.setVolume", json!({ "track": "Lead Vox", "db": -6.0 })));
-        assert_eq!(parse_line("mute 2"), cmd("track.setMute", json!({ "track": 2, "mute": true })));
-        assert_eq!(parse_line("unmute Bass"), cmd("track.setMute", json!({ "track": "Bass", "mute": false })));
+        assert_eq!(
+            parse_line("vol Lead Vox -6"),
+            cmd("track.setVolume", json!({ "tracks": ["Lead Vox"], "db": -6.0 }))
+        );
+        assert_eq!(parse_line("mute 2"), cmd("track.setMute", json!({ "tracks": [2], "mute": true })));
+        assert_eq!(parse_line("unmute Bass"), cmd("track.setMute", json!({ "tracks": ["Bass"], "mute": false })));
         assert_eq!(parse_line("undo"), cmd("edit.undo", json!({})));
         assert_eq!(parse_line("metronome on"), cmd("transport.setMetronome", json!({ "on": true })));
         assert_eq!(parse_line("click off"), cmd("transport.setMetronome", json!({ "on": false })));
@@ -315,8 +318,8 @@ mod tests {
         assert!(parse_line("metronome loud").is_err());
         assert!(parse_line("tempo fast").is_err());
         assert_eq!(
-            parse_line("track.setMute {\"track\": 1, \"mute\": true}"),
-            cmd("track.setMute", json!({ "track": 1, "mute": true }))
+            parse_line("track.setMute {\"tracks\": [1], \"mute\": true}"),
+            cmd("track.setMute", json!({ "tracks": [1], "mute": true }))
         );
         assert_eq!(parse_line("project.info"), cmd("project.info", json!({})));
         assert!(parse_line("scene two").is_err());

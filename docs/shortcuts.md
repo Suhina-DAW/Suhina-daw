@@ -1,9 +1,9 @@
 ---
 description: Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them
-read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys
+read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, mute clips, select all, hotkeys
 type: howto
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -66,17 +66,21 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Open or close Settings (`settings.open`) | Ctrl+, |
 | Make the whole window larger, smaller, its normal size (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`; 50–200 % in 10 % steps, kept in `settings.txt`, [spec](spec/window-zoom.md)) | Ctrl+Plus, Ctrl+Equals; Ctrl+Minus; Ctrl+0 |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
-| Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
-| Duplicate, delete the selected clip (`selection.duplicate`, `.delete`) | Ctrl+D; Delete, Backspace |
+| Copy, cut, paste the selected clips (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
+| Duplicate, delete the selected clips (`selection.duplicate`, `.delete`) | Ctrl+D; Delete, Backspace |
+| Mute or unmute the selected clips (`selection.mute`) | Ctrl+M |
+| Select every clip in the arrangement (`selection.selectAll`) | Ctrl+A |
 | Group the selected tracks (`selection.group`) | Ctrl+G |
 | Next, previous project (`projects.next`, `projects.previous`) | Ctrl+Tab, Ctrl+Shift+Tab |
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
 | Show which version of Suhina this is (`help.about`, Help › About Suhina, [spec](spec/about.md)) | none |
 
-Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
+Paste places the copies right after the selected clip, or at the playhead on the selected track; like a
 moved clip, it replaces what it covers unless the stacking setting for its kind is on
-([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.
+([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same. Every key that acts
+on clips acts on the whole selection — Ctrl-click a clip to add it, Shift-click to take the run up
+to it — and the whole list is one undo step.
 
 Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
 while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and

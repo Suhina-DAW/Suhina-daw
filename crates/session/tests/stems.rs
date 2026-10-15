@@ -102,7 +102,7 @@ fn the_stems_play_through_the_group_and_the_master_does_not_sound_twice() {
     // Only the master (stems muted): sound too. Everything muted: silence.
     let set = |session: &mut Session, name: &str, mute: bool| {
         let id = track(session.project(), name).id.0;
-        run(session, "track.setMute", json!({ "track": id, "mute": mute })).unwrap();
+        run(session, "track.setMute", json!({ "tracks": [id], "mute": mute })).unwrap();
     };
     for name in ["Drums", "Bass", "Other", "Vox"] {
         set(&mut session, name, true);

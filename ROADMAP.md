@@ -354,6 +354,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   redo. Every click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
+- Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
+  `track.adjustPan` move each track by the same amount, keeping what is between them, and
+  `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
+  volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
+  tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
+  volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
@@ -362,6 +368,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Clips: Ctrl-click adds one to the selection and Shift-click takes the run up to one, Ctrl+A
+  selects the lot, and Ctrl+C, Ctrl+X, Ctrl+D, Delete and Ctrl+M (clip mute) act on the whole
+  selection as one undo step ([spec](docs/spec/arrangement-editing.md#selecting-clips)). Header
+  clicks take a run of tracks the same way.
+- A group's triangle folds its tracks away into one lane, which stands in for the track being
+  worked on (its clips, waveform and colour), or the first track inside it; a Stems file's group
+  arrives folded ([spec](docs/spec/arrangement-editing.md#folded-groups)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right

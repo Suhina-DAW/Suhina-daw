@@ -489,6 +489,49 @@ fn a_sample_dropped_from_the_system_onto_the_empty_space_makes_an_audio_track() 
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// The repository's Stems test file (a master and four stems: Drums, Bass, Other, Vox in one
+/// MP4, `crates/media/tests/data`), copied into `folder` under a name of its own.
+fn stems(folder: &Path) -> PathBuf {
+    let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../media/tests/data/tones-aac.stem.mp4");
+    let to = folder.join("tones.stem.mp4");
+    std::fs::copy(from, &to).unwrap();
+    to
+}
+
+#[test]
+fn a_stems_file_dropped_on_a_lane_becomes_one_folded_group() {
+    let (settings, folder) = (temp("stems-settings"), temp("stems"));
+    pack(&folder);
+    let file = stems(&folder);
+    let mut harness = window(&settings, &folder);
+    harness.state_mut().do_action("view.toggle", &mut Vec::new());
+    harness.run();
+    let header = harness.get_by_label("Track Keys").rect();
+    let x = if header.center().x < SIZE.0 / 2.0 { header.right() + 60.0 } else { header.left() - 60.0 };
+    system_drop(&mut harness, &file, Pos2::new(x, header.center().y));
+    let grouped = |app: &App| {
+        app.session().is_some_and(|s| {
+            let p = s.project();
+            p.tracks.iter().filter(|t| t.parent.is_some()).count() == 5 && p.tracks.iter().any(|t| t.name == "Master")
+        })
+    };
+    assert!(until(&mut harness, grouped), "a group of the master and its four stems");
+    // One more frame: the drop runs after the view has drawn, so the lanes follow it next frame.
+    harness.run();
+    // The group arrives folded: one lane named after the file, its tracks away, and the clip the
+    // fold stands in for (the master) drawn on that lane.
+    assert!(harness.query_by_label("Track tones").is_some(), "the group's own lane");
+    assert!(harness.query_by_label("Unfold tones").is_some(), "it arrives folded");
+    assert!(harness.query_by_label("Track Master").is_none(), "the stems' lanes are folded away");
+    assert!(harness.query_by_label_contains("Clip tones – Master").is_some(), "its row shows the master");
+
+    harness.get_by_label("Unfold tones").click();
+    harness.run();
+    assert!(harness.query_by_label("Track Master").is_some(), "unfolding brings the stems back");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
 #[test]
 fn a_midi_file_dropped_from_the_system_onto_an_arrangement_lane_lands_on_that_track() {
     let (settings, folder) = (temp("system-lane-settings"), temp("system-lane"));

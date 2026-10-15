@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -33,6 +33,10 @@ replaces them.
 
 - Radius 0 everywhere. No shadows, gradients or cards.
 - Regions are separated by 1 px gaps that show `border` beneath them.
+- **One frame after an edit.** The window draws a view from the state at the start of the frame, and
+  the commands of a click, a drag that ended and a drop run after it: when a command changed the
+  project, the window asks for one more frame, so what the user did is on screen at once instead of
+  waiting for another click or pointer move.
 - Parts marked **(planned)** are designed but not built yet; everything else is what the app
   draws today.
 - Type, by role:
@@ -181,6 +185,7 @@ track along the bottom edge.
 | Fade curve handle | A 7 px circle on the fade's line half-way through the fade, on fades at least 21 px wide, drawn and hit (11 × 11 px) like the fade handles. A vertical drag moves it with the pointer and bends the curve so the line passes through it (`clip.setFades` `inCurve`/`outCurve`): up towards +1, down towards −1, stopping at either; double-click sets it to 0. The line is drawn with at most 256 points |
 | Playhead | 1 px `accent` through the ruler and all lanes while playing; while stopped, at the play start marker once it is past beat 0 |
 | Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `panel.background` (`control.background` when selected), 5 px top/bottom and 6 px side padding (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
+| Group fold triangle | 12 px at the start of a group's first row, before the track number, on a group that holds tracks: a 7 × 4 px triangle, `text.hint` (`text.primary` under the pointer), pointing right while the group is folded and down while it is open. A click folds the group's tracks away or opens it ([spec](../spec/arrangement-editing.md) › Folded groups); a folded group's row then draws the clips of the track it stands in for |
 | Return and main rows | 20 px each along the bottom, `panel.background` headers: the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only) |
 
 ### Track header levels
@@ -258,6 +263,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
+| Interface › Arrangement | Mixer controls | Field (default): the volume bar and the pan centre bar; Knob: a knob with its value beside it, in the Arrangement headers and the Session mixer ([spec](../spec/arrangement-editing.md) › Volume, pan, mute and solo) |
 | Interface › Detail area | Device chain | Row (default), Stack |
 | Interface › Browser | Side | Left (default), Right |
 | Interface › Browser | Auto-play | On (default), Off: selecting a sample or MIDI file previews it |
