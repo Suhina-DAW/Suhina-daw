@@ -185,18 +185,21 @@ impl TempoMap {
         self.time_at(beat + beats) - self.time_at(beat)
     }
 
-    /// The beats at which the tempo changes (steps and the ends of ramps), and where ramps begin,
-    /// in order: the points a reader that plays constant-speed pieces must cut at.
+    /// The beats at which the tempo changes (steps, and where ramps begin and end), in order.
     pub fn breaks(&self) -> impl Iterator<Item = f64> + '_ {
         self.segments.iter().skip(1).map(|s| s.beat)
     }
 
-    /// Whether the tempo ramps between `from` and `to` beats.
-    pub fn ramps_between(&self, from: f64, to: f64) -> bool {
-        self.segments.iter().enumerate().any(|(index, s)| {
-            let end = self.segments.get(index + 1).map_or(f64::INFINITY, |n| n.beat);
-            s.slope != 0.0 && s.beat < to && end > from
-        })
+    /// The first beat after `beat` at which the tempo changes (see [`TempoMap::breaks`]), if
+    /// any. A binary search; never allocates.
+    pub fn next_break_after(&self, beat: f64) -> Option<f64> {
+        let index = self.segments.partition_point(|s| s.beat <= beat);
+        self.segments.get(index).map(|s| s.beat)
+    }
+
+    /// Whether the tempo is ramping at `beat`.
+    pub fn ramps_at(&self, beat: f64) -> bool {
+        self.segment_at_beat(beat).is_some_and(|s| s.slope != 0.0)
     }
 }
 
@@ -385,6 +388,7 @@ mod tests {
         let expected = 60.0 / 7.5 * (180.0f64 / 120.0).ln();
         assert!((map.time_at(8.0) - expected).abs() < 1e-12);
         assert!((map.bpm_at(4.0) - 150.0).abs() < 1e-12);
+        assert!(map.ramps_at(0.0) && map.ramps_at(7.9) && !map.ramps_at(8.0));
         assert_eq!(map.bpm_at(9.0), 180.0);
         // After the ramp, a constant 180 bpm.
         assert!((map.time_at(10.0) - (expected + 2.0 / 3.0)).abs() < 1e-12);
@@ -429,6 +433,7 @@ mod tests {
         let map = TempoMap::new(f64::NAN, &changes, f64::NAN);
         assert_eq!(map.start_bpm(), 120.0);
         assert_eq!(map.breaks().collect::<Vec<_>>(), vec![8.0]);
+        assert_eq!((map.next_break_after(2.0), map.next_break_after(8.0)), (Some(8.0), None));
         assert_eq!(map.bpm_at(9.0), 60.0, "the later of two points on one beat wins");
         let many: Vec<TempoPoint> = (1..=20_000).map(|i| point(f64::from(i), 100.0, false)).collect();
         assert_eq!(TempoMap::new(120.0, &many, 1.0).breaks().count(), MAX_TEMPO_CHANGES);

@@ -23,6 +23,7 @@ mod preview;
 mod preview_tests;
 mod stretch;
 mod swap;
+mod tempo;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -46,7 +47,7 @@ use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
 use suhina_device_api::ProcessContext;
 pub use suhina_model as model;
-use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TempoMap, TrackId};
 
 /// The most frames a plug-in is asked to process at once: the size of a device chain's block.
 pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;
@@ -175,7 +176,9 @@ pub(crate) struct Graph {
     ahead: AheadReader,
     length: u64,
     launcher: Launcher,
-    frames_per_beat: f64,
+    /// The tempo map counted in frames: every beat of this graph is placed through it
+    /// (`docs/spec/tempo-map.md`).
+    tempo: Arc<TempoMap>,
     /// Device chains of the tracks that have devices (ADR 0004).
     chains: Vec<Chain>,
     /// Every track's bus and the gains its sources are mixed at (muted tracks at zero), so
@@ -252,7 +255,7 @@ impl Renderer {
             .launcher
             .monitor
             .frames_per_beat
-            .store(graph.frames_per_beat.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            .store(graph.tempo.start_per_beat().to_bits(), std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
             sample_rate,
             graph,
@@ -434,7 +437,7 @@ impl Renderer {
         self.graph.ahead.service();
         let context = ProcessContext {
             tempo: self.graph.launcher.tempo_bpm(),
-            beat: self.graph.launcher.beat_and_bar().0,
+            beat: self.graph.launcher.beat(),
             playing: self.running,
         };
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
@@ -449,8 +452,8 @@ impl Renderer {
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
-            let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
-            let click = self.metronome.frame(self.running, beat, bar_beats);
+            let launcher = &self.graph.launcher;
+            let click = self.metronome.frame(self.running, launcher.beat(), launcher.meter());
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running
@@ -723,7 +726,11 @@ impl Graph {
         }
         project.validate().map_err(RenderError::InvalidProject)?;
 
-        let frames_per_beat = 60.0 / bpm * f64::from(sample_rate);
+        let tempo = Arc::new(project.transport.tempo_map(f64::from(sample_rate)));
+        let frames_per_beat = tempo.start_per_beat();
+        // Audio events follow the map only when it changes, so a constant tempo plays exactly as
+        // it always did.
+        let changing = (!tempo.is_constant()).then(|| Arc::clone(&tempo));
         let column_of = |track: TrackId| {
             project
                 .launcher
@@ -751,7 +758,7 @@ impl Graph {
                         LaneData::Notes(_) => collect_notes(
                             clip,
                             content_lane,
-                            frames_per_beat,
+                            &tempo,
                             (track, gain_left, gain_right, column, bus),
                             &mut events,
                         ),
@@ -762,10 +769,11 @@ impl Graph {
                             // the stretcher cannot handle, are re-pitched.
                             if region.warped
                                 && region.stretch != suhina_model::StretchMode::Repitch
-                                && let Some(voice) = StretchVoice::new(clip, region, data.clone(), bpm, sample_rate)
+                                && let Some(voice) =
+                                    StretchVoice::on_map(clip, region, data.clone(), &tempo, sample_rate)
                             {
                                 let gain = if region.gain.is_finite() { region.gain.max(0.0) as f32 } else { 0.0 };
-                                let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+                                let to_frame = |beats: f64| tempo::frame_of(&tempo, beats);
                                 let (start, end) = (to_frame(clip.start), to_frame(clip.start + clip.length));
                                 stretch_voices.push((voice, start, end.saturating_sub(start)));
                                 stretch_events.push(StretchEvent {
@@ -773,13 +781,14 @@ impl Graph {
                                     end,
                                     gain_left: gains.0 * gain,
                                     gain_right: gains.1 * gain,
-                                    fades: Fades::new(clip, frames_per_beat, sample_rate),
+                                    fades: Fades::on_map(clip, &tempo, sample_rate),
                                     column,
                                     bus,
                                 });
                                 continue;
                             }
-                            let timing = audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate };
+                            let timing =
+                                audio::Timing { frames_per_beat, tempo_bpm: bpm, sample_rate, map: changing.clone() };
                             audio_events.extend(AudioEvent::new(clip, region, data.clone(), timing, gains).map(
                                 |event| ArrangedAudio {
                                     event,
@@ -818,8 +827,8 @@ impl Graph {
             stretch_events,
             ahead: AheadReader::new(stretch_voices, sample_rate),
             length,
-            launcher: Launcher::new(project, audio, sample_rate, &chains),
-            frames_per_beat,
+            launcher: Launcher::new(project, audio, sample_rate, &chains, Arc::clone(&tempo)),
+            tempo,
             routes: project
                 .tracks
                 .iter()
@@ -991,7 +1000,7 @@ fn heard_with_solo(project: &Project, channel: &suhina_model::Channel, chain: &[
 fn collect_notes(
     clip: &Clip,
     lane: &ContentLane,
-    frames_per_beat: f64,
+    map: &TempoMap,
     (track, gain_left, gain_right, column, bus): (TrackId, f32, f32, u32, u32),
     events: &mut Vec<NoteEvent>,
 ) {
@@ -999,7 +1008,7 @@ fn collect_notes(
     if !(clip.length.is_finite() && clip.length > 0.0 && clip.start.is_finite() && clip.offset.is_finite()) {
         return;
     }
-    let to_frame = |beats: f64| (beats.max(0.0) * frames_per_beat).round() as u64;
+    let to_frame = |beats: f64| tempo::frame_of(map, beats);
 
     // Each pass maps the content range [from, to) to the clip position `at`.
     let mut push_range = |from: f64, to: f64, at: f64| {

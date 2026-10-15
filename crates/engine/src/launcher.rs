@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use suhina_model::{LaneData, Project, TimeSignature};
+use suhina_model::{LaneData, Meter, Project, TempoMap};
 
 use crate::audio::{AudioEvent, AudioPool, Timing};
 use crate::chain::Chain;
@@ -337,8 +337,13 @@ pub(crate) struct Launcher {
     bar_beats: f64,
     beat: f64,
     tempo_bpm: f64,
-    /// The project tempo, which stretch voices are prepared for.
+    /// The project's start tempo, which stretch voices are prepared for.
     project_tempo_bpm: f64,
+    /// The arrangement's tempo map in frames and its meter (`docs/spec/tempo-map.md`).
+    map: Arc<TempoMap>,
+    meter: Meter,
+    /// The clock runs on the map; a scene tempo takes it off the map until the map is edited.
+    follows_map: bool,
     pending_tempo: Option<(f64, f64)>,
     frames_per_beat_at_build: f64,
     stop_fade_frames: f64,
@@ -347,9 +352,16 @@ pub(crate) struct Launcher {
 }
 
 impl Launcher {
-    pub(crate) fn new(project: &Project, audio: &AudioPool, sample_rate: u32, chains: &[Chain]) -> Self {
+    pub(crate) fn new(
+        project: &Project,
+        audio: &AudioPool,
+        sample_rate: u32,
+        chains: &[Chain],
+        map: Arc<TempoMap>,
+    ) -> Self {
         let tempo = project.transport.tempo_bpm;
         let frames_per_beat = 60.0 / tempo * f64::from(sample_rate);
+        let meter = project.transport.meter();
         let columns: Vec<Column> = project
             .launcher
             .columns
@@ -382,7 +394,10 @@ impl Launcher {
                 .map(|s| s.tempo_bpm.filter(|bpm| bpm.is_finite() && (1.0..=999.0).contains(bpm)))
                 .collect(),
             quantization: Quantization::Bars(1),
-            bar_beats: bar_beats(project.transport.time_signature),
+            bar_beats: meter.start_bar_beats(),
+            meter,
+            map,
+            follows_map: true,
             beat: 0.0,
             tempo_bpm: tempo,
             project_tempo_bpm: tempo,
@@ -404,9 +419,15 @@ impl Launcher {
         self.quantization = old.quantization;
         self.beat = old.beat;
         self.pending_tempo = old.pending_tempo;
-        // An edited project tempo replaces the running one; otherwise a scene's tempo stays.
-        self.tempo_bpm =
-            if self.project_tempo_bpm == old.project_tempo_bpm { old.tempo_bpm } else { self.project_tempo_bpm };
+        // An edited tempo map replaces the running tempo and puts the clock back on the map;
+        // otherwise a scene's tempo stays.
+        if *self.map == *old.map {
+            self.tempo_bpm = old.tempo_bpm;
+            self.follows_map = old.follows_map;
+        } else {
+            self.tempo_bpm = self.map.bpm_at(self.beat);
+            self.follows_map = true;
+        }
         let frames_per_beat = self.frames_per_beat_at_build;
         for (new, old) in self.columns.iter_mut().zip(old.columns.iter_mut()) {
             new.overrides_since = old.overrides_since;
@@ -436,13 +457,34 @@ impl Launcher {
         self.tempo_bpm
     }
 
-    /// The beat playing now and the beats in a bar, for the metronome.
-    pub(crate) fn beat_and_bar(&self) -> (f64, f64) {
-        (self.beat, self.bar_beats)
+    /// The beat playing now.
+    pub(crate) fn beat(&self) -> f64 {
+        self.beat
+    }
+
+    /// The project's meter, for the metronome.
+    pub(crate) fn meter(&self) -> &Meter {
+        &self.meter
+    }
+
+    /// Whether the clock reads its beat from the tempo map: it follows the map and the map
+    /// changes (a constant map is counted frame by frame, as it always was).
+    fn on_map(&self) -> bool {
+        self.follows_map && !self.map.is_constant()
+    }
+
+    /// Puts the tempo at the clock's beat, when the clock follows the map.
+    fn tempo_from_map(&mut self) {
+        if self.follows_map {
+            self.tempo_bpm = self.map.bpm_at(self.beat);
+        }
     }
 
     /// The beat a launch issued now happens at.
     fn launch_beat(&self) -> f64 {
+        if !self.meter.is_constant() {
+            return self.launch_beat_on_meter();
+        }
         let step = self.quantization.step(self.bar_beats);
         if step == 0.0 {
             return self.beat;
@@ -450,6 +492,27 @@ impl Launcher {
         // A launch exactly on a boundary (within rounding) happens there.
         let index = ((self.beat - 1e-9) / step).ceil().max(0.0);
         index * step
+    }
+
+    /// [`Launcher::launch_beat`] when the time signature changes: bars are the meter's, and a
+    /// note value counts from the start of the bar it is in.
+    fn launch_beat_on_meter(&self) -> f64 {
+        let beat = self.beat.max(0.0);
+        // The bar the beat is in; a beat a rounding error before a bar line counts as on it, and
+        // a launch exactly on a boundary happens there.
+        let here = self.meter.position(beat + 1e-9);
+        match self.quantization {
+            Quantization::Bars(bars) if bars > 0 => {
+                let next = if (here.bar_start - beat).abs() <= 1e-9 { here.bar } else { here.bar.saturating_add(1) };
+                self.meter.bar_start(next.div_ceil(bars).saturating_mul(bars))
+            }
+            Quantization::Beats(step) if step.is_finite() && step > 0.0 => {
+                let index = ((beat - here.bar_start - 1e-9) / step).ceil().max(0.0);
+                // A grid that does not divide the bar ends at the next bar line.
+                (here.bar_start + index * step).min(here.bar_start + here.bar_beats)
+            }
+            _ => self.beat,
+        }
     }
 
     fn queue(&mut self, column: usize, action: Queued) {
@@ -523,14 +586,6 @@ fn carry(
     Some(playing)
 }
 
-/// Beats in one bar: a 4/4 bar has 4, a 6/8 bar 3.
-fn bar_beats(ts: TimeSignature) -> f64 {
-    if ts.numerator == 0 || ts.denominator == 0 {
-        return 4.0;
-    }
-    f64::from(ts.numerator) * 4.0 / f64::from(ts.denominator)
-}
-
 fn plan_clip(
     project: &Project,
     audio: &AudioPool,
@@ -585,7 +640,9 @@ fn plan_clip(
                 };
                 let gains = (gain_left * AUDIO_HEADROOM, gain_right * AUDIO_HEADROOM);
                 let tempo = project.transport.tempo_bpm;
-                let timing = Timing { frames_per_beat, tempo_bpm: tempo, sample_rate };
+                // Launched clips are not on the arrangement's timeline: they are placed at the
+                // start tempo and follow the launcher clock.
+                let timing = Timing { frames_per_beat, tempo_bpm: tempo, sample_rate, map: None };
                 let Some(event) = AudioEvent::new(&placed, region, data.clone(), timing, gains) else { continue };
                 // Warped clips are time-stretched like arrangement clips; the stretch voice gets
                 // the region gain, the direct reader has it already.
@@ -764,12 +821,12 @@ impl Renderer {
         self.active_audio_count = 0;
         self.metronome.reset_at(beat);
         self.graph.launcher.beat = beat;
+        self.graph.launcher.tempo_from_map();
     }
 
-    /// The arrangement frame of `beat`, in the playing graph's tempo.
+    /// The arrangement frame of `beat`, through the playing graph's tempo map.
     pub(crate) fn frame_of_beat(&self, beat: f64) -> u64 {
-        let frame = (beat * self.graph.frames_per_beat).round();
-        if frame.is_finite() && frame > 0.0 { frame as u64 } else { 0 }
+        crate::tempo::frame_of(&self.graph.tempo, beat)
     }
 
     /// The play start marker's arrangement frame.
@@ -779,8 +836,7 @@ impl Renderer {
 
     /// The arrangement beat playing now.
     fn playhead_beat(&self) -> f64 {
-        let fpb = self.graph.frames_per_beat;
-        if fpb > 0.0 { self.time() as f64 / fpb } else { 0.0 }
+        crate::tempo::beat_at(&self.graph.tempo, self.time())
     }
 
     /// Ends every sounding note and device tail that the transport stopping or jumping cuts.
@@ -821,6 +877,7 @@ impl Renderer {
         }
         launcher.pending_tempo = None;
         launcher.beat = self.start_beat;
+        launcher.tempo_from_map();
         launcher.monitor.running.store(false, Ordering::Relaxed);
     }
 
@@ -835,6 +892,7 @@ impl Renderer {
             self.graph.ahead.move_to(self.start_frame());
             self.stretch_fresh = true;
             self.graph.launcher.beat = self.start_beat;
+            self.graph.launcher.tempo_from_map();
             return;
         }
         self.release_sounding();
@@ -875,10 +933,21 @@ impl Renderer {
         if self.running {
             self.apply_due();
         }
+        // The beats this frame moves on. On a changing tempo map the next beat is read from the
+        // map at the next arrangement frame, so the clock never drifts from the arrangement;
+        // otherwise the tempo is added up frame by frame, as it always was.
         let beats_per_frame = self.graph.launcher.tempo_bpm / 60.0 / f64::from(self.sample_rate);
+        let on_map = self.running && self.graph.launcher.on_map();
+        let (step, next_beat) = if on_map {
+            let next = crate::tempo::beat_at(&self.graph.tempo, self.time().saturating_add(1));
+            let next = next.max(self.graph.launcher.beat);
+            (next - self.graph.launcher.beat, next)
+        } else {
+            (beats_per_frame, self.graph.launcher.beat + beats_per_frame)
+        };
         for index in 0..self.graph.launcher.columns.len() {
             if self.running {
-                self.play_notes(index, beats_per_frame);
+                self.play_notes(index, beats_per_frame, on_map);
             }
             let launcher = &mut self.graph.launcher;
             let chains = &mut self.graph.chains;
@@ -920,7 +989,7 @@ impl Renderer {
                         }
                     }
                 }
-                p.elapsed_beats += beats_per_frame;
+                p.elapsed_beats += step;
                 p.elapsed_frames += 1.0;
                 if p.fade_left > 0.0 {
                     p.fade_left -= 1.0;
@@ -940,7 +1009,10 @@ impl Renderer {
             }
         }
         if self.running {
-            self.graph.launcher.beat += beats_per_frame;
+            self.graph.launcher.beat = next_beat;
+            if on_map {
+                self.graph.launcher.tempo_from_map();
+            }
         }
         out
     }
@@ -952,6 +1024,7 @@ impl Renderer {
             && at <= beat
         {
             self.graph.launcher.tempo_bpm = bpm;
+            self.graph.launcher.follows_map = false;
             self.graph.launcher.pending_tempo = None;
         }
         let mut changed = false;
@@ -1010,8 +1083,10 @@ impl Renderer {
     }
 
     /// Starts the notes of a column's playing clip that are due at this frame.
-    fn play_notes(&mut self, index: usize, beats_per_frame: f64) {
+    fn play_notes(&mut self, index: usize, beats_per_frame: f64, on_map: bool) {
+        let time = self.time();
         let Self { graph, voices, position, sample_rate, block_frame, .. } = self;
+        let map = &graph.tempo;
         let frame = *block_frame;
         let launcher = &mut graph.launcher;
         let chains = &mut graph.chains;
@@ -1021,9 +1096,16 @@ impl Renderer {
         let Some(plan) = column.slots.get(p.slot).and_then(|s| s.clip.as_ref()) else { return };
         let limit = plan.note_limit();
         let beat = plan.clip_beat(p.elapsed_beats);
+        let song_beat = launcher.beat;
         let mut start = |note: &PlanNote| {
             let beats = note.duration.min(limit - note.time).max(0.0);
-            let end = position.saturating_add((beats / beats_per_frame).round() as u64);
+            // A note's length in frames follows the tempo map from where it starts.
+            let frames = if on_map {
+                crate::tempo::frame_of(map, song_beat + beats).saturating_sub(time)
+            } else {
+                (beats / beats_per_frame).round() as u64
+            };
+            let end = position.saturating_add(frames);
             let start = NoteStart {
                 frequency: note.frequency,
                 key: note.key,

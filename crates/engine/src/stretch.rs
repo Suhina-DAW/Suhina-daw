@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use suhina_model::{AudioRegion, Clip, StretchMode};
+use suhina_model::{AudioRegion, Clip, StretchMode, TempoMap};
 use suhina_stretch::Stretch;
 
 use crate::audio::{AudioData, STRETCH_SAMPLE_RATES, seconds_at, warp_markers};
@@ -24,6 +24,10 @@ const CHUNK_FRAMES: usize = 1024;
 const UNITY_TOLERANCE: f64 = 1e-4;
 /// Speeds the stretcher is given; a clip with a segment outside them is re-pitched.
 const RATES: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+/// Longest piece during a tempo ramp, in beats: a sixteenth note. The stretcher plays one speed a
+/// piece, so a ramp is played as short steps, each starting at its exact time
+/// (`docs/spec/tempo-map.md` › What follows the map).
+const RAMP_PIECE_BEATS: f64 = 0.25;
 /// Most playlist pieces per clip, so a malformed clip cannot exhaust memory. A looping clip that
 /// needs more is cut after its last whole loop, and the voice repeats the loops after the first
 /// loop start ([`Repeat`]), so it keeps looping.
@@ -58,24 +62,72 @@ struct Place {
     turn: u64,
 }
 
+/// When a clip's beats play: seconds after the clip's start.
+enum Clock<'a> {
+    /// At one tempo, in bpm.
+    Constant(f64),
+    /// Through a tempo map counted in frames at `sample_rate`, for a clip that starts at song
+    /// beat `start`.
+    Map { map: &'a TempoMap, start: f64, sample_rate: f64 },
+}
+
+impl Clock<'_> {
+    /// Seconds from the clip's start to `played` beats into it.
+    fn seconds(&self, played: f64) -> f64 {
+        match self {
+            Self::Constant(bpm) => played * (60.0 / bpm),
+            Self::Map { map, start, sample_rate } => (map.time_at(start + played) - map.time_at(*start)) / sample_rate,
+        }
+    }
+
+    /// The most beats a piece starting `played` beats into the clip may last: up to the next
+    /// tempo change, and a sixteenth during a ramp. Unlimited at a constant tempo.
+    fn piece_limit(&self, played: f64) -> f64 {
+        let Self::Map { map, start, .. } = self else { return f64::INFINITY };
+        let song = start + played;
+        let next_change = map.next_break_after(song + 1e-9).map_or(f64::INFINITY, |b| b - song);
+        let ramp = if map.ramps_at(song + 1e-9) { RAMP_PIECE_BEATS } else { f64::INFINITY };
+        next_change.min(ramp)
+    }
+}
+
 /// Works out which part of the file plays when, from the clip's offset, loop and length and the
 /// region's warp markers at `tempo_bpm`. `None` when the clip cannot be stretched (fewer than two
 /// usable warp markers, a speed that is not a finite positive number, or more than `MAX_PIECES`
 /// pieces without a whole loop to repeat).
+#[cfg(test)]
 fn playlist(
     clip: &Clip,
     region: &AudioRegion,
     data: &AudioData,
     tempo_bpm: f64,
 ) -> Option<(Vec<Piece>, f64, Option<Repeat>)> {
+    if !(tempo_bpm.is_finite() && tempo_bpm > 0.0) {
+        return None;
+    }
+    playlist_on(clip, region, data, &Clock::Constant(tempo_bpm))
+}
+
+/// The playlist on any [`Clock`]: at a constant tempo the pieces are exactly the ones it has
+/// always made; through a tempo map they are also cut at every tempo change and in a ramp.
+fn playlist_on(
+    clip: &Clip,
+    region: &AudioRegion,
+    data: &AudioData,
+    clock: &Clock,
+) -> Option<(Vec<Piece>, f64, Option<Repeat>)> {
     let markers = warp_markers(region);
     if markers.len() < 2 || markers.windows(2).any(|w| matches!(w, [a, b] if b.1 <= a.1)) {
         return None;
     }
-    if !(tempo_bpm.is_finite() && tempo_bpm > 0.0 && clip.length.is_finite() && clip.length > 0.0) {
+    if let Clock::Constant(bpm) = clock
+        && !(bpm.is_finite() && *bpm > 0.0)
+    {
         return None;
     }
-    let seconds_per_beat = 60.0 / tempo_bpm;
+    if !(clip.length.is_finite() && clip.length > 0.0) {
+        return None;
+    }
     let file_rate = f64::from(data.sample_rate);
     let loop_range = clip.loop_range.filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start);
 
@@ -92,16 +144,21 @@ fn playlist(
         let next_marker = markers.get(markers.partition_point(|m| m.0 <= beat + 1e-9)).map(|m| m.0);
         let loop_end = loop_range.map(|r| r.end).filter(|e| *e > beat + 1e-9);
         let clip_end = beat + (clip.length - played);
-        let next = [next_marker, loop_end, Some(clip_end)].into_iter().flatten().fold(f64::INFINITY, f64::min);
+        let tempo_cut = Some(beat + clock.piece_limit(played)).filter(|b| b.is_finite());
+        let next =
+            [next_marker, loop_end, Some(clip_end), tempo_cut].into_iter().flatten().fold(f64::INFINITY, f64::min);
         let src_start = seconds_at(&markers, beat) * file_rate;
         let src_end = seconds_at(&markers, next) * file_rate;
-        let out_seconds = (next - beat) * seconds_per_beat;
+        let out_seconds = match clock {
+            Clock::Constant(bpm) => (next - beat) * (60.0 / bpm),
+            Clock::Map { .. } => clock.seconds(played + (next - beat)) - clock.seconds(played),
+        };
         let rate = (src_end - src_start) / file_rate / out_seconds;
         if !(rate.is_finite() && rate > 0.0) {
             return None;
         }
         max_rate = max_rate.max(rate).max(1.0 / rate);
-        pieces.push(Piece { out_start: played * seconds_per_beat, src_start, src_end, rate, stream_start: stream });
+        pieces.push(Piece { out_start: clock.seconds(played), src_start, src_end, rate, stream_start: stream });
         stream += src_end - src_start;
         played += next - beat;
         beat = next;
@@ -117,7 +174,11 @@ fn playlist(
     if played < clip.length - 1e-9 {
         // Cut at the cap: keep whole loops and repeat them, or refuse the clip.
         let (Some(first), Some(last)) = (first_loop, last_loop) else { return None };
-        let repeat = Repeat { first: first.0, out: (last.1 - first.1) * seconds_per_beat, stream: last.2 - first.2 };
+        let out = match clock {
+            Clock::Constant(bpm) => (last.1 - first.1) * (60.0 / bpm),
+            Clock::Map { .. } => clock.seconds(last.1) - clock.seconds(first.1),
+        };
+        let repeat = Repeat { first: first.0, out, stream: last.2 - first.2 };
         if last.0 <= first.0 || !(repeat.out > 0.0 && repeat.stream > 0.0) {
             return None;
         }
@@ -162,6 +223,36 @@ impl StretchVoice {
         tempo_bpm: f64,
         sample_rate: u32,
     ) -> Option<Self> {
+        if !(tempo_bpm.is_finite() && tempo_bpm > 0.0) {
+            return None;
+        }
+        Self::with_clock(clip, region, data, &Clock::Constant(tempo_bpm), sample_rate)
+    }
+
+    /// [`StretchVoice::new`] for a clip on an arrangement whose tempo follows `map` (counted in
+    /// frames at `sample_rate`): its speed changes at every tempo change and through ramps, so
+    /// it stays on the grid. At a constant tempo exactly [`StretchVoice::new`].
+    pub(crate) fn on_map(
+        clip: &Clip,
+        region: &AudioRegion,
+        data: Arc<AudioData>,
+        map: &TempoMap,
+        sample_rate: u32,
+    ) -> Option<Self> {
+        if map.is_constant() {
+            return Self::new(clip, region, data, map.start_bpm(), sample_rate);
+        }
+        let clock = Clock::Map { map, start: clip.start, sample_rate: f64::from(sample_rate) };
+        Self::with_clock(clip, region, data, &clock, sample_rate)
+    }
+
+    fn with_clock(
+        clip: &Clip,
+        region: &AudioRegion,
+        data: Arc<AudioData>,
+        clock: &Clock,
+        sample_rate: u32,
+    ) -> Option<Self> {
         let channels = usize::from(data.channels);
         if !(1..=8).contains(&channels) || data.frames() == 0 || !STRETCH_SAMPLE_RATES.contains(&data.sample_rate) {
             return None;
@@ -169,7 +260,7 @@ impl StretchVoice {
         if region.stretch == StretchMode::Repitch {
             return None;
         }
-        let (pieces, max_rate, repeat) = playlist(clip, region, &data, tempo_bpm)?;
+        let (pieces, max_rate, repeat) = playlist_on(clip, region, &data, clock)?;
         let pitch = 2f64.powf(region.transpose / 12.0);
         let pitch = if pitch.is_finite() && pitch > 0.0 { pitch } else { 1.0 };
         // Audio that already plays at its own speed and pitch needs no stretcher: the caller reads

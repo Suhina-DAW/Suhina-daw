@@ -99,6 +99,8 @@ pub(crate) struct Updater {
     plugin_info: HashMap<u64, PluginSlotInfo>,
     plugins: Producer<(u64, Processor)>,
     retired_plugins: Consumer<Processor>,
+    /// The tempo map of the last graph sent, which plays once the swaps before it are done.
+    tempo: Arc<suhina_model::TempoMap>,
 }
 
 impl Updater {
@@ -145,6 +147,7 @@ impl Renderer {
             plugin_info: self.plugin_info.clone(),
             plugins,
             retired_plugins,
+            tempo: Arc::clone(&self.graph.tempo),
         }
     }
 
@@ -207,13 +210,12 @@ impl Renderer {
     /// Swaps in the pending graph and carries the state over (ADR 0005). Never allocates.
     pub(crate) fn apply_swap(&mut self) {
         let Some(swap) = self.swap.pending.take() else { return };
-        let old_beat_frames = self.graph.frames_per_beat;
         let old_time = self.time();
         let param_seq = swap.param_seq;
         let mut old = std::mem::replace(&mut self.graph, swap.graph);
-        // The playhead stays on the same beat when the tempo changed.
-        if self.running && old_beat_frames != self.graph.frames_per_beat {
-            self.time_at_origin = rescale(self.time(), old_beat_frames, self.graph.frames_per_beat);
+        // The playhead stays on the same beat when the tempo map changed.
+        if self.running && *old.tempo != *self.graph.tempo {
+            self.time_at_origin = crate::tempo::rescale(old_time, &old.tempo, &self.graph.tempo);
             self.origin = self.position;
         }
         self.graph.launcher.adopt(&mut old.launcher);
@@ -324,7 +326,7 @@ impl Renderer {
         monitor.position.store(self.position, Ordering::Relaxed);
         monitor.arrangement.store(self.time(), Ordering::Relaxed);
         monitor.stretch_underruns.store(self.stretch_underruns(), Ordering::Relaxed);
-        monitor.frames_per_beat.store(self.graph.frames_per_beat.to_bits(), Ordering::Relaxed);
+        monitor.frames_per_beat.store(self.graph.tempo.start_per_beat().to_bits(), Ordering::Relaxed);
         monitor.start_beat.store(self.start_beat.to_bits(), Ordering::Relaxed);
     }
 }
@@ -411,12 +413,6 @@ fn apply_param(chains: &mut [crate::chain::Chain], change: ParamChange) {
     }
 }
 
-/// Arrangement frame `time` at `from` frames per beat, moved to the same beat at `to` frames per
-/// beat. The controller and the audio thread both use this, so they agree to the frame.
-fn rescale(time: u64, from: f64, to: f64) -> u64 {
-    if from > 0.0 && to > 0.0 && from != to { (time as f64 / from * to).round() as u64 } else { time }
-}
-
 impl Controller {
     /// Makes the renderer play `project` from now on, keeping what is playing (ADR 0005): builds
     /// it on this thread and swaps it in about [`SWAP_AHEAD_SECONDS`] from now. Fails if the
@@ -427,16 +423,25 @@ impl Controller {
         let mut plugins = Plugins { info: updater.plugin_info.clone(), processors: HashMap::new() };
         let mut graph =
             Graph::build(project, &updater.audio, updater.sample_rate, &mut plugins).map_err(|e| e.to_string())?;
+        let sent = Arc::clone(&graph.tempo);
         let monitor = &self.monitor;
         let (at, arrangement) = if monitor.running() {
             let ahead =
                 if graph.ahead.is_empty() { 0 } else { (SWAP_AHEAD_SECONDS * f64::from(updater.sample_rate)) as u64 };
             let position = monitor.position.load(Ordering::Relaxed);
             let arrangement = monitor.arrangement.load(Ordering::Relaxed);
-            // Arrangement frames are in the playing graph's tempo; the swap keeps the beat, so
-            // the new graph's voices go to the same beat in its own tempo.
-            let playing = f64::from_bits(monitor.frames_per_beat.load(Ordering::Relaxed));
-            (position + ahead, Some(rescale(arrangement + ahead, playing, graph.frames_per_beat)))
+            // Arrangement frames are in the playing graph's tempo map; the swap keeps the beat, so
+            // the new graph's voices go to the same beat in its own map. At constant tempos the
+            // playing graph's frames per beat come from the monitor, exact even with an edit
+            // still on its way; a changing map is the last one sent.
+            let at = arrangement + ahead;
+            let moved = if updater.tempo.is_constant() && graph.tempo.is_constant() {
+                let playing = f64::from_bits(monitor.frames_per_beat.load(Ordering::Relaxed));
+                crate::tempo::rescale_constant(at, playing, graph.tempo.start_per_beat())
+            } else {
+                crate::tempo::rescale(at, &updater.tempo, &graph.tempo)
+            };
+            (position + ahead, Some(moved))
         } else {
             (0, None)
         };
@@ -452,6 +457,7 @@ impl Controller {
             .swaps
             .push(Swap { graph, at, arrangement, param_seq: updater.param_seq })
             .map_err(|_| "the audio engine has not taken the previous edits yet".to_string())
+            .map(|()| updater.tempo = sent)
     }
 
     /// Sets parameter `param` (its index in the device's info) of the device at index `device`
