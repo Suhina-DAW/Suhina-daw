@@ -1,6 +1,6 @@
 ---
 description: Automation envelopes - lanes of points over the arrangement for a track's volume, pan and mute and every device parameter, curves and jumps, how the engine plays them, a manual change turning a lane off, and the automation.* commands
-read_when: automation, envelope, automation lane, breakpoint, automation point, curve, automation.addPoint, automation.movePoint, automation.deletePoint, automation.clear, automation.setEnabled, automation.list, device.setAutomation, automation off, re-enable automation, volume automation, pan automation, mute automation, device parameter automation, AutomationLane, AutomationPoint, MixLanes, DeviceLanes, Envelope
+read_when: automation, envelope, automation lane, automation lanes view, show automation, automation.movePoints, automation.deletePoints, select points, breakpoint, automation point, curve, automation.addPoint, automation.movePoint, automation.deletePoint, automation.clear, automation.setEnabled, automation.list, device.setAutomation, automation off, re-enable automation, volume automation, pan automation, mute automation, device parameter automation, AutomationLane, AutomationPoint, MixLanes, DeviceLanes, Envelope
 type: spec
 status: current
 last_verified: 2026-10-15
@@ -14,6 +14,8 @@ covers:
   - crates/engine/src/buses.rs
   - crates/session/src/automation.rs
   - crates/session/tests/automation.rs
+  - crates/ui/src/automation_lanes.rs
+  - crates/ui/tests/automation_lanes.rs
   - crates/project-file/src/lib.rs
 ---
 
@@ -21,8 +23,8 @@ covers:
 
 A parameter can follow an **envelope** over the arrangement: a lane of points, each a beat and a
 value, that the parameter moves along while the transport plays. This is Suhina's own design
-(#395); it extends the plug-in lanes of #109 to every parameter. Drawing lanes in the
-arrangement is a separate piece of work: here they are set by command (CLI, MCP).
+(#395); it extends the plug-in lanes of #109 to every parameter. Lanes are set by command (CLI,
+MCP) and drawn and edited in the Arrangement view (#420, [below](#in-the-arrangement-view)).
 
 ## What can be automated
 
@@ -104,6 +106,8 @@ mixer) and `param`. Values are in the unit of the parameter's set command.
 | `automation.addPoint {track, device?, param, beat, value, curve?}` | adds a point, making the lane (enabled) if there is none; answers the point's index in beat order |
 | `automation.movePoint {track, device?, param, point, beat?, value?, curve?}` | changes a point; answers its new index |
 | `automation.deletePoint {track, device?, param, point}` | removes a point; the lane goes with its last point |
+| `automation.movePoints {track, device?, param, points, beats?, value?, curve?}` | moves several points of one lane together in one undo step: `beats` later (earlier below 0), `value` up or down in the set command's unit (dB for the volume), each value kept in the parameter's range (a silent volume point stays silent, a louder one stops at +6 dB), `curve` given to each; answers the points' new indices in the order given |
+| `automation.deletePoints {track, device?, param, points}` | removes several points in one undo step; the lane goes with its last point |
 | `automation.clear {track, device?, param?}` | removes a lane, or every lane of the mixer or the device |
 | `automation.setEnabled {track, device?, param, enabled}` | turns a lane off or on again |
 | `automation.list {track}` | the track's lanes: `mixer` and `devices` (index, name, lanes), each with `param`, `enabled` and `points` (`beat`, `value`, `curve`) |
@@ -113,6 +117,41 @@ Refused, changing nothing: an unknown track, device or parameter; a beat below 0
 arrangement's limit; a value out of range for the mixer (a volume above +6 dB, a pan outside -1 to
 1, a mute other than 0 or 1); a curve outside -1 to 1; a point index the lane does not have; a lane
 of more than 65,536 points; a `movePoint` with nothing to change.
+
+## In the Arrangement view
+
+Each track header has an envelope button at the end of its first row ("Show automation of
+Drums"); a click shows the track's automation lanes under it, and another hides them. Shown the
+first time, they are the lanes that have points, or the volume's. Which lanes are shown is the
+view's own state, like a lane's height: it is not saved and needs no command. Return tracks and
+the main track have no lanes yet.
+
+A lane is 40 px tall across the timeline, with a header under the track's:
+
+- **The parameter**, a dropdown of the track's volume, pan and mute and each built-in effect or
+  instrument's parameters, grouped by device; a parameter with points is marked " •". Choosing
+  one shows it in this lane. Plug-in parameters are listed once their ranges are known to the
+  view (not yet).
+- **On/Off** (lanes with points): whether the lane plays. A manual change to the parameter turns
+  it off (the envelope is drawn in `text.hint` and the header says "Off: set by hand"); a click
+  turns it on again (`automation.setEnabled`), or off.
+- **+** shows the next parameter not shown in a new lane; **×** hides this lane.
+
+The envelope is drawn in the track's colour through every point, holding before the first and
+after the last, along each segment's curve; steps for mute, on/off and choices. Values are placed
+as the parameter's control places them: the volume as the mixer's volume field (0 dB at 85 % of
+the height), a device's parameter as its knob turns. Editing (every edit is one undo step):
+
+| Gesture | Command |
+|---|---|
+| Click the lane | `automation.addPoint` at the beat under the pointer (on the clip grid of the zoom; Alt: free) and the value at its height |
+| Drag a point | `automation.movePoint`, its beat on the grid (Alt: free) and its value following the pointer; points dragged past others keep beat order |
+| Click a point | selects it; Shift or Ctrl adds it to the selection or takes it out. Selecting a clip ends a selection of points |
+| Drag on the lane away from the line | draws a box that selects the points in it |
+| Drag a selected point | `automation.movePoints`: the whole selection moves by the same beats (none before beat 0) and the same change of value |
+| Delete (or Backspace) | `automation.deletePoints` for the selection, before any selected clip |
+| Double-click a point, or its menu's Delete point | `automation.deletePoint` (the menu deletes the whole selection when the point is part of one) |
+| Drag the line between two points up or down | `automation.movePoint` with the first point's curve: up bends the line up, from -1 to 1 |
 
 ## In the project file
 
@@ -124,6 +163,6 @@ than 65,536 points; points are read in beat order.
 
 ## Not done yet
 
-- Drawing, recording and editing lanes in the arrangement (the lanes view).
+- Recording automation, drawing with a pencil, and plug-in parameter lanes in the view.
 - The master channel's mixer, send levels (#396), the tempo (#402).
 - Importing automation from other formats.

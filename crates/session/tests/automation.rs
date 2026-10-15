@@ -204,3 +204,97 @@ fn a_lane_holds_a_limited_number_of_points() {
     let full = run(&mut session, "automation.addPoint", json!({ "track": 1, "param": "pan", "beat": 0, "value": 0 }));
     assert!(full.unwrap_err().contains("at most"));
 }
+
+#[test]
+fn several_points_move_together_in_one_undo_step() {
+    let mut session = Session::new(project());
+    for (beat, value) in [(0, -12), (4, -6), (8, 0)] {
+        run(
+            &mut session,
+            "automation.addPoint",
+            json!({ "track": 1, "param": "volume", "beat": beat, "value": value }),
+        )
+        .unwrap();
+    }
+    let before = session.project().clone();
+    // The first two move two beats later and 3 dB up; the first passes no other point.
+    let moved = run(
+        &mut session,
+        "automation.movePoints",
+        json!({ "track": 1, "param": "volume", "points": [0, 1], "beats": 2, "value": 3 }),
+    )
+    .unwrap();
+    assert_eq!(moved["points"], json!([0, 1]));
+    let beats: Vec<f64> = lanes(&session)[0].points.iter().map(|p| p.beat).collect();
+    assert_eq!(beats, [2.0, 6.0, 8.0]);
+    let db = |v: f64| (20.0 * v.log10() * 100.0).round() / 100.0;
+    assert_eq!(db(lanes(&session)[0].points[1].value), -3.0);
+    // The top of the fader holds a point that would go past it.
+    run(&mut session, "automation.movePoints", json!({ "track": 1, "param": "volume", "points": [2], "value": 10 }))
+        .unwrap();
+    assert!((db(lanes(&session)[0].points[2].value) - 6.0).abs() < 0.01);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &before);
+}
+
+#[test]
+fn moved_points_keep_beat_order_and_report_their_new_places() {
+    let mut session = Session::new(project());
+    for (beat, value) in [(0.0, 0.0), (4.0, 0.5), (8.0, -0.5)] {
+        run(&mut session, "automation.addPoint", json!({ "track": 1, "param": "pan", "beat": beat, "value": value }))
+            .unwrap();
+    }
+    // The first point jumps past the others; values stay in the pan's range.
+    let moved = run(
+        &mut session,
+        "automation.movePoints",
+        json!({ "track": 1, "param": "pan", "points": [0], "beats": 10, "value": -2 }),
+    )
+    .unwrap();
+    assert_eq!(moved["points"], json!([2]));
+    let points: Vec<(f64, f64)> = lanes(&session)[0].points.iter().map(|p| (p.beat, p.value)).collect();
+    assert_eq!(points, [(4.0, 0.5), (8.0, -0.5), (10.0, -1.0)]);
+}
+
+#[test]
+fn several_points_are_deleted_in_one_undo_step_and_the_lane_goes_with_the_last() {
+    let mut session = Session::new(project());
+    for beat in [0, 2, 4] {
+        run(&mut session, "automation.addPoint", json!({ "track": 1, "param": "mute", "beat": beat, "value": 1 }))
+            .unwrap();
+    }
+    run(&mut session, "automation.deletePoints", json!({ "track": 1, "param": "mute", "points": [2, 0] })).unwrap();
+    assert_eq!(lanes(&session)[0].points.len(), 1);
+    assert_eq!(lanes(&session)[0].points[0].beat, 2.0);
+    run(&mut session, "automation.deletePoints", json!({ "track": 1, "param": "mute", "points": [0] })).unwrap();
+    assert!(lanes(&session).is_empty());
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(lanes(&session)[0].points.len(), 3);
+}
+
+#[test]
+fn malformed_point_lists_change_nothing() {
+    let mut session = Session::new(project());
+    for beat in [0, 2] {
+        run(&mut session, "automation.addPoint", json!({ "track": 1, "param": "pan", "beat": beat, "value": 0 }))
+            .unwrap();
+    }
+    let before = session.project().clone();
+    for (id, params) in [
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [0], "beats": -1 })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [0, 0], "beats": 1 })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [5], "beats": 1 })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [0] })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [], "beats": 1 })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [-1], "beats": 1 })),
+        ("automation.movePoints", json!({ "track": 1, "param": "pan", "points": [0], "curve": 2 })),
+        ("automation.deletePoints", json!({ "track": 1, "param": "pan", "points": [2] })),
+        ("automation.deletePoints", json!({ "track": 1, "param": "pan", "points": "0" })),
+        ("automation.deletePoints", json!({ "track": 1, "param": "volume", "points": [0] })),
+    ] {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    assert_eq!(session.project(), &before);
+}

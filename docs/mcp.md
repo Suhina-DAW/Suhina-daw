@@ -137,7 +137,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `track.devices` gives a plug-in's set values and any device's lanes (`automation`).
 
 - **Automation.** `automation.addPoint`, `automation.movePoint`, `automation.deletePoint`,
-  `automation.clear`, `automation.setEnabled` and `automation.list` (through `command_run`) edit
+  `automation.movePoints`, `automation.deletePoints` (several points of one lane in one undo
+  step), `automation.clear`, `automation.setEnabled` and `automation.list` (through `command_run`) edit
   the envelopes of a track's `volume`, `pan` and `mute` (no `device`) and of any device
   parameter (`device` and its `param` id), point by point, each one undo step; values in the
   set command's unit (the volume in dB). `device.setAutomation` replaces a whole device lane, for

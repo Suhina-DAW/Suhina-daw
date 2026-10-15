@@ -191,7 +191,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   playback and renders (device parameters split at their points and every 64 frames, mixer gains
   moving frame by frame); setting an automated parameter by hand turns its lane off until it is
   turned on again ([#395](https://github.com/suhina-daw/suhina-daw/issues/395),
-  [spec](docs/spec/automation.md)). Lanes are set by command for now.
+  [spec](docs/spec/automation.md)).
+- Automation lanes in the Arrangement view: the envelope button on a track header shows lanes
+  under the track, one per chosen parameter (volume, pan, mute, each built-in device parameter);
+  a click adds a point on the grid (Alt: free), points are dragged, selected (a box, Shift-click)
+  and moved or deleted together, a segment's curve is bent by dragging it, and a lane a manual
+  change turned off is turned on again from its header; each edit one undo step through the
+  `automation.*` commands ([#420](https://github.com/suhina-daw/suhina-daw/issues/420),
+  [spec](docs/spec/automation.md#in-the-arrangement-view)).
 - Still to do: more commands (notes, [#200](https://github.com/suhina-daw/suhina-daw/issues/200);
   clips; sends), MCP resources.
 
@@ -263,8 +270,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   plug-in's parameters, `device.setParam` sets one (heard from the next block, saved with the
   project) and `device.setAutomation` draws a lane of beats and values over the arrangement,
   which playback and renders follow to the frame (a value every 64 frames while it moves)
-  ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)). Lanes are set by command for
-  now; drawing them in the arrangement comes with the automation lanes view.
+  ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)). Their lanes are set by command;
+  the Arrangement's lanes show built-in parameters only so far.
 - Still to do: plug-ins of one process in one round trip
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), latency a plug-in changes while
   it runs ([#110](https://github.com/suhina-daw/suhina-daw/issues/110)), waiting for each chain's

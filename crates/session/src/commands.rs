@@ -750,6 +750,49 @@ static COMMANDS: &[CommandSpec] = &[
         run: automation::delete_point,
     },
     CommandSpec {
+        id: "automation.movePoints",
+        label: "Move several points of one parameter's automation together, by a number of beats and by a value, in one undo step; values stay in the parameter's range",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            AUTOMATED,
+            param(
+                "points",
+                ParamType::Numbers,
+                "point indices on the lane, from 0 in beat order, as in automation.list",
+            ),
+            optional(
+                "beats",
+                ParamType::Number,
+                "beats to move the points by: later above 0, earlier below; they must stay from beat 0",
+            ),
+            optional(
+                "value",
+                ParamType::Number,
+                "how much to change each value by, in the unit of automation.addPoint (dB for the volume, where silence stays silent)",
+            ),
+            optional("curve", ParamType::Number, "a curve to give every moved point's segment, -1 to 1"),
+        ],
+        kind: CommandKind::Edit,
+        run: automation::move_points,
+    },
+    CommandSpec {
+        id: "automation.deletePoints",
+        label: "Delete several points of one parameter's automation in one undo step; the lane goes with its last point",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            AUTOMATED,
+            param(
+                "points",
+                ParamType::Numbers,
+                "point indices on the lane, from 0 in beat order, as in automation.list",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: automation::delete_points,
+    },
+    CommandSpec {
         id: "automation.clear",
         label: "Remove a parameter's automation, or without param every lane of the track's mixer or of the device",
         params: &[
