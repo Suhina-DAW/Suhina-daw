@@ -8,7 +8,7 @@ use suhina_model::*;
 use suhina_session::{MAX_NOTES_PER_COMMAND, Session};
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 1.0, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration: 1.0, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 fn clip(content: u32, start: f64) -> Clip {
@@ -112,7 +112,10 @@ fn undoes(session: &mut Session, content: u32, before: &[Note]) {
 fn notes_are_listed_with_midi_velocities() {
     let mut session = Session::new(project());
     let listed = run(&mut session, "note.list", json!({ "track": "Keys", "index": 0 })).unwrap();
-    assert_eq!(listed[1], json!({ "index": 1, "time": 1.0, "length": 1.0, "key": 64, "velocity": 100 }));
+    assert_eq!(
+        listed[1],
+        json!({ "index": 1, "time": 1.0, "length": 1.0, "key": 64, "velocity": 100, "muted": false })
+    );
     assert_eq!(listed.as_array().map(Vec::len), Some(3));
     // An empty MIDI clip has none; a slot's clip is named by its scene.
     assert_eq!(run(&mut session, "note.list", json!({ "track": 1, "index": 1 })).unwrap(), json!([]));

@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, notes, preview};
+use crate::{CommandError, Session, automation, devices, files, follow, note_tools, notes, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -128,6 +128,9 @@ const CLIP_INDEX: Param =
 const CLIP_SCENE: Param =
     optional("scene", ParamType::Integer, "instead of index: the clip in the track's slot of this scene, from 1");
 const NOTES: Param = param("notes", ParamType::Integers, "note indices, from note.list; at most 10000");
+/// The notes a MIDI tool acts on: the named ones, or every note of the clip.
+const NOTE_SELECTION: Param =
+    optional("notes", ParamType::Integers, "note indices, from note.list; every note when left out");
 const AUTOMATED: Param = param(
     "param",
     ParamType::Text,
@@ -962,7 +965,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "note.list",
-        label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127",
+        label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127 and whether it is muted",
         params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
         kind: CommandKind::Read,
         run: notes::list,
@@ -1092,6 +1095,126 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: notes::split,
+    },
+    CommandSpec {
+        id: "note.setMuted",
+        label: "Mute or unmute notes of a MIDI clip; with muted left out each named note is flipped; the result gives the state of each",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("muted", ParamType::Bool, "true mutes them, false unmutes them; left out flips each note"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::set_muted,
+    },
+    CommandSpec {
+        id: "note.humanize",
+        label: "Move the starts and velocities of notes of a MIDI clip by a random draw; the same seed gives the same result, and the result gives the seed",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional("time", ParamType::Number, "how far a start may move, in beats, 0 to 1 (default 0.02)"),
+            optional("velocity", ParamType::Number, "how far a velocity may move, in MIDI steps, 0 to 127 (default 8)"),
+            optional(
+                "seed",
+                ParamType::Integer,
+                "the draw to repeat, 0 or more; left out, a fresh one is used and returned",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::humanize,
+    },
+    CommandSpec {
+        id: "note.fitToScale",
+        label: "Move notes of a MIDI clip to the nearest key of a scale over a root; a tie goes to the lower key",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional(
+                "root",
+                ParamType::Text,
+                "the key the scale starts on: a name such as C, F# or Bb, or 0 to 11 (default C)",
+            ),
+            optional(
+                "scale",
+                ParamType::Text,
+                "major, minor, harmonicMinor, melodicMinor, dorian, phrygian, lydian, mixolydian, locrian, majorPentatonic, minorPentatonic or blues (default major)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::fit_to_scale,
+    },
+    CommandSpec {
+        id: "note.invert",
+        label: "Mirror the keys of notes of a MIDI clip around the middle of the range they cover, each kept within 0 to 127",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::invert,
+    },
+    CommandSpec {
+        id: "note.reverse",
+        label: "Turn notes of a MIDI clip round in time inside their own span (the earliest start to the latest end), lengths unchanged",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::reverse,
+    },
+    CommandSpec {
+        id: "note.legato",
+        label: "Make each note of a MIDI clip last until the next note of its key starts, at least a hundredth of a beat; the last of a key keeps its length",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::legato,
+    },
+    CommandSpec {
+        id: "note.stretch",
+        label: "Stretch notes of a MIDI clip in time about the earliest of their starts; 2 is twice as long, 0.5 half of it",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            param("factor", ParamType::Number, "how much longer or shorter, 0.01 to 100"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::stretch,
+    },
+    CommandSpec {
+        id: "note.randomizeVelocity",
+        label: "Move the velocities of notes of a MIDI clip by a random draw, each kept within 1 to 127; the same seed gives the same result",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional("amount", ParamType::Number, "how far a velocity may move, in MIDI steps, 0 to 127 (default 16)"),
+            optional(
+                "seed",
+                ParamType::Integer,
+                "the draw to repeat, 0 or more; left out, a fresh one is used and returned",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::randomize_velocity,
+    },
+    CommandSpec {
+        id: "note.rampVelocity",
+        label: "Spread the velocities of notes of a MIDI clip evenly from one value to another in time order; one note takes the last value",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            param("from", ParamType::Integer, "the velocity of the first note in time order, 1 to 127"),
+            param("to", ParamType::Integer, "the velocity of the last note in time order, 1 to 127"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::ramp_velocity,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {

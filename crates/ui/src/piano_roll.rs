@@ -540,7 +540,7 @@ impl PianoRollState {
             FREE_LENGTH
         };
         let velocity = f32::from(self.last_velocity) / 127.0;
-        Some(Note { time, duration: length, key, velocity, release_velocity: 0.5, channel: 0 })
+        Some(Note { time, duration: length, key, velocity, release_velocity: 0.5, channel: 0, muted: false })
     }
 }
 
@@ -1962,7 +1962,7 @@ mod tests {
     use super::*;
 
     fn note(time: f64, duration: f64, key: u8) -> Note {
-        Note { time, duration, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0 }
+        Note { time, duration, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
     }
 
     #[test]

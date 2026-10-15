@@ -347,14 +347,9 @@ fn content_value(c: &ClipContent) -> Value {
         .map(|lane| {
             let target = lane.target.map(|t| t.0);
             match &lane.data {
-                LaneData::Notes(notes) => json!({ "target": target, "notes": notes.iter().map(|n| json!({
-                    "time": number(n.time),
-                    "duration": number(n.duration),
-                    "key": n.key,
-                    "velocity": number(f64::from(n.velocity)),
-                    "release_velocity": number(f64::from(n.release_velocity)),
-                    "channel": n.channel,
-                })).collect::<Vec<_>>() }),
+                LaneData::Notes(notes) => {
+                    json!({ "target": target, "notes": notes.iter().map(note_value).collect::<Vec<_>>() })
+                }
                 LaneData::Audio(a) => json!({ "target": target, "audio": audio_value(a) }),
             }
         })
@@ -380,6 +375,25 @@ fn audio_value(a: &AudioRegion) -> Value {
         "transpose": number(a.transpose),
         "stream": a.stream,
     })
+}
+
+/// One note as the file writes it. `muted` is written only on a muted note, so a project without
+/// muted notes is byte-identical to a file written before muted notes existed.
+fn note_value(n: &Note) -> Value {
+    let mut out = json!({
+        "time": number(n.time),
+        "duration": number(n.duration),
+        "key": n.key,
+        "velocity": number(f64::from(n.velocity)),
+        "release_velocity": number(f64::from(n.release_velocity)),
+        "channel": n.channel,
+    });
+    if n.muted
+        && let Some(map) = out.as_object_mut()
+    {
+        map.insert("muted".into(), Value::Bool(true));
+    }
+    out
 }
 
 fn clip_value(c: &Clip) -> Value {
@@ -791,6 +805,8 @@ fn read_content(value: &Value, at: &str) -> Result<ClipContent, ProjectFileError
                         velocity: float_or(n, "velocity", 1.0, &at)?.clamp(0.0, 1.0) as f32,
                         release_velocity: float_or(n, "release_velocity", 0.0, &at)?.clamp(0.0, 1.0) as f32,
                         channel,
+                        // A file from before muted notes reads every note as unmuted.
+                        muted: flag(n, "muted", false, &at)?,
                     });
                 }
                 LaneData::Notes(notes)

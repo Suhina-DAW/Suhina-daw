@@ -824,6 +824,7 @@ fn demo_project() -> Project {
         velocity,
         release_velocity: 0.5,
         channel: 0,
+        muted: false,
     };
     let track = |id: u32, name: &str| Track {
         id: TrackId(id),

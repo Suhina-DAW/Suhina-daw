@@ -10,6 +10,7 @@ mod devices;
 mod files;
 mod follow;
 mod library;
+mod note_tools;
 mod notes;
 mod plugins;
 mod preview;

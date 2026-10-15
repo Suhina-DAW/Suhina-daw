@@ -625,9 +625,9 @@ impl Reader {
             };
             let Some(events) = path(key_track, &["Notes"]) else { continue };
             for event in events.children().filter(|n| n.has_tag_name("MidiNoteEvent")) {
-                if event.attribute("IsEnabled") == Some("false") {
-                    continue;
-                }
+                // A deactivated note is kept and read as muted, not dropped
+                // (docs/spec/als-format.md › Notes).
+                let muted = event.attribute("IsEnabled") == Some("false");
                 let time = event.attribute("Time").and_then(parse_number);
                 let duration = event.attribute("Duration").and_then(parse_number);
                 let (Some(time), Some(duration)) = (time, duration) else {
@@ -643,6 +643,7 @@ impl Reader {
                     velocity: (velocity / 127.0).clamp(0.0, 1.0) as f32,
                     release_velocity: (release / 127.0).clamp(0.0, 1.0) as f32,
                     channel: 0,
+                    muted,
                 });
             }
         }

@@ -127,6 +127,7 @@ fn content_of(id: ContentId, name: &str, track: u8) -> ClipContent {
             velocity: 0.8,
             release_velocity: 0.5,
             channel: 0,
+            muted: false,
         })
         .collect();
     ClipContent {
