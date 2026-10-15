@@ -30,7 +30,8 @@ pub fn shape(t: f64, curve: f64) -> f64 {
 /// (for on/off and choice parameters). `None` for no points.
 pub fn value_at(points: &[AutomationPoint], beat: f64, stepped: bool) -> Option<f64> {
     let first = points.first()?;
-    if !(beat >= first.beat) {
+    // Before the first point, and for a beat that is not a number.
+    if beat.partial_cmp(&first.beat).is_none_or(|o| o == std::cmp::Ordering::Less) {
         return Some(first.value);
     }
     // The last point at or before `beat`.
@@ -38,7 +39,7 @@ pub fn value_at(points: &[AutomationPoint], beat: f64, stepped: bool) -> Option<
     let a = points.get(index)?;
     let Some(b) = points.get(index + 1) else { return Some(a.value) };
     let span = b.beat - a.beat;
-    if stepped || !(span > 0.0) {
+    if stepped || span.is_nan() || span <= 0.0 {
         return Some(a.value);
     }
     let t = (beat - a.beat) / span;
@@ -125,7 +126,7 @@ mod tests {
         assert!(shape(0.25, -1.0) < 0.01);
         assert_eq!(shape(1.0, 0.7), 1.0);
         assert_eq!(shape(f64::NAN, 1.0), 0.0);
-        assert_eq!(shape(0.5, f64::INFINITY), 0.5_f64.powf(0.25));
+        assert_eq!(shape(0.5, f64::INFINITY), 0.5, "a curve that is not a number is straight");
         let mut p = points(&[(0.0, 0.0), (1.0, 1.0)]);
         if let Some(first) = p.first_mut() {
             first.curve = 0.5;

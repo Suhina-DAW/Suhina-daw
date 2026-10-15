@@ -185,6 +185,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/suhina-format.md)).
+- Automation envelopes for a track's volume, pan and mute and every built-in device parameter:
+  lanes of points with curves and jumps, edited point by point with `automation.addPoint`,
+  `movePoint`, `deletePoint`, `clear`, `setEnabled` and `list`, saved in the project and followed by
+  playback and renders (device parameters split at their points and every 64 frames, mixer gains
+  moving frame by frame); setting an automated parameter by hand turns its lane off until it is
+  turned on again ([#395](https://github.com/suhina-daw/suhina-daw/issues/395),
+  [spec](docs/spec/automation.md)). Lanes are set by command for now.
 - Still to do: more commands (notes, [#200](https://github.com/suhina-daw/suhina-daw/issues/200);
   clips; sends), MCP resources.
 

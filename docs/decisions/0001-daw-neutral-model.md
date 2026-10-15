@@ -106,6 +106,16 @@ the last; two points at one beat make a jump. Lanes play on plug-in devices firs
 effects and instruments follow with LOOP-39. A lane belongs to its device, so it moves, copies and
 goes with it.
 
+## Amendment: envelopes for every parameter (2026-10-15)
+
+Lanes play on built-in devices too, and a `Channel` holds `automation` of its own: lanes of its
+mixer parameters `volume`, `pan` and `mute`, in the units of the channel's fields (#395). An
+`AutomationPoint` has a `curve` (-1 to 1, 0 a straight line) for the segment to the next point,
+and an `AutomationLane` an `enabled` flag: a manual change to the parameter turns it off, and the
+value set by hand holds until it is on again. The shapes, steps and how the engine plays them are
+in [the automation spec](../spec/automation.md); the pure parts (a lane's value at a beat, the
+curve) are in `model::automation`.
+
 ## Amendment: fade shapes and curves (2026-10-13)
 
 Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`): a

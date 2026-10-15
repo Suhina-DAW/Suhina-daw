@@ -135,6 +135,15 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   arrangement, `points` a flat list of beat and value (`[0, 0.2, 4, 0.8]`), `[]` removing it.
   Values are kept in the parameter's range once `device.pluginParams` has listed them.
   `track.devices` gives a plug-in's set values and any device's lanes (`automation`).
+
+- **Automation.** `automation.addPoint`, `automation.movePoint`, `automation.deletePoint`,
+  `automation.clear`, `automation.setEnabled` and `automation.list` (through `command_run`) edit
+  the envelopes of a track's `volume`, `pan` and `mute` (no `device`) and of any device
+  parameter (`device` and its `param` id), point by point, each one undo step; values in the
+  set command's unit (the volume in dB). `device.setAutomation` replaces a whole device lane, for
+  built-in devices too. Setting an automated parameter by hand turns its lane off (the answer
+  says `"automation": "off"`) until `automation.setEnabled` turns it on again
+  ([automation spec](spec/automation.md)).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
   follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file. Renders and
   the playing engine run the chains.

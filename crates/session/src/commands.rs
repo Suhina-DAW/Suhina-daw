@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, devices, files, preview};
+use crate::{CommandError, Session, automation, devices, files, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -109,6 +109,23 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
+const AUTOMATED: Param = param(
+    "param",
+    ParamType::Text,
+    "the parameter: volume, pan or mute of the track's mixer (no device), or a device's parameter id, from devices.list (a plug-in's from device.pluginParams)",
+);
+const AUTOMATED_DEVICE: Param = optional(
+    "device",
+    ParamType::Integer,
+    "device index on the track, from 0, as in track.devices; left out for the track's mixer",
+);
+const POINT: Param =
+    param("point", ParamType::Integer, "point index on the lane, from 0 in beat order, as in automation.list");
+const CURVE: Param = optional(
+    "curve",
+    ParamType::Number,
+    "shape of the segment to the next point, -1 to 1: 0 a straight line (the default), above 0 fast first, below 0 slow first",
+);
 
 pub struct CommandSpec<T: 'static = Session> {
     /// Stable id in `area.verb` form; part of the public interface for agents.
@@ -674,11 +691,15 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "device.setAutomation",
-        label: "Automate a parameter of a plug-in device over the arrangement: points of beat and value, a straight line between them; no points removes the automation",
+        label: "Automate a parameter of a device over the arrangement: points of beat and value, a straight line between them; no points removes the automation (automation.addPoint edits one point)",
         params: &[
             TRACK,
             DEVICE,
-            param("param", ParamType::Text, "the plug-in's parameter id, from device.pluginParams"),
+            param(
+                "param",
+                ParamType::Text,
+                "parameter id: a built-in effect or instrument's from devices.list, a plug-in's (a number) from device.pluginParams",
+            ),
             param(
                 "points",
                 ParamType::Numbers,
@@ -687,6 +708,76 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: devices::set_automation,
+    },
+    CommandSpec {
+        id: "automation.addPoint",
+        label: "Add a point to a parameter's automation (envelope) over the arrangement, making the lane if it has none; the value moves from point to point along each segment's curve",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            AUTOMATED,
+            param("beat", ParamType::Number, "arrangement beat, from 0; a second point at one beat makes a jump"),
+            param(
+                "value",
+                ParamType::Number,
+                "value in the unit the parameter's set command takes: volume in dB (at most +6; below -150 is silence), pan -1 to 1, mute 0 or 1, a device's as device.setParam",
+            ),
+            CURVE,
+        ],
+        kind: CommandKind::Edit,
+        run: automation::add_point,
+    },
+    CommandSpec {
+        id: "automation.movePoint",
+        label: "Move a point of a parameter's automation to another beat or value, or change its curve",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            AUTOMATED,
+            POINT,
+            optional("beat", ParamType::Number, "new arrangement beat"),
+            optional("value", ParamType::Number, "new value, as for automation.addPoint"),
+            CURVE,
+        ],
+        kind: CommandKind::Edit,
+        run: automation::move_point,
+    },
+    CommandSpec {
+        id: "automation.deletePoint",
+        label: "Delete a point of a parameter's automation; the lane goes with its last point",
+        params: &[TRACK, AUTOMATED_DEVICE, AUTOMATED, POINT],
+        kind: CommandKind::Edit,
+        run: automation::delete_point,
+    },
+    CommandSpec {
+        id: "automation.clear",
+        label: "Remove a parameter's automation, or without param every lane of the track's mixer or of the device",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            optional("param", ParamType::Text, "the parameter, as for automation.addPoint; left out for every lane"),
+        ],
+        kind: CommandKind::Edit,
+        run: automation::clear,
+    },
+    CommandSpec {
+        id: "automation.setEnabled",
+        label: "Turn a parameter's automation off or on again; a manual change to an automated parameter turns it off, and the value set by hand holds until it is on again",
+        params: &[
+            TRACK,
+            AUTOMATED_DEVICE,
+            AUTOMATED,
+            param("enabled", ParamType::Bool, "false turns the lane off, true on"),
+        ],
+        kind: CommandKind::Edit,
+        run: automation::set_enabled,
+    },
+    CommandSpec {
+        id: "automation.list",
+        label: "List a track's automation: its mixer's lanes and each device's, with their points (beat, value, curve) and whether they play",
+        params: &[TRACK],
+        kind: CommandKind::Read,
+        run: automation::list,
     },
     CommandSpec {
         id: "device.pluginParams",
@@ -884,7 +975,8 @@ fn set_volume(session: &mut Session, params: &Value) -> Result<Value, CommandErr
     let gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) };
     let channel = channel_param(session, params)?;
     channel.volume = gain;
-    Ok(json!({ "volume_db": to_db(gain) }))
+    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::VOLUME);
+    Ok(with_override(json!({ "volume_db": to_db(gain) }), off))
 }
 
 fn set_pan(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -892,14 +984,27 @@ fn set_pan(session: &mut Session, params: &Value) -> Result<Value, CommandError>
     if !(-1.0..=1.0).contains(&pan) {
         return Err(format!("pan must be between -1 and 1, got {pan}").into());
     }
-    channel_param(session, params)?.pan = pan;
-    Ok(json!({ "pan": pan }))
+    let channel = channel_param(session, params)?;
+    channel.pan = pan;
+    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::PAN);
+    Ok(with_override(json!({ "pan": pan }), off))
 }
 
 fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let mute = params.get("mute").and_then(Value::as_bool).ok_or("mute must be true or false")?;
-    channel_param(session, params)?.mute = mute;
-    Ok(json!({ "mute": mute }))
+    let channel = channel_param(session, params)?;
+    channel.mute = mute;
+    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::MUTE);
+    Ok(with_override(json!({ "mute": mute }), off))
+}
+
+/// A set command's answer, saying `"automation": "off"` when the change turned the parameter's
+/// lane off (#395).
+pub(crate) fn with_override(mut answer: Value, off: bool) -> Value {
+    if off && let Some(map) = answer.as_object_mut() {
+        map.insert("automation".into(), json!("off"));
+    }
+    answer
 }
 
 /// The ids in `params.tracks`, each resolved like a track parameter.
@@ -1793,6 +1898,6 @@ fn number_or_neg_infinity(params: &Value, name: &str) -> Result<f64, CommandErro
 }
 
 /// Linear gain to decibels, rounded to 0.01 dB; `None` (JSON null) for silence.
-fn to_db(gain: f64) -> Option<f64> {
+pub(crate) fn to_db(gain: f64) -> Option<f64> {
     (gain > 0.0).then(|| (20.0 * gain.log10() * 100.0).round() / 100.0)
 }

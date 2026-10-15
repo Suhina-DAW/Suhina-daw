@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 pub mod audio;
+mod automation;
 mod blank;
 mod commands;
 mod devices;

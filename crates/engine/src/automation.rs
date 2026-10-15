@@ -129,7 +129,7 @@ fn changes(
     };
     let step = STEP as u64;
     let on_point = time.checked_sub(1).is_some_and(|before| envelope.frame(envelope.first_after(before)) == Some(time));
-    if jumped || time % step == 0 || on_point {
+    if jumped || time.is_multiple_of(step) || on_point {
         sent += send(0, envelope.value_at(time));
     }
     // The next frame of the arrangement's grid after `time`, from the block's start.
