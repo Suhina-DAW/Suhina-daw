@@ -680,18 +680,22 @@ fn several_clips_mute_and_delete_as_one_undo_step() {
     assert_eq!(bass_spans(&session).len(), 2);
 
     // A list that names nothing, a clip without an index, an unknown track and an index past the
-    // end are all refused, and the old single-clip form with them.
+    // end are all refused, and so is a list given with a single clip beside it.
     for bad in [
         json!({ "clips": [] }),
         json!({ "clips": [{ "track": "Bass" }] }),
         json!({ "clips": [{ "track": "Nope", "index": 0 }] }),
         json!({ "clips": [{ "track": "Bass", "index": 9 }] }),
         json!({ "clips": "Bass" }),
+        json!({ "clips": [{ "track": "Bass", "index": 0 }], "track": "Bass", "index": 1 }),
     ] {
         assert!(run(&mut session, "clip.delete", bad.clone()).is_err(), "{bad}");
     }
-    assert!(run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 0 })).is_err());
     assert_eq!(bass_spans(&session).len(), 2, "a refused list changes nothing");
+
+    // One clip by track and index still works, as the Session view's form by scene does.
+    run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 0 })).unwrap();
+    assert_eq!(bass_spans(&session), [(8.0, true)]);
 }
 
 #[test]

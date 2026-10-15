@@ -89,7 +89,8 @@ Shift takes the run of headers between the last one clicked and this one. Ctrl+G
 `clip.duplicate {clips, stack?}` places a copy of each named clip right after it, replacing what
 the copies cover unless stacked, as a moved clip does (the window stacks when the setting for the
 clip's kind is on); `clip.delete {clips}` removes them. Both take a list of `{ track, index }` as
-`project.clips` lists them, at least one, and make one undo step for the whole list. In the
+`project.clips` lists them, at least one, and make one undo step for the whole list
+(`clip.delete` also takes one clip as `{track, index}`, or a slot's clip as `{track, scene}`). In the
 Arrangement view a clip's right-click menu has both, and Mute, and they act on the whole
 selection when the click fell inside it, else on the one clip. The keys Ctrl+D and Delete do the
 same for the selection. Points selected on an automation lane are deleted by Delete before any
