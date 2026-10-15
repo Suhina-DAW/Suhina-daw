@@ -2413,6 +2413,21 @@ fn the_delete_key_takes_a_selected_slot_clip_off_its_slot() {
 }
 
 #[test]
+fn a_double_click_opens_the_new_clips_piano_roll() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // The double-click selects the clip it makes: the detail area opens its properties and its
+    // piano roll, empty.
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert!(harness.query_by_label("Clip MIDI clip, scene 1").is_some(), "the properties show");
+    assert!(harness.query_by_label("Piano roll, 0 notes").is_some(), "the piano roll opens");
+    // One undo takes the clip off again, and the piano roll with it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Piano roll, 0 notes").is_none(), "the piano roll closed");
+}
+
+#[test]
 fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
     harness.get_by_label("Arrangement view").click();

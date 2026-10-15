@@ -1527,15 +1527,15 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let arrangement_clip = match clip {
-            Some(detail_view::ClipRef::Arrangement(track, index)) => Some((track, index)),
-            _ => None,
-        };
-        let piano = self.piano_clip(arrangement_clip);
+        let piano = self.piano_clip(clip);
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
-        let focus =
-            arrangement_clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        let focus = match clip {
+            Some(detail_view::ClipRef::Arrangement(track, _)) => {
+                Some(track).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track)
+            }
+            _ => None,
+        };
         self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
@@ -1657,21 +1657,30 @@ impl App {
 
     /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is its
     /// own grid value, or the control bar's when Settings says so.
-    fn piano_clip(&self, clip: Option<(TrackId, usize)>) -> Option<piano_roll::PianoClip> {
-        let (track, index) = clip?;
+    /// The piano roll for the shown clip: an arrangement clip's, or the Session view's selected
+    /// slot's clip.
+    fn piano_clip(&self, clip: Option<detail_view::ClipRef>) -> Option<piano_roll::PianoClip> {
         let grid = self.piano_grid_name();
         let quantization = suhina_session::parse_quantization(grid).ok()?;
-        let mut clip = piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?;
-        clip.grid_name = grid;
-        Some(clip)
+        let mut piano = match clip? {
+            detail_view::ClipRef::Arrangement(track, index) => {
+                piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?
+            }
+            detail_view::ClipRef::Slot(track, scene) => {
+                piano_roll::launcher_clip(self.session()?.project(), track, scene, quantization)?
+            }
+        };
+        piano.grid_name = grid;
+        Some(piano)
     }
 
     /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
     pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
-        if self.shown != View::Arrangement {
-            return None;
-        }
-        self.piano_clip(self.arrangement.selected_clip()).map(|c| c.address)
+        let clip = match self.shown {
+            View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
+            View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
+        };
+        self.piano_clip(clip).map(|c| c.address)
     }
 
     /// The grid value the piano roll uses.
@@ -1685,10 +1694,18 @@ impl App {
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
     fn piano_key(&mut self, action: &str) -> Option<Action> {
-        if self.shown != View::Arrangement {
-            return None;
-        }
-        let clip = self.piano_clip(self.arrangement.selected_clip())?;
+        let clip = match self.shown {
+            View::Session => self
+                .view
+                .selected_slot
+                .map(|(t, s)| detail_view::ClipRef::Slot(t, s))
+                .and_then(|clip| self.piano_clip(Some(clip)))?,
+            View::Arrangement => self
+                .arrangement
+                .selected_clip()
+                .map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
+                .and_then(|clip| self.piano_clip(Some(clip)))?,
+        };
         let playhead = self.timeline.as_ref().map_or(0.0, |(_, t)| t.beat);
         let copied = self.session().and_then(Session::copied_notes);
         self.piano_roll.key_action(action, &clip, playhead, copied)
@@ -2399,9 +2416,13 @@ impl App {
             "transport.playFromSelection" => actions.push(self.play_action(true)),
             // Quantise in the piano roll, while it shows a clip.
             "pianoRoll.quantize" => {
-                let showing = self.detail_open
-                    && matches!(self.shown, View::Arrangement)
-                    && self.piano_clip(self.arrangement.selected_clip()).is_some();
+                let clip = match self.shown {
+                    View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
+                    View::Arrangement => {
+                        self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
+                    }
+                };
+                let showing = self.detail_open && self.piano_clip(clip).is_some();
                 if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
                     actions.push(quantize);
                 }

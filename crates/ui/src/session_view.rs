@@ -589,6 +589,8 @@ fn column_body(
         }
         if !has_clip && column.notes && launch.as_ref().is_some_and(Response::double_clicked) {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
+            // The new clip is selected, so the detail area opens its piano roll.
+            state.select_slot(column.track, scene);
         }
         if select.as_ref().is_some_and(Response::clicked) {
             state.select_slot(column.track, scene);
