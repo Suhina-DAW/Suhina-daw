@@ -3,7 +3,7 @@ description: How the sample map behaves: samples laid out by how they sound, col
 read_when: sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
@@ -63,8 +63,8 @@ Both play a sample as soon as the pointer is over it.
   ([ADR 0013](../decisions/0013-sample-map-analysis.md) lists them). Two items are **similar**
   when their features are close.
 - **Layout:** the position of every point, computed from the features of the scope.
-- **Kind:** what sort of sound an item is (kick, snare, hat…), from its name or, failing that,
-  guessed from its features.
+- **Kind:** what sort of sound an item is (kick, snare, hat…): set by hand, from its name, or
+  recognised from its sound (*Kinds and colours*).
 
 ## Where the map is shown
 
@@ -103,7 +103,8 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   changed samples are queued; removed ones leave the cache.
 - Analysis uses at most half of the computer's cores, never the audio thread, and the
   results are kept on disk, so a library is analysed once.
-- A sample is analysed from its first 4 seconds. Samples longer than the **map length limit**
+- A sample is analysed from its onset (the first moment within 40 dB of its loudest, looked for
+  in its first 4 seconds), for 4 seconds; leading silence is skipped. Samples longer than the **map length limit**
   (Settings › Interface › Browser › Map: longest sample: 5, 10, 30 or 60 s, 10 by default;
   `soundmap.layout` takes 1–60) are not shown: the map is for one-shots and short loops. The
   length is kept with the analysis, so changing the limit needs no new analysis.
@@ -115,7 +116,10 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
 ## Layout
 
 - **Cloud** (the default): points where the layout puts them. Similar items are close; distances
-  between far-apart regions mean little.
+  between far-apart regions mean little. Kinds are found before the layout and the layout is
+  given them along with the features, so each kind forms regions of its own and an item of
+  one kind does not sit inside another kind's region; items of no kind lie where their sound
+  puts them.
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
   item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
@@ -209,9 +213,27 @@ Every item has a kind. The kinds and the words in names that give them:
   alone. The file name is read first, then its folders from the
   nearest up to the library folder; the first word that names a kind wins, and a more specific
   kind (Closed hat) wins over a general one (Hat) in the same name.
-- **Guessed kinds.** An item whose name gives no kind is given the kind most of its 7 nearest
-  neighbours (by features) have, when at least 4 of them agree; otherwise Other. A guessed
-  kind is drawn a little paler, and the item's tooltip says "guessed".
+- **Kinds from the sound.** Before the layout, the map learns what each kind sounds like from
+  the scope's own items whose file name (or the user) gives their kind; no model is shipped. A
+  kind with fewer than 4 such items learns from items whose folder names it as well. Each
+  learned kind is a few centres of its examples in feature space. Then, for every item:
+  - a kind **set by hand** wins over everything;
+  - a kind from the **file name** stands, whatever the sound;
+  - a kind from a **folder** stands, unless the item clearly sounds like another kind: that
+    kind is at least 1.4 times nearer, and the item is within reach of it (below);
+  - an item **without a kind** takes the kind it sounds like, when that kind is within reach and
+    every kind of another family is at least 1.15 times further away; otherwise it is Other.
+
+  Within reach means no further from the kind's centres than 2.5 times the distance most (nine
+  in ten) of its own examples are. Closed hat, Open hat and Hat are one family, Crash, Ride and
+  Cymbal another, Snare and Rim a third: telling relatives apart never overrules a folder or
+  makes a guess unsure. A kind from the sound is drawn a little paler, and the item's tooltip
+  says "guessed".
+- **Set by hand.** Right-click a point, **Kind ▸**, and choose a kind; **Automatic** gives the
+  item back to its name and sound. The kind shows at once, the scope is laid out again in the
+  background so the item moves to its kind's region, and the tooltip says "set by hand". It is
+  kept beside the feature caches (`kinds.txt`, by the file's path), survives analysing the file
+  again and every new layout, and teaches the map that kind like a file name does.
 - Each kind has a colour from Suhina's own palette (the design brief's track colours, extended),
   chosen so that neighbouring kinds (kick and bass, snare and clap, the hats) are told apart.
 - **Labels.** Each cluster of a kind is named over its region, without overlapping another
@@ -230,7 +252,8 @@ Every item has a kind. The kinds and the words in names that give them:
   are dimmed.
 - **Dimmed:** items that do not match the search text, the tag filter or the legend are drawn
   faint but stay in place, so the map does not jump while typing.
-- **Tooltip** over a point: the file name, the kind ("guessed" when it is), and its folder.
+- **Tooltip** over a point: the file name, the kind ("guessed" or "set by hand" when it is), and
+  its folder.
 
 ## Pointing, clicking and moving
 
@@ -246,7 +269,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |
 | Double-click empty space, the Fit button | Fits all points in view. |
 | Arrow keys | Moves the selection to the nearest point in that direction and previews it; with Show similar on, Up and Down step through the similar list instead. |
-| Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Show in folder (switches to the list with the item selected). |
+| Right-click a point | Menu: **Show similar**, Pin or Unpin, Tag ▸, Kind ▸ (*Kinds and colours* › Set by hand), Show in folder (switches to the list with the item selected). |
 
 **Show similar** rings the 16 items nearest to the clicked one by features (not by position on
 the map, which distorts distances), dims the rest and lists them in order in a strip at the map's
@@ -294,9 +317,10 @@ Everything the map does is a command (AGENTS.md rule 6):
 |---|---|---|
 | `soundmap.status` | | analysis progress per folder: analysed, queued, failed, skipped as too long |
 | `soundmap.analyse` | `folder?` | queues a folder (or all) for analysis again, ignoring the cache |
-| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
+| `soundmap.layout` | `place?`, `text?`, `tags?`, `grid?`, `aspect?`, `maxSeconds?` | the scope's items with their position (0–1 in both axes), kind, whether the kind was guessed from the sound (`guessed`) or set by hand (`byHand`) and whether they match `text`/`tags`; leaves out samples longer than `maxSeconds` (1–60, default 10); with `grid`, each item's cell in a grid whose width over height is close to `aspect` (0.1–10, default 1); computes the layout when it is not cached |
 | `soundmap.similar` | `item`, `count?`, `place?` | the `count` (default 16, at most 100) items most similar to `item` in its scope (`place`), nearest first, with their distance |
-| `soundmap.info` | `item` | an item's kind (and why: the word, or guessed), its features and when it was analysed |
+| `soundmap.info` | `item` | an item's kind and where it comes from (`kindFrom`: `hand`, `name`, `guess` or `none`; a guess is made among the items of the item's library folder), its features and when it was analysed |
+| `soundmap.setKind` | `item`, `kind` | sets the item's kind by hand (a kind id, as `soundmap.layout` gives them), or `auto` to give it back to its name and sound |
 
 Over MCP, `item`, `place` and `folder` paths must be inside the server's read roots
 ([`mcp.md`](../mcp.md)).
@@ -306,7 +330,8 @@ Over MCP, `item`, `place` and `folder` paths must be inside the server's read ro
 | What | Limit | Beyond it |
 |---|---|---|
 | Sample length in the map | 10 s by default, 1–60 s | not analysed, not shown |
-| Audio analysed per item | first 4 s | the rest is not read |
+| Audio analysed per item | 4 s from the onset, the onset within the first 4 s | the rest is not read; a file silent for its first 4 s is not analysed |
+| Kinds set by hand | 1 000 000 | refused |
 | A file to analyse | 256 MiB | skipped with a reason |
 | Items in one map | 200 000 | the rest left out; the map says so |
 | Points drawn one by one | 20 000 in view | the density view (*Many items*) |
@@ -348,8 +373,11 @@ translated from them (CONTRIBUTING.md › Clean-room).
 
 - The NKS questions listed in [`nks-format.md`](nks-format.md) › To observe, above all whether a
   preset's state loads into the VST3 version of its plug-in.
-- Whether the guessed kinds are good enough with nearest neighbours, or a small classifier
-  trained on openly licensed one-shots (CC-BY or CC0 only) is needed.
+- Whether the kinds learned from a library's own names are good enough on real libraries, or a
+  small classifier trained on openly licensed one-shots (CC-BY or CC0 only) is needed. The
+  generated test sounds (kicks, snares, claps, hats, tambourines, shakers, toms and basses, with
+  leading silence, room tails and level changes) all get their kind; a tom with a long room
+  tail 12 dB down sounds between a tom and a bass and is left Other.
 - How the layout feels with real libraries of 1 000, 10 000 and 200 000 samples: perplexity,
   the 4-second window and the feature weights are set by trying them. With 200 000 items, also
   whether t-SNE separates the kinds well enough or a UMAP-style layout is needed

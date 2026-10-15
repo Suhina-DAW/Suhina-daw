@@ -21,10 +21,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape,
-    FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot,
-    StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker,
+    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
+    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
+    FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb,
+    Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation,
 };
 
 /// The file extension, without the dot.
@@ -264,9 +264,43 @@ fn channel_value(c: &Channel) -> Value {
         "devices": c.devices.iter().map(device_value).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        if !c.automation.is_empty() {
+            map.insert("automation".into(), lanes_value(&c.automation));
+        }
         with_extensions(map, &c.extensions);
     }
     out
+}
+
+/// Automation lanes: a lane's `enabled` and a point's `curve` are written only when they are not
+/// the default (on, a straight line), so files keep their shape.
+fn lanes_value(lanes: &[AutomationLane]) -> Value {
+    let lanes: Vec<Value> = lanes
+        .iter()
+        .map(|lane| {
+            let points: Vec<Value> = lane
+                .points
+                .iter()
+                .map(|p| {
+                    let mut point = json!({ "beat": number(p.beat), "value": number(p.value) });
+                    if p.curve != 0.0
+                        && let Some(map) = point.as_object_mut()
+                    {
+                        map.insert("curve".into(), json!(number(p.curve)));
+                    }
+                    point
+                })
+                .collect();
+            let mut out = json!({ "param": lane.param, "points": points });
+            if !lane.enabled
+                && let Some(map) = out.as_object_mut()
+            {
+                map.insert("enabled".into(), Value::Bool(false));
+            }
+            out
+        })
+        .collect();
+    Value::Array(lanes)
 }
 
 fn follow_value(f: &FollowAction) -> Value {
@@ -297,6 +331,10 @@ fn device_value(d: &Device) -> Value {
         "params": d.params.iter().map(|p| json!({ "id": p.id, "value": number(p.value) })).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        // Only devices with automation say so, so files without any keep their shape.
+        if !d.automation.is_empty() {
+            map.insert("automation".into(), lanes_value(&d.automation));
+        }
         with_extensions(map, &d.extensions);
     }
     out
@@ -659,8 +697,41 @@ fn read_channel(value: &Value, at: &str) -> Result<Channel, ProjectFileError> {
         output: optional_whole(c, "output", at)?.map(ChannelId),
         sends,
         devices,
+        automation: read_lanes(c, at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// The `automation` lanes of a device or channel: points in beat order (those at one beat keep
+/// their order), a curve from -1 to 1, at most `MAX_POINTS` points a lane.
+fn read_lanes(map: &Obj, at: &str) -> Result<Vec<AutomationLane>, ProjectFileError> {
+    let mut automation = Vec::new();
+    for (i, v) in list(map, "automation", at)?.iter().enumerate() {
+        let at = format!("{at}.automation[{i}]");
+        let lane = object(v, &at)?;
+        let listed = list(lane, "points", &at)?;
+        if listed.len() > automation::MAX_POINTS {
+            return Err(format!("{at}.points: more than {} points", automation::MAX_POINTS).into());
+        }
+        let mut points = Vec::with_capacity(listed.len());
+        for (j, p) in listed.iter().enumerate() {
+            let at = format!("{at}.points[{j}]");
+            let p = object(p, &at)?;
+            let curve = float_or(p, "curve", 0.0, &at)?;
+            if !(-1.0..=1.0).contains(&curve) {
+                return Err(format!("{at}.curve: must be from -1 to 1, got {curve}").into());
+            }
+            points.push(AutomationPoint { beat: float(p, "beat", &at)?, value: float(p, "value", &at)?, curve });
+        }
+        // In beat order, as the model keeps them; points at the same beat keep their order.
+        points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+        automation.push(AutomationLane {
+            param: required_text(lane, "param", &at)?,
+            points,
+            enabled: flag(lane, "enabled", true, &at)?,
+        });
+    }
+    Ok(automation)
 }
 
 fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
@@ -683,12 +754,14 @@ fn read_device(value: &Value, at: &str) -> Result<Device, ProjectFileError> {
         let p = object(v, &at)?;
         params.push(DeviceParam { id: required_text(p, "id", &at)?, value: float(p, "value", &at)? });
     }
+    let automation = read_lanes(d, at)?;
     Ok(Device {
         name: text(d, "name", at)?,
         kind,
         enabled: flag(d, "enabled", true, at)?,
         state: bytes(d, "state", at)?,
         params,
+        automation,
         extensions: extensions(d, at)?,
     })
 }

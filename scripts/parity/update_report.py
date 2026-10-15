@@ -96,7 +96,7 @@ def headline(devices) -> str:
         f"{len(devices['instruments'])} instruments) |",
         f"| Commands | **{score.COMMANDS}**, every one reachable from the UI, the CLI and MCP |",
         "| Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, "
-        "Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |",
+        "Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |",
     ]
     return block("\n".join(lines))
 
@@ -155,7 +155,7 @@ GAPS = [
     ("MIDI tools, MPE, grooves, tuning", "Generative/transform (ch 11-15)",
      "transformation and generative tools, MPE editing, groove pool, tuning systems"),
     ("Automation and clip envelopes", "Automation, envelopes (ch 26, 27)",
-     "automation lanes, recording and drawing, clip envelopes"),
+     "drawing and recording automation lanes, send and tempo automation, clip envelopes"),
     ("Recording, bounce, comping", "Recording, bounce, comp (ch 19-22)",
      "audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce"),
     ("Mixing, routing, I/O", "Mixing, routing, I/O (ch 17, 18, 38)",

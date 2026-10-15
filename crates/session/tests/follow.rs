@@ -65,6 +65,7 @@ fn project() -> Project {
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![content(1, 36), content(2, 40)],
         launcher: Launcher {

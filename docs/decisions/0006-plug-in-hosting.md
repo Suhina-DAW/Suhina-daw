@@ -106,6 +106,20 @@ workspace forbids.
      gives a plug-in without audio inputs (an instrument) no input port. A parameter event
      (automation) reaches a VST3 processor as a parameter change at its frame and a CLAP plug-in
      as a parameter event at its frame.
+     *Built (#109):* the engine sends them. A plug-in slot plans each block's parameter events
+     before any of the block runs (`crates/engine/src/plugin_params.rs`): the values the project
+     sets on the device (`Device::params`, by parameter id, in the plug-in's own range) at the
+     start of the first blocks a processor runs and again after a restart, over the state it
+     loaded; a value `device.setParam` sets while it plays, at the start of the next block
+     (the same parameter message as a built-in device's, ADR 0005); and, while the transport
+     runs, each automation lane's value at the block's first frame, at each point inside it and
+     every 64 frames while it moves (a VST3 plug-in ramps between them, a CLAP plug-in steps).
+     The slot hands each span it runs its share through `PluginProcessor::automate`, and the
+     session's processor merges them with the notes in frame order, a value before a note at
+     the same frame; a block the host could not take carries the latest value of each
+     parameter to the next. Nothing allocates on the audio thread: each slot has room for 512
+     events a block. Values go to the processor only, so a VST3 plug-in's editor does not move
+     with its automation yet.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* protocol
      version 8 (`latency_changed` comes unasked when a running plug-in reports another
@@ -125,7 +139,10 @@ workspace forbids.
      them again after a restart.
 4. **Block sync and deadline.** The engine signals the host, the host processes and signals
    back. Primitives: a futex in the shared memory on Linux; duplicated auto-reset events on
-   Windows; semaphores on macOS, prototyped first because they are the least certain. The host's
+   Windows, waited on together with a high-resolution waitable timer that wakes the wait 1 ms
+   before the deadline, the rest spent yielding, so a miss ends on time and not on the system
+   timer's next 15.6 ms tick (#211); semaphores on macOS, prototyped first because they are the
+   least certain. The host's
    audio thread runs at the engine's real-time priority (MMCSS "Pro Audio" on Windows; the
    engine's audio workgroup on macOS). The engine waits at most the rest of the block's time.
    On a miss it outputs the plug-in's input (an effect) or silence (an instrument) for that block

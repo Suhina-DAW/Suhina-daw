@@ -63,6 +63,7 @@ fn plugin_device(id: &str) -> Device {
         enabled: true,
         state: None,
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }
@@ -95,6 +96,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),
