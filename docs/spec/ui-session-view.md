@@ -31,8 +31,9 @@ From top to bottom:
    - groove amount, metronome, global launch quantisation
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
-     start, punch, loop, loop length. **Suhina:** play starts from the play start marker and
-     stop returns to it or stays, as Settings › General › Stop says
+     start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
+     from the selected Arrangement clip as Settings › General › Play from says, and stop
+     returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
@@ -119,11 +120,19 @@ tempo and time signature that apply when launched.
 
 One knob per return track (A, B, …). Return tracks show pre/post toggles on the main column.
 
+**Built:** the send knobs sit in the mixer strip's knob row beside the pan knob, as many as fit
+(three in a track column; none in a return column); the pre/post choice is in each knob's
+right-click menu rather than on the main column, and a dot under the knob marks a send before
+the fader. Behaviour and commands: [sends and returns](sends-and-returns.md).
+
 ### Mixer (toggleable, resizable height)
 
 Per track, top to bottom: pan, volume with numeric field and meter ([level
 meters](level-meters.md)), track on/off (shows the
-track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
+track number), solo, arm (MIDI and audio tracks). Pan and volume are dragged up or down and
+double-clicked to reset; the change is heard while dragging, and one drag is one undo step
+(`track.setPan`, `track.setVolume` with `continue`). The Arrangement view's track headers work
+the same. **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no

@@ -1,0 +1,38 @@
+name: Project sync
+
+# Brings the Suhina project board up to date with the repository: adds every open issue and pull
+# request that has no card and sets each card's Status from the repository's state
+# (scripts/project_sync.py says how). Run by hand only, as a dry run first: Actions → Project sync →
+# Run workflow. It uses the claim bot's `PROJECT_TOKEN` (docs/claim-bot.md › Project sync).
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Write the changes to the board (unchecked prints them and writes nothing)
+        type: boolean
+        default: false
+
+# The board is written with PROJECT_TOKEN; the workflow's own token only checks out the script.
+permissions:
+  contents: read
+
+# Two runs at once would race for the same cards, and with the claim bot too.
+concurrency: project-sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync the board
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_OWNER: suhina-daw
+          PROJECT_NUMBER: "1"
+          APPLY: ${{ inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            python3 scripts/project_sync.py --apply
+          else
+            python3 scripts/project_sync.py --dry-run
+          fi

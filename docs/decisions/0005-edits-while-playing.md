@@ -54,7 +54,8 @@ clip; devices (ADR 0004) will add many more parameters.
    Sounding note voices ring on, on their track's chain in the new graph. A track's device
    chain keeps its running devices when the new graph has the same devices on the same track,
    with the new parameter values, so instrument notes and effect tails carry on (ADR 0004
-   decision 9). The launcher's runtime is copied column by column (a
+   decision 9), and its sends keep the sound in their delay lines when they go to the same
+   returns with the same latency (decision 11). The launcher's runtime is copied column by column (a
    column or slot that no longer exists is dropped). A playing launched clip whose prepared
    audio is unchanged keeps its stretch voice (moved from the old graph to the new); otherwise
    the new voice is moved to the clip's position. Level meters keep their levels and clip
@@ -111,7 +112,10 @@ klingt and JUCE's graph do), now:
    (the project is updated and an undo step recorded as for any edit). Each graph records the
    number of the last message its project already held; when a graph built before newer
    messages takes over, the renderer applies those again (it keeps the last 256), so an older
-   graph never undoes a newer value.
+   graph never undoes a newer value. A plug-in device's parameter takes the same message, with
+   its parameter id for `param`; its slot sends the value to the plug-in at the start of the
+   next block (ADR 0006, decision 3), and a graph built after it sends only the values that
+   changed.
 4. **Sounding notes follow their track's mix.** Each sine voice remembers its track and
    velocity; at a swap it takes the new graph's volume, pan and mute (and bus, if the track's
    chain changed) at once instead of keeping them until the note ends.
