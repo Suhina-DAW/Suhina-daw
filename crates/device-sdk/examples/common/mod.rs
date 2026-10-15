@@ -16,17 +16,42 @@ pub fn wire(graph: &mut DeviceGraph, from: &str, to: &str, port: &str) {
 
 pub fn style_parameter(parameter: &mut Parameter) {
     parameter.ui.font_size = 11.0;
+    parameter.ui.label_position = suhina_device_sdk::LabelPosition::Top;
     let knob = matches!(parameter.control, ParameterControl::Knob | ParameterControl::LogKnob);
     parameter.ui.shape =
         if knob { suhina_device_sdk::ControlShape::Rounded } else { suhina_device_sdk::ControlShape::Square };
     parameter.ui.corner_radius = if knob { 5.0 } else { 0.0 };
 }
 
+#[allow(dead_code)]
+pub fn explanation(lines: &[&str]) -> suhina_device_sdk::ui::DeviceUi {
+    use suhina_device_sdk::ui::{DeviceUi, Draw, TextAlign, TextFormat};
+    DeviceUi {
+        size: [208.0, lines.len() as f32 * 16.0 + 8.0],
+        background: [0, 0, 0, 0],
+        layers: lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| Draw::Text {
+                position: [4.0.into(), (index as f32 * 16.0 + 4.0).into()],
+                text: (*line).into(),
+                color: [140, 140, 140, 255],
+                size: 11.0,
+                parameter: None,
+                decimals: 0,
+                align: TextAlign::Left,
+                format: TextFormat::Number,
+            })
+            .collect(),
+        ..DeviceUi::default()
+    }
+}
+
 pub fn finish(mut g: DeviceGraph) -> Result<DeviceGraph, Box<dyn std::error::Error>> {
-    // Hide implementation details so the generated panel has room for the user controls.
+    let mut visible_parameter = 0usize;
+    // The examples teach their controls; their implementation graph does not need panel space.
     for node in &mut g.nodes {
-        node.visible =
-            matches!(node.id.as_str(), "encode" | "decode" | "pan" | "filter" | "shape" | "delay" | "detector");
+        node.visible = false;
     }
     for p in &mut g.parameters {
         p.control = match p.id.as_str() {
@@ -37,6 +62,11 @@ pub fn finish(mut g: DeviceGraph) -> Result<DeviceGraph, Box<dyn std::error::Err
         };
         style_parameter(p);
         p.ui.tooltip = format!("{} ({})", p.name, p.unit);
+        if !g.ui.as_ref().is_some_and(|ui| ui.hidden_parameters.contains(&p.id)) {
+            p.ui.position = Some([(visible_parameter % 2) as f32 * 104.0, (visible_parameter / 2) as f32 * 84.0]);
+            p.ui.size = Some([100.0, 80.0]);
+            visible_parameter += 1;
+        }
     }
     g.validate()?;
     Ok(g)

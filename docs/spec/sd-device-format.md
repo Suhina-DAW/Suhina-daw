@@ -201,6 +201,16 @@ an effect-specific solution. Delay-time ramps can change pitch as the read head 
 
 Generate a control gallery with
 `cargo run -p suhina-device-sdk --example ui_controls -- target/sdk-examples/ui-controls.sd`.
+The SDK examples put labels above controls and values underneath, with enough cell height for
+both rows. Run each example again after changing its presentation: `cargo build` alone does not
+rewrite `.sd` files. Reinsert a device to update a project's embedded copy of its graph.
+The Custom Panel, Orbit Filter and Wire Layout examples include explanations inside the panel.
+`custom-panel.sd` appears as Velvet Volume to demonstrate an independently chosen `device.name`;
+`orbit-filter.sd` appears as Orbit Filter and demonstrates custom UI. Their device ids are distinct.
+Orbit Filter demonstrates a custom drawn XY pad, output knob, gradient and embedded texture;
+it combines a low-pass filter, stereo balance and output gain. Wire Layout processes
+only gain; its node positions and wire bends demonstrate saved graph-editor metadata, while the
+current device panel shows its signal order as a node list.
 
 Example parameter UI declaration:
 
@@ -222,7 +232,16 @@ and text. Omitted colours follow the Suhina theme. `ui.font_size` is 8..48 (defa
 `ui.monospace` selects the font family, and `ui.corner_radius` is 0..128 (default 4).
 `ui.shape` is rounded (default), square or pill; knobs use their circular body by default
 and a square body for square. `ui.label_position` is left (default), top or hidden;
-`ui.show_value` defaults to true. Knob size follows the available control area.
+`ui.show_value` defaults to true. With a top label, the control fills the middle row and its
+label and value are centered above and underneath the control; set `show_value` to false to omit
+the value row. Knob size follows
+the available control area.
+
+For a device with a custom canvas, `device.ui.viewport_size[0]` sets the preferred available
+panel width (24..8192 logical pixels); the host clips it to the detail area and scrolls its
+contents. This width setting applies to the whole device panel, including its generated controls.
+Without a custom canvas, a device in the horizontal chain expands to fit the declared parameter
+cells, with a minimum width of 220 pixels. The UI Controls example uses a single horizontal row.
 
 These fields are optional and old files retain automatic placement. Authors must leave enough
 cell space for labels and controls. Untrusted geometry is checked before UI rendering;

@@ -21,12 +21,18 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
         if matches!(control, Toggle | Button) {
             p.max = 1.0;
         }
-        if matches!(control, Choice | Radio) {
-            p.ui.options = vec!["Off".into(), "Unity".into(), "Boost".into()];
+        if control == Radio {
+            p.max = 1.0;
         }
-        p.ui.position = Some([0.0, index as f32 * 104.0]);
-        p.ui.size = Some([220.0, 96.0]);
-        p.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+        if matches!(control, Choice | Radio) {
+            p.ui.options = if control == Radio {
+                vec!["Off".into(), "On".into()]
+            } else {
+                vec!["Off".into(), "Unity".into(), "Boost".into()]
+            };
+        }
+        p.ui.position = Some([index as f32 * 104.0, 0.0]);
+        p.ui.size = Some([100.0, 128.0]);
         common::style_parameter(&mut p);
         graph.parameters.push(p);
         let mut node = Node::gain(&id, &id);

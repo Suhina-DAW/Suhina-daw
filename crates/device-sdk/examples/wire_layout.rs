@@ -14,6 +14,12 @@ pub fn build() -> DeviceGraph {
     graph.parameters.push(gain);
     graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
     graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+    graph.ui = Some(common::explanation(&[
+        "Volume: 0 silent, 1 unchanged, 2 louder.",
+        "Demonstrates saved node positions",
+        "and wire bends for graph editors.",
+        "This panel shows the signal order.",
+    ]));
     graph.editor = Some(Editor {
         graph: GraphLayout {
             nodes: ["in", "gain", "out"]

@@ -16,6 +16,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Node::new("transpose", NodeKind::MidiTransposeParameter { parameter: "semitones".into() }),
         Node::new("out", NodeKind::MidiOutput),
     ];
+    for node in &mut graph.nodes {
+        node.visible = false;
+    }
     graph.connections = vec![Connection::new("midi", "transpose"), Connection::new("transpose", "out")];
     graph.write_file(&path)?;
     println!("Wrote {}", path.display());

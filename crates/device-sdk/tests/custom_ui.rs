@@ -1,11 +1,32 @@
+#![allow(clippy::duplicate_mod)]
 use image::ImageEncoder as _;
 use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ui::*};
 #[path = "../examples/custom_panel.rs"]
+mod name_demo;
+#[path = "../examples/orbit_filter.rs"]
 mod panel;
+
+#[test]
+fn filename_demo_and_custom_ui_have_distinct_names_and_ids() {
+    let graph = name_demo::build().unwrap();
+    let orbit = panel::build().unwrap();
+    assert_eq!(graph.name, "Velvet Volume");
+    assert_ne!(graph.id, orbit.id);
+    assert!(graph.ui.as_ref().unwrap().controls.is_empty());
+    assert_eq!(DeviceGraph::from_sd(&graph.to_sd().unwrap()).unwrap(), graph);
+}
 
 #[test]
 fn example_panel_roundtrips_and_processes_audio() {
     let graph = panel::build().unwrap();
+    assert_eq!(graph.name, "Orbit Filter");
+    let canvas = graph.ui.as_ref().unwrap();
+    assert!(!canvas.assets.is_empty());
+    assert!(canvas.controls.iter().any(|control| control.id == "orbit"
+        && control.x.as_ref().is_some_and(|binding| binding.parameter == "cutoff")
+        && control.y.as_ref().is_some_and(|binding| binding.parameter == "balance")));
+    assert!(canvas.controls.iter().any(|control| control.id == "output"));
+    assert!(graph.parameters.iter().all(|parameter| canvas.hidden_parameters.contains(&parameter.id)));
     for parameter in &graph.parameters {
         if matches!(
             parameter.control,

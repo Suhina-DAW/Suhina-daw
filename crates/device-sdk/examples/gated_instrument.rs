@@ -30,6 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Node::new("output", NodeKind::Multiply),
         Node::audio_output("out"),
     ];
+    for node in &mut graph.nodes {
+        node.visible = false;
+    }
     graph.connections = vec![
         Connection::ports("key", "out", "semitones", "a"),
         Connection::ports("zero_key", "out", "semitones", "b"),

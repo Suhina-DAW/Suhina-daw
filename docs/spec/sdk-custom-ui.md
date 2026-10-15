@@ -10,9 +10,26 @@ covers:
   - crates/ui/src/device_canvas.rs
   - crates/ui/src/detail_view.rs
   - crates/device-sdk/examples/custom_panel.rs
+  - crates/device-sdk/examples/orbit_filter.rs
 ---
 
 # Custom device panels
+
+The `custom_panel` example writes `custom-panel.sd`, whose `device.name` is **Velvet Volume**.
+It demonstrates that the file name and the inserted device's name may differ, using a standard
+gain control and an explanation inside the panel.
+
+The separate `orbit_filter` example writes `orbit-filter.sd`, named **Orbit Filter**. It demonstrates a
+self-contained custom UI: a gradient background, embedded raster texture, a drawn XY pad that
+controls cutoff and stereo balance, and a drawn output knob. It hides the generated parameter
+controls. Instructions appear inside the authored panel.
+
+Generate the two files with:
+
+```sh
+cargo run -p suhina-device-sdk --example custom_panel -- target/sdk-examples/custom-panel.sd
+cargo run -p suhina-device-sdk --example orbit_filter -- target/sdk-examples/orbit-filter.sd
+```
 
 `device.ui` optionally describes a canvas. It contains size, background RGBA, embedded image
 assets, drawing layers, custom controls and a list of parameters hidden from the stock panel.

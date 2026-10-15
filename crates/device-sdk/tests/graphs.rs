@@ -379,6 +379,16 @@ fn visual_ui_settings_round_trip_and_hostile_geometry_is_rejected() {
 }
 
 #[test]
+fn compact_top_label_files_remain_readable() {
+    let mut g = graph(K::Gain { parameter: "amount".into() });
+    let ui = &mut g.parameters[0].ui;
+    ui.font_size = 8.0;
+    ui.label_position = suhina_device_sdk::LabelPosition::Top;
+    ui.size = Some([48.0, 44.0]);
+    assert_eq!(DeviceGraph::from_sd(&g.to_sd().unwrap()).unwrap(), g);
+}
+
+#[test]
 fn delay_panel_has_working_stereo_timing_ping_pong_and_valid_selectors() {
     let mut g = examples::build("delay").unwrap();
     assert_eq!(g, DeviceGraph::from_sd(&g.to_sd().unwrap()).unwrap());

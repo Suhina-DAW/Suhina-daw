@@ -1,36 +1,22 @@
-//! Filter and stereo controls composed from the SDK's built-in widgets.
+//! A file name and an independently chosen device.name, with standard parameter controls.
+#[allow(dead_code)]
 mod common;
-use common::{finish, parameter, wire};
-use suhina_device_sdk::{DeviceGraph, DeviceRole, FilterMode, Node as N, NodeKind as K, ParameterControl};
+use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ParameterControl};
 
 pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
-    let mut g = DeviceGraph::new("org.example.custom-panel", "Orbit Filter", DeviceRole::Effect);
-    g.nodes = vec![N::audio_input("in"), N::audio_output("out")];
-    parameter(&mut g, "cutoff", (20.0, 20_000.0), 2400.0, "Hz", true);
-    parameter(&mut g, "balance", (-1.0, 1.0), 0.0, "", false);
-    parameter(&mut g, "level", (0.0, 2.0), 1.0, "", false);
-    if let Some(p) = g.parameters.iter_mut().find(|p| p.id == "balance") {
-        p.name = "Stereo position".into();
-        p.control = ParameterControl::Knob;
-    }
-    if let Some(p) = g.parameters.iter_mut().find(|p| p.id == "level") {
-        p.name = "Output".into();
-        p.control = ParameterControl::Knob;
-    }
-    g.parameters[0].name = "Cutoff".into();
-    g.nodes.extend([
-        N::new("filter", K::Filter { mode: FilterMode::Lowpass }),
-        N::new("pan", K::Pan),
-        N::gain("gain", "level"),
-    ]);
-    wire(&mut g, "in", "filter", "in");
-    wire(&mut g, "cutoff", "filter", "frequency");
-    wire(&mut g, "filter", "pan", "in");
-    wire(&mut g, "balance", "pan", "balance");
-    wire(&mut g, "pan", "gain", "in");
-    wire(&mut g, "gain", "out", "in");
-    g.nodes.retain(|node| node.id != "level");
-    finish(g)
+    let mut graph = DeviceGraph::new("org.example.custom-panel", "Velvet Volume", DeviceRole::Effect);
+    let mut gain = Parameter::new("gain", "Gain", (0.0, 2.0), 1.0);
+    gain.control = ParameterControl::Knob;
+    graph.parameters.push(gain);
+    graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
+    graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+    graph.ui = Some(common::explanation(&[
+        "File: custom-panel.sd",
+        "Device name: Velvet Volume",
+        "The title comes from device.name.",
+        "Gain adjusts the volume.",
+    ]));
+    common::finish(graph)
 }
 
 #[cfg(not(test))]

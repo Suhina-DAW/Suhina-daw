@@ -382,8 +382,16 @@ fn chain_row(
     let mut x = area.left();
     for device in &chain.devices {
         let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
-        let authored_width = device.graph.as_ref().and_then(|g| g.canvas.as_ref()).map_or(DEVICE_WIDTH, |c| {
-            c.viewport_size.map_or(DEVICE_WIDTH.max(c.size[0] + PAD * 2.0), |v| v[0] + PAD * 2.0)
+        let authored_width = device.graph.as_ref().map_or(DEVICE_WIDTH, |graph| {
+            graph.canvas.as_ref().map_or_else(
+                || {
+                    parameter_layout(&graph.parameters, DEVICE_WIDTH - PAD * 2.0, &[])
+                        .iter()
+                        .map(|cell| cell.right() + PAD * 2.0)
+                        .fold(DEVICE_WIDTH, f32::max)
+                },
+                |c| c.viewport_size.map_or(DEVICE_WIDTH.max(c.size[0] + PAD * 2.0), |v| v[0] + PAD * 2.0),
+            )
         });
         let width = editor.map_or(authored_width, |e| authored_width.max(e.x + PAD * 2.0));
         let bottom =
@@ -695,7 +703,7 @@ fn device_panel(
             widgets::text_in(
                 painter,
                 name_rect,
-                Align2::LEFT_CENTER,
+                if parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top { Align2::CENTER_CENTER } else { Align2::LEFT_CENTER },
                 &if parameter.ui.group.is_empty() {
                     parameter.name.clone()
                 } else {
@@ -705,13 +713,18 @@ fn device_panel(
                 foreground,
             );
             }
-            let value_width = if parameter.ui.show_value { (row.width()*0.24).min(80.0) } else { 0.0 };
+            let value_height = if parameter.ui.show_value && parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top {
+                parameter.ui.font_size + 4.0
+            } else {
+                0.0
+            };
+            let value_width = if parameter.ui.show_value && value_height == 0.0 { (row.width()*0.24).min(80.0) } else { 0.0 };
             let control_min = match parameter.ui.label_position {
                 suhina_device_sdk::LabelPosition::Left => Pos2::new(name_rect.right(),row.top()),
                 suhina_device_sdk::LabelPosition::Top => Pos2::new(row.left(),name_rect.bottom()),
                 suhina_device_sdk::LabelPosition::Hidden => row.min,
             };
-            let slider_rect = Rect::from_min_max(control_min,Pos2::new(row.right()-value_width,row.bottom()));
+            let slider_rect = Rect::from_min_max(control_min,Pos2::new(row.right()-value_width,row.bottom()-value_height));
             let mut value = parameter.value;
             let response = (parameter.min < parameter.max).then(|| {
                 ui.scope_builder(
@@ -766,7 +779,7 @@ fn device_panel(
                                         .response
                                 }
                                 suhina_device_sdk::ParameterControl::Radio => {
-                                    ui.vertical(|ui| {
+                                    ui.vertical_centered(|ui| {
                                         for (i, label) in parameter.ui.options.iter().enumerate() {
                                             ui.selectable_value(&mut value, i as f64, label);
                                         }
@@ -832,12 +845,17 @@ fn device_panel(
                                     });
                                     response
                                 }
+                                suhina_device_sdk::ParameterControl::VerticalSlider => {
+                                    let rect = Rect::from_center_size(slider_rect.center(), Vec2::new(ui.spacing().interact_size.y, slider_rect.height()));
+                                    let mut slider_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Center)));
+                                    slider_ui.add(egui::Slider::new(&mut value, parameter.min..=parameter.max)
+                                        .vertical().show_value(false)
+                                        .trailing_fill(parameter.ui.accent.is_some())
+                                        .max_decimals(parameter.ui.decimals)
+                                        .step_by(parameter.ui.step))
+                                }
                                 control => ui.add(
-                                    (if control == suhina_device_sdk::ParameterControl::VerticalSlider {
-                                        egui::Slider::new(&mut value, parameter.min..=parameter.max).vertical()
-                                    } else {
-                                        egui::Slider::new(&mut value, parameter.min..=parameter.max)
-                                    })
+                                    egui::Slider::new(&mut value, parameter.min..=parameter.max)
                                     .show_value(false)
                                     .trailing_fill(parameter.ui.accent.is_some())
                                     .max_decimals(parameter.ui.decimals)
@@ -864,8 +882,12 @@ fn device_panel(
             });
             if parameter.ui.show_value { widgets::text_in(
                 painter,
-                Rect::from_min_max(Pos2::new(slider_rect.right(), control_min.y), row.max),
-                Align2::RIGHT_CENTER,
+                if value_height > 0.0 {
+                    Rect::from_min_max(Pos2::new(row.left(), slider_rect.bottom()), row.max)
+                } else {
+                    Rect::from_min_max(Pos2::new(slider_rect.right(), control_min.y), row.max)
+                },
+                if value_height > 0.0 { Align2::CENTER_CENTER } else { Align2::RIGHT_CENTER },
                 if matches!(parameter.control,suhina_device_sdk::ParameterControl::Choice | suhina_device_sdk::ParameterControl::Radio) {
                     parameter.ui.options.get(value as usize).cloned().unwrap_or_default()
                 } else { format!("{:.*} {}", parameter.ui.decimals, value, parameter.unit).trim().to_owned() }.as_str(),
@@ -984,6 +1006,11 @@ fn parameter_height(parameter: &GraphParameter) -> f32 {
         0.0
     };
     extra
+        + if parameter.ui.show_value && parameter.ui.label_position == suhina_device_sdk::LabelPosition::Top {
+            parameter.ui.font_size + 4.0
+        } else {
+            0.0
+        }
         + match parameter.control {
             suhina_device_sdk::ParameterControl::VerticalSlider => 80.0,
             suhina_device_sdk::ParameterControl::Knob | suhina_device_sdk::ParameterControl::LogKnob => 36.0,
@@ -1014,12 +1041,31 @@ fn parameter_layout(parameters: &[GraphParameter], width: f32, hidden: &[String]
 mod styled_gallery;
 
 #[cfg(test)]
-#[path = "../../device-sdk/examples/custom_panel.rs"]
+#[path = "../../device-sdk/examples/orbit_filter.rs"]
 mod custom_panel;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn top_label_places_value_below_control_and_reserves_height() {
+        let mut parameter = GraphParameter {
+            default: 1.0,
+            control: suhina_device_sdk::ParameterControl::Knob,
+            unit: String::new(),
+            id: "gain".into(),
+            name: "Gain".into(),
+            min: 0.0,
+            max: 2.0,
+            value: 1.0,
+            ui: suhina_device_sdk::ParameterUi::default(),
+        };
+        parameter.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+        let with_value = parameter_height(&parameter);
+        parameter.ui.show_value = false;
+        assert!(with_value > parameter_height(&parameter));
+    }
     use crate::demo::demo_project;
     use suhina_engine::model::{Device, DeviceParam, Extensions};
 
@@ -1171,6 +1217,10 @@ mod tests {
     #[test]
     fn render_the_authored_control_gallery() {
         let graph = styled_gallery::build().unwrap();
+        for parameter in &graph.parameters {
+            assert_eq!(parameter.ui.position.map(|position| position[1]), Some(0.0));
+            assert_eq!(parameter.ui.label_position, suhina_device_sdk::LabelPosition::Top);
+        }
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
             name: graph.name.clone(),
@@ -1182,9 +1232,9 @@ mod tests {
         });
         let detail = build(&project, Some(TrackId(1)), None);
         let mut harness =
-            egui_kittest::Harness::builder().with_size((820.0, 740.0)).with_pixels_per_point(1.0).wgpu().build_ui(
+            egui_kittest::Harness::builder().with_size((1180.0, 180.0)).with_pixels_per_point(1.0).wgpu().build_ui(
                 |ui| {
-                    show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                    show_row(ui, &detail, &mut Vec::new(), &mut Vec::new());
                 },
             );
         theme::install(&harness.ctx);

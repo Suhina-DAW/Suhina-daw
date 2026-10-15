@@ -60,9 +60,10 @@ fn knob(ui: &mut DeviceUi, id: &str, label: &str, [x, y, w, h]: [f32; 4], log: b
     });
 }
 pub fn build(parameters: &[Parameter]) -> DeviceUi {
+    let height_scale = 168.0 / 180.0;
     let mut ui = DeviceUi {
-        size: [400., 180.],
-        viewport_size: Some([400., 180.]),
+        size: [400., 168.],
+        viewport_size: Some([400., 168.]),
         hidden_parameters: parameters.iter().map(|p| p.id.clone()).collect(),
         ..DeviceUi::default()
     };
@@ -196,6 +197,10 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
         control.visible_when = Some(
             control.visible_when.take().map_or_else(|| expanded.clone(), |condition| condition * expanded.clone()),
         );
+    }
+    for control in &mut ui.controls {
+        control.bounds[1] *= height_scale;
+        control.bounds[3] *= height_scale;
     }
     ui
 }
