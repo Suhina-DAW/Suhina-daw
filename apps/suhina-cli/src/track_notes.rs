@@ -112,6 +112,7 @@ mod tests {
             }],
             arrangement: Arrangement {
                 lanes: vec![ArrangementLane { name: "Lead".into(), track: Some(TrackId(1)), clips }],
+                markers: Vec::new(),
             },
             ..Project::default()
         }

@@ -23,8 +23,8 @@ use serde_json::{Map, Value, json};
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    Launcher, LauncherColumn, LoopRange, Marker, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature,
+    Track, TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -206,14 +206,17 @@ fn project_value(p: &Project) -> Value {
     out.insert("tracks".into(), p.tracks.iter().map(track_value).collect());
     out.insert("channels".into(), p.channels.iter().map(channel_value).collect());
     out.insert("contents".into(), p.contents.iter().map(content_value).collect());
-    out.insert(
-        "arrangement".into(),
-        json!({ "lanes": p.arrangement.lanes.iter().map(|lane| json!({
-            "name": lane.name,
-            "track": lane.track.map(|t| t.0),
-            "clips": lane.clips.iter().map(clip_value).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>() }),
-    );
+    let mut arrangement = json!({ "lanes": p.arrangement.lanes.iter().map(|lane| json!({
+        "name": lane.name,
+        "track": lane.track.map(|t| t.0),
+        "clips": lane.clips.iter().map(clip_value).collect::<Vec<_>>(),
+    })).collect::<Vec<_>>() });
+    // Left out when there are none, so a project without markers is written as before.
+    if !p.arrangement.markers.is_empty() {
+        arrangement["markers"] =
+            p.arrangement.markers.iter().map(|m| json!({ "beat": number(m.beat), "name": m.name })).collect();
+    }
+    out.insert("arrangement".into(), arrangement);
     out.insert(
         "launcher".into(),
         json!({
@@ -544,7 +547,19 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
                     clips,
                 });
             }
-            Arrangement { lanes }
+            let mut markers = Vec::new();
+            for (i, v) in list(a, "markers", "project.arrangement")?.iter().enumerate() {
+                let at = format!("project.arrangement.markers[{i}]");
+                let m = object(v, &at)?;
+                let beat = float(m, "beat", &at)?;
+                if beat < 0.0 {
+                    return Err(format!("{at}.beat: expected a beat from 0 on").into());
+                }
+                markers.push(Marker { beat, name: text(m, "name", &at)? });
+            }
+            let mut arrangement = Arrangement { lanes, markers };
+            arrangement.sort_markers();
+            arrangement
         }
     };
     let launcher = match p.get("launcher") {

@@ -66,6 +66,7 @@ fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
                 .iter()
                 .map(|&t| ArrangementLane { name: format!("l{t}"), track: Some(TrackId(t)), clips: vec![clip.clone()] })
                 .collect(),
+            markers: Vec::new(),
         },
         ..Project::default()
     }

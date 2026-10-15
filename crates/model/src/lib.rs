@@ -445,6 +445,41 @@ pub struct LoopRange {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Arrangement {
     pub lanes: Vec<ArrangementLane>,
+    /// Named positions on the timeline, sorted by beat ([`Arrangement::sort_markers`]).
+    pub markers: Vec<Marker>,
+}
+
+impl Arrangement {
+    /// Puts the markers in order of their beats; markers on the same beat keep their order.
+    pub fn sort_markers(&mut self) {
+        self.markers.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+    }
+
+    /// Adds a marker after any already on its beat and returns its index.
+    pub fn insert_marker(&mut self, marker: Marker) -> usize {
+        let at = self.markers.partition_point(|m| m.beat <= marker.beat);
+        self.markers.insert(at, marker);
+        at
+    }
+}
+
+/// A named position on the arrangement's timeline (a locator): playback can jump to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marker {
+    /// Beats from the start, at least 0.
+    pub beat: f64,
+    pub name: String,
+}
+
+impl Marker {
+    pub fn new(beat: f64, name: impl Into<String>) -> Self {
+        Self { beat, name: name.into() }
+    }
+
+    /// Whether the beat is a finite number, not negative.
+    pub fn is_valid(&self) -> bool {
+        self.beat.is_finite() && self.beat >= 0.0
+    }
 }
 
 /// A row of the arrangement. Bound to a track, or free (a row of a pattern playlist, whose clips
@@ -513,6 +548,8 @@ pub enum ValidationError {
         lane: usize,
         clip: usize,
     },
+    /// The arrangement marker at this index has a beat that is negative or not finite.
+    BadMarker(usize),
 }
 
 impl fmt::Display for ValidationError {
@@ -531,6 +568,7 @@ impl fmt::Display for ValidationError {
                      or a fade curve outside -1 to +1"
                 )
             }
+            Self::BadMarker(index) => write!(f, "arrangement marker {index} is not at a beat from 0 on"),
         }
     }
 }
@@ -595,6 +633,11 @@ impl Project {
                 if !clip.fades_valid() {
                     errors.push(ValidationError::BadFades { lane: lane_index, clip: clip_index });
                 }
+            }
+        }
+        for (index, marker) in self.arrangement.markers.iter().enumerate() {
+            if !marker.is_valid() {
+                errors.push(ValidationError::BadMarker(index));
             }
         }
         for column in &self.launcher.columns {
@@ -721,6 +764,7 @@ mod tests {
                     track: Some(TrackId(1)),
                     clips: vec![clip(1, 0.0)],
                 }],
+                markers: Vec::new(),
             },
             launcher: Launcher {
                 scenes: vec![Scene::default(), Scene::default()],
@@ -761,6 +805,7 @@ mod tests {
                     track: None,
                     clips: vec![clip(1, 0.0), clip(1, 4.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -785,6 +830,7 @@ mod tests {
                     track: Some(TrackId(5)),
                     clips: vec![clip(3, 0.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -867,6 +913,7 @@ mod tests {
                     track: None,
                     clips: vec![with(1.0, 1.0), with(3.0, 3.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -884,6 +931,29 @@ mod tests {
         let mut c = Clip { fade_in: 1.0, fade_out: 0.5, ..clip(1, 0.0) };
         c.fit_fades();
         assert_eq!((c.fade_in, c.fade_out), (1.0, 0.5), "fades that fit are kept");
+    }
+
+    #[test]
+    fn markers_stay_in_beat_order_and_must_be_at_a_beat_from_0() {
+        let mut arrangement = Arrangement::default();
+        assert_eq!(arrangement.insert_marker(Marker::new(8.0, "Chorus")), 0);
+        assert_eq!(arrangement.insert_marker(Marker::new(0.0, "Intro")), 0);
+        assert_eq!(arrangement.insert_marker(Marker::new(8.0, "Drop")), 2, "after the one already on beat 8");
+        let names: Vec<&str> = arrangement.markers.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Intro", "Chorus", "Drop"]);
+        arrangement.markers[0].beat = 12.0;
+        arrangement.sort_markers();
+        let names: Vec<&str> = arrangement.markers.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Chorus", "Drop", "Intro"]);
+
+        let project = Project {
+            arrangement: Arrangement {
+                lanes: Vec::new(),
+                markers: vec![Marker::new(0.0, "ok"), Marker::new(-1.0, "before"), Marker::new(f64::NAN, "nan")],
+            },
+            ..Project::default()
+        };
+        assert_eq!(project.validate(), Err(vec![ValidationError::BadMarker(1), ValidationError::BadMarker(2)]));
     }
 
     #[test]

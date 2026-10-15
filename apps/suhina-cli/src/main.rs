@@ -887,6 +887,7 @@ fn demo_project() -> Project {
                     clips: vec![clip(2, 0.0), clip(2, 4.0)],
                 },
             ],
+            markers: Vec::new(),
         },
         ..Project::default()
     }

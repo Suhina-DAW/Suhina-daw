@@ -2,7 +2,7 @@
 //!
 //! The format is described in `docs/spec/als-format.md`, which was written from Live Sets we
 //! authored ourselves. This reader covers what that spec covers: tempo, tracks, mixer, sends,
-//! scenes, MIDI and audio clips, plug-ins, and Live's devices that have a Suhina counterpart
+//! scenes, locators, MIDI and audio clips, plug-ins, and Live's devices that have a Suhina counterpart
 //! (see `devices.rs`). Anything else is skipped or kept as a placeholder and reported in
 //! [`Import::warnings`], so a project still opens with everything else intact.
 
@@ -17,7 +17,7 @@ use roxmltree::Node;
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
-    LoopRange, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
+    LoopRange, Marker, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
     ValidationError, WarpMarker,
 };
 
@@ -202,7 +202,7 @@ impl Reader {
             tracks,
             channels,
             contents: std::mem::take(&mut self.contents),
-            arrangement: Arrangement { lanes },
+            arrangement: Arrangement { lanes, markers: self.markers(live_set) },
             launcher: Launcher { scenes, columns },
             extensions: Extensions::default(),
         }
@@ -441,6 +441,23 @@ impl Reader {
                 },
             })
             .collect()
+    }
+
+    /// The set's locators as markers, in beat order (`docs/spec/als-format.md` › Locators). One
+    /// without a usable time is left out with a warning.
+    fn markers(&mut self, live_set: Node) -> Vec<Marker> {
+        let Some(locators) = path(live_set, &["Locators", "Locators"]) else { return Vec::new() };
+        let mut arrangement = Arrangement::default();
+        for locator in locators.children().filter(|n| n.has_tag_name("Locator")) {
+            let name = value(locator, &["Name"]).unwrap_or_default();
+            match number(locator, &["Time"]).filter(|beat| *beat >= 0.0) {
+                Some(beat) => {
+                    arrangement.insert_marker(Marker::new(beat, name));
+                }
+                None => self.warn(format!("skipped the locator {name:?}: its time is missing or before the start")),
+            }
+        }
+        arrangement.markers
     }
 
     fn arrangement_clips(&mut self, entry: &TrackEntry) -> Vec<Clip> {

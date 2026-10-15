@@ -156,6 +156,7 @@ fn everything() -> Project {
                     clips: vec![Clip { enabled: false, loop_range: None, ..clip(2, 4.0) }],
                 },
             ],
+            markers: vec![Marker::new(0.0, "Intro"), Marker::new(16.0, "Verse"), Marker::new(16.0, "")],
         },
         launcher: Launcher {
             scenes: vec![
@@ -268,6 +269,11 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_shape": "wobbly" } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_out_shape": 3 } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_curve": 2 } ] } ] } }"#,
+        r#"{ "arrangement": { "markers": [ { "beat": -1, "name": "before" } ] } }"#,
+        r#"{ "arrangement": { "markers": [ { "beat": "soon" } ] } }"#,
+        r#"{ "arrangement": { "markers": [ { "name": "nowhere" } ] } }"#,
+        r#"{ "arrangement": { "markers": [ { "beat": 1, "name": 7 } ] } }"#,
+        r#"{ "arrangement": { "markers": { "beat": 1 } } }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -284,6 +290,21 @@ fn a_clip_without_fade_shapes_has_linear_fades() {
     let clip = &project.arrangement.lanes[0].clips[0];
     assert_eq!((clip.fade_in_curve, clip.fade_out_curve), (FadeCurve::default(), FadeCurve::default()));
     assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
+}
+
+/// Markers come back in beat order, however the file lists them; a project without any writes
+/// no `markers`, as files did before markers existed.
+#[test]
+fn markers_are_read_in_beat_order_and_left_out_when_there_are_none() {
+    let project = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "arrangement": { "markers": [
+            { "beat": 32, "name": "Outro" }, { "beat": 0.5 }, { "beat": 8, "name": "Verse" } ] } } }"#,
+    )
+    .unwrap();
+    let markers: Vec<(f64, &str)> = project.arrangement.markers.iter().map(|m| (m.beat, m.name.as_str())).collect();
+    assert_eq!(markers, [(0.5, ""), (8.0, "Verse"), (32.0, "Outro")]);
+    assert!(!to_json(&Project::default()).contains("markers"));
+    assert!(to_json(&project).contains(r#""markers""#));
 }
 
 #[test]

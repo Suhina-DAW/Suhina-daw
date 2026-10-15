@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Marker, Project, Track,
+    TrackId,
 };
 
 use crate::{CommandError, Session, devices, files, preview};
@@ -106,6 +107,7 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
+const MARKER: Param = param("index", ParamType::Integer, "marker index, from 0, as in project.markers");
 
 pub struct CommandSpec<T: 'static = Session> {
     /// Stable id in `area.verb` form; part of the public interface for agents.
@@ -196,7 +198,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.info",
-        label: "Summarise the open project: tempo, time signature, counts of tracks, scenes and clips, undo state",
+        label: "Summarise the open project: tempo, time signature, counts of tracks, scenes, clips and markers, undo state",
         params: &[],
         kind: CommandKind::Read,
         run: info,
@@ -411,6 +413,51 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: move_clip,
+    },
+    CommandSpec {
+        id: "project.markers",
+        label: "List the arrangement's markers (named positions on the timeline) in beat order, with index, beat and name",
+        params: &[],
+        kind: CommandKind::Read,
+        run: markers,
+    },
+    CommandSpec {
+        id: "marker.add",
+        label: "Add a named marker on the arrangement's timeline",
+        params: &[
+            param("beat", ParamType::Number, "where, in beats from the beginning, 0 … 120000"),
+            optional("name", ParamType::Text, "the marker's name (default \"Marker n\")"),
+        ],
+        kind: CommandKind::Edit,
+        run: add_marker,
+    },
+    CommandSpec {
+        id: "marker.move",
+        label: "Move a marker to another beat; markers stay in beat order, so its index can change",
+        params: &[MARKER, param("beat", ParamType::Number, "the new beat, 0 … 120000")],
+        kind: CommandKind::Edit,
+        run: move_marker,
+    },
+    CommandSpec {
+        id: "marker.rename",
+        label: "Rename a marker",
+        params: &[MARKER, param("name", ParamType::Text, "the new name, not empty")],
+        kind: CommandKind::Edit,
+        run: rename_marker,
+    },
+    CommandSpec {
+        id: "marker.delete",
+        label: "Delete a marker",
+        params: &[MARKER],
+        kind: CommandKind::Edit,
+        run: delete_marker,
+    },
+    CommandSpec {
+        id: "marker.jump",
+        label: "Move the play start marker to a marker; while playing, playback jumps there at once",
+        params: &[MARKER],
+        kind: CommandKind::Transport,
+        run: jump_to_marker,
     },
     CommandSpec {
         id: "project.launcher",
@@ -760,6 +807,7 @@ fn info(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
         "scenes": p.launcher.scenes.len(),
         "arrangement_clips": arrangement_clips,
         "launcher_clips": launcher_clips,
+        "markers": p.arrangement.markers.len(),
         "can_undo": session.can_undo(),
         "can_redo": session.can_redo(),
     }))
@@ -1464,6 +1512,99 @@ fn content_at(clip: &Clip, beats: f64) -> f64 {
         Some(r) if r.end > r.start && at >= r.end => r.start + (at - r.start).rem_euclid(r.end - r.start),
         _ => at,
     }
+}
+
+fn markers(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    let markers = &session.project().arrangement.markers;
+    Ok(Value::Array(
+        markers
+            .iter()
+            .enumerate()
+            .map(|(index, m)| json!({ "index": index, "beat": m.beat, "name": m.name }))
+            .collect(),
+    ))
+}
+
+/// `params.beat`, checked to be a beat a marker can be at.
+fn marker_beat(params: &Value) -> Result<f64, CommandError> {
+    let beat = number(params, "beat")?;
+    if !(0.0..=MAX_START_BEAT).contains(&beat) {
+        return Err(format!("beat must be between 0 and {MAX_START_BEAT}, got {beat}").into());
+    }
+    Ok(beat)
+}
+
+/// `params.index`, checked to name a marker.
+fn marker_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+    let index =
+        params.get("index").and_then(Value::as_u64).ok_or("index must be a whole number from project.markers")?;
+    let count = p.arrangement.markers.len();
+    usize::try_from(index)
+        .ok()
+        .filter(|i| *i < count)
+        .ok_or_else(|| format!("marker {index} does not exist; the arrangement has {count} markers").into())
+}
+
+fn add_marker(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let beat = marker_beat(params)?;
+    let markers = &mut session.project.arrangement;
+    let name = match params.get("name") {
+        None | Some(Value::Null) => {
+            // The first "Marker n" not in use, counting from how many there are.
+            let mut n = markers.markers.len() + 1;
+            while markers.markers.iter().any(|m| m.name == format!("Marker {n}")) {
+                n += 1;
+            }
+            format!("Marker {n}")
+        }
+        Some(v) => {
+            v.as_str().map(str::trim).filter(|n| !n.is_empty()).ok_or("name must be a text, not empty")?.to_string()
+        }
+    };
+    let index = markers.insert_marker(Marker::new(beat, name.clone()));
+    Ok(json!({ "index": index, "beat": beat, "name": name }))
+}
+
+fn move_marker(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let index = marker_index(&session.project, params)?;
+    let beat = marker_beat(params)?;
+    let arrangement = &mut session.project.arrangement;
+    if index >= arrangement.markers.len() {
+        return Err("the marker does not exist".into());
+    }
+    let mut marker = arrangement.markers.remove(index);
+    marker.beat = beat;
+    let name = marker.name.clone();
+    let index = arrangement.insert_marker(marker);
+    Ok(json!({ "index": index, "beat": beat, "name": name }))
+}
+
+fn rename_marker(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let name = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
+    let name = name.ok_or("name must be a text, not empty")?.to_string();
+    let index = marker_index(&session.project, params)?;
+    let marker = session.project.arrangement.markers.get_mut(index).ok_or("the marker does not exist")?;
+    marker.name.clone_from(&name);
+    Ok(json!({ "index": index, "name": name }))
+}
+
+fn delete_marker(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let index = marker_index(&session.project, params)?;
+    let markers = &mut session.project.arrangement.markers;
+    if index >= markers.len() {
+        return Err("the marker does not exist".into());
+    }
+    let marker = markers.remove(index);
+    Ok(json!({ "deleted": index, "name": marker.name }))
+}
+
+fn jump_to_marker(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    // Without an engine there is nothing to jump; say so before looking at the marker.
+    session.player_mut()?;
+    let index = marker_index(session.project(), params)?;
+    let beat = session.project().arrangement.markers.get(index).map_or(0.0, |m| m.beat).clamp(0.0, MAX_START_BEAT);
+    send(session, LaunchCommand::SetPosition { beat })?;
+    Ok(json!({ "index": index, "start_beat": beat }))
 }
 
 fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError> {

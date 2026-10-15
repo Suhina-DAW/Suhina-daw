@@ -59,7 +59,7 @@ pub fn blank_project() -> Project {
         project.channels.push(channel(id, name, ChannelRole::Effect, Some(main)));
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
-    project.arrangement = Arrangement { lanes };
+    project.arrangement = Arrangement { lanes, markers: Vec::new() };
     project.launcher =
         Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), tempo_bpm: None }).collect(), columns };
     project

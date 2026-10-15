@@ -64,6 +64,7 @@ fn project() -> Project {
                 track: Some(TrackId(1)),
                 clips: vec![clip(0.0), clip(8.0)],
             }],
+            markers: Vec::new(),
         },
         ..Project::default()
     }
@@ -577,4 +578,68 @@ fn clips_copy_cut_and_paste_with_their_own_content() {
     assert_eq!(session.project().arrangement.lanes[0].clips.len(), 1);
     run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 20 })).unwrap();
     assert_eq!(session.project().arrangement.lanes[0].clips.len(), 2);
+}
+
+#[test]
+fn markers_are_added_moved_renamed_and_deleted_in_beat_order() {
+    let mut session = Session::new(project());
+    let names = |s: &Session| -> Vec<(f64, String)> {
+        s.project().arrangement.markers.iter().map(|m| (m.beat, m.name.clone())).collect()
+    };
+    let added = run(&mut session, "marker.add", json!({ "beat": 16, "name": " Chorus " })).unwrap();
+    assert_eq!((added["index"].as_u64(), added["name"].as_str()), (Some(0), Some("Chorus")));
+    let added = run(&mut session, "marker.add", json!({ "beat": 4 })).unwrap();
+    assert_eq!((added["index"].as_u64(), added["name"].as_str()), (Some(0), Some("Marker 2")));
+    let added = run(&mut session, "marker.add", json!({ "beat": 16 })).unwrap();
+    assert_eq!((added["index"].as_u64(), added["name"].as_str()), (Some(2), Some("Marker 3")), "after Chorus");
+    assert_eq!(run(&mut session, "project.info", json!({})).unwrap()["markers"], 3);
+
+    // Moving keeps the order and says where the marker went.
+    let moved = run(&mut session, "marker.move", json!({ "index": 0, "beat": 32 })).unwrap();
+    assert_eq!(moved["index"], 2);
+    run(&mut session, "marker.rename", json!({ "index": 0, "name": "Hook" })).unwrap();
+    assert_eq!(
+        names(&session),
+        [(16.0, "Hook".to_string()), (16.0, "Marker 3".to_string()), (32.0, "Marker 2".to_string())]
+    );
+    let listed = run(&mut session, "project.markers", json!({})).unwrap();
+    assert_eq!(listed[2], json!({ "index": 2, "beat": 32.0, "name": "Marker 2" }));
+
+    // A default name skips one in use.
+    run(&mut session, "marker.delete", json!({ "index": 1 })).unwrap();
+    let added = run(&mut session, "marker.add", json!({ "beat": 0 })).unwrap();
+    assert_eq!(added["name"], "Marker 3");
+
+    // Each edit is one undo step.
+    for _ in 0..7 {
+        run(&mut session, "edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(session.project(), &project());
+}
+
+#[test]
+fn bad_marker_edits_are_errors_and_change_nothing() {
+    let mut session = Session::new(project());
+    run(&mut session, "marker.add", json!({ "beat": 4, "name": "Verse" })).unwrap();
+    let before = session.project().clone();
+    for (id, params) in [
+        ("marker.add", json!({ "beat": -1 })),
+        ("marker.add", json!({ "beat": 120_000.5 })),
+        ("marker.add", json!({ "beat": "4" })),
+        ("marker.add", json!({})),
+        ("marker.add", json!({ "beat": 1, "name": "  " })),
+        ("marker.add", json!({ "beat": 1, "name": 3 })),
+        ("marker.move", json!({ "index": 1, "beat": 0 })),
+        ("marker.move", json!({ "index": 0, "beat": -0.5 })),
+        ("marker.move", json!({ "index": -1, "beat": 0 })),
+        ("marker.move", json!({ "index": 0 })),
+        ("marker.rename", json!({ "index": 0, "name": "" })),
+        ("marker.rename", json!({ "index": 9, "name": "Nine" })),
+        ("marker.delete", json!({ "index": 1 })),
+        ("marker.delete", json!({ "index": 18_446_744_073_709_551_615u64 })),
+        ("marker.delete", json!({})),
+    ] {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    assert_eq!(session.project(), &before);
 }

@@ -64,6 +64,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "Audio".into(), track: Some(TrackId(1)), clips: vec![clip.clone()] }],
+            markers: Vec::new(),
         },
         launcher: Launcher {
             scenes: vec![Scene::default()],

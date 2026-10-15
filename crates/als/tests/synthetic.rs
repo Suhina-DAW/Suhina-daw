@@ -258,3 +258,26 @@ fn reads_plugins_and_placeholders() {
     assert_eq!(eq.kind, DeviceKind::Foreign { format: "als".into(), id: "Eq8".into() });
     assert!(!eq.enabled);
 }
+
+/// Locators become arrangement markers in beat order; one without a usable time is skipped with
+/// a warning, and a set without locators has no markers (`docs/spec/als-format.md` › Locators).
+#[test]
+fn reads_locators_as_markers() {
+    let set = |locators: &str| format!(r#"<Ableton><LiveSet><Tracks/>{locators}</LiveSet></Ableton>"#);
+    let locator = |id: u32, time: &str, name: &str| {
+        format!(
+            r#"<Locator Id="{id}"><LomId Value="0"/><Time Value="{time}"/><Name Value="{name}"/>
+               <Annotation Value=""/><IsSongStart Value="false"/></Locator>"#
+        )
+    };
+    let locators =
+        [locator(0, "32", "Chorus"), locator(1, "0", "Intro"), locator(2, "-4", "Early"), locator(3, "x", "")];
+    let import = read_xml(&set(&format!("<Locators><Locators>{}</Locators></Locators>", locators.concat()))).unwrap();
+    let markers: Vec<(f64, &str)> =
+        import.project.arrangement.markers.iter().map(|m| (m.beat, m.name.as_str())).collect();
+    assert_eq!(markers, [(0.0, "Intro"), (32.0, "Chorus")]);
+    assert_eq!(import.warnings.iter().filter(|w| w.contains("locator")).count(), 2, "{:?}", import.warnings);
+
+    assert!(read_xml(&set("")).unwrap().project.arrangement.markers.is_empty());
+    assert!(read_xml(&set("<Locators><Locators/></Locators>")).unwrap().project.arrangement.markers.is_empty());
+}
