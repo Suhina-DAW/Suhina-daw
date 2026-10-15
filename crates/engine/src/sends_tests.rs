@@ -14,6 +14,7 @@ fn channel(id: u32, role: ChannelRole, devices: Vec<Device>) -> Channel {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices,

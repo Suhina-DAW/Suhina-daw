@@ -32,6 +32,7 @@ fn master(volume: f64) -> Channel {
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }
