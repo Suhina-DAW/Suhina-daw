@@ -491,6 +491,51 @@ length, 48 kHz, 32-bit float, no normalising, no dither) as `501-bounce.wav` and
 `corpus/als/README.md`, as in the Log section at the end, plus the fade preference from Setup, the exact fade
 lengths Live shows, and the answer for 504.
 
+## Series 10: sidechain (a device reading another track)
+
+Teaches the importer how a Live Set stores a device that reads another track's signal — a sidechain or
+key input. Suhina keeps that as an input on the device that reads it ([sidechain](sidechain.md) ›
+Model), while the file may store it on the other side of the edge, as the source track's own output
+routing into the destination **device**. This series exists to find out which, and what the file holds
+for a group track, a return track, a deleted source and two keys on one track.
+
+No bounces: this series is about reading a reference, not about a sound. One optional bounce of `602`
+is in the log, to confirm by ear that the reference really keys the device.
+
+### Setup
+
+1. Make the test signal if you have not (series 6, step 1).
+2. Open `corpus/devices/…/100-base.als` (one audio track with the test signal at bar 1, warp off,
+   tempo 120) and Save As `corpus/als/600-sidechain-base.als`. Live creates
+   `corpus/als/600-sidechain-base Project/`; save the whole series there.
+3. Add a second audio track, drag the same test signal into its first Session slot and then into
+   Arrangement View at bar 1, so both tracks play the same short tone. Log it if the set already has a
+   track you can reuse instead.
+
+### Files (600–611)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 600 | `600-sidechain-base.als` | No edit: two audio tracks with the tone, nothing else. |
+| 601 | `601-compressor.als` | Add the built-in **Compressor** to the **second** track (default settings, no preset). |
+| 602 | `602-device-sidechain.als` | In the Compressor, open its sidechain section and choose the **first** track as the sidechain source with the device's own chooser. Log every entry that chooser offers, and whether a tap (pre/post) or a similar choice appears anywhere in it. |
+| 603 | `603-other-source.als` | Change that chooser to the **second** track itself. Log whether its own track is offered at all. |
+| 604 | `604-track-output-route.als` | From `601` (no device sidechain): set the **first track's output** to the second track, then pick the Compressor's sidechain input in the lower chooser. Log the exact entries that lower chooser lists. |
+| 605 | `605-from-group.als` | From `602`: group the first track (select its header, Ctrl+G), then key the Compressor from the **group** track. |
+| 606 | `606-from-return.als` | From `602`: turn the first track's Send A up, then key the Compressor from the **return** track (A). Log the return track's name. |
+| 607 | `607-tap-variant.als` | From `602`: if the chooser offers a second tap or a pre/post choice, set the one that is not the default. If it offers none, save this file as a copy of `602` and write "no tap choice" in the log. |
+| 608 | `608-source-deleted.als` | From `602`: delete the source track and save without fixing anything. |
+| 609 | `609-two-keys.als` | From `602`: add a **second** Compressor after the first on the same track and key it from the other audio track, so one track holds two devices that each read a track. |
+| 610 | `610-in-rack.als` | From `602`: wrap the Compressor in an audio effect rack (select the device, Ctrl+G) and key it from inside the rack. Log what the rack's own routing offers. |
+| 611 | `611-from-chain.als` | From `610`: add a **second** chain to the rack (Chain List › drop area), put a Utility in it, and key the Compressor **from that chain** — the routing list should name the rack's chains. Log every entry it lists for a chain, and whether the three routing points of a chain (before its devices, after them, after its fader) appear as separate entries. |
+| 612 | `612-sidechain-vst3.als` | From `601`: if any installed VST3 exposes a sidechain input in the program's own sidechain chooser, use that plug-in instead of the Compressor and log the chooser's entries. If none does, save a copy of `601` and write in the log that no installed plug-in exposed one — a negative result is a result. |
+
+### Log
+
+`corpus/als/README.md`, as in the Log section at the end, plus for every file what the choosers listed,
+whether a tap choice appeared, and (optionally) a bounce of `602`'s first bar (48 kHz, 32-bit float) as
+`602-bounce.wav`, to hear the ducking.
+
 ## Tips from the first run
 
 - Live's default new set already has two MIDI tracks, two audio tracks, two returns and eight

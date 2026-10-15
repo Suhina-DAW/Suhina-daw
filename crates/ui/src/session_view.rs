@@ -28,12 +28,16 @@ const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
 
-/// What the view keeps between frames: scrolling, and a value being dragged.
+/// What the view keeps between frames: scrolling, the selection, and a value being dragged.
 #[derive(Debug, Default)]
 pub struct SessionViewState {
     pub scroll: Vec2,
-    /// The track whose header was clicked; the detail area shows its devices.
+    /// The selected track (its header was clicked, or a clip on it selected); the detail area
+    /// shows its devices.
     pub selected: Option<TrackId>,
+    /// The selected clip slot, its track and scene from 0: launching its clip selected it. The
+    /// detail area shows the clip's follow action.
+    pub selected_slot: Option<(TrackId, usize)>,
     /// A column header being dragged to move its track, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
@@ -44,6 +48,14 @@ pub struct SessionViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+}
+
+impl SessionViewState {
+    /// Selects the clip slot at `scene` (from 0) on `track`, and the track with it.
+    pub fn select_slot(&mut self, track: TrackId, scene: usize) {
+        self.selected_slot = Some((track, scene));
+        self.selected = Some(track);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,6 +323,7 @@ fn draw_column(
         column,
         progress,
         id,
+        state,
         actions,
     );
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
@@ -364,6 +377,7 @@ fn column_header(
     });
     if response.clicked() {
         state.selected = Some(column.track);
+        state.selected_slot = None;
     }
     let fill = if state.selected == Some(column.track) { theme::control_active() } else { theme::control_background() };
     painter.rect_filled(rect, 0.0, fill);
@@ -395,6 +409,7 @@ fn column_body(
     column: &Column,
     progress: Option<f32>,
     id: Id,
+    state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
     for (scene, slot) in column.slots.iter().enumerate() {
@@ -428,6 +443,10 @@ fn column_body(
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         if response.is_some_and(|r| r.clicked()) {
             actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+            // A launched clip on a track is selected, so the detail area shows it.
+            if column.kind == ColumnKind::Track && !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop) {
+                state.select_slot(column.track, scene);
+            }
         }
         slot_cell(painter, rect, column, slot, hover, pulse, progress);
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
