@@ -107,6 +107,7 @@ const WINDOW_ACTIONS: &[(&str, &str, &str)] = &[
     ("selection.split", "Split the selected clip at the playhead", "Edit"),
     ("selection.consolidate", "Consolidate the selected clip into a new one", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
 /// Every action a key can be bound to: the window's, then each command that needs no

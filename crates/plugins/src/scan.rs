@@ -211,7 +211,7 @@ pub fn scan_file(host: &Path, file: &str, timeout: Duration) -> Scanned {
     };
     let output = reader.and_then(|r| r.join().ok()).unwrap_or_default();
     let Some(status) = status else {
-        return Scanned::Failed(format!("hung: no answer within {} s", timeout.as_secs_f32()));
+        return Scanned::Failed(hung_message(timeout));
     };
     let result = output
         .lines()
@@ -223,6 +223,13 @@ pub fn scan_file(host: &Path, file: &str, timeout: Duration) -> Scanned {
         None if status.success() => Scanned::Failed("the scanner gave no answer".into()),
         None => Scanned::Failed(format!("crashed while loading ({status})")),
     }
+}
+
+/// Why [`scan_file`] gave up on a file: its process did not answer within `timeout` and was
+/// ended. Only the scanner's own deadline gives this reason, so a test can tell a hang that was
+/// caught from any other failure.
+pub fn hung_message(timeout: Duration) -> String {
+    format!("hung: no answer within {} s", timeout.as_secs_f32())
 }
 
 /// What the host prints for a scan that found `plugins` (their paths are not printed).
