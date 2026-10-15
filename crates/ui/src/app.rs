@@ -21,7 +21,7 @@ use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
 use crate::piano_roll::{self, PianoRollState};
-use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
+use crate::project_dialog::{self, AboutChoice, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
@@ -207,6 +207,8 @@ pub struct App {
     lists_wanted: bool,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
+    /// Help › About Suhina is open.
+    about_open: bool,
     new_request: Option<NewProject>,
     /// A project file saved since the app last asked, for its recent list.
     saved_path: Option<PathBuf>,
@@ -287,6 +289,7 @@ impl App {
             project_lists: Lists::default(),
             lists_wanted: false,
             save_prompt: None,
+            about_open: false,
             new_request: None,
             saved_path: None,
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
@@ -751,6 +754,17 @@ impl App {
                 // Cancelling the name also cancels closing or quitting.
                 Some(SaveChoice::Cancel) => self.save_then = None,
                 None => self.save_prompt = Some(prompt),
+            }
+        }
+        if self.about_open {
+            match project_dialog::show_about(ui, window) {
+                Some(AboutChoice::Copy) => {
+                    let line = project_dialog::version_line();
+                    ui.ctx().copy_text(line.clone());
+                    self.status = Status::Done(format!("Copied {line}"));
+                }
+                Some(AboutChoice::Close) => self.about_open = false,
+                None => {}
             }
         }
         if let Some(leaving) = self.unsaved_prompt.take() {
@@ -1709,6 +1723,11 @@ impl App {
                     self.settings_open = true;
                 }
             });
+            ui.menu_button("Help", |ui| {
+                if ui.add(egui::Button::new("About Suhina").shortcut_text(keys("help.about"))).clicked() {
+                    self.about_open = true;
+                }
+            });
         });
     }
 
@@ -1769,7 +1788,10 @@ impl App {
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
+        let dialog = self.project_dialog.is_some()
+            || self.save_prompt.is_some()
+            || self.unsaved_prompt.is_some()
+            || self.about_open;
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
@@ -1787,6 +1809,7 @@ impl App {
         let has_project = !self.projects.is_empty();
         match action {
             "settings.open" => self.settings_open = !self.settings_open,
+            "help.about" => self.about_open = !self.about_open,
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
             "view.browser" if self.keymap.keys("view.browser").is_empty() => {

@@ -24,7 +24,7 @@ Items marked **(to observe)** still need checking in Live.
 From top to bottom:
 
 1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help. (Suhina has File,
-   Edit, View, Projects and Options so far; components.md lists what is built.)
+   Edit, View, Projects, Options and Help so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
    - groove amount, metronome, global launch quantisation
