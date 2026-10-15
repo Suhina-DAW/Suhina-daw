@@ -90,6 +90,23 @@ fn scenes_and_stop_buttons_send_their_commands() {
 }
 
 #[test]
+fn a_scene_menu_inserts_duplicates_and_deletes_scenes() {
+    let mut harness = view();
+    for (entry, action) in [
+        ("Insert scene below", Action::new("scene.insert", json!({ "scene": 4 }))),
+        ("Duplicate scene", Action::new("scene.duplicate", json!({ "scene": 3 }))),
+        ("Delete scene", Action::new("scene.delete", json!({ "scene": 3 }))),
+    ] {
+        harness.state_mut().actions.clear();
+        harness.get_by_label("Launch scene 3 Build").click_secondary();
+        harness.run();
+        harness.get_by_label(entry).click();
+        harness.run();
+        assert_eq!(harness.state().actions, [action], "{entry}");
+    }
+}
+
+#[test]
 fn return_tracks_have_a_mixer_but_no_slots() {
     let harness = view();
     assert!(harness.query_by_label("Turn A Reverb off").is_some());
@@ -1375,6 +1392,72 @@ fn dragging_a_session_column_header_moves_the_track() {
     assert_eq!(names(&harness)[..4], ["Vox", "Drums", "Bass", "Keys"]);
 }
 
+/// Renders the window with the demo project and the piano roll of the **Beat B** clip on **Drums**
+/// to `target/ui-snapshots/piano-roll-*.png`, to look the toolbar, the note clipboard buttons and
+/// the quantise block over: the row layout, the quantise block open in it, and the stacked detail
+/// area with the block open. Needs a GPU adapter, so it runs only when asked:
+/// `cargo test -p suhina-ui --test window -- --ignored render_the_piano_roll`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_piano_roll() {
+    let mut renderer = suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(session, &[]);
+    let mut harness = window_with_step(app, 0.05);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+    harness.run();
+    // A note selected, so no clipboard button is greyed out.
+    let note = harness
+        .query_all_by_label_contains("Note ")
+        .next()
+        .unwrap_or_else(|| panic!("a note in the grid"))
+        .rect()
+        .center();
+    harness.hover_at(note);
+    harness.step();
+    for pressed in [true, false] {
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos: note,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+    }
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    let save = |harness: &mut Harness<'static, App>, name: &str| {
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        image.save(folder.join(name)).unwrap_or_else(|e| panic!("{e}"));
+    };
+    save(&mut harness, "piano-roll.png");
+
+    harness.state_mut().piano_roll_mut().quantize_open = true;
+    harness.run();
+    assert!(harness.state().piano_roll().quantize_open, "the block is open");
+    assert!(harness.query_by_label("Quantise notes").is_some(), "and its controls are drawn");
+    save(&mut harness, "piano-roll-quantise.png");
+
+    let ctx = harness.ctx.clone();
+    let stacked =
+        suhina_ui::settings::Settings { device_layout: suhina_ui::settings::DeviceLayout::Stack, ..Default::default() };
+    harness.state_mut().set_settings(&ctx, stacked);
+    harness.run();
+    harness.state_mut().piano_roll_mut().quantize_open = true;
+    harness.run();
+    save(&mut harness, "piano-roll-quantise-stacked.png");
+}
+
 /// Renders the window with the demo project to `target/ui-snapshots/session.png` and
 /// `arrangement.png`, to compare with the mockups in `docs/design/reference/`. Needs a GPU adapter, so it runs only
 /// when asked: `cargo test -p suhina-ui -- --ignored`.
@@ -1872,6 +1955,49 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+/// Bass's send to the A Reverb return in the project: level and before the fader.
+fn bass_send(harness: &Harness<'static, App>) -> Option<(f64, bool)> {
+    let project = harness.state().session()?.project();
+    let bass = project.tracks.iter().find(|t| t.name == "Bass")?.channel?;
+    let reverb = project.tracks.iter().find(|t| t.name == "A Reverb")?.channel?;
+    let send = project.channels.iter().find(|c| c.id == bass)?.sends.iter().find(|s| s.target == reverb)?;
+    Some((send.level, send.pre_fader))
+}
+
+#[test]
+fn a_send_knob_sets_the_send_level_and_its_menu_the_mode() {
+    let mut harness = window(demo_app());
+    let before = bass_send(&harness).map(|(level, _)| 20.0 * level.log10()).unwrap_or_default();
+    let knob = harness.get_by_label("Bass send to A Reverb").rect().center();
+    harness.hover_at(knob);
+    harness.run();
+    harness.drag_at(knob);
+    harness.run();
+    harness.hover_at(knob - egui::vec2(0.0, 10.0));
+    harness.run();
+    harness.hover_at(knob - egui::vec2(0.0, 20.0));
+    harness.run();
+    harness.drop_at(knob - egui::vec2(0.0, 20.0));
+    harness.run();
+    // 20 points up at 0.25 dB a point: 5 dB louder, rounded to 0.1 dB.
+    let after = bass_send(&harness).map(|(level, _)| 20.0 * level.log10()).unwrap_or_default();
+    assert!((after - before - 5.0).abs() < 0.11, "{before} to {after}");
+
+    harness.get_by_label("Bass send to A Reverb").click_secondary();
+    harness.run();
+    harness.get_by_label("Before the fader (pre)").click();
+    harness.run();
+    assert_eq!(bass_send(&harness).map(|(_, pre)| pre), Some(true));
+
+    // Two undo steps: the mode, then the level.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    let undone = bass_send(&harness).map(|(level, pre)| (20.0 * level.log10(), pre));
+    assert!(undone.is_some_and(|(db, pre)| (db - before).abs() < 1e-9 && !pre), "{undone:?}");
 }
 
 #[test]

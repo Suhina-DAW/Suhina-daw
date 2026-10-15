@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 104
+COMMANDS = 134
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -61,40 +61,54 @@ CHAPTERS = [
      "overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
      "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.52, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
-     "A launched clip is selected and the detail area shows its follow-action controls. Missing "
-     "scene view/editing depth, select-on-launch options."),
-    (8, "Clip View", 34, 0.08, "started",
-     "Detail area shows clip properties; the MIDI clip editor is a spec only "
-     "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),
+    (7, "Session View", 13, 0.60, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching; "
+     "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
+     "each. A launched clip is selected and the detail area shows its follow-action controls. "
+     "Missing capture-and-insert scene, select-on-launch options."),
+    (8, "Clip View", 34, 0.15, "started",
+     "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
+     "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "
+     "tool icons with the note clipboard, and the quantise controls in the clip column. No loop "
+     "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
     (9, "Audio Clips, Tempo, and Warping", 18, 0.35, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
      "six warp modes in the model, tempo detect for the browser. One stretch algorithm serves "
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
      "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
      "of long samples, warp-marker editing, quantise audio, tempo automation."),
-    (10, "Editing MIDI", 41, 0.05, "started",
-     "Notes are in the model (velocity, release velocity) and import from .als; there is no note "
-     "editor, no note commands beyond what a clip holds, no quantise, probability or MPE lanes."),
+    (10, "Editing MIDI", 41, 0.33, "started",
+     "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
+     "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase and Slice "
+     "tools (keys 1 to 5, the wheel with the right button held steps through them) and "
+     "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
+     "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
+     "through the track's instrument, "
+     "quantises them (Ctrl+U, and grid, amount and ends in the clip column) and edits velocity in a lane, "
+     "through note.* commands with undo; a duplicated clip's notes are its own once edited. No "
+     "transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
     (13, "Converting Audio to MIDI", 5, 0.05, "planned",
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.48, "partial",
-     "Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, "
-     "warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by "
-     "command and in the detail area). Missing launch modes, legato, velocity amount, "
-     "clip offset/nudge, follow-action multiplier and scene follow actions."),
+    (16, "Launching Clips", 12, 0.51, "partial",
+     "Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time "
+     "signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by "
+     "chance, linked or timed, jump to a slot; by command and in the detail area). Missing launch "
+     "modes, legato, velocity amount, clip offset/nudge, follow-action multiplier and scene follow "
+     "actions."),
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.30, "partial",
+    (18, "Mixing", 18, 0.50, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, "
-     "return tracks imported and drawn. Return tracks are silent: sends live in the model and in "
-     "the .als importer only, so nothing feeds them. Missing crossfader, cue, meters, track delay."),
+     "sends pre or post fader into return tracks that run their device chains (track.setSend, "
+     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level "
+     "meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks "
+     "imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement "
+     "headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
      "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",

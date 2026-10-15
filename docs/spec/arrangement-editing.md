@@ -229,6 +229,11 @@ dragging a header moves the track above the lane under the pointer (below it fro
 and a right-click opens the track's menu: name, colour, group, ungroup, delete. The Session view's
 column headers have the same menu.
 
+While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
+the view shows only its ruler and the edited track's lane, lit, with no return tracks and no main
+track, and is not scrolled; its scroll position is back when the view is whole again
+([clip editor](ui-clip-editor.md) › Pulled to the top).
+
 ## Over other clips
 
 The moved clip covers `[start, start + length)` on its lane. Every other clip on that lane:

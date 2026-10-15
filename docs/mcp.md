@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
+read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
 type: system
 status: current
 last_verified: 2026-10-15
@@ -92,6 +92,30 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
+  in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
+  velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
+  semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
+  `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
+  deleted stay valid; each is one undo step and fails as a whole on a bad value
+  ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
+  other clips also play (a duplicate) first gives that clip its own copy of the content, so the
+  others do not change; the result's indices are the same.
+- **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
+  starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
+  `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
+  onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
+  outside 0 to 100 or a note that does not exist fails and changes nothing.
+- **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
+  changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
+  adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
+  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
+- **Splitting notes.** `note.split {track, index | scene, notes, at}` splits each named note that
+  spans the beat `at` into two at `at` (the first keeps the start, the second the end); a note
+  that starts or ends exactly at `at` is left alone, so a second split at the same beat changes
+  nothing. One undo step; it returns the indices of the notes it made, and `at` is a beat from 0
+  to 120 000.
 - **Follow actions.** `clip.setFollowAction {track, scene, enabled?, time?, linked?, actionA?,
   actionB?, chanceA?, chanceB?}` sets what a slot clip does after its follow time (one undo
   step); `project.launcher` lists each slot clip's `follow_action`. A `project_render` script
@@ -109,11 +133,20 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`.
+  `preview.stop` stops it; `launcher.state` reports `preview`. `preview.noteOn {track, key,
+  velocity?}` plays one key through the track's instrument and holds it, as the piano roll's key
+  column does, until `preview.noteOff {track, key?}` lets that key go, or every held preview note
+  when `key` is left out. Both are transport commands: the project, its undo history and the
+  transport are untouched.
 
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.
+
+- **Level meters.** With `--audio`, `mixer.levels` reads the main output's and every track's
+  peak and RMS level per side in dB (`null` for silence) and whether it clipped;
+  `mixer.resetClip {track?, main?}` turns clip indicators off
+  ([spec](spec/level-meters.md)). An agent can play a project and check its levels this way.
 
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Suhina's settings folder) and keeps it up to date while it runs

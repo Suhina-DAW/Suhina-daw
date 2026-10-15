@@ -99,7 +99,8 @@ fn distance(a: &Features, b: &Features) -> f32 {
     a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f32>().sqrt()
 }
 
-/// Positions in 0–1 for every item, the same for the same input. `seed` comes from the scope.
+/// Positions in 0–1 for every item. `seed` comes from the scope; the same input gives the same
+/// map, up to t-SNE's parallel sums, whose last digits follow the thread schedule (ADR 0013).
 pub fn layout(standardised: &Standardised, seed: u64) -> Vec<[f32; 2]> {
     let n = standardised.len();
     match n {
@@ -332,11 +333,13 @@ mod tests {
                 .unwrap();
             assert_eq!(labels[nearest], labels[i]);
         }
-        let b = layout(&s, 42);
-        let moved = a.iter().zip(&b).map(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs()).fold(0.0f32, f32::max);
-        // t-SNE sums in parallel, so runs may differ in the last digits; the map looks the same.
-        // (The sound map keeps layouts, so a scope opens with the map it had.)
-        assert!(moved < 0.05, "moved {moved}");
+        // t-SNE sums in parallel, and the order of a float sum follows the thread schedule, so
+        // two runs may differ in the last digits, which its epochs can grow by any amount (the
+        // sound map keeps layouts, so a scope opens with the map it had). On one thread the order
+        // is fixed: the layout is then exactly a function of its input and seed.
+        let one = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let (b, c) = one.install(|| (layout(&s, 42), layout(&s, 42)));
+        assert_eq!(b, c);
     }
 
     #[test]

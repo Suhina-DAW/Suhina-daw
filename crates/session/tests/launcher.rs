@@ -72,8 +72,8 @@ fn project() -> Project {
         contents: vec![content(1, "Beat", 36), content(2, "Line", 40), content(3, "Off", 50)],
         launcher: Launcher {
             scenes: vec![
-                Scene { name: "Intro".into(), tempo_bpm: None },
-                Scene { name: "Drop".into(), tempo_bpm: Some(128.0) },
+                Scene { name: "Intro".into(), ..Scene::default() },
+                Scene { name: "Drop".into(), tempo_bpm: Some(128.0), time_signature: None },
             ],
             columns: vec![
                 LauncherColumn {
@@ -116,7 +116,7 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
     for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport) {
-        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0 });
+        let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0, "key": 60 });
         let params: Value = params
             .as_object()
             .unwrap()
@@ -508,6 +508,63 @@ fn bad_play_sources_are_errors_and_leave_the_transport() {
     advance(&mut renderer, 1);
     let state = run(&mut session, "launcher.state", json!({})).unwrap();
     assert_eq!((state["start_beat"].as_f64(), state["running"].as_bool()), (Some(0.0), Some(false)));
+}
+
+#[test]
+fn a_key_column_note_plays_until_it_is_let_go() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "fm-synth" })).unwrap();
+    advance(&mut renderer, 2);
+    let before = session.project().clone();
+    let on = run(&mut session, "preview.noteOn", json!({ "track": "Drums", "key": 60 })).unwrap();
+    assert_eq!(on, json!({ "track": 1, "key": 60, "velocity": 100.0 }));
+    // The note holds while the transport is stopped, taking no undo step.
+    let held = beat_peaks(&mut renderer, 2)[1];
+    assert!(held > 0.01, "the track's FM synth plays the key: {held}");
+    assert!(session.player().unwrap().preview_monitor().playing());
+    let later = beat_peaks(&mut renderer, 4)[3];
+    assert!(later > held * 0.2, "{held} -> {later}");
+    // Playing and letting go of a key is no edit: the only undo step is the device added above.
+    assert_eq!(session.project(), &before);
+    assert_eq!(run(&mut session, "edit.undo", json!({})).unwrap()["undone"], true);
+    run(&mut session, "edit.redo", json!({})).unwrap();
+
+    // Letting go releases it.
+    assert_eq!(
+        run(&mut session, "preview.noteOff", json!({ "track": "Drums", "key": 60 })).unwrap(),
+        json!({ "key": 60 })
+    );
+    let tail = beat_peaks(&mut renderer, 2)[1];
+    assert!(tail < held * 0.05, "released: {tail} of {held}");
+    assert!(!session.player().unwrap().preview_monitor().playing());
+    // Letting go again, of a key that is not held, is not an error.
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums", "key": 64 })).unwrap();
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums" })).unwrap();
+    assert_eq!(session.project(), &before);
+}
+
+#[test]
+fn bad_key_column_notes_are_refused_and_change_nothing() {
+    let (mut session, mut renderer) = playing();
+    let before = session.project().clone();
+    let bad = [
+        ("preview.noteOn", json!({ "track": "Drums" })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 128 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": -1 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 1.5 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 0 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 128 })),
+        ("preview.noteOn", json!({ "track": "Nope", "key": 60 })),
+        ("preview.noteOff", json!({ "track": "Drums", "key": 200 })),
+        ("preview.noteOff", json!({ "track": "Nope" })),
+    ];
+    for (id, params) in bad {
+        assert!(run(&mut session, id, params.clone()).is_err(), "{id} {params}");
+    }
+    advance(&mut renderer, 4);
+    assert_eq!(session.project(), &before);
+    assert!(!session.can_undo());
+    assert!(!session.player().unwrap().preview_monitor().playing(), "nothing was started");
 }
 
 #[test]
