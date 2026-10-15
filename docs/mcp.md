@@ -89,6 +89,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Follow actions.** `clip.setFollowAction {track, scene, enabled?, time?, linked?, actionA?,
+  actionB?, chanceA?, chanceB?}` sets what a slot clip does after its follow time (one undo
+  step); `project.launcher` lists each slot clip's `follow_action`. A `project_render` script
+  picks the same random actions every time ([clip launching](spec/clip-launching.md#follow-actions)).
+
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new

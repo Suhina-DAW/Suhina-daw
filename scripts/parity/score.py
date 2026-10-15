@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 93
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -58,7 +58,8 @@ CHAPTERS = [
      "crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.50, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
-     "Missing scene view/editing depth, select-on-launch options, follow actions."),
+     "Follow actions are set by command only (clip.setFollowAction). Missing scene view/editing "
+     "depth, select-on-launch options, follow-action controls in the view."),
     (8, "Clip View", 34, 0.08, "started",
      "Detail area shows clip properties; the MIDI clip editor is a spec only "
      "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),
@@ -77,10 +78,11 @@ CHAPTERS = [
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.35, "partial",
+    (16, "Launching Clips", 12, 0.48, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, "
-     "warped launched clips. Missing launch modes, legato, velocity amount, clip offset/nudge, "
-     "follow actions."),
+     "warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by "
+     "command, no controls in the detail area yet). Missing launch modes, legato, velocity amount, "
+     "clip offset/nudge, follow-action multiplier and scene follow actions."),
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
