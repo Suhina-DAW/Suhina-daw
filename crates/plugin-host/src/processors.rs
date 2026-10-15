@@ -24,6 +24,15 @@ pub(crate) trait Processor: Send + Sync {
     fn set_state(&self, data: &[u8]) -> Result<(), String>;
 }
 
+/// A test processor as an instance's audio processing.
+pub(crate) struct TestBlock(pub(crate) std::sync::Arc<dyn Processor>);
+
+impl crate::audio::Block for TestBlock {
+    fn process(&mut self, input: &[f32], _events: &[suhina_ipc::Event], output: &mut [f32]) {
+        self.0.process(input, output);
+    }
+}
+
 pub(crate) fn create(plugin: &str) -> Result<std::sync::Arc<dyn Processor>, String> {
     let after = |prefix: &str| plugin.strip_prefix(prefix).and_then(|n| n.parse::<u32>().ok());
     if plugin == "test:gain" {

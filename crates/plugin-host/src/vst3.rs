@@ -18,7 +18,6 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use suhina_ipc::Served;
 use suhina_plugins::ParamInfo;
@@ -30,8 +29,6 @@ use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComWrapper, Interface};
 
-/// How long the audio thread waits for a block before checking whether it should stop.
-const POLL: Duration = Duration::from_millis(100);
 /// The category of the classes that process audio.
 const AUDIO_CLASS: &str = "Audio Module Class";
 /// The category of the class that lists which older plug-ins the module replaces.
@@ -573,8 +570,9 @@ fn channel_count(arrangement: SpeakerArrangement) -> usize {
 
 impl Vst3Plugin {
     /// Loads the plug-in `spec` names, activates it for the link's block size at `sample_rate`
-    /// and starts serving blocks from `served` on an audio thread.
-    pub(crate) fn load(spec: &str, served: Served, sample_rate: f64) -> Result<Self, String> {
+    /// and starts serving blocks from `served` on an audio thread, as instance `instance` of
+    /// the process.
+    pub(crate) fn load(spec: &str, instance: u32, served: Served, sample_rate: f64) -> Result<Self, String> {
         let (module, wanted) = open(spec)?;
         let classes = module.audio_classes()?;
         let (cid, name) = match wanted {
@@ -660,7 +658,7 @@ impl Vst3Plugin {
             .name("plug-in audio".into())
             .spawn(move || {
                 crate::real_time_thread();
-                serve(audio, served, buses, sample_rate, (pending, mapping), &stop);
+                serve(instance, audio, served, buses, sample_rate, (pending, mapping), &stop);
             })
             .map_err(|e| e.to_string())?;
         plugin.audio = Some(thread);
@@ -974,8 +972,10 @@ impl Drop for Vst3Plugin {
     }
 }
 
-/// The audio thread: serves blocks from the link through the processor until `stop` is set.
+/// The audio thread: serves blocks from the link through the processor until `stop` is set,
+/// and runs it after other instances when their blocks ask ([`crate::audio`]).
 fn serve(
+    instance: u32,
     audio: AudioSide,
     mut served: Served,
     buses: (Vec<usize>, Vec<usize>),
@@ -984,92 +984,146 @@ fn serve(
     stop: &AtomicBool,
 ) {
     let processor = audio.0;
-    let mut changes = BlockChanges::new(pending);
-    let notes = BlockEvents::new();
-    let max_frames = served.max_frames() as usize;
-    let link_channels = served.channels() as usize;
-    let (in_channels, out_channels) = buses;
-    // One buffer per channel of every bus; the pointers below point into these and stay valid,
-    // because the buffers are never resized.
-    let mut in_buffers: Vec<Vec<Vec<f32>>> = in_channels.iter().map(|c| vec![vec![0.0; max_frames]; *c]).collect();
-    let mut out_buffers: Vec<Vec<Vec<f32>>> = out_channels.iter().map(|c| vec![vec![0.0; max_frames]; *c]).collect();
-    let mut in_pointers: Vec<Vec<*mut f32>> =
-        in_buffers.iter_mut().map(|bus| bus.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
-    let mut out_pointers: Vec<Vec<*mut f32>> =
-        out_buffers.iter_mut().map(|bus| bus.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
-    let bus_buffers = |pointers: &mut Vec<Vec<*mut f32>>| -> Vec<AudioBusBuffers> {
-        pointers
-            .iter_mut()
-            .map(|channels| AudioBusBuffers {
-                numChannels: channels.len() as int32,
-                silenceFlags: 0,
-                __field0: AudioBusBuffers__type0 { channelBuffers32: channels.as_mut_ptr() },
-            })
-            .collect()
-    };
-    let mut inputs = bus_buffers(&mut in_pointers);
-    let mut outputs = bus_buffers(&mut out_pointers);
-    let mut context: ProcessContext = blank();
-    context.sampleRate = sample_rate;
-    context.tempo = 120.0;
-    context.timeSigNumerator = 4;
-    context.timeSigDenominator = 4;
-
     // SAFETY: a live, active processor, on the audio thread.
     let _ = unsafe { processor.setProcessing(1) };
-    while !stop.load(Ordering::Acquire) {
-        served.serve_with_events(POLL, |input, events, output| {
-            let frames = (input.len() / link_channels.max(1)).min(max_frames);
-            for bus in in_buffers.iter_mut() {
-                for channel in bus.iter_mut() {
-                    channel.fill(0.0);
-                }
-            }
-            if let Some(main) = in_buffers.first_mut() {
-                for (index, channel) in main.iter_mut().enumerate() {
-                    let source = index.min(link_channels.saturating_sub(1));
-                    for (frame, sample) in channel.iter_mut().take(frames).enumerate() {
-                        *sample = input.get(frame * link_channels + source).copied().unwrap_or(0.0);
-                    }
-                }
-            }
-            let mut data = ProcessData {
-                processMode: ProcessModes_::kRealtime as int32,
-                symbolicSampleSize: SymbolicSampleSizes_::kSample32 as int32,
-                numSamples: frames as int32,
-                numInputs: inputs.len() as int32,
-                numOutputs: outputs.len() as int32,
-                inputs: inputs.as_mut_ptr(),
-                outputs: outputs.as_mut_ptr(),
-                inputParameterChanges: changes.take(events.iter().filter_map(|e| mapping.change(e))),
-                outputParameterChanges: std::ptr::null_mut(),
-                inputEvents: notes.fill(events),
-                outputEvents: std::ptr::null_mut(),
-                processContext: &mut context,
-            };
-            // SAFETY: a live, processing processor on the audio thread; every bus has a buffer
-            // per channel of at least `frames` samples, and all of it outlives the call.
-            let result = unsafe { processor.process(&mut data) };
-            changes.done();
-            context.projectTimeSamples += frames as i64;
-            context.continousTimeSamples += frames as i64;
-            if !ok(result) {
-                return;
-            }
-            if let Some(main) = out_buffers.first() {
-                for channel in 0..link_channels {
-                    let Some(source) = main.get(channel.min(main.len().saturating_sub(1))) else { break };
-                    for (frame, sample) in source.iter().take(frames).enumerate() {
-                        if let Some(out) = output.get_mut(frame * link_channels + channel) {
-                            *out = *sample;
-                        }
-                    }
-                }
-            }
-        });
+    let block = Vst3Block::new(processor, &served, buses, sample_rate, (pending, mapping));
+    if let Some(block) = crate::audio::serve(instance, block, &mut served, stop) {
+        // SAFETY: as above.
+        let _ = unsafe { block.processor.setProcessing(0) };
     }
-    // SAFETY: as above.
-    let _ = unsafe { processor.setProcessing(0) };
+}
+
+/// The processing processor and what it needs to run a block, without allocating.
+struct Vst3Block {
+    processor: ComPtr<IAudioProcessor>,
+    changes: BlockChanges,
+    notes: BlockEvents,
+    mapping: MidiMapping,
+    max_frames: usize,
+    link_channels: usize,
+    /// One buffer per channel of every bus; the pointers in `inputs` and `outputs` point into
+    /// these and stay valid, because the buffers are never resized (moving the vectors does not
+    /// move what they hold).
+    in_buffers: Vec<Vec<Vec<f32>>>,
+    out_buffers: Vec<Vec<Vec<f32>>>,
+    _in_pointers: Vec<Vec<*mut f32>>,
+    _out_pointers: Vec<Vec<*mut f32>>,
+    inputs: Vec<AudioBusBuffers>,
+    outputs: Vec<AudioBusBuffers>,
+    context: ProcessContext,
+}
+
+// SAFETY: the block is used by one audio thread at a time (behind its lock, `crate::audio`),
+// which the VST3 threading model allows for `process`: hosts run processors on whichever of
+// their audio threads is free. Its raw pointers point into buffers it owns, whose heap memory
+// does not move with it, and the COM objects it holds are only touched from `process`.
+unsafe impl Send for Vst3Block {}
+
+impl Vst3Block {
+    fn new(
+        processor: ComPtr<IAudioProcessor>,
+        served: &Served,
+        buses: (Vec<usize>, Vec<usize>),
+        sample_rate: f64,
+        (pending, mapping): (Pending, MidiMapping),
+    ) -> Self {
+        let max_frames = served.max_frames() as usize;
+        let (in_channels, out_channels) = buses;
+        let mut in_buffers: Vec<Vec<Vec<f32>>> = in_channels.iter().map(|c| vec![vec![0.0; max_frames]; *c]).collect();
+        let mut out_buffers: Vec<Vec<Vec<f32>>> =
+            out_channels.iter().map(|c| vec![vec![0.0; max_frames]; *c]).collect();
+        let mut in_pointers: Vec<Vec<*mut f32>> =
+            in_buffers.iter_mut().map(|bus| bus.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
+        let mut out_pointers: Vec<Vec<*mut f32>> =
+            out_buffers.iter_mut().map(|bus| bus.iter_mut().map(|c| c.as_mut_ptr()).collect()).collect();
+        let bus_buffers = |pointers: &mut Vec<Vec<*mut f32>>| -> Vec<AudioBusBuffers> {
+            pointers
+                .iter_mut()
+                .map(|channels| AudioBusBuffers {
+                    numChannels: channels.len() as int32,
+                    silenceFlags: 0,
+                    __field0: AudioBusBuffers__type0 { channelBuffers32: channels.as_mut_ptr() },
+                })
+                .collect()
+        };
+        let inputs = bus_buffers(&mut in_pointers);
+        let outputs = bus_buffers(&mut out_pointers);
+        let mut context: ProcessContext = blank();
+        context.sampleRate = sample_rate;
+        context.tempo = 120.0;
+        context.timeSigNumerator = 4;
+        context.timeSigDenominator = 4;
+        Self {
+            processor,
+            changes: BlockChanges::new(pending),
+            notes: BlockEvents::new(),
+            mapping,
+            max_frames,
+            link_channels: served.channels() as usize,
+            in_buffers,
+            out_buffers,
+            _in_pointers: in_pointers,
+            _out_pointers: out_pointers,
+            inputs,
+            outputs,
+            context,
+        }
+    }
+}
+
+impl crate::audio::Block for Vst3Block {
+    fn process(&mut self, input: &[f32], events: &[suhina_ipc::Event], output: &mut [f32]) {
+        let link_channels = self.link_channels;
+        let frames = (input.len() / link_channels.max(1)).min(self.max_frames);
+        for bus in self.in_buffers.iter_mut() {
+            for channel in bus.iter_mut() {
+                channel.fill(0.0);
+            }
+        }
+        if let Some(main) = self.in_buffers.first_mut() {
+            for (index, channel) in main.iter_mut().enumerate() {
+                let source = index.min(link_channels.saturating_sub(1));
+                for (frame, sample) in channel.iter_mut().take(frames).enumerate() {
+                    *sample = input.get(frame * link_channels + source).copied().unwrap_or(0.0);
+                }
+            }
+        }
+        let mapping = &self.mapping;
+        let mut data = ProcessData {
+            processMode: ProcessModes_::kRealtime as int32,
+            symbolicSampleSize: SymbolicSampleSizes_::kSample32 as int32,
+            numSamples: frames as int32,
+            numInputs: self.inputs.len() as int32,
+            numOutputs: self.outputs.len() as int32,
+            inputs: self.inputs.as_mut_ptr(),
+            outputs: self.outputs.as_mut_ptr(),
+            inputParameterChanges: self.changes.take(events.iter().filter_map(|e| mapping.change(e))),
+            outputParameterChanges: std::ptr::null_mut(),
+            inputEvents: self.notes.fill(events),
+            outputEvents: std::ptr::null_mut(),
+            processContext: &mut self.context,
+        };
+        // SAFETY: a live, processing processor on an audio thread of the process, one at a
+        // time; every bus has a buffer per channel of at least `frames` samples, and all of it
+        // outlives the call.
+        let result = unsafe { self.processor.process(&mut data) };
+        self.changes.done();
+        self.context.projectTimeSamples += frames as i64;
+        self.context.continousTimeSamples += frames as i64;
+        if !ok(result) {
+            return;
+        }
+        if let Some(main) = self.out_buffers.first() {
+            for channel in 0..link_channels {
+                let Some(source) = main.get(channel.min(main.len().saturating_sub(1))) else { break };
+                for (frame, sample) in source.iter().take(frames).enumerate() {
+                    if let Some(out) = output.get_mut(frame * link_channels + channel) {
+                        *out = *sample;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

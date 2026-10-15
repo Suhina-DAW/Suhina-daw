@@ -35,8 +35,6 @@ use clack_host::prelude::*;
 use suhina_ipc::{Event, EventKind, MAX_EVENTS, Served};
 use suhina_plugins::ParamInfo;
 
-/// How long the audio thread waits for a block before checking whether it should stop.
-const POLL: Duration = Duration::from_millis(100);
 /// Output events the audio thread has room for each block.
 const EVENT_CAPACITY: usize = 512;
 
@@ -223,7 +221,7 @@ impl HostHandlers for Host {
 /// A loaded, active CLAP plug-in and its audio thread.
 pub(crate) struct ClapPlugin {
     instance: PluginInstance<Host>,
-    audio: Option<thread::JoinHandle<StoppedPluginAudioProcessor<Host>>>,
+    audio: Option<thread::JoinHandle<Option<StoppedPluginAudioProcessor<Host>>>>,
     stop: Arc<AtomicBool>,
     latency: u32,
     pending: PendingParams,
@@ -273,8 +271,9 @@ pub(crate) fn describe(spec: &str) -> Result<Vec<suhina_plugins::scan::PluginInf
 
 impl ClapPlugin {
     /// Loads the plug-in `spec` names, activates it for the link's block size at `sample_rate`
-    /// and starts serving blocks from `served` on an audio thread.
-    pub(crate) fn load(spec: &str, served: Served, sample_rate: f64) -> Result<Self, String> {
+    /// and starts serving blocks from `served` on an audio thread, as instance `number` of the
+    /// process.
+    pub(crate) fn load(spec: &str, number: u32, served: Served, sample_rate: f64) -> Result<Self, String> {
         let (entry, wanted) = entry(spec)?;
         let factory = entry.get_plugin_factory().ok_or("the file has no plug-in factory")?;
         let ids: Vec<CString> = factory.plugin_descriptors().filter_map(|d| d.id().map(CString::from)).collect();
@@ -326,7 +325,7 @@ impl ClapPlugin {
             .name("plug-in audio".into())
             .spawn(move || {
                 crate::real_time_thread();
-                serve(stopped, served, has_input, audio_pending, &audio_stop)
+                serve(number, stopped, served, has_input, audio_pending, &audio_stop)
             })
             .map_err(|e| e.to_string())?;
         let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
@@ -542,94 +541,142 @@ impl Drop for ClapPlugin {
         self.close_editor();
         self.stop.store(true, Ordering::Release);
         if let Some(audio) = self.audio.take()
-            && let Ok(stopped) = audio.join()
+            && let Ok(Some(stopped)) = audio.join()
         {
             self.instance.deactivate(stopped);
         }
     }
 }
 
-/// The audio thread: serves blocks from the link through the plug-in until `stop` is set, and
-/// hands the stopped processor back for deactivation on the main thread.
+/// The audio thread: serves blocks from the link through the plug-in until `stop` is set (and
+/// runs it after other instances when their blocks ask, [`crate::audio`]), and hands the
+/// stopped processor back for deactivation on the main thread.
 fn serve(
+    instance: u32,
     stopped: StoppedPluginAudioProcessor<Host>,
     mut served: Served,
     has_input: bool,
     pending: PendingParams,
     stop: &AtomicBool,
-) -> StoppedPluginAudioProcessor<Host> {
-    let mut processor = match stopped.start_processing() {
+) -> Option<StoppedPluginAudioProcessor<Host>> {
+    let processor = match stopped.start_processing() {
         Ok(started) => started,
-        Err(e) => return e.into_stopped_processor(),
+        Err(e) => return Some(e.into_stopped_processor()),
     };
-    let channels = served.channels() as usize;
-    let max_frames = served.max_frames() as usize;
-    let mut inputs = vec![vec![0.0f32; max_frames]; channels];
-    let mut outputs = vec![vec![0.0f32; max_frames]; channels];
-    let mut input_ports = AudioPorts::with_capacity(channels, 1);
-    let mut output_ports = AudioPorts::with_capacity(channels, 1);
-    // Room for a block's parameter values and its events, so pushing never grows it.
-    let mut in_events = EventBuffer::with_capacity(MAX_EVENTS + MAX_PARAM_CHANGES);
-    let mut out_events = EventBuffer::with_capacity(EVENT_CAPACITY);
-    let mut steady_time = 0u64;
+    let block = ClapBlock::new(processor, &served, has_input, pending);
+    crate::audio::serve(instance, block, &mut served, stop).map(|block| block.processor.stop_processing())
+}
 
-    while !stop.load(Ordering::Acquire) {
-        served.serve_with_events(POLL, |input, events, output| {
-            let frames = input.len() / channels.max(1);
-            for (channel, buffer) in inputs.iter_mut().enumerate() {
-                for (frame, sample) in buffer.iter_mut().take(frames).enumerate() {
-                    *sample = input.get(frame * channels + channel).copied().unwrap_or(0.0);
-                }
-            }
-            let input_port = has_input.then(|| AudioPortBuffer {
-                latency: 0,
-                channels: AudioPortBufferType::f32_input_only(
-                    inputs.iter_mut().map(|b| InputChannel::variable(b.get_mut(..frames).unwrap_or_default())),
-                ),
-            });
-            let audio_in = input_ports.with_input_buffers(input_port);
-            let mut audio_out = output_ports.with_output_buffers([AudioPortBuffer {
-                latency: 0,
-                channels: AudioPortBufferType::f32_output_only(
-                    outputs.iter_mut().map(|b| b.get_mut(..frames).unwrap_or_default()),
-                ),
-            }]);
-            out_events.clear();
-            in_events.clear();
-            // Parameter values first, at the block's start; then the notes, in time order.
-            if let Ok(mut values) = pending.try_lock() {
-                let room = values.len().min(MAX_PARAM_CHANGES);
-                for (id, value) in values.drain(..room) {
-                    if let Some(id) = ClapId::from_raw(id) {
-                        in_events.push(&ParamValueEvent::new(0, id, Pckn::match_all(), value));
-                    }
-                }
-            }
-            for event in events {
-                push_event(&mut in_events, event);
-            }
-            let processed = processor.process(
-                &audio_in,
-                &mut audio_out,
-                &InputEvents::from_buffer(&in_events),
-                &mut OutputEvents::from_buffer(&mut out_events),
-                Some(steady_time),
-                None,
-            );
-            steady_time = steady_time.wrapping_add(frames as u64);
-            // A failed block stays silent (the output starts zeroed).
-            if processed.is_ok() {
-                for (channel, buffer) in outputs.iter().enumerate() {
-                    for (frame, sample) in buffer.iter().take(frames).enumerate() {
-                        if let Some(out) = output.get_mut(frame * channels + channel) {
-                            *out = *sample;
-                        }
-                    }
-                }
-            }
-        });
+/// The started plug-in and what it needs to run a block, without allocating.
+struct ClapBlock {
+    processor: StartedPluginAudioProcessor<Host>,
+    channels: usize,
+    has_input: bool,
+    inputs: Vec<Vec<f32>>,
+    outputs: Vec<Vec<f32>>,
+    input_ports: AudioPorts,
+    output_ports: AudioPorts,
+    in_events: EventBuffer,
+    out_events: EventBuffer,
+    pending: PendingParams,
+    steady_time: u64,
+}
+
+impl ClapBlock {
+    fn new(
+        processor: StartedPluginAudioProcessor<Host>,
+        served: &Served,
+        has_input: bool,
+        pending: PendingParams,
+    ) -> Self {
+        let channels = served.channels() as usize;
+        let max_frames = served.max_frames() as usize;
+        Self {
+            processor,
+            channels,
+            has_input,
+            inputs: vec![vec![0.0f32; max_frames]; channels],
+            outputs: vec![vec![0.0f32; max_frames]; channels],
+            input_ports: AudioPorts::with_capacity(channels, 1),
+            output_ports: AudioPorts::with_capacity(channels, 1),
+            // Room for a block's parameter values and its events, so pushing never grows it.
+            in_events: EventBuffer::with_capacity(MAX_EVENTS + MAX_PARAM_CHANGES),
+            out_events: EventBuffer::with_capacity(EVENT_CAPACITY),
+            pending,
+            steady_time: 0,
+        }
     }
-    processor.stop_processing()
+}
+
+impl crate::audio::Block for ClapBlock {
+    fn process(&mut self, input: &[f32], events: &[Event], output: &mut [f32]) {
+        let Self {
+            processor,
+            channels,
+            has_input,
+            inputs,
+            outputs,
+            input_ports,
+            output_ports,
+            in_events,
+            out_events,
+            pending,
+            steady_time,
+        } = self;
+        let channels = *channels;
+        let frames = input.len() / channels.max(1);
+        for (channel, buffer) in inputs.iter_mut().enumerate() {
+            for (frame, sample) in buffer.iter_mut().take(frames).enumerate() {
+                *sample = input.get(frame * channels + channel).copied().unwrap_or(0.0);
+            }
+        }
+        let input_port = has_input.then(|| AudioPortBuffer {
+            latency: 0,
+            channels: AudioPortBufferType::f32_input_only(
+                inputs.iter_mut().map(|b| InputChannel::variable(b.get_mut(..frames).unwrap_or_default())),
+            ),
+        });
+        let audio_in = input_ports.with_input_buffers(input_port);
+        let mut audio_out = output_ports.with_output_buffers([AudioPortBuffer {
+            latency: 0,
+            channels: AudioPortBufferType::f32_output_only(
+                outputs.iter_mut().map(|b| b.get_mut(..frames).unwrap_or_default()),
+            ),
+        }]);
+        out_events.clear();
+        in_events.clear();
+        // Parameter values first, at the block's start; then the notes, in time order.
+        if let Ok(mut values) = pending.try_lock() {
+            let room = values.len().min(MAX_PARAM_CHANGES);
+            for (id, value) in values.drain(..room) {
+                if let Some(id) = ClapId::from_raw(id) {
+                    in_events.push(&ParamValueEvent::new(0, id, Pckn::match_all(), value));
+                }
+            }
+        }
+        for event in events {
+            push_event(in_events, event);
+        }
+        let processed = processor.process(
+            &audio_in,
+            &mut audio_out,
+            &InputEvents::from_buffer(in_events),
+            &mut OutputEvents::from_buffer(out_events),
+            Some(*steady_time),
+            None,
+        );
+        *steady_time = steady_time.wrapping_add(frames as u64);
+        // A failed block stays silent (the output starts zeroed).
+        if processed.is_ok() {
+            for (channel, buffer) in outputs.iter().enumerate() {
+                for (frame, sample) in buffer.iter().take(frames).enumerate() {
+                    if let Some(out) = output.get_mut(frame * channels + channel) {
+                        *out = *sample;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The host's window as the parent CLAP's `gui` extension takes on this system.

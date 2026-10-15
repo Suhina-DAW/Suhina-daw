@@ -199,3 +199,41 @@ fn events_go_with_their_block() {
     assert_eq!(link.process_with_events(&[0.0; 16], &many, &mut [0.0; 16], LONG), Outcome::Done);
     assert_eq!(host.join().ok(), Some(MAX_EVENTS));
 }
+
+#[test]
+fn a_block_names_the_instances_that_run_it_after_the_links_own() {
+    let mut link = Link::create(2, BLOCK as u32).unwrap_or_else(|e| panic!("{e}"));
+    let address = link.address();
+    // A host that records each block's followers and adds 1 per instance run (its own first).
+    let host = thread::spawn(move || {
+        let mut served = Served::open(&address).unwrap_or_else(|e| panic!("{e}"));
+        let mut seen = Vec::new();
+        while seen.len() < 3 {
+            served.serve_joint(LONG, |input, _, followers, output| {
+                let runs = 1.0 + followers.len() as f32;
+                for (o, i) in output.iter_mut().zip(input) {
+                    *o = *i + runs;
+                }
+                seen.push(followers.to_vec());
+            });
+        }
+        seen
+    });
+    let input = vec![1.0; BLOCK * 2];
+    let mut output = vec![0.0; BLOCK * 2];
+    assert!(link.ready());
+    assert!(link.send_joint(&input, &[], &[7, 3, 9], output.len()));
+    assert!(!link.ready(), "a block is out");
+    assert_eq!(link.wait(&mut output, Instant::now() + LONG), Outcome::Done);
+    assert!(output.iter().all(|s| *s == 5.0));
+    assert!(link.ready());
+    // A plain block names none; past MAX_FOLLOWERS the rest are dropped.
+    assert_eq!(link.process(&input, &mut output, LONG), Outcome::Done);
+    let many: Vec<u32> = (0..MAX_FOLLOWERS as u32 + 10).collect();
+    assert!(link.send_joint(&input, &[], &many, output.len()));
+    assert_eq!(link.wait(&mut output, Instant::now() + LONG), Outcome::Done);
+    let seen = host.join().unwrap_or_else(|_| panic!("host"));
+    assert_eq!(seen[0], [7, 3, 9]);
+    assert!(seen[1].is_empty());
+    assert_eq!(seen[2], many[..MAX_FOLLOWERS]);
+}
