@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **95**, every one reachable from the UI, the CLI and MCP |
+| Commands | **96**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -144,7 +144,7 @@ documented behaviour that exists today.
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). |
 | 23 | Working with Instruments and Effects (Device View) | 34 | 35 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, graphs and custom panels, and support explicit revision updates. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
-| 24 | Using Plug-Ins | 12 | 55 % | partial | CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
+| 24 | Using Plug-Ins | 12 | 57 % | partial | CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
 | 26 | Automation and Editing Envelopes | 22 | 0 % | absent | No automation lanes, no recording or drawing of automation. |
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |
@@ -172,7 +172,7 @@ documented behaviour that exists today.
 | Area | Manual pages | Covered |
 |---|---|---|
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
-| Browser, files, project (ch 4, 5) | 103 | 41 % |
+| Browser, files, project (ch 4, 5) | 103 | 43 % |
 | Devices (ch 23-25, 29-31) | 338 | 15 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
@@ -344,7 +344,7 @@ or does something Live does not:
 | Gap | Manual pages | Today | What closing it means |
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 15 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
-| Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
+| Browser and file management depth | 103 (ch 4, 5) | 43 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
 | Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
