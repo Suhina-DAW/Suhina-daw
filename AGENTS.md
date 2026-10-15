@@ -180,6 +180,15 @@ Several agents often run at once, so an agent never starts work that exists alre
 - **Before opening a pull request**, check the issue's linked pull requests; when one is open,
   push to it rather than opening another.
 
+**Branch names.** A branch is `<kind>/<short-description>`: `feature/` for something a user can
+do, `fix/` for a bug, `docs/` for documentation, `chore/` for repository, build and release work,
+and two to five lowercase words joined by hyphens (`feature/piano-roll-workflow`,
+`fix/short-panes`). Before the first push, create that branch from the starting point and open the
+pull request from it, even if the session was started on a `claude/...` branch; never open a pull
+request from a `claude/...` branch. A session started for you can be given its branch up front
+(`outcome_branch`). The [Branch name](.github/workflows/branch-name.yml) check warns about a name
+that does not follow the rule; it never fails.
+
 Continuing open work is always allowed, in a new session too. A second, competing pull request for
 the same issue is opened only when the user asks for one, and its description says
 `Alternative to #N`.
