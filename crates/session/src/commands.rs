@@ -934,6 +934,7 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output,
         sends: Vec::new(),
         devices: Vec::new(),

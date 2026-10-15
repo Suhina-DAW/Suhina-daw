@@ -50,6 +50,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: Vec::new(),

@@ -67,6 +67,9 @@ pub(crate) struct Chain {
     /// Some chain plays into this one (a group bus): it runs after them, in order, rather than
     /// in the stages the other chains run their plug-ins in together. Set with `target`.
     pub(crate) is_bus: bool,
+    /// The track's cue is on: its output after the chain is also added to the cue bus, at
+    /// these gains (its own channel's volume and pan, divided by `CHAIN_INPUT_GAIN`).
+    pub(crate) cue: Option<(f32, f32)>,
     buffer: Vec<f32>,
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
@@ -175,6 +178,7 @@ impl Chain {
             post: (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN),
             target: None,
             is_bus: false,
+            cue: None,
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
@@ -204,6 +208,7 @@ impl Chain {
             post: (1.0, 1.0),
             target: None,
             is_bus: false,
+            cue: None,
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::new(),
             span_events: Vec::new(),
@@ -220,6 +225,16 @@ impl Chain {
     /// Sets the gains applied after the devices: the track's gains up to where its sound goes.
     pub(crate) fn set_post(&mut self, post: (f32, f32)) {
         self.post = (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN);
+    }
+
+    /// Sets the gains the chain's output is added to the cue bus at, or `None` for no cue.
+    pub(crate) fn set_cue(&mut self, gains: Option<(f32, f32)>) {
+        self.cue = gains.map(|(left, right)| (left / CHAIN_INPUT_GAIN, right / CHAIN_INPUT_GAIN));
+    }
+
+    /// Whether it runs devices (a passthrough chain has none).
+    pub(crate) fn has_devices(&self) -> bool {
+        !self.slots.is_empty()
     }
 
     /// The first `frames` frames of the buffer, for the chains that play into this bus to add
@@ -425,8 +440,8 @@ impl Chain {
     }
 
     /// Runs the devices over the rest of a block of `frames` frames and adds the result, at
-    /// the track's gains, to `out`.
-    pub(crate) fn finish(&mut self, out: &mut [f32], frames: usize, context: &ProcessContext) {
+    /// the track's gains, to `out`, and, when its cue is on, at its cue gains to `cue`.
+    pub(crate) fn finish(&mut self, out: &mut [f32], cue: &mut [f32], frames: usize, context: &ProcessContext) {
         self.context = *context;
         self.run(frames);
         let (gain_left, gain_right) = self.post;
@@ -435,6 +450,12 @@ impl Chain {
         for ([l, r], [cl, cr]) in out.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
             *l += cl * gain_left;
             *r += cr * gain_right;
+        }
+        if let Some((cue_left, cue_right)) = self.cue {
+            for ([l, r], [cl, cr]) in cue.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
+                *l += cl * cue_left;
+                *r += cr * cue_right;
+            }
         }
     }
 

@@ -96,6 +96,9 @@ pub struct Channel {
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (headphones), so it can be listened to apart from the main
+    /// mix; the main mix does not change.
+    pub cue: bool,
     /// Where the channel's output goes; `None` means the audio output (the master).
     pub output: Option<ChannelId>,
     pub sends: Vec<Send>,
@@ -662,6 +665,7 @@ mod tests {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: Vec::new(),

@@ -30,6 +30,7 @@ fn everything() -> Project {
         pan: -0.25,
         mute: id == 2,
         solo: false,
+        cue: false,
         output: output.map(ChannelId),
         sends: Vec::new(),
         devices: Vec::new(),

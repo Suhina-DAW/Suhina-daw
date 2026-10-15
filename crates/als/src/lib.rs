@@ -710,6 +710,7 @@ fn empty_channel(id: ChannelId, name: &str, role: ChannelRole) -> Channel {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),

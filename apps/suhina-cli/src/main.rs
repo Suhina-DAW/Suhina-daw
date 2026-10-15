@@ -841,6 +841,7 @@ fn demo_project() -> Project {
         pan,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
