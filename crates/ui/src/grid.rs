@@ -2,7 +2,7 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, LaunchSettings, Project, Rgb, TrackId};
 use suhina_engine::{LauncherMonitor, Queued};
 
 use crate::theme;
@@ -55,6 +55,8 @@ pub struct Slot {
     pub enabled: bool,
     /// The clip's loop length in beats, for its progress while playing.
     pub length: f64,
+    /// The clip's launch settings; `None` for an empty slot.
+    pub launch: Option<LaunchSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,7 +132,10 @@ impl Grid {
             let slots = match (kind, launcher.and_then(|i| project.launcher.columns.get(i))) {
                 (ColumnKind::Return, _) => Vec::new(),
                 (_, None) => {
-                    vec![Slot { state: SlotState::Empty, name: String::new(), enabled: true, length: 0.0 }; scene_count]
+                    vec![
+                        Slot { state: SlotState::Empty, name: String::new(), enabled: true, length: 0.0, launch: None };
+                        scene_count
+                    ]
                 }
                 (_, Some(column)) => (0..scene_count)
                     .map(|scene| {
@@ -151,6 +156,7 @@ impl Grid {
                                 .unwrap_or_default(),
                             enabled: clip.is_none_or(|c| c.enabled),
                             length: clip.map_or(0.0, |c| c.loop_range.map_or(c.length, |r| r.end - r.start)),
+                            launch: clip.map(|c| c.launch),
                         }
                     })
                     .collect(),

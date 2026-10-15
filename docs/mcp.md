@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -46,7 +46,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `projects.close` (through `command_run`) manage them. Tools work on the active project, or on
   the one their `project` argument names, without switching. At most 32 are open.
 - **Audio output.** With `--audio`, each opened project also plays on the chosen output device
-  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
+  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `clip.release`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error; launch scripts in
@@ -103,6 +103,13 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
   `preview.stop` stops it; `launcher.state` reports `preview`.
 
+- **Launch settings.** `clip.setLaunchMode {track, scene, mode}` (trigger, gate, toggle,
+  repeat), `clip.setLegato {track, scene, on}` and `clip.setQuantization {track, scene, value}`
+  (global, none or a grid value) set how a slot's clip launches, one undo step each;
+  `project.launcher` shows them. `clip.launch` is a press of the slot's launch button and
+  `clip.release` its release, which stops a gate clip and ends a repeat clip's repeats; in a
+  `project_render` script the two can be steps at different times
+  ([spec](spec/clip-launching.md#launch-settings)).
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.

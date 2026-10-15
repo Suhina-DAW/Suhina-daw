@@ -9,7 +9,7 @@ primary platform; Windows and macOS are supported.
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, the metronome, launch modes, legato and per-clip quantisation work; follow actions to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
 | M7 | **More formats:** DAWproject import and export | not started |
@@ -34,7 +34,7 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
-7. **Follow actions, launch modes, legato and per-clip quantisation** (the rest of M4).
+7. **Follow actions** (the rest of M4).
 
 Finishing what is in flight (M3's commands, M6's automation and editors, M7, M8's installers and
 detail area) goes alongside this list, not after it.
@@ -205,7 +205,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
   `suhina-cli play --launcher` takes them as typed lines, `suhina-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
-- Still to do: follow actions, launch modes, per-clip quantisation, fades on launched clips
+- Launch modes (trigger, gate, toggle, repeat), legato and per-clip launch quantisation:
+  `clip.setLaunchMode`, `clip.setLegato`, `clip.setQuantization`, and `clip.release` for the
+  release of a slot's launch button; in the Session view a slot launches as the mouse button goes
+  down, and right-clicking a clip sets its launch settings
+  ([spec](docs/spec/clip-launching.md#launch-settings)).
+- Still to do: follow actions, launching slots from keys and MIDI notes, fades on launched clips
   ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.

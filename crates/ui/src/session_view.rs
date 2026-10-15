@@ -399,8 +399,11 @@ fn column_body(
         };
         let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
-        if response.is_some_and(|r| r.clicked()) {
-            actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+        if let Some(response) = &response {
+            crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions);
+            if let Some(launch) = slot.launch {
+                response.context_menu(|ui| crate::slot_launch::launch_menu(ui, column.track, number, launch, actions));
+            }
         }
         slot_cell(painter, rect, column, slot, hover, pulse, progress);
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));

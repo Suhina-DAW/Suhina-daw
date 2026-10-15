@@ -2577,6 +2577,15 @@ fn describe(action: &Action) -> Option<String> {
         "track.stop" => format!("Stopping track {}", p["track"]),
         "launcher.stopAll" => "Stopping all clips".into(),
         "launcher.setQuantization" => format!("Launch quantisation {}", p["value"].as_str().unwrap_or_default()),
+        "clip.setLaunchMode" => format!("Launch mode {}", p["mode"].as_str().unwrap_or_default()),
+        "clip.setQuantization" => format!("Clip launch quantisation {}", p["value"].as_str().unwrap_or_default()),
+        "clip.setLegato" => {
+            if p["on"] == true {
+                "Legato on".into()
+            } else {
+                "Legato off".into()
+            }
+        }
         "transport.setTempo" => format!("Tempo {}", p["bpm"]),
         "edit.undo" => "Undone".into(),
         "edit.redo" => "Redone".into(),

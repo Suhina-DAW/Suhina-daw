@@ -3,10 +3,11 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
+  - crates/ui/src/slot_launch.rs
   - crates/ui/src/app.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/detail_view.rs
@@ -86,6 +87,12 @@ Each cell is a slot for one clip.
 | Clip, queued | launch control in a pending (blinking) state until the quantisation point | |
 | Clip, playing | launch control in the playing state, progress through the clip | relaunches |
 | Clip, recording | recording state | |
+
+**Suhina:** a slot launches when the mouse button goes down on it, not when the click ends, and
+going up is the release a clip in gate or repeat mode listens for
+([clip launching](clip-launching.md#launch-settings)). Right-clicking a clip opens its launch
+settings: **Launch mode** (Trigger, Gate, Toggle, Repeat), **Launch quantisation** (Global,
+None, 8 bars … 1/32) and **Legato**, each an undoable edit.
 
 Double-clicking an empty slot on a MIDI track creates an empty one-bar clip and opens it in the
 detail area. Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip

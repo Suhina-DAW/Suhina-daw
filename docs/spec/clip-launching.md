@@ -1,26 +1,31 @@
 ---
-description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement
-read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
+description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launch modes, legato, per-clip quantisation, launcher over arrangement
+read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, launch modes, gate, toggle, repeat, legato, per-clip quantisation
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
+  - crates/engine/src/launcher/modes.rs
+  - crates/model/src/launch.rs
+  - crates/session/src/launch.rs
   - crates/session/tests/launcher.rs
+  - crates/session/tests/launch_settings.rs
 ---
 
 # Clip launching
 
 - **Sources:** the behaviour of the Session View as the public Live 12 manual describes it
-  (launching clips and scenes, launch quantisation, stop buttons, scene tempo), and the Live Set
+  (launching clips and scenes, launch quantisation, stop buttons, scene tempo, clip launch
+  modes, legato and clip quantisation), and the Live Set
   fields in [`als-format.md`](als-format.md) (scenes, clip slots, `HasStop`, scene tempo, clip
   markers; corpus series 1 and 4).
 - **Observed with:** nothing yet. The launch behaviour has not been checked against Live 12.4.6
   by listening or watching; every statement marked **(hypothesis)** needs that check (see
   *To observe* below). The Live Set fields come from the corpus and are observed.
-- **Status:** first version, implemented in `crates/engine/src/launcher.rs` (ROADMAP M4).
-  Follow actions, per-clip launch quantisation and launch modes (trigger, gate, toggle, repeat)
-  are not specified yet; they need a corpus series of their own.
+- **Status:** implemented in `crates/engine/src/launcher.rs` (ROADMAP M4); launch modes, legato
+  and per-clip quantisation in `crates/engine/src/launcher/modes.rs`. Follow actions are not
+  specified yet. Reading the launch settings from a Live Set needs a corpus series of its own.
 
 This document describes the behaviour Suhina implements, in Suhina's terms. Where Suhina
 decides something the sources do not settle, the text says so (**Suhina:**).
@@ -68,6 +73,55 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    **Suhina:** back to arrangement stops the launched clips of those tracks (with the stop
    fade) and drops their queued launches, so a track never plays both at once.
 
+## Launch settings
+
+Every clip has launch settings. They count when the clip is in a slot; a clip on the arrangement
+keeps them (so it launches the same way when it is put into a slot again) but does not use them.
+A new clip has the defaults: trigger, legato off, global quantisation.
+
+A slot's launch button has a **press** and a **release**. A mouse button going down on the slot
+is the press and going up is the release; `clip.launch` is the press and `clip.release` the
+release for the CLI and agents. A click that has no press and release of its own (the keyboard,
+an accessibility tool) is a press.
+
+1. **Launch mode.**
+   - **Trigger** (default): the press launches the clip; it plays until it is stopped or
+     replaced. The release does nothing.
+   - **Gate:** the press launches the clip, the release stops it, at the clip's quantisation
+     like any stop. **Suhina:** a release before the launch has happened takes the launch back,
+     and the clip does not play. **(hypothesis:** the stop at the release is quantised.**)**
+   - **Toggle:** the press launches the clip; a press while it plays stops it, quantised.
+     **Suhina:** a press before a queued launch or stop of this clip has happened takes that
+     launch or stop back.
+   - **Repeat:** the press launches the clip, and while the button is held it is launched again
+     at every boundary of its quantisation. **Suhina:** with no quantisation there is no boundary
+     to repeat on, and the clip plays as if triggered. After the release the clip plays on from
+     where it is **(hypothesis)**; only the next repeat is taken back.
+2. **Legato.** A clip with legato on starts at the position of the clip it replaces on its track,
+   instead of at its own start. **Suhina:** the position is the time since the replaced clip was
+   launched, which carries on from clip to clip while one legato clip replaces another; a clip
+   that loops wraps it into its loop, one that does not wraps it into its length. On a track that
+   plays nothing the clip starts from its start. Notes that start before that position do not
+   sound; audio plays from that place in the file.
+3. **Clip quantisation.** A clip's launch waits for its own grid instead of the global launch
+   quantisation: **global** (default; the launcher's value, followed as it changes), **none**,
+   or any of the global values. The stop of a gate or toggle clip waits for the same grid.
+   **Suhina:** a scene launch launches each clip on its own grid; the track's own stop button,
+   "stop all clips" and a scene's tempo keep the global grid.
+4. **Scenes.** A clip launched by a scene starts like a triggered clip, whatever its mode: a
+   scene has no release, and launching it again relaunches its row. Legato and the clip's
+   quantisation apply. **(hypothesis)**
+5. **Another launch in the column.** A held gate or repeat clip that another launch replaces
+   (another slot, or a scene) no longer listens for its release.
+
+**Commands.** `clip.setLaunchMode {track, scene, mode}` (trigger, gate, toggle, repeat),
+`clip.setLegato {track, scene, on}` and `clip.setQuantization {track, scene, value}` (global,
+none, 8 bars … 1/32) change the clip in a slot, one undo step each; an edit while the clip is
+held or playing is heard at once ([ADR 0005](../decisions/0005-edits-while-playing.md)).
+`clip.release {track, scene}` is a transport command like `clip.launch`. `project.launcher`
+reports each clip's `launch_mode`, `legato` and `quantization`. The project file keeps the
+settings ([Suhina format](suhina-format.md)).
+
 ## Suhina decisions
 
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
@@ -87,7 +141,7 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   tempo by reading faster or slower (re-pitch), since their stretchers are prepared for the
   project tempo; unwarped audio clips keep playing at the speed of their file. The arrangement
   keeps its frame positions for now; a tempo map for the arrangement comes later.
-- **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
+- **Commands.** Every action is a command (`clip.launch`, `clip.release`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`), sent to the audio thread through a lock-free queue and applied at the start
@@ -110,9 +164,19 @@ with a screen recording or notes, no audio from Live needed):
 - Launch a clip on a track that has arrangement clips, then stop it: does the track stay silent
   until "Back to Arrangement"?
 - Global quantisation: where it is stored in the Live Set, and its default in a new set.
+- Gate: is the stop at the release quantised, and does a release before the launch keep the
+  clip from playing?
+- Repeat: after the release, does the clip play on or stop?
+- A scene launch: do the clips in its row keep their launch modes, legato and quantisation?
+- Where a clip's launch mode, legato and quantisation are stored in a Live Set (a corpus series
+  that changes one of them per saved variant).
 
 ## Not yet
 
-- Follow actions, launch modes, per-clip launch quantisation, legato.
-- Reading the global launch quantisation from a Live Set (needs a corpus series).
+- Follow actions.
+- Reading the global launch quantisation and the clips' launch settings from a Live Set (needs a
+  corpus series).
+- Launching slots from computer keys and MIDI notes (their press and release would drive gate
+  and repeat the same way).
+- Launch velocity.
 - Recording into slots.

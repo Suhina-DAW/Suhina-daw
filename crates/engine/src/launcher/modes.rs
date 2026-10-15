@@ -76,12 +76,8 @@ impl Launcher {
                     c.pending = None;
                 }
             }
-            Some(LaunchMode::Repeat) => {
-                // The clip plays on; only the next repeat is taken back.
-                if queued == Some((Queued::Launch(slot), true)) {
-                    c.pending = None;
-                }
-            }
+            // The clip plays on; only the next repeat is taken back.
+            Some(LaunchMode::Repeat) if queued == Some((Queued::Launch(slot), true)) => c.pending = None,
             _ => {}
         }
     }
