@@ -3,9 +3,10 @@ description: How much of Ableton Live 12's documented functionality Suhina has t
 read_when: Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap.
 type: plan
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - scripts/parity/**
+  - .github/workflows/parity-notice.yml
 ---
 
 <!-- parity:begin title --># Parity with Ableton Live 12 (status check, 2026-10-13)<!-- parity:end -->
@@ -456,3 +457,13 @@ figures:
 | `scripts/parity/charts.py` | the two figures, into `docs/research/` |
 | `scripts/parity/update_report.py` | the marked parts of this document, from `score.py` and `devices.json` |
 | `scripts/parity/run.py --pdf <file>` | all five in order |
+
+**Keeping it current.** Every pull request that adds, changes or removes something a user can do
+updates the coverage it moves in `score.py` (and `devices.json` for a built-in effect or
+instrument) and runs `update_report.py`, in the same pull request; one that moves no coverage says
+`Parity: no change` and why in its description
+([AGENTS.md › Before you finish a task](../../AGENTS.md#4-before-you-finish-a-task)).
+`scripts/parity/pr_notice.py`, run by
+[`.github/workflows/parity-notice.yml`](../../.github/workflows/parity-notice.yml), warns on a pull
+request that changes `crates/`, `devices/` or `apps/` and does neither. It is a warning, not a
+failure.

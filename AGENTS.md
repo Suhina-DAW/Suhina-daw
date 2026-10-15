@@ -204,6 +204,17 @@ Write them by doing them in the build, not from the code. A change with nothing 
 (a refactor, tests, CI, documentation) says so in one line instead; an engine change a user can
 hear or measure is not one of them.
 
+**A change in what Suhina does updates the parity measurement.** Always, in the same pull request:
+every change that adds, changes or removes something a user can do (the same changes that need a
+*How to check it* section) updates the coverage of the chapters it moves in
+[`scripts/parity/score.py`](scripts/parity/score.py), and
+[`scripts/parity/devices.json`](scripts/parity/devices.json) for a built-in effect or instrument,
+runs `python scripts/parity/update_report.py`, and commits what it writes into
+[`docs/research/parity-live-12.md`](docs/research/parity-live-12.md). A pull request that moves no
+coverage writes `Parity: no change` and the reason in its description ("Parity: no change, a
+refactor"). When a pull request changes `crates/`, `devices/` or `apps/` and does neither, the
+[Parity notice](.github/workflows/parity-notice.yml) check warns; it does not fail.
+
 **Documentation is part of the change.** A pull request that changes how something works updates,
 in the same pull request, every document that describes it, so the docs never describe code
 that no longer exists:
