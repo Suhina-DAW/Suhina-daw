@@ -20,11 +20,11 @@ mod follow;
 #[cfg(test)]
 mod follow_tests;
 mod launcher;
+#[cfg(test)]
+mod loop_tests;
 mod meters;
 #[cfg(test)]
 mod meters_tests;
-#[cfg(test)]
-mod loop_tests;
 mod metronome;
 mod plugin;
 mod plugin_params;

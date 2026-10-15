@@ -913,7 +913,7 @@ impl Renderer {
             LaunchCommand::SetPosition { beat } => self.set_position(beat),
             LaunchCommand::Locate { beat } => {
                 if self.running && beat.is_finite() {
-                    self.jump(beat.clamp(0.0, MAX_START_BEAT));
+                    self.jump_to(beat.clamp(0.0, MAX_START_BEAT));
                 }
             }
             LaunchCommand::ResumeColumn { column, slot, elapsed_beats } => {
@@ -1109,12 +1109,6 @@ impl Renderer {
             self.graph.launcher.beat = self.start_beat;
             return;
         }
-        self.jump(self.start_beat);
-    }
-
-    /// While running: playback goes on from `beat` at once. Launches and a scene tempo still
-    /// waiting are queued again for the next boundary from there.
-    fn jump(&mut self, beat: f64) {
         self.jump_to(self.start_beat);
     }
 

@@ -107,6 +107,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
                     follow_action: Default::default(),
                 }],
             }],
+            markers: Vec::new(),
         },
         ..Project::default()
     }

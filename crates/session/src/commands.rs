@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, Project, Scene, Slot, TimeSignature, Track, TrackId, Marker, MAX_GROUP_DEPTH,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, MAX_GROUP_DEPTH,
+    Marker, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
 use crate::{CommandError, Session, automation, devices, files, follow, meters, notes, preview};

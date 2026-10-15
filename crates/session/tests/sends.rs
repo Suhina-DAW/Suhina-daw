@@ -85,6 +85,7 @@ fn project() -> Project {
                     extensions: Extensions::default(),
                 }],
             }],
+            markers: Vec::new(),
         },
         ..Project::default()
     }

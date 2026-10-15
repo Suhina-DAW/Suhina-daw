@@ -72,6 +72,7 @@ fn sending(level: f64, pre_fader: bool, return_devices: Vec<Device>) -> Project 
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip] }],
+            markers: Vec::new(),
         },
         ..Project::default()
     }

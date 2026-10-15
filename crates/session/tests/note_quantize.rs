@@ -56,6 +56,7 @@ fn project(notes: Vec<Note>) -> Project {
                 track: Some(TrackId(1)),
                 clips: vec![clip(1), clip(2)],
             }],
+            markers: Vec::new(),
         },
         launcher: Launcher {
             scenes: vec![Scene::default()],

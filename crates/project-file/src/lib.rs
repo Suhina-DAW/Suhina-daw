@@ -21,7 +21,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation, Marker,
+    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
+    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
+    FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Marker, Note,
+    Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation,
 };
 
 /// The file extension, without the dot.

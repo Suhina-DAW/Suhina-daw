@@ -17,7 +17,8 @@ use roxmltree::Node;
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
-    LoopRange, Marker, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, ValidationError, WarpMarker, MAX_GROUP_DEPTH,
+    LoopRange, MAX_GROUP_DEPTH, Marker, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId,
+    Transport, ValidationError, WarpMarker,
 };
 
 /// Upper bound for the decompressed XML, so a malicious file cannot exhaust memory.
