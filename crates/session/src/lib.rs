@@ -6,6 +6,7 @@ pub mod audio;
 mod blank;
 mod commands;
 mod devices;
+mod editing;
 mod files;
 mod library;
 mod plugins;
@@ -237,6 +238,13 @@ impl Session {
     /// player is started with [`Session::audio`].
     pub fn set_audio(&mut self, audio: suhina_engine::AudioPool) {
         self.audio = audio;
+        self.audio_changed = true;
+    }
+
+    /// Puts audio made by a command (a consolidated range) into the pool under `key`, for the
+    /// player to hear with the next edit.
+    pub(crate) fn add_audio(&mut self, key: String, data: suhina_engine::AudioData) {
+        self.audio.files.insert(key, std::sync::Arc::new(data));
         self.audio_changed = true;
     }
 

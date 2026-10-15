@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, devices, files, preview};
+use crate::{CommandError, Session, devices, editing, files, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -372,6 +372,28 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: duplicate_clip,
+    },
+    CommandSpec {
+        id: "clip.split",
+        label: "Cut an arrangement clip in two at a song position; the second part plays on from where the clip was",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            param("at", ParamType::Number, "where to cut, in beats from the beginning of the song, inside the clip"),
+        ],
+        kind: CommandKind::Edit,
+        run: editing::split_clip,
+    },
+    CommandSpec {
+        id: "clip.consolidate",
+        label: "Turn a range of one track into one clip: MIDI clips by joining their notes, audio clips by rendering them (no devices) to a new file next to the project",
+        params: &[
+            TRACK,
+            param("start", ParamType::Number, "where the range starts, in beats from the beginning, at least 0"),
+            param("end", ParamType::Number, "where the range ends, in beats, after start"),
+        ],
+        kind: CommandKind::Edit,
+        run: editing::consolidate,
     },
     CommandSpec {
         id: "track.setOutput",
@@ -1071,7 +1093,7 @@ fn delete_track(session: &mut Session, params: &Value) -> Result<Value, CommandE
 }
 
 /// The lane of `params.track` and the clip index in it, checked.
-fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), CommandError> {
+pub(crate) fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), CommandError> {
     let track = track_id(p, params)?;
     let index = params.get("index").and_then(Value::as_u64).ok_or("index must be a whole number from project.clips")?;
     let lane =
@@ -1445,7 +1467,7 @@ pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
             kept.push(first);
         }
         if end > to {
-            let offset = content_at(&clip, to - start);
+            let offset = content_at(&clip, to - start, 1.0);
             let mut second = Clip { start: to, length: end - to, offset, ..clip };
             if split {
                 second.fade_in = 0.0;
@@ -1457,11 +1479,18 @@ pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
     *clips = kept;
 }
 
-/// Where in its content a clip is `beats` after it starts, following its loop.
-fn content_at(clip: &Clip, beats: f64) -> f64 {
-    let at = clip.offset + beats;
-    match clip.loop_range {
-        Some(r) if r.end > r.start && at >= r.end => r.start + (at - r.start).rem_euclid(r.end - r.start),
+/// Where in its content a clip is `beats` after it starts, moving `rate` content beats per beat
+/// and following its loop, as the engine plays it: a start marker at or past the loop end starts
+/// at the loop start.
+pub(crate) fn content_at(clip: &Clip, beats: f64, rate: f64) -> f64 {
+    let loop_range = clip.loop_range.filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start);
+    let from = match loop_range {
+        Some(r) if clip.offset >= r.end => r.start,
+        _ => clip.offset,
+    };
+    let at = from + beats * rate;
+    match loop_range {
+        Some(r) if at >= r.end => r.start + (at - r.end).rem_euclid(r.end - r.start),
         _ => at,
     }
 }
