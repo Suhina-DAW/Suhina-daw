@@ -159,6 +159,21 @@ fn everything() -> Project {
             ],
         },
         launcher: Launcher {
+            mappings: vec![
+                LaunchMapping {
+                    source: MappingSource::key("Q").unwrap(),
+                    target: MappingTarget::Slot { track: TrackId(2), scene: 1 },
+                },
+                LaunchMapping {
+                    source: MappingSource::note(10, 36).unwrap(),
+                    target: MappingTarget::Scene { scene: 0 },
+                },
+                // Its track is gone: kept, unused.
+                LaunchMapping {
+                    source: MappingSource::key("Space").unwrap(),
+                    target: MappingTarget::Stop { track: TrackId(99) },
+                },
+            ],
             scenes: vec![
                 Scene { name: "Intro".into(), tempo_bpm: Some(100.0) },
                 Scene { name: String::new(), tempo_bpm: None },
@@ -177,6 +192,22 @@ fn every_part_of_a_project_survives_a_round_trip() {
     let project = everything();
     assert_eq!(project.validate(), Ok(()));
     assert_eq!(from_json(&to_json(&project)), Ok(project));
+}
+
+/// Mappings are written under the launcher with 1-based scenes, and left out when there are none.
+#[test]
+fn launch_mappings_are_written_with_their_targets() {
+    let written: Value = serde_json::from_str(&to_json(&everything())).unwrap();
+    assert_eq!(
+        written["project"]["launcher"]["mappings"],
+        json!([
+            { "source": "key:Q", "target": "slot", "track": 2, "scene": 2 },
+            { "source": "note:10:36", "target": "scene", "scene": 1 },
+            { "source": "key:Space", "target": "stop", "track": 99 },
+        ])
+    );
+    let empty: Value = serde_json::from_str(&to_json(&Project::default())).unwrap();
+    assert!(empty["project"]["launcher"].get("mappings").is_none(), "{empty}");
 }
 
 #[test]
@@ -270,6 +301,20 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_out_shape": 3 } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_curve": 2 } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": 3 } ] } ] } }"#,
+        r#"{ "launcher": { "mappings": 3 } }"#,
+        r#"{ "launcher": { "mappings": [ 3 ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q" } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "pad", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "slot", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "slot", "track": 1, "scene": 0 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "scene", "scene": -1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "stop" } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "stop", "track": 99999999999 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "Q", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": 81, "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "note:17:60", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "note:1:128", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "scene", "scene": 1 }, { "source": "key:Q", "target": "scene", "scene": 2 } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": "hold" } } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": 1 } } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "legato": "yes" } } ] } ] } }"#,

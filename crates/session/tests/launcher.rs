@@ -70,6 +70,7 @@ fn project() -> Project {
         channels: vec![channel(1), channel(2), channel(3)],
         contents: vec![content(1, "Beat", 36), content(2, "Line", 40), content(3, "Off", 50)],
         launcher: Launcher {
+            mappings: Vec::new(),
             scenes: vec![
                 Scene { name: "Intro".into(), tempo_bpm: None },
                 Scene { name: "Drop".into(), tempo_bpm: Some(128.0) },

@@ -942,6 +942,7 @@ mod tests {
         let mut project = demo_project();
         let clip = project.arrangement.lanes[0].clips[0].clone();
         project.launcher = Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default(), Scene::default()],
             columns: vec![LauncherColumn {
                 track: TrackId(1),

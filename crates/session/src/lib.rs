@@ -9,6 +9,7 @@ mod devices;
 mod files;
 mod launch;
 mod library;
+mod mapping;
 mod plugins;
 mod preview;
 mod projects;
@@ -28,6 +29,7 @@ pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
 pub use library::{Category, Found, file_info, library_commands, search_items};
+pub use mapping::{MAX_MAPPINGS, mapped_command, target_exists};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{

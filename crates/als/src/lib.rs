@@ -203,7 +203,7 @@ impl Reader {
             channels,
             contents: std::mem::take(&mut self.contents),
             arrangement: Arrangement { lanes },
-            launcher: Launcher { scenes, columns },
+            launcher: Launcher { scenes, columns, mappings: Vec::new() },
             extensions: Extensions::default(),
         }
     }

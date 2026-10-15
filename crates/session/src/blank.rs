@@ -60,8 +60,11 @@ pub fn blank_project() -> Project {
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.arrangement = Arrangement { lanes };
-    project.launcher =
-        Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), tempo_bpm: None }).collect(), columns };
+    project.launcher = Launcher {
+        scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), tempo_bpm: None }).collect(),
+        columns,
+        mappings: Vec::new(),
+    };
     project
 }
 

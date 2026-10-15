@@ -219,6 +219,7 @@ mod tests {
                 extensions: Extensions::default(),
             }],
             launcher: Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default()],
                 columns: vec![LauncherColumn {
                     track: TrackId(1),

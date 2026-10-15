@@ -1191,6 +1191,7 @@ mod tests {
                 .collect(),
             contents,
             launcher: suhina_model::Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default(); scenes],
                 columns: slots
                     .into_iter()
