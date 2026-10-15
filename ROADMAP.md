@@ -448,12 +448,50 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
+- A first **piano roll** ([#200](https://github.com/suhina-daw/suhina-daw/issues/200),
+  [spec](docs/spec/ui-clip-editor.md)): selecting a MIDI clip in the Arrangement view shows its
+  notes in the detail area beside its properties, with a keyboard, a grid with its own grid value,
+  and a velocity lane. A double-click draws or deletes a note; a click,
+  Shift+click or a rectangle selects; dragging moves notes (by grid steps, Alt for free) or their
+  right end resizes them; Delete deletes the selected notes; dragging a stem changes velocity;
+  the wheel scrolls and Ctrl (with Shift, or Alt alone, for key height) zooms. Every edit is a `note.*` command
+  (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
+  the CLI and MCP run too.
+- Editing the notes of a **duplicated clip** changes that clip only: its first note edit gives
+  it its own copy of the notes, in the same undo step
+  ([#352](https://github.com/suhina-daw/suhina-daw/issues/352)). A shared pattern stays shared.
+- **Quantise** in the piano roll ([#345](https://github.com/suhina-daw/suhina-daw/issues/345)):
+  Ctrl+U moves the selected notes, or every note, onto the grid; the **Q** button over the keys
+  sets the grid (triplets too), how far notes move (0 to 100 %) and whether their ends move.
+  It is the command `note.quantize`, one undo step, that the CLI and MCP run too.
+- **Keyboard editing in the piano roll** ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):
+  after a click in it, the arrows move the selected notes by a grid step or a semitone
+  (Shift+Up and Down by an octave), Shift+Left and Right change their length, Ctrl+A selects every
+  note and Escape clears; Ctrl+C, X, V and D copy, cut, paste and duplicate notes (`note.copy`,
+  `.cut`, `.paste`, `.duplicate`), pasting after the selection or at the playhead.
+- **Piano roll, step 2** ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)): its
+  splitter pulls it all the way up (a double-click too), leaving only the edited track above it,
+  lit, or nothing (Settings › General › Piano roll); Alt+wheel zooms its key rows; a toolbar with
+  the tools Select, Draw (B), Paint and Erase, each stroke one undo step; and its own grid value,
+  so the control bar's sets the Arrangement view's only, unless Settings links the two.
+- **Piano roll, step 3** ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)): the
+  toolbar's tools are icons drawn in code, with Cut, Copy, Paste, Duplicate (the same as Ctrl+X,
+  C, V and the duplicate key) beside them and the keys 1 to 5 choosing Select, Draw, Paint, Erase
+  and **Slice**; a slice drag splits every note it crosses (`note.split`, one undo step, in the
+  CLI and MCP too); with the right button held the wheel steps through the tools; Shift and Draw
+  lays notes back to back at the last note's length; the quantise controls moved into the clip
+  column on the left (nothing floats over the grid) and Ctrl+U still quantises at once; the key
+  column plays through the track's instrument while a key is held (`preview.noteOn`,
+  `preview.noteOff`), with Ctrl+click and Ctrl+drag selecting the notes of a pitch or a range of
+  them; and Settings › Shortcuts has the presets **Select-first** (Ctrl+D duplicates) and
+  **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
+  `keymap.json`.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
   input routing, arm, level meters, device editing
-  ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the clip editor
+  ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the rest of the clip editor
   ([#200](https://github.com/suhina-daw/suhina-daw/issues/200)) in the detail area, installers and
   signed builds ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)).

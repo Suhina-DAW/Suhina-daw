@@ -130,6 +130,7 @@ pub(crate) fn add_return(session: &mut Session, params: &Value) -> Result<Value,
         output: main,
         sends: Vec::new(),
         devices: Vec::new(),
+        automation: Vec::new(),
         extensions: Default::default(),
     });
     // Returns come after every other track, in the order they were added.
