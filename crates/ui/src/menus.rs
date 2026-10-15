@@ -94,6 +94,10 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
 /// kind is on, so its copy leaves the clips it lands on as they are.
 pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions: &mut Vec<Action>) {
     ui.set_min_width(140.0);
+    if ui.add(egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
+        actions.push(Action::new("clip.copy", json!({ "track": track.0, "index": index })));
+        ui.close();
+    }
     if ui.add(egui::Button::new("Duplicate").shortcut_text("Ctrl+D")).clicked() {
         let mut params = json!({ "track": track.0, "index": index });
         if stack {
@@ -104,6 +108,27 @@ pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions
     }
     if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() {
         actions.push(Action::new("clip.delete", json!({ "track": track.0, "index": index })));
+        ui.close();
+    }
+}
+
+/// A clip slot's right-click menu: copy its clip, or paste the copied clip into it (`scene`
+/// from 1). Copy is greyed out on an empty slot, Paste while nothing has been copied.
+pub fn slot_menu(
+    ui: &mut Ui,
+    track: TrackId,
+    scene: usize,
+    has_clip: bool,
+    can_paste: bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.set_min_width(140.0);
+    if ui.add_enabled(has_clip, egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
+        actions.push(Action::new("clip.copy", json!({ "track": track.0, "scene": scene })));
+        ui.close();
+    }
+    if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text("Ctrl+V")).clicked() {
+        actions.push(Action::new("clip.paste", json!({ "track": track.0, "scene": scene })));
         ui.close();
     }
 }

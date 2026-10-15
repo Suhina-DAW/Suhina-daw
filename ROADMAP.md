@@ -196,6 +196,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
 - A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- An arrangement clip goes into a clip slot, and a slot's clip onto the arrangement, as a copy
+  with its gain, warping, loop and fades: Copy and Paste in the right-click menus, Ctrl+C and
+  Ctrl+V on the selected clip or slot (`clip.copy` and `clip.paste` take `scene`), or a drag held
+  over the other view's name in the control bar until the view switches
+  ([spec](docs/spec/clip-launching.md) › Clips between the arrangement and the slots).
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.

@@ -1578,3 +1578,189 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
+
+#[test]
+fn a_slots_menu_copies_its_clip_and_pastes_once_something_is_copied() {
+    let mut harness = view();
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click_secondary();
+    harness.run();
+    assert_eq!(harness.state().state.selected_slot, Some((suhina_engine::model::TrackId(2), 1)));
+    harness.state_mut().actions.clear();
+    harness.get_by_label_contains("Copy").click();
+    harness.run();
+    assert_eq!(harness.state().actions, [Action::new("clip.copy", json!({ "track": 2, "scene": 2 }))]);
+
+    // Nothing copied: Paste is there but does nothing.
+    harness.get_by_label("Stop Keys (scene 1)").click_secondary();
+    harness.run();
+    harness.state_mut().actions.clear();
+    harness.get_by_label_contains("Paste").click();
+    harness.run();
+    assert!(harness.state().actions.is_empty());
+    harness.key_press(Key::Escape);
+    harness.run();
+
+    harness.state_mut().state.can_paste = true;
+    harness.run();
+    harness.get_by_label("Stop Keys (scene 1)").click_secondary();
+    harness.run();
+    harness.state_mut().actions.clear();
+    harness.get_by_label_contains("Paste").click();
+    harness.run();
+    assert_eq!(harness.state().actions, [Action::new("clip.paste", json!({ "track": 3, "scene": 1 }))]);
+}
+
+#[test]
+fn clicking_a_slot_selects_it_and_still_launches_or_stops() {
+    let mut harness = view();
+    assert_eq!(
+        clicked(&mut harness, "Stop Keys (scene 1)"),
+        [Action::new("clip.launch", json!({ "track": 3, "scene": 1 }))]
+    );
+    assert_eq!(harness.state().state.selected_slot, Some((suhina_engine::model::TrackId(3), 0)));
+    clicked(&mut harness, "Launch Walk on Bass (scene 2)");
+    assert_eq!(harness.state().state.selected_slot, Some((suhina_engine::model::TrackId(2), 1)));
+}
+
+/// What Drums' slot in `scene` (from 0) holds: its clip's content name.
+fn drums_slot(harness: &Harness<'static, App>, scene: usize) -> Option<String> {
+    let session = harness.state().session()?;
+    let p = session.project();
+    let clip = p.launcher.columns[0].slots[scene].clip.as_ref()?;
+    p.content(clip.content).map(|c| c.name.clone())
+}
+
+#[test]
+fn an_arrangement_clip_copied_with_ctrl_c_pastes_into_the_selected_slot() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Clip Fill on Drums at bar 29").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    harness.run();
+    harness.key_press(Key::Tab);
+    harness.run();
+    assert_eq!(harness.state().view(), View::Session);
+    // Ctrl+V with no slot picked says what to do.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    harness.run();
+    assert!(matches!(harness.state().status(), Status::Hint(_)));
+    harness.get_by_label("Stop Drums (scene 5)").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    harness.run();
+    assert_eq!(drums_slot(&harness, 4).as_deref(), Some("Fill"));
+    let arranged = harness.state().session().map_or(0, |s| s.project().arrangement.lanes[0].clips.len());
+    assert_eq!(arranged, 4, "the arrangement keeps its clips");
+    // One undo step empties the slot again.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(drums_slot(&harness, 4), None);
+
+    // A slot's clip copies with Ctrl+C and pastes into another slot.
+    harness.get_by_label("Launch Fill on Drums (scene 4)").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    harness.run();
+    harness.get_by_label("Stop Drums (scene 5)").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    harness.run();
+    assert_eq!(drums_slot(&harness, 4).as_deref(), Some("Fill"));
+}
+
+/// Holds the pointer still for a second, a frame at a time, so a hover that waits fires.
+fn wait_over(harness: &mut Harness<'static, App>, at: egui::Pos2) {
+    for _ in 0..4 {
+        harness.hover_at(at);
+        harness.step();
+    }
+}
+
+#[test]
+fn an_arrangement_clip_dragged_over_the_session_switch_drops_into_a_slot() {
+    let mut harness = arrangement_app();
+    let from = harness.get_by_label("Clip Fill on Drums at bar 29").rect().center();
+    let switch = harness.get_by_label("Session view").rect().center();
+    harness.hover_at(from);
+    harness.step();
+    harness.drag_at(from);
+    harness.step();
+    harness.hover_at(from + egui::vec2(10.0, 0.0));
+    harness.step();
+    wait_over(&mut harness, switch);
+    assert_eq!(harness.state().view(), View::Session);
+    let slot = harness.get_by_label("Stop Drums (scene 5)").rect().center();
+    harness.hover_at(slot);
+    harness.step();
+    harness.drop_at(slot);
+    harness.run();
+    assert_eq!(drums_slot(&harness, 4).as_deref(), Some("Fill"));
+    let starts: Vec<f64> = harness
+        .state()
+        .session()
+        .map(|s| s.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect())
+        .unwrap_or_default();
+    assert_eq!(starts, [0.0, 64.0, 112.0, 128.0], "the arrangement clip stays where it was");
+}
+
+#[test]
+fn a_slot_clip_dragged_over_the_arrangement_switch_drops_on_a_lane() {
+    let mut harness = window(demo_app());
+    let from = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
+    let switch = harness.get_by_label("Arrangement view").rect().center();
+    harness.hover_at(from);
+    harness.step();
+    harness.drag_at(from);
+    harness.step();
+    harness.hover_at(from + egui::vec2(0.0, 12.0));
+    harness.step();
+    wait_over(&mut harness, switch);
+    assert_eq!(harness.state().view(), View::Arrangement);
+    // Bars 1 to 8 of Bass are empty; Root starts at bar 9, 8 points a beat.
+    let root = harness.get_by_label("Clip Root on Bass at bar 9").rect();
+    let to = egui::pos2(root.left() - 16.0 * 8.0, root.center().y);
+    harness.hover_at(to);
+    harness.step();
+    harness.drop_at(to);
+    harness.run();
+    let bass: Vec<(f64, f64)> = harness
+        .state()
+        .session()
+        .map(|s| s.project().arrangement.lanes[1].clips.iter().map(|c| (c.start, c.length)).collect())
+        .unwrap_or_default();
+    assert!(bass.contains(&(16.0, 4.0)), "{bass:?}");
+    assert!(matches!(harness.state().status(), Status::Done(text) if text.contains("Copied Walk to Bass")));
+}
+
+#[test]
+fn escape_or_a_drop_on_nothing_leaves_the_project_alone() {
+    let project = |h: &Harness<'static, App>| h.state().session().map(|s| s.project().clone());
+    let mut harness = window(demo_app());
+    let before = project(&harness);
+    let from = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
+    harness.hover_at(from);
+    harness.step();
+    harness.drag_at(from);
+    harness.step();
+    harness.hover_at(from + egui::vec2(0.0, 12.0));
+    harness.step();
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.drop_at(from + egui::vec2(0.0, 12.0));
+    harness.run();
+    assert_eq!(project(&harness), before);
+    // Dropped back on its own slot, or on a track header: nothing either.
+    for to in [from, harness.get_by_label("Track Keys").rect().center()] {
+        harness.hover_at(from);
+        harness.step();
+        harness.drag_at(from);
+        harness.step();
+        harness.hover_at(from + egui::vec2(0.0, 12.0));
+        harness.step();
+        harness.hover_at(to);
+        harness.step();
+        harness.drop_at(to);
+        harness.run();
+        assert_eq!(project(&harness), before);
+    }
+}

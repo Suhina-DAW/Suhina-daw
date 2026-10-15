@@ -3,7 +3,7 @@ description: Keyboard shortcuts in the desktop app: the default keys, the keymap
 read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -76,6 +76,12 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
 moved clip, it replaces what it covers unless the stacking setting for its kind is on
 ([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.
+
+In the Session view, copy and paste act on the selected clip slot (the one clicked last): Ctrl+C
+copies its clip, Ctrl+V puts the copied clip in it, replacing what it holds. That is how an
+arrangement clip goes into a slot: Ctrl+C on the clip, Tab, click a slot, Ctrl+V
+([Session view](spec/ui-session-view.md) › Between the views). Cut, duplicate and delete act on
+arrangement clips only.
 
 Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
 while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and

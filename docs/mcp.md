@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -87,7 +87,10 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
   `clip.cut`, `clip.paste`, `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats,
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
-  `command_run` ([arrangement editing](spec/arrangement-editing.md)).
+  `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.copy {track, scene}`
+  copies a clip slot's clip and `clip.paste {track, scene}` puts the copied clip into a slot, so a
+  clip goes from the arrangement into a slot and back
+  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots).
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |

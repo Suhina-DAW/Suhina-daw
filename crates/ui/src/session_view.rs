@@ -36,6 +36,13 @@ pub struct SessionViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// The clip slot clicked last (track, scene from 0): Ctrl+C and Ctrl+V act on it.
+    pub selected_slot: Option<(TrackId, usize)>,
+    /// Something has been copied, so a slot's menu can paste it; the window says so each frame.
+    pub can_paste: bool,
+    /// A clip slot whose drag started this frame (track, scene from 0): the window carries the
+    /// clip from there (`docs/spec/ui-session-view.md` › Between the views).
+    pub slot_drag: Option<(TrackId, usize)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,10 +148,16 @@ pub fn show(
                 continue;
             }
             let header_rect = Rect::from_x_y_ranges(*span, header.y_range());
-            probe.offer(header_rect, DropTarget::Track(column.track));
+            if !probe.clip {
+                probe.offer(header_rect, DropTarget::Track(column.track));
+            }
             let column_body = Rect::from_x_y_ranges(*span, body.y_range()).intersect(tracks_clip);
             if column_body.contains(probe.pointer) {
                 let scene = row_of(probe.pointer.y).min(grid.scenes.len());
+                // A carried clip lands in a slot that is there; files may add a scene below.
+                if probe.clip && scene >= grid.scenes.len() {
+                    continue;
+                }
                 let top = bands.top + scene as f32 * PITCH;
                 let cell = Rect::from_x_y_ranges(*span, egui::Rangef::new(top, top + ROW)).intersect(column_body);
                 let target = if probe.files {
@@ -155,7 +168,7 @@ pub fn show(
                 probe.offer(if probe.files { cell } else { column_body }, target);
             }
         }
-        if empty.width() > 0.0 && empty.contains(probe.pointer) {
+        if !probe.clip && empty.width() > 0.0 && empty.contains(probe.pointer) {
             let scene = if probe.pointer.y > body.top() { row_of(probe.pointer.y).min(grid.scenes.len()) } else { 0 };
             probe.offer(empty, DropTarget::NewTracks { beat: None, scene: Some(scene) });
         }
@@ -295,6 +308,7 @@ fn draw_column(
         column,
         progress,
         id,
+        state,
         actions,
     );
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
@@ -368,8 +382,12 @@ fn column_body(
     column: &Column,
     progress: Option<f32>,
     id: Id,
+    state: &mut SessionViewState,
     actions: &mut Vec<Action>,
 ) {
+    // A track's slots can be selected, copied, pasted into and dragged; a group's only launch.
+    let editable = column.kind == ColumnKind::Track;
+    let can_paste = state.can_paste;
     for (scene, slot) in column.slots.iter().enumerate() {
         let rect = Rect::from_x_y_ranges(
             span,
@@ -380,6 +398,12 @@ fn column_body(
         }
         let number = scene + 1;
         let response = match slot.state {
+            SlotState::Empty if editable => Some(widgets::button_area(
+                ui,
+                rect.intersect(clip),
+                id.with(scene),
+                format!("Empty slot on {} (scene {number})", column.name),
+            )),
             SlotState::Empty => None,
             SlotState::EmptyStop => Some(widgets::button_area(
                 ui,
@@ -389,20 +413,36 @@ fn column_body(
             )),
             _ => {
                 let name = if slot.name.is_empty() { "clip" } else { slot.name.as_str() };
-                Some(widgets::button_area(
-                    ui,
-                    rect.intersect(clip),
-                    id.with(scene),
-                    format!("Launch {name} on {} (scene {number})", column.name),
-                ))
+                let label = format!("Launch {name} on {} (scene {number})", column.name);
+                let sense = if editable { Sense::click_and_drag() } else { Sense::click() };
+                let response = ui.interact(rect.intersect(clip), id.with(scene), sense);
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                Some(response)
             }
         };
         let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
-        if response.is_some_and(|r| r.clicked()) {
-            actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+        let has_clip = !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
+        let key = (column.track, scene);
+        if let Some(response) = &response {
+            if response.clicked() && slot.state != SlotState::Empty {
+                actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
+            }
+            if editable {
+                if response.clicked() || response.secondary_clicked() {
+                    state.selected_slot = Some(key);
+                }
+                if has_clip && response.drag_started_by(egui::PointerButton::Primary) {
+                    state.selected_slot = Some(key);
+                    state.slot_drag = Some(key);
+                }
+                response.context_menu(|ui| menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions));
+            }
         }
         slot_cell(painter, rect, column, slot, hover, pulse, progress);
+        if state.selected_slot == Some(key) {
+            painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
+        }
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
 

@@ -70,6 +70,9 @@ struct ScanDone {
 
 /// The handle between the browser and the view.
 const BROWSER_HANDLE: f32 = 4.0;
+/// How long a carried clip hovers over the other view's name before the window switches to it,
+/// in seconds (`docs/spec/ui-session-view.md` › Between the views).
+const SWITCH_HOVER: f64 = 0.5;
 
 /// A drop whose samples are being decoded on another thread before its commands run.
 struct PendingDrop {
@@ -90,6 +93,27 @@ struct Stash {
     revision: u64,
     timeline: Option<(u64, Timeline)>,
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
+}
+
+/// A clip carried from one view to the other with the mouse: where it comes from, and its name
+/// for the label beside the pointer.
+#[derive(Debug, Clone, PartialEq)]
+struct Carry {
+    from: CarryFrom,
+    name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CarryFrom {
+    Arrangement {
+        track: TrackId,
+        index: usize,
+    },
+    /// Scene from 0.
+    Slot {
+        track: TrackId,
+        scene: usize,
+    },
 }
 
 /// The main view; Tab switches between them.
@@ -214,6 +238,9 @@ pub struct App {
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
+    /// A clip carried between the views, and the view whose name it hovers over since when.
+    carry: Option<Carry>,
+    switch_hover: Option<(View, f64)>,
 }
 
 impl Default for App {
@@ -276,6 +303,8 @@ impl App {
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
+            carry: None,
+            switch_hover: None,
         }
     }
 
@@ -961,6 +990,12 @@ impl App {
                 .drag
                 .as_ref()
                 .and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
+            // A carried clip probes the same way, for a slot or a lane only.
+            let probe = match (&self.carry, ui.ctx().pointer_latest_pos()) {
+                (Some(_), Some(pointer)) => Some(DropProbe::for_clip(pointer)),
+                _ => probe,
+            };
+            self.view.can_paste = self.session().is_some_and(|s| s.copied_clip_is_audio().is_some());
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
             // The large sample map takes the main area, except while something is dragged from
@@ -1010,6 +1045,7 @@ impl App {
             drop_overlay(ui, view_area);
         });
         self.browser_drag(ui);
+        self.carry_clip(ui);
         self.poll_drop(ui.ctx());
 
         self.plugin_dialog(ui, window);
@@ -1670,6 +1706,18 @@ impl App {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
             }
+            // In the Session view copy and paste act on the selected clip slot.
+            "selection.copy" | "selection.paste" if self.shown == View::Session => {
+                let Some((track, scene)) = self.view.selected_slot else {
+                    self.status = Status::Hint("Click a clip slot first".into());
+                    return;
+                };
+                let params = json!({ "track": track.0, "scene": scene + 1 });
+                actions.push(Action::new(if action == "selection.copy" { "clip.copy" } else { "clip.paste" }, params));
+            }
+            "selection.cut" | "selection.duplicate" | "selection.delete" if self.shown == View::Session => {
+                self.status = Status::Hint("In the Session view, a slot's clip can be copied and pasted".into());
+            }
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
                 let Some((track, index)) = self.arrangement.selected_clip() else { return };
                 let id = match action {
@@ -2073,24 +2121,11 @@ impl App {
         let separate = ctrl != self.settings.drop_separate;
         let label = target.and_then(|t| self.plan_drop(&items, t, separate)).map(|p| p.label);
         if let Some(pointer) = pointer {
-            let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("browser-drag"));
-            let painter = ui.ctx().layer_painter(layer);
             let text = label.clone().unwrap_or_else(|| match items.as_slice() {
                 [one] => one.name.clone(),
                 many => format!("{} items", many.len()),
             });
-            let font = theme::ui_font(theme::TEXT_SMALL);
-            let galley = widgets::fitted(&painter, &text, font, theme::text_primary(), 280.0);
-            let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(PAD * 2.0, 6.0));
-            painter.rect_filled(rect, 0.0, theme::control_active());
-            painter.rect_stroke(
-                rect,
-                0.0,
-                theme::hairline(if label.is_some() { theme::accent() } else { theme::border_strong() }),
-                egui::StrokeKind::Inside,
-            );
-            painter.galley(rect.min + Vec2::new(PAD, 3.0), galley, theme::text_primary());
-            ui.ctx().request_repaint();
+            drag_label(ui.ctx(), pointer, &text, label.is_some());
         }
         if released {
             self.browser.drag = None;
@@ -2102,6 +2137,147 @@ impl App {
                 browser_view::stop_preview(&mut self.browser, &mut self.projects);
                 self.drop_items(&items, target, separate);
             }
+        }
+    }
+
+    /// Switches to `hovered`, the view whose name a dragged or carried clip is over, once it has
+    /// stayed there for [`SWITCH_HOVER`]; a clip dragged in the Arrangement view is carried from
+    /// then on.
+    fn hover_switch(&mut self, ctx: &egui::Context, hovered: Option<View>) {
+        let Some(view) = hovered else {
+            self.switch_hover = None;
+            return;
+        };
+        let now = ctx.input(|i| i.time);
+        let since = match self.switch_hover {
+            Some((v, since)) if v == view => since,
+            _ => {
+                self.switch_hover = Some((view, now));
+                now
+            }
+        };
+        if now - since < SWITCH_HOVER {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(SWITCH_HOVER / 4.0));
+            return;
+        }
+        self.switch_hover = None;
+        if self.carry.is_none()
+            && let Some((track, index)) = self.arrangement.dragged_clip()
+        {
+            let name = self
+                .timeline
+                .as_ref()
+                .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
+                .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                .map(|c| c.name.clone())
+                .unwrap_or_default();
+            self.arrangement.cancel_clip_drag();
+            ctx.stop_dragging();
+            self.carry = Some(Carry { from: CarryFrom::Arrangement { track, index }, name });
+        }
+        self.shown = view;
+        self.close_large_map();
+    }
+
+    /// While a clip is carried between the views: the label beside the pointer, Escape to stop,
+    /// and on release a copy of it in the slot or on the lane under the pointer
+    /// (`docs/spec/ui-session-view.md` › Between the views). A clip slot's drag starts one.
+    fn carry_clip(&mut self, ui: &Ui) {
+        if let Some((track, scene)) = self.view.slot_drag.take() {
+            let name = self
+                .session()
+                .and_then(|s| {
+                    let p = s.project();
+                    let column = p.launcher.columns.iter().find(|c| c.track == track)?;
+                    let clip = column.slots.get(scene)?.clip.as_ref()?;
+                    p.content(clip.content).map(|c| c.name.clone())
+                })
+                .unwrap_or_default();
+            ui.ctx().stop_dragging();
+            self.carry = Some(Carry { from: CarryFrom::Slot { track, scene }, name });
+        }
+        let Some(carry) = self.carry.clone() else { return };
+        let (released, escape, pointer) =
+            ui.input(|i| (!i.pointer.primary_down(), i.key_pressed(Key::Escape), i.pointer.latest_pos()));
+        let target = match self.shown {
+            View::Session => self.view.drop.as_ref().and_then(|p| p.target),
+            View::Arrangement => self.arrangement.drop.as_ref().and_then(|p| p.target),
+        };
+        if escape || released {
+            self.carry = None;
+            self.switch_hover = None;
+            self.view.drop = None;
+            self.arrangement.drop = None;
+            if released && !escape {
+                match target {
+                    Some(target) => self.drop_carried(&carry, target),
+                    None => self.status = Status::Hint("Drop a clip on a clip slot or a track's lane".into()),
+                }
+            }
+            return;
+        }
+        let label = target.and_then(|t| self.carry_label(&carry, t));
+        if let Some(pointer) = pointer {
+            let name = if carry.name.is_empty() { "clip" } else { carry.name.as_str() };
+            drag_label(ui.ctx(), pointer, label.as_deref().unwrap_or(name), label.is_some());
+        }
+    }
+
+    /// What the label beside a carried clip says over `target`, or `None` where it cannot land.
+    fn carry_label(&self, carry: &Carry, target: DropTarget) -> Option<String> {
+        let project = self.session()?.project();
+        let name = |t: TrackId| project.tracks.iter().find(|x| x.id == t).map_or_else(String::new, |x| x.name.clone());
+        let clip = if carry.name.is_empty() { "clip" } else { carry.name.as_str() };
+        match target {
+            DropTarget::Slot { track, scene } => Some(format!("Copy {clip} to {}, scene {}", name(track), scene + 1)),
+            DropTarget::Lane { track, beat } => {
+                let bar = (beat / self.bar_beats()).floor() as u64 + 1;
+                Some(format!("Copy {clip} to {}, bar {bar}", name(track)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Beats in a bar of the shown project, 4 when it has no usable time signature.
+    fn bar_beats(&self) -> f64 {
+        self.session().map_or(4.0, |s| {
+            let ts = s.project().transport.time_signature;
+            if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) }
+        })
+    }
+
+    /// Puts a copy of the carried clip on `target`: `clip.copy` from where it came, then
+    /// `clip.paste` there, the same commands as Ctrl+C and Ctrl+V; the paste is one undo step.
+    fn drop_carried(&mut self, carry: &Carry, target: DropTarget) {
+        let copy = match carry.from {
+            CarryFrom::Arrangement { track, index } => json!({ "track": track.0, "index": index }),
+            CarryFrom::Slot { track, scene } => json!({ "track": track.0, "scene": scene + 1 }),
+        };
+        let mut paste = match target {
+            DropTarget::Slot { track, scene } => {
+                if carry.from == (CarryFrom::Slot { track, scene }) {
+                    return;
+                }
+                json!({ "track": track.0, "scene": scene + 1 })
+            }
+            DropTarget::Lane { track, beat } => json!({ "track": track.0, "start": beat }),
+            _ => return,
+        };
+        let Ok(session) = self.projects.session_mut(None) else { return };
+        if let Err(e) = session.execute("clip.copy", &copy) {
+            self.status = Status::Error(e.0);
+            return;
+        }
+        // On a lane the copy follows the stacking setting for its kind, as a moved clip does.
+        let audio = session.copied_clip_is_audio();
+        if paste.get("start").is_some() && audio.is_some_and(|audio| self.stacks(audio)) {
+            paste["stack"] = json!(true);
+        }
+        self.status = Status::Hint(String::new());
+        self.run(&Action::new("clip.paste", paste));
+        if !matches!(self.status, Status::Error(_)) {
+            let label = self.carry_label(carry, target).unwrap_or_default();
+            self.status = Status::Done(label.replacen("Copy", "Copied", 1));
         }
     }
 
@@ -2408,6 +2584,11 @@ impl App {
             right = rect.left() - PAD;
         }
         let mut underline_at = None;
+        // A clip dragged in the Arrangement view, or carried, switches the view when it hovers
+        // over the other view's name for a moment.
+        let carrying = self.carry.is_some() || self.arrangement.dragged_clip().is_some();
+        let pointer = ui.ctx().pointer_latest_pos();
+        let mut hovered_switch = None;
         for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
             let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
             let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
@@ -2417,6 +2598,10 @@ impl App {
             if response.clicked() {
                 self.shown = view;
             }
+            if carrying && self.shown != view && pointer.is_some_and(|p| rect.expand(4.0).contains(p)) {
+                hovered_switch = Some(view);
+                painter.rect_stroke(rect.expand(3.0), 0.0, theme::hairline(theme::accent()), egui::StrokeKind::Inside);
+            }
             let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
             let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
             painter.galley(pos, galley, color);
@@ -2425,6 +2610,7 @@ impl App {
             }
             right = rect.left() - 12.0;
         }
+        self.hover_switch(ui.ctx(), hovered_switch);
         // The underline slides to the view that was picked.
         if let Some((x, y, width)) = underline_at {
             let ctx = ui.ctx();
@@ -2568,6 +2754,25 @@ fn empty(ui: &mut Ui) {
     );
 }
 
+/// The label beside the pointer while something is dragged: outlined in the accent colour when
+/// it can land where the pointer is.
+fn drag_label(ctx: &egui::Context, pointer: Pos2, text: &str, lands: bool) {
+    let layer = egui::LayerId::new(egui::Order::Tooltip, Id::new("browser-drag"));
+    let painter = ctx.layer_painter(layer);
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let galley = widgets::fitted(&painter, text, font, theme::text_primary(), 280.0);
+    let rect = Rect::from_min_size(pointer + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(PAD * 2.0, 6.0));
+    painter.rect_filled(rect, 0.0, theme::control_active());
+    painter.rect_stroke(
+        rect,
+        0.0,
+        theme::hairline(if lands { theme::accent() } else { theme::border_strong() }),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + Vec2::new(PAD, 3.0), galley, theme::text_primary());
+    ctx.request_repaint();
+}
+
 /// What the status bar says after a command ran, or nothing for silent ones.
 fn describe(action: &Action) -> Option<String> {
     let p = &action.params;
@@ -2578,6 +2783,9 @@ fn describe(action: &Action) -> Option<String> {
         "launcher.stopAll" => "Stopping all clips".into(),
         "launcher.setQuantization" => format!("Launch quantisation {}", p["value"].as_str().unwrap_or_default()),
         "transport.setTempo" => format!("Tempo {}", p["bpm"]),
+        "clip.copy" => "Copied the clip".into(),
+        "clip.paste" if p.get("scene").is_some() => format!("Pasted into scene {} on track {}", p["scene"], p["track"]),
+        "clip.paste" => "Pasted the clip".into(),
         "edit.undo" => "Undone".into(),
         "edit.redo" => "Redone".into(),
         _ => return None,

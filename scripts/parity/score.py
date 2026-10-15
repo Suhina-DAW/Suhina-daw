@@ -56,9 +56,11 @@ CHAPTERS = [
      "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
      "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.50, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
-     "Missing scene view/editing depth, select-on-launch options, follow actions."),
+    (7, "Session View", 13, 0.52, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
+     "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
+     "the view switch). Missing scene view/editing depth, moving clips between slots, "
+     "select-on-launch options, follow actions."),
     (8, "Clip View", 34, 0.08, "started",
      "Detail area shows clip properties; the MIDI clip editor is a spec only "
      "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),

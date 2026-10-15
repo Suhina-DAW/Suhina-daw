@@ -335,8 +335,16 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.copy",
-        label: "Copy an arrangement clip, with what it plays, for clip.paste",
-        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        label: "Copy a clip, with what it plays, for clip.paste: an arrangement clip by index, or a clip slot's by scene",
+        params: &[
+            TRACK,
+            optional("index", ParamType::Integer, "arrangement clip index on the track, from project.clips"),
+            optional(
+                "scene",
+                ParamType::Integer,
+                "instead of index: the clip in this scene's slot, from 1, as in project.launcher",
+            ),
+        ],
         kind: CommandKind::Read,
         run: copy_clip,
     },
@@ -349,11 +357,20 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.paste",
-        label: "Place the copied clip on a track, replacing what it covers unless stacked",
+        label: "Place the copied clip on a track's arrangement at start, replacing what it covers unless stacked, or in its clip slot at scene, replacing the slot's clip",
         params: &[
             TRACK,
-            param("start", ParamType::Number, "where it starts, in beats from the beginning, at least 0"),
-            optional("stack", ParamType::Bool, "true leaves clips under it as they are"),
+            optional(
+                "start",
+                ParamType::Number,
+                "where it starts in the arrangement, in beats from the beginning, at least 0",
+            ),
+            optional(
+                "scene",
+                ParamType::Integer,
+                "instead of start: the scene, from 1, whose slot on the track takes the clip",
+            ),
+            optional("stack", ParamType::Bool, "with start, true leaves clips under it as they are"),
         ],
         kind: CommandKind::Edit,
         run: paste_clip,
@@ -1206,10 +1223,20 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
 }
 
 fn copy_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let (lane, index) = lane_and_index(&session.project, params)?;
-    let clip = session.project.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).cloned();
-    let clip = clip.ok_or("the clip is missing")?;
-    let content = session.project.content(clip.content).cloned().ok_or("the clip's content is missing")?;
+    let p = &session.project;
+    let clip = match (params.get("index"), params.get("scene")) {
+        (Some(_), None) => {
+            let (lane, index) = lane_and_index(p, params)?;
+            p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).cloned().ok_or("the clip is missing")?
+        }
+        (None, Some(_)) => {
+            let (column, scene) = (column_index(p, params)?, scene_index(p, params)?);
+            let slot = p.launcher.columns.get(column).and_then(|c| c.slots.get(scene));
+            slot.and_then(|s| s.clip.clone()).ok_or_else(|| format!("the slot in scene {} is empty", scene + 1))?
+        }
+        _ => return Err("give either index (an arrangement clip) or scene (a clip slot)".into()),
+    };
+    let content = p.content(clip.content).cloned().ok_or("the clip's content is missing")?;
     let name = content.name.clone();
     session.clipboard = Some((clip, content));
     Ok(json!({ "copied": name }))
@@ -1220,12 +1247,30 @@ fn cut_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError
     delete_clip(session, params)
 }
 
+/// Where `clip.paste` puts the copy: an arrangement beat, or a clip slot (scene from 0).
+enum PasteAt {
+    Beat(f64),
+    Slot(usize),
+}
+
 fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let (clip, content) = session.clipboard.clone().ok_or("nothing has been copied")?;
-    let start = number(params, "start")?;
-    if start < 0.0 {
-        return Err(format!("start must be at least 0, got {start}").into());
-    }
+    let at = match (params.get("start"), params.get("scene")) {
+        (Some(_), None) => {
+            let start = number(params, "start")?;
+            if !(0.0..=MAX_START_BEAT).contains(&start) {
+                return Err(format!("start must be from 0 to {MAX_START_BEAT}, got {start}").into());
+            }
+            PasteAt::Beat(start)
+        }
+        (None, Some(_)) => {
+            if params.get("stack").is_some() {
+                return Err("stack is for the arrangement (start); a slot holds one clip".into());
+            }
+            PasteAt::Slot(scene_index(&session.project, params)?)
+        }
+        _ => return Err("give either start (a beat in the arrangement) or scene (a clip slot)".into()),
+    };
     let stack = match params.get("stack") {
         None => false,
         Some(v) => v.as_bool().ok_or("stack must be true or false")?,
@@ -1239,10 +1284,29 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
         let what = if audio { "an audio clip" } else { "a MIDI clip" };
         return Err(format!("track {:?} cannot hold {what}", target.name).into());
     }
+    let column = match at {
+        PasteAt::Slot(_) => Some(column_index(p, params)?),
+        PasteAt::Beat(_) => None,
+    };
     // The copy plays its own content, so editing one does not change the other.
-    let id = suhina_model::ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0) + 1);
+    let id = p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?;
+    let id = suhina_model::ContentId(id);
     p.contents.push(suhina_model::ClipContent { id, ..content });
-    let placed = Clip { content: id, start, ..clip };
+    let start = match at {
+        PasteAt::Beat(start) => start,
+        PasteAt::Slot(_) => 0.0,
+    };
+    // Gain, warp and the loop travel with the content and the clip; fades are fitted, as when
+    // a clip is shortened, so a clip with odd fades still makes a valid project.
+    let mut placed = Clip { content: id, start, ..clip };
+    placed.fit_fades();
+    if let (PasteAt::Slot(scene), Some(column)) = (at, column) {
+        let slot =
+            p.launcher.columns.get_mut(column).and_then(|c| c.slots.get_mut(scene)).ok_or("the slot is missing")?;
+        let replaced = slot.clip.is_some();
+        slot.clip = Some(placed);
+        return Ok(json!({ "track": track.0, "scene": scene + 1, "replaced": replaced }));
+    }
     let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
         Some(lane) => lane,
         None => {

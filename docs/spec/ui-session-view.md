@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -81,7 +81,7 @@ Each cell is a slot for one clip.
 | Slot state | Shows | Click |
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
-| Empty, without stop button | nothing | nothing |
+| Empty, without stop button | nothing | nothing (**Suhina:** selects it) |
 | Clip, stopped | clip colour, clip name, launch control | launches the clip |
 | Clip, queued | launch control in a pending (blinking) state until the quantisation point | |
 | Clip, playing | launch control in the playing state, progress through the clip | relaunches |
@@ -93,6 +93,36 @@ there; on an empty audio track the track takes the clip's name **(observed in th
 
 Below the last scene each track has a **stop all clips** button for that track, and the main
 column has **stop all clips** for the whole set.
+
+**Suhina:** a click on a track's slot also selects it (a group's slots only launch). A
+right-click selects it and opens its menu: **Copy** copies its clip (`clip.copy {track,
+scene}`), **Paste** puts the copied clip in it (`clip.paste {track, scene}`), greyed out while
+nothing has been copied. Ctrl+C and Ctrl+V do the same on the selected slot
+([shortcuts](../shortcuts.md)); Ctrl+X, Ctrl+D and Delete act on arrangement clips only and say so
+in the Session view.
+
+### Between the views
+
+The window shows one view at a time, so a clip goes from the Arrangement view to a slot, or from
+a slot to the arrangement, in two ways. **Suhina** decisions, our own design:
+
+- **Copy and paste.** Copy an arrangement clip (Ctrl+C, or Copy in its right-click menu), switch
+  with Tab, select a slot and paste (Ctrl+V, or Paste in the slot's menu). The other way, copy a
+  slot's clip, switch, select a clip or a track and paste: it lands as an arrangement paste does
+  ([arrangement editing](arrangement-editing.md) › Copy, cut and paste).
+- **Dragging.** While a clip is dragged, holding it over the other view's name in the control bar
+  for half a second switches the view, and the drag goes on there: let go over a slot and the clip
+  is copied into it; over a track's lane and it is copied there, at the beat under the pointer on
+  the grid (Alt for free), stacking when the setting for its kind says so. A slot's clip can
+  also be dragged to another slot in the Session view, which copies it. A label beside the pointer
+  says where it will go ("Copy Fill to Drums, scene 5"); Escape, or letting go anywhere else (a
+  header, the empty space, the clip's own slot), does nothing.
+- **Always a copy.** A clip that crosses views is copied, never moved: the arrangement and the
+  launcher are separate places, and the original stays where it was. The drop runs `clip.copy`
+  from where the clip came from, then `clip.paste`, so the dropped clip is also the copied clip
+  for Ctrl+V. The paste is one undo step.
+- **What travels.** The clip's content (its own copy), gain, warping, loop, offset, length and
+  fades. In a slot its start is 0; on the arrangement it starts where it was dropped.
 
 ### Scene launch (main track column)
 
