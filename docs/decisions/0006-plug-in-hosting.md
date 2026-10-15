@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -130,7 +130,8 @@ workspace forbids.
    On a miss it outputs the plug-in's input (an effect) or silence (an instrument) for that block
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
-   without a deadline (with a long timeout), so they run as fast as the plug-in allows.
+   without a deadline (with a long timeout), so they run as fast as the plug-in allows; a block
+   left unanswered there says whether the process died (the plug-in crashed) or is still stuck.
    *Built:* the host's audio threads and the desktop app's render thread join MMCSS "Pro Audio"
    on Windows (`audio_thread_priority`; `thread-priority`'s highest, `THREAD_PRIORITY_HIGHEST`,
    only where MMCSS refuses) and take the highest priority the system gives them elsewhere (on
@@ -180,10 +181,14 @@ workspace forbids.
    runs inside the engine process, so it stays small.
 7. **Formats.** CLAP first, then VST3, on the same boundary. CLAP goes through `clack-host`:
    the instance stays on the host's main thread (with the plug-in's main-thread callbacks), the
-   started audio processor on its audio thread. A plug-in is named `clap:<file>` or
+   started audio processor on its audio thread. Every audio port the plug-in declares gets a
+   buffer with the channels it declared (a plug-in may read them all, and one given fewer can
+   crash, #327); the link's stereo goes through the main ports and the rest get silence. A
+   plug-in is named `clap:<file>` or
    `clap:<file>#<id>`; the only `unsafe` the host needs for it is opening the file. A CLAP gain
    built into the host (`test:clap`, made with `clack-plugin`) lets the tests run the whole path
-   without a plug-in installed; `SUHINA_TEST_CLAP` runs them against a real file too.
+   without a plug-in installed, and `test:clap-ports` has a rack's port layout (8-channel main
+   ports and stereo side ports); `SUHINA_TEST_CLAP` runs them against a real file too.
    VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
    thread (connected through their connection points, the controller given the component's
    state; the host makes the messages and attribute lists they send each other,
