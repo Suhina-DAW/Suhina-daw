@@ -369,9 +369,9 @@ impl Projects {
 
     fn sync_active_plugins(&mut self) -> Vec<String> {
         let Some(active) = self.active else { return Vec::new() };
-        if self.get(active).is_none_or(|s| s.player().is_none()) {
-            return Vec::new();
-        }
+        // The catalog is handed over even when the project has no player (a stopped headless
+        // session, an agent's): the device commands look the installed plug-ins up in it, and
+        // a sync without a player only keeps the rack stopped.
         let env = self.plugin_env();
         let (owner, embed) = (self.editor_owner, self.editor_embed);
         let Some(session) = self.get_mut(active) else { return Vec::new() };

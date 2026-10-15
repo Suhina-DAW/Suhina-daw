@@ -3,7 +3,8 @@
 //! prompt, which asks for a name and a folder when a project is saved for the first time, saved
 //! under another name, or saved as a template. And the question asked before a project with
 //! unsaved changes is closed, replaced or the app quits. And the offer, on start, of a backup a
-//! crash left (`docs/spec/backups.md`). All are drawn over the window; Escape closes them.
+//! crash left (`docs/spec/backups.md`). And Help › About Suhina, which says which build this is
+//! (docs/spec/about.md). All are drawn over the window; Escape closes them.
 
 use std::path::{Path, PathBuf};
 
@@ -243,6 +244,68 @@ pub fn show_unsaved(ui: &Ui, area: Rect, name: &str, doing: &str) -> Option<Unsa
         .inner
 }
 
+/// The version of this build: the workspace version, which a nightly sets to its own,
+/// `0.0.1-nightly.20261013+a15ad35` (docs/releasing.md › Nightly).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// What was chosen in the About dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AboutChoice {
+    /// Copy [`version_line`] to the clipboard; the dialog stays open.
+    Copy,
+    Close,
+}
+
+/// One line that names this build, to paste into a bug report:
+/// `Suhina 0.0.1-nightly.20261013+a15ad35 (linux x86_64)`.
+pub fn version_line() -> String {
+    format!("Suhina {VERSION} ({})", platform())
+}
+
+fn platform() -> String {
+    format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// Draws the About dialog over `area`. Returns what was chosen, or `None` while it stays open.
+pub fn show_about(ui: &Ui, area: Rect) -> Option<AboutChoice> {
+    egui::Area::new(Id::new("about-dialog"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(area.min)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_size(area.size());
+            draw_about(ui, area)
+        })
+        .inner
+}
+
+fn draw_about(ui: &mut Ui, area: Rect) -> Option<AboutChoice> {
+    let mut closed: Option<AboutChoice> = None;
+    let platform = platform();
+    let facts = [("Version", VERSION), ("Platform", platform.as_str()), ("Licence", "GPL-3.0-or-later, free software")];
+    let height = ROW + facts.len() as f32 * LINE + BUTTON.y + 3.0 * PAD;
+    let panel = panel(ui, area, Vec2::new(SAVE_WIDTH, height), "About Suhina", &mut closed);
+    let painter = ui.painter_at(area);
+    let font = theme::ui_font(theme::TEXT);
+    for (i, (name, value)) in facts.iter().enumerate() {
+        let line = Rect::from_min_size(
+            Pos2::new(panel.left() + PAD, panel.top() + ROW + PAD + i as f32 * LINE),
+            Vec2::new(panel.width() - 2.0 * PAD, LINE),
+        );
+        widgets::text_in(&painter, line, Align2::LEFT_CENTER, name, font.clone(), theme::text_hint());
+        let value_at = Rect::from_min_max(Pos2::new(line.left() + 80.0, line.top()), line.max);
+        widgets::text_in(&painter, value_at, Align2::LEFT_CENTER, value, font.clone(), theme::text_primary());
+    }
+    let copy = Rect::from_min_size(Pos2::new(panel.right() - PAD - BUTTON.x, panel.bottom() - PAD - BUTTON.y), BUTTON);
+    // The label carries the line itself, so a screen reader reads the version too.
+    if button(ui, &painter, copy, "Copy version", &format!("Copy version: {}", version_line())) {
+        return Some(AboutChoice::Copy);
+    }
+    if ui.input(|i| i.key_pressed(Key::Escape) || i.key_pressed(Key::Enter)) {
+        return Some(AboutChoice::Close);
+    }
+    closed
+}
+
 fn draw_unsaved(ui: &mut Ui, area: Rect, name: &str, doing: &str) -> Option<UnsavedChoice> {
     let mut closed: Option<UnsavedChoice> = None;
     let panel =
@@ -388,6 +451,12 @@ impl CloseChoice for SaveChoice {
 impl CloseChoice for RecoveryChoice {
     fn close() -> Self {
         RecoveryChoice::Ignore
+    }
+}
+
+impl CloseChoice for AboutChoice {
+    fn close() -> Self {
+        AboutChoice::Close
     }
 }
 

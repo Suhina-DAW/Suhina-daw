@@ -13,6 +13,7 @@ rust-version = "1.95"
 suhina-model = { path = "crates/model" }
 suhina-engine = { path = "crates/engine" }
 suhina-als = { path = "crates/als" }
+suhina-flp = { path = "crates/flp" }
 suhina-project-file = { path = "crates/project-file" }
 suhina-session = { path = "crates/session" }
 suhina-automation = { path = "crates/automation" }
@@ -47,6 +48,7 @@ serde_json = "1"  # MIT OR Apache-2.0
 chrono = { version = "0.4", default-features = false, features = ["clock"] }  # MIT OR Apache-2.0
 rtrb = "0.3"  # MIT OR Apache-2.0
 notify-debouncer-full = "0.6"  # MIT OR Apache-2.0; with notify (CC0-1.0)
+memory-stats = "1.2"  # MIT; the process's RAM, for the control bar
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
