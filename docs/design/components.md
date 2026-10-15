@@ -284,6 +284,8 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | General › Dropping files | Warp mode | Rhythmic (default), Tonal, Texture, Smooth, High quality, Re-pitch: how a dropped sample with a known tempo is stretched |
 | General › Transport | Play from | Marker (default): Play and Space start from the play start marker; Selected clip: from the start of the clip selected in the Arrangement view, the marker moving there ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
+| General › Piano roll | Toolbar size: Normal, Large (default), Larger; the toolbar's box, gaps and icon strokes scale with it ([clip editor spec](../spec/ui-clip-editor.md) › Layout) |
+| General › Piano roll | Left click draws, Right click deletes a note, Shift+right click splits, Alt+right plays from the point: the four mouse switches of the **Mouse-first** preset, each on or off on its own, kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
 | Interface | Animations | On (default), Off |
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
@@ -472,35 +474,48 @@ when that is less, with 127 and 1 in its scale column). Rows are drawn as white-
 grid's lines are `border`, bar lines `border.strong`; the grid past the clip's end is darkened.
 A rectangle being dragged is a 1 px `text.secondary` outline. The toolbar is built too
 ([#442](https://github.com/suhina-daw/suhina-daw/issues/442), icons
-[#443](https://github.com/suhina-daw/suhina-daw/issues/443)): 22 px on `panel.background` with a
-1 px `border` under it; from where the grid starts (36 px in), the tools Select, Draw, Paint,
-Erase and Slice as 14 px **icons drawn in code** (1.1 px strokes: an arrow, a pencil, a brush, an
-eraser, a blade), 3 px apart, the chosen one `control.activeBackground` with a `text.primary`
+[#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
+[#460](https://github.com/suhina-daw/suhina-daw/issues/460)): 22 px at **Toolbar size** Normal on
+`panel.background` with a
+1 px `border` under it, 28 px at Large (the default) and 33 px at Larger, with the 14 px icon box,
+the 3 px gap and the 1.1 px strokes scaled by the same factor (so at Large the box is 17.5 px and
+the stroke 1.4 px), and never taller than the room the editor has; from where the grid starts
+(36 px in), the tools Select, Draw, Paint,
+Erase, Slice and Mute as icons drawn in code (1.1 px strokes at Normal: an arrow, a pencil, a
+brush, a slanted eraser block with a lighter rubbing end, a blade, and a speaker with a cross),
+3 px apart, the chosen one `control.activeBackground` with a `text.primary`
 shape, the others `control.background` with a `text.secondary` shape; each has a tooltip and an
-accessible label of its name and key ("Draw (2)"). After a 1 px `border.strong` divider and 5 px,
+accessible label of its name and key ("Draw (2)"). The pointer over the grid takes the tool's
+shape: an arrow, a crosshair, an eraser (the eraser icon, not a no-entry sign), a text cursor, an
+arrow, an arrow. After a 1 px `border.strong` divider and 5 px,
 the note clipboard's Cut, Copy, Paste and Duplicate icons, greyed out (`text.hint`, no highlight)
-when there is nothing to act on; then the quantise icon (notes snapping onto a line), which opens
-the quantise block in the clip column. At the right end
+when there is nothing to act on; then the quantise icon (notes snapping onto a line), which shows
+the MIDI tools column with the quantise block open, and the **MIDI tools** icon (three horizontal
+sliders, `control.activeBackground` while the column shows), which shows and hides that column.
+At the right end
 "Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`). Notes a draw or
 paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
 drag has passed over fade to 0.12; the cut line of a slice drag is 1 px `accent`, and a note it
 would split is marked with a 1 px `accent` line over it. A key with the pointer over it, or one
-that is playing, is `control.hoverBackground`.
+that is playing, is `control.hoverBackground`. A **muted** note is the track colour at 0.25 with a
+1 px dashed `text.hint` outline under its 1 px `text.primary` inset when selected, and its velocity
+stem is `text.hint`; it keeps its name and position.
 Pulled to the top with **Edited track**, the Arrangement view's
 one lane is `panel.hoverBackground` with a 2 px `accent` edge on its left, its header
-`control.background` as a selected one. The quantise block is built in the clip properties column
-(196 px: a 20 px title "Quantise", then one row each for the 64 px Grid menu, the 150 px Amount
-slider with its value behind it, the "Move ends too" box and the two 18 px buttons **Quantise
-notes** and **Close**; nothing is placed beside a field whose value would fall off the column's
-edge); the clip's own properties move down under it, and the block is no pop-up.
+`control.background` as a selected one. The quantise block is built at the top of the MIDI tools
+column (112 px: a 20 px title "Quantise", then one row each for the 64 px Grid menu, the 150 px
+Amount slider with its value behind it, the "Move ends too" box and the two 18 px buttons
+**Quantise notes** and **Close**; nothing is placed beside a field whose value would fall off the
+column's edge); the clip's own properties stay in the properties column beside it, and the block is
+no pop-up.
 The rest of this table is planned.
 
 | Part | Spec |
 |---|---|
-| Columns | Clip properties 196 px · tools 112 px · editor |
-| Clip properties | 20 px title with 2 px clip-colour strip; 6 px padding and group gap; each pair = labels row (10 px `text.secondary`) and values row (15 px mono fields); Loop as a 15 px toggle |
-| Tools | Transpose field, then a two-column grid of 18 px buttons (×2, ÷2, Fit scale, Invert, Humanize, Quantize, Reverse, Legato) |
-| Toolbar | 22 px (built: the five tool icons, the clipboard's four, the quantise icon and the grid value); later also tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name |
+| Columns | Clip properties 196 px · MIDI tools 112 px · editor (the tools column is not drawn with the detail area stacked) |
+| Clip properties | 20 px title with 2 px clip-colour strip; 6 px padding and group gap; each pair = labels row (10 px `text.secondary`) and values row (15 px mono fields); Loop as a 15 px toggle; with notes selected, a Notes row "N of M" and, under it, From, To, Pitch and Velocity rows in the same pair shape, all 10 px/15 px |
+| MIDI tools | 112 px on `panel.background` with a 1 px `border` on its right; 10 px head ("Selected notes" / "Whole clip") with a 10 px `text.hint` count under it; the quantise block (above); Transpose as a 64 px value field with −/+ steppers; then a two-column grid of 18 px buttons (×2, ÷2, Fit scale, Invert, Humanise, Reverse, Legato, and the velocity Randomise) plus a Ramp row of two 48 px fields (From, To) |
+| Toolbar | 22 px at Toolbar size Normal, 28 px at Large, 33 px at Larger (built: the six tool icons, the clipboard's four, the quantise icon, the MIDI tools icon and the grid value); later also tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name |
 | Ruler | 16 px; bar numbers `#C9C4BB`, beats `text.hint`; bar lines `#5A5751`, beat lines `#34332F` |
 | Clip loop | 8 px row, 4 px bar `control.activeBackground`, 2 × 8 handles `text.primary` |
 | Key column | 36 px; white keys `control.background`, black keys `window.background`; the key under the pointer or playing `control.hoverBackground`; 2 px scale mark `#6E6A63`; C labels with octave (C3 = MIDI 60) |

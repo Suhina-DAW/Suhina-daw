@@ -1160,6 +1160,11 @@ fn collect_notes(
     // Each pass maps the content range [from, to) to the clip position `at`.
     let mut push_range = |from: f64, to: f64, at: f64| {
         for note in notes {
+            // A muted note stays in the clip and produces no event at all, exactly as if it were
+            // not there (ADR 0001 › Amendment: muted notes).
+            if note.muted {
+                continue;
+            }
             if !(note.time.is_finite() && note.duration.is_finite()) || note.time < from || note.time >= to {
                 continue;
             }
@@ -1212,7 +1217,7 @@ mod tests {
     const SR: u32 = 48_000;
 
     fn note(time: f64, duration: f64, key: u8) -> Note {
-        Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+        Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
     }
 
     fn project_with(lanes: Vec<ContentLane>, clips: Vec<Clip>, tracks: u32) -> Project {
@@ -1346,6 +1351,61 @@ mod tests {
         let mut project = project_with(untargeted(vec![note(0.0, 1.0, 60)]), vec![clip(0.0, 4.0)], 1);
         project.channels[0].mute = true;
         assert_eq!(render_offline(&project, SR, 256), Ok(Vec::new()));
+    }
+
+    /// Mutes note `index` of the first content's first note lane.
+    fn mute_note(project: &mut Project, index: usize) {
+        if let Some(lane) = project.contents.first_mut().and_then(|c| c.lanes.first_mut())
+            && let LaneData::Notes(notes) = &mut lane.data
+            && let Some(note) = notes.get_mut(index)
+        {
+            note.muted = true;
+        }
+    }
+
+    #[test]
+    fn a_muted_note_is_silent_and_does_not_shorten_the_render() {
+        // The long first note covers the short second one's span, so the render lasts the same
+        // whether the second note plays or not.
+        let notes = vec![note(0.0, 2.0, 60), note(0.5, 0.5, 64)];
+        let mut project = project_with(untargeted(notes.clone()), vec![clip(0.0, 4.0)], 1);
+        let all = render_offline(&project, SR, 256).unwrap();
+        let ends = SR as usize + (RELEASE_SECONDS * f64::from(SR)) as usize;
+        assert_eq!(all.len() / 2, ends);
+
+        mute_note(&mut project, 1);
+        let muted = render_offline(&project, SR, 256).unwrap();
+        assert_eq!(muted.len(), all.len(), "muting does not change the render length");
+        assert!(rms(&muted, 0, muted.len() / 2) < rms(&all, 0, all.len() / 2));
+        // The muted note is not there at all: the render is the other note's alone.
+        let alone = project_with(untargeted(vec![notes[0]]), vec![clip(0.0, 4.0)], 1);
+        assert_eq!(muted, render_offline(&alone, SR, 256).unwrap());
+
+        // Every note muted: silence, and no length at all.
+        mute_note(&mut project, 0);
+        assert_eq!(render_offline(&project, SR, 256), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn muting_one_of_two_notes_halves_the_sounding_notes() {
+        // Two notes sounding together: muting one leaves a single voice, so its RMS is about
+        // 1/sqrt(2) of the pair's, and the render is what the other note alone would give.
+        let notes = vec![note(0.0, 1.0, 60), note(0.0, 1.0, 64)];
+        let mut project = project_with(untargeted(notes.clone()), vec![clip(0.0, 4.0)], 1);
+        let all = render_offline(&project, SR, 256).unwrap();
+        let all_rms = rms(&all, 0, all.len() / 2);
+
+        mute_note(&mut project, 0);
+        let muted = render_offline(&project, SR, 256).unwrap();
+        let muted_rms = rms(&muted, 0, muted.len() / 2);
+        assert!(
+            muted_rms < all_rms * 0.9 && muted_rms > all_rms * 0.5,
+            "one of two voices: {muted_rms} against {all_rms}"
+        );
+
+        let alone = project_with(untargeted(vec![notes[1]]), vec![clip(0.0, 4.0)], 1);
+        assert_eq!(muted, render_offline(&alone, SR, 256).unwrap(), "the muted note is not there");
+        assert_eq!(onsets(&all).len(), 1, "the two notes start together");
     }
 
     #[test]

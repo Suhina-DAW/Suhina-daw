@@ -611,6 +611,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   them; and Settings › Shortcuts has the presets **Select-first** (Ctrl+D duplicates) and
   **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
   `keymap.json`.
+- **Piano roll, step 4** ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the toolbar
+  takes a size in Settings › General › Piano roll (Normal, Large, Larger, Large at first) and its
+  six tool icons are drawn as outlines; the **Mute** tool (key 6) mutes and unmutes the notes a
+  click or drag touches, and a muted note keeps its place in the clip, is drawn faded and is never
+  played (`note.setMuted`, and `Note.muted` in the model, the `.suhina` file and a Live Set's
+  `IsEnabled="false"`); a **MIDI tools column** beside the notes holds quantise (Ctrl+U still
+  works) and the tools Transpose, Humanise, Fit to scale, Invert, Reverse, Legato, ×2, ÷2 and the
+  velocity Randomise and Ramp, each one command (`note.humanize`, `.fitToScale`, `.invert`,
+  `.reverse`, `.legato`, `.stretch`, `.randomizeVelocity`, `.rampVelocity`) and one undo step; the
+  clip column lists what is selected (Notes "N of M", From, To, Pitch, Velocity); and
+  Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
+  (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
+  their own, kept in `keymap.json`.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

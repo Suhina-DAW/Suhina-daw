@@ -178,13 +178,14 @@ fn the_right_button_and_the_wheel_stop_at_the_first_and_last_tool_and_never_scro
     // Back from the first tool: it stays the first.
     wheel(&mut h, -60.0);
     assert_eq!(h.state().piano_roll().tool, Tool::Select);
-    // Far forward: it stops at the last tool, it does not come round to the first.
+    // Far forward: it stops at the last tool (Mute, the sixth), it does not come round to the
+    // first.
     for _ in 0..10 {
         wheel(&mut h, 60.0);
     }
-    assert_eq!(h.state().piano_roll().tool, Tool::Slice);
+    assert_eq!(h.state().piano_roll().tool, Tool::Mute);
     wheel(&mut h, -60.0);
-    assert_eq!(h.state().piano_roll().tool, Tool::Erase);
+    assert_eq!(h.state().piano_roll().tool, Tool::Slice);
     // Let go, and let the wheel's smoothing run out: nothing has scrolled.
     button(&mut h, at, false, egui::PointerButton::Secondary);
     for _ in 0..20 {

@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
+read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
 type: system
 status: current
 last_verified: 2026-10-15
@@ -144,7 +144,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   decisions).
 
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
-  in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
+  in beats, key with 60 as C3, velocity 1 to 127, and `muted`); `note.add {..., notes: [{time, length, key,
   velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
   semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
@@ -152,11 +152,29 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
   other clips also play (a duplicate) first gives that clip its own copy of the content, so the
   others do not change; the result's indices are the same.
+- **Muting notes.** `note.setMuted {track, index | scene, notes, muted?}` sets the named notes'
+  mute (`true` mutes, `false` unmutes); with `muted` left out each named note is flipped, which is
+  what a click with the piano roll's Mute tool does. A muted note keeps its place, length, key and
+  velocity and is never played (the arrangement, the launcher and an offline render all skip it);
+  it is saved as `"muted": true` in the project file and survives a save and reopen. One undo step;
+  it returns the notes' indices and their state.
 - **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
   starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
   `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
   onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
   outside 0 to 100 or a note that does not exist fails and changes nothing.
+- **MIDI tools.** The piano roll's MIDI tools column runs the same commands an agent can:
+  `note.humanize {notes?, time?, velocity?, seed?}` moves each start and velocity a small random
+  amount, `note.fitToScale {notes?, root?, scale?}` moves each note to the nearest key of a scale
+  (a key name such as `"C"` or `"F#"`, and `major`, `minor`, `dorian`, `blues` and the rest),
+  `note.invert {notes?}` mirrors the pitches, `note.reverse {notes?}` turns them round in time,
+  `note.legato {notes?}` makes each note last until the next of its key, `note.stretch {notes?,
+  factor}` stretches them in time (`2` is the **×2** button, `0.5` **÷2**),
+  `note.randomizeVelocity {notes?, amount?, seed?}` and `note.rampVelocity {notes?, from, to}`
+  change velocities. `notes` left out means every note of the clip. The two random tools take a
+  `seed`, so the same call gives the same result twice and a script can repeat it; the result says
+  which seed it used when none was given. Each is one undo step and fails as a whole, and none of
+  them changes a note's mute.
 - **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
   changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default

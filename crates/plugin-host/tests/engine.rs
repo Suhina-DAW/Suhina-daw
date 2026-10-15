@@ -71,8 +71,15 @@ fn plugin_device(id: &str) -> Device {
 /// One track playing a note from beat 0 to `length` beats (and one at beat 1 when `two`),
 /// with `devices`.
 fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
-    let note =
-        |time: f64, duration: f64| Note { time, duration, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    let note = |time: f64, duration: f64| Note {
+        time,
+        duration,
+        key: 69,
+        velocity: 1.0,
+        release_velocity: 0.5,
+        channel: 0,
+        muted: false,
+    };
     let notes = if two { vec![note(0.0, 0.5), note(1.0, 0.5)] } else { vec![note(0.0, length)] };
     Project {
         tracks: vec![Track {

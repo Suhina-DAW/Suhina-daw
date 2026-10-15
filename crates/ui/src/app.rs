@@ -1627,9 +1627,17 @@ impl App {
         if let Some(shown_track) = clip.map(ClipRef::track).or(track) {
             self.detail_drop = Some((detail, shown_track));
         }
-        let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
+        let mut shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // What the piano roll has selected, described for the clip column (› Clip column).
+        if let (detail_view::Detail::Clip(info, _), Some(piano), Some(session)) = (&mut shown, &piano, self.session()) {
+            info.selection = detail_view::SelectionInfo::of(
+                &piano.notes,
+                &self.piano_roll.selected,
+                detail_view::bar_beats(session.project()),
+            );
+        }
         // A selected slot clip's follow action comes first, the rest of the detail beside or
         // under it.
         let follow = match (self.shown, self.view.selected_slot, self.session()) {
@@ -1655,7 +1663,11 @@ impl App {
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
-        let options = piano_roll::Options { right_click_deletes: self.keymap.preset().right_click_deletes() };
+        let options = piano_roll::Options {
+            right_click_deletes: self.keymap.preset().right_click_deletes(),
+            toolbar_size: self.settings.toolbar_size,
+            mouse: self.keymap.mouse(),
+        };
         // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
         // visible on the button.
         let keymap = self.keymap.clone();
@@ -1666,7 +1678,16 @@ impl App {
         let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
-                let rest = detail_view::show_clip_column(ui, info, stacked, piano_roll, actions);
+                let mut rest = detail_view::show_clip_column(ui, info, stacked);
+                // The MIDI tools column, between the clip's properties and the note grid. With the
+                // detail area stacked there is no room beside the notes, so it is not drawn there
+                // (the quantise settings and Ctrl+U still work: › Other note tools).
+                if piano_roll.tools_open && !stacked {
+                    let selected = piano_roll.selected.clone();
+                    let tools =
+                        crate::midi_tools::Tools { address: &piano.address, notes: &piano.notes, selected: &selected };
+                    rest = crate::midi_tools::show(ui, rest, &tools, piano_roll, actions);
+                }
                 let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
             } else if stacked {

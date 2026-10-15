@@ -166,8 +166,24 @@ fn everything() -> Project {
                 lanes: vec![ContentLane {
                     target: None,
                     data: LaneData::Notes(vec![
-                        Note { time: 0.0, duration: 1.0, key: 60, velocity: 0.75, release_velocity: 0.5, channel: 0 },
-                        Note { time: 1.5, duration: 0.25, key: 127, velocity: 1.0, release_velocity: 0.0, channel: 15 },
+                        Note {
+                            time: 0.0,
+                            duration: 1.0,
+                            key: 60,
+                            velocity: 0.75,
+                            release_velocity: 0.5,
+                            channel: 0,
+                            muted: false,
+                        },
+                        Note {
+                            time: 1.5,
+                            duration: 0.25,
+                            key: 127,
+                            velocity: 1.0,
+                            release_velocity: 0.0,
+                            channel: 15,
+                            muted: false,
+                        },
                     ]),
                 }],
                 extensions: ext("MidiClip"),
@@ -277,6 +293,49 @@ fn an_empty_project_survives_a_round_trip() {
     assert_eq!(from_json(&to_json(&Project::default())), Ok(Project::default()));
 }
 
+/// The notes of content 1, to change.
+fn notes_of(project: &mut Project) -> Option<&mut Vec<Note>> {
+    match &mut project.contents.first_mut()?.lanes.first_mut()?.data {
+        LaneData::Notes(notes) => Some(notes),
+        LaneData::Audio(_) => None,
+    }
+}
+
+#[test]
+fn a_muted_note_survives_a_round_trip() {
+    let mut project = everything();
+    if let Some(note) = notes_of(&mut project).and_then(|notes| notes.get_mut(1)) {
+        note.muted = true;
+    }
+    let text = to_json(&project);
+    assert!(text.contains(r#""muted": true"#), "{text}");
+    // Only the muted note names a mute.
+    assert_eq!(text.matches(r#""muted""#).count(), 1, "{text}");
+    assert_eq!(from_json(&text), Ok(project));
+}
+
+#[test]
+fn a_project_without_muted_notes_writes_no_muted_key() {
+    // The fixture holds notes, all of them unmuted: none of them names a mute, so a project
+    // saved now is the file a version before muted notes wrote.
+    let text = to_json(&everything());
+    assert!(!text.contains(r#""muted""#), "{text}");
+}
+
+#[test]
+fn a_note_without_the_muted_key_reads_as_unmuted() {
+    let read = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "contents": [ { "id": 1, "length": 4,
+        "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 60 } ] } ] } ] } }"#,
+    );
+    let project = read.expect("a version-1 file reads");
+    let muted = match project.contents.first().and_then(|c| c.lanes.first()).map(|lane| &lane.data) {
+        Some(LaneData::Notes(notes)) => notes.first().map(|n| n.muted),
+        _ => None,
+    };
+    assert_eq!(muted, Some(false), "a note from before this reads as unmuted");
+}
+
 #[test]
 fn files_are_written_and_read() {
     let dir = std::env::temp_dir().join(format!("suhina-project-file-{}", std::process::id()));
@@ -365,6 +424,7 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "channels": [ { "id": 1, "automation": { "param": "pan" } } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst3", "id": "x" }, "state": "***" } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 200 } ] } ] } ] }"#,
+        r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 60, "muted": "yes" } ] } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": "long" } ] }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "loop": [3, 1] } ] } ] } }"#,

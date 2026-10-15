@@ -328,6 +328,10 @@ pub struct Note {
     pub release_velocity: f32,
     /// MIDI channel, 0–15.
     pub channel: u8,
+    /// A muted note stays in the clip but is not played: the engine emits no voice for it, as if
+    /// it were not there ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment:
+    /// muted notes).
+    pub muted: bool,
 }
 
 /// An audio file mapped onto musical time.
@@ -1034,7 +1038,7 @@ mod tests {
     use super::*;
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.25, key, velocity: 0.8, release_velocity: 0.5, channel: 0 }
+        Note { time, duration: 0.25, key, velocity: 0.8, release_velocity: 0.5, channel: 0, muted: false }
     }
 
     fn track(id: u32, channel: u32) -> Track {

@@ -15,6 +15,7 @@ mod library;
 mod mapping;
 mod meters;
 mod midi;
+mod note_tools;
 mod notes;
 mod plugin_edits;
 mod plugins;

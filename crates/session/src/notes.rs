@@ -17,7 +17,7 @@ pub const MAX_NOTES_PER_COMMAND: usize = 10_000;
 /// The most notes a clip may hold.
 pub const MAX_NOTES_PER_CLIP: usize = 100_000;
 /// The latest start and the longest length of a note, in beats: the engine's furthest start.
-const MAX_BEAT: f64 = MAX_START_BEAT;
+pub(crate) const MAX_BEAT: f64 = MAX_START_BEAT;
 /// The velocity a note gets when `note.add` gives none, and the release velocity of every new
 /// note (the MIDI default, 64).
 const DEFAULT_VELOCITY: f64 = 100.0;
@@ -102,7 +102,7 @@ fn placements(p: &Project, content: ContentId) -> usize {
 /// with the edit, and the other clips keep the content as it was (copy on write, ADR 0001). A
 /// shared pattern, a content with lanes for named tracks, stays shared: its placements are one
 /// pattern on purpose. The copy is part of the same command, so one undo takes back both.
-fn edit_notes(
+pub(crate) fn edit_notes(
     p: &mut Project,
     params: &Value,
     edit: impl FnOnce(&mut Vec<Note>) -> Result<Value, CommandError>,
@@ -145,7 +145,7 @@ fn check_midi(p: &Project, content: ContentId) -> Result<(), CommandError> {
 }
 
 /// The notes of the clip `params` names (none for an empty MIDI clip).
-fn notes_of<'a>(p: &'a Project, params: &Value) -> Result<&'a [Note], CommandError> {
+pub(crate) fn notes_of<'a>(p: &'a Project, params: &Value) -> Result<&'a [Note], CommandError> {
     let (_, content, track) = locate(p, params)?;
     check_midi(p, content)?;
     let content = p.content(content).ok_or("the clip's content is missing")?;
@@ -184,7 +184,7 @@ fn notes_mut<'a>(p: &'a mut Project, params: &Value) -> Result<&'a mut Vec<Note>
 }
 
 /// The note indices in `params.notes`, each once, in rising order; every one must exist.
-fn indices(params: &Value, count: usize) -> Result<Vec<usize>, CommandError> {
+pub(crate) fn indices(params: &Value, count: usize) -> Result<Vec<usize>, CommandError> {
     let list = params.get("notes").and_then(Value::as_array).ok_or("notes must be a list of note indices")?;
     if list.is_empty() {
         return Err("notes is empty; give the indices of the notes, from note.list".into());
@@ -207,7 +207,7 @@ fn indices(params: &Value, count: usize) -> Result<Vec<usize>, CommandError> {
 }
 
 /// An optional finite number.
-fn optional_number(params: &Value, key: &str) -> Result<Option<f64>, CommandError> {
+pub(crate) fn optional_number(params: &Value, key: &str) -> Result<Option<f64>, CommandError> {
     match params.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => {
@@ -217,7 +217,7 @@ fn optional_number(params: &Value, key: &str) -> Result<Option<f64>, CommandErro
 }
 
 /// MIDI velocity 1 … 127 to the model's 0 … 1.
-fn velocity_of(midi: f64) -> f32 {
+pub(crate) fn velocity_of(midi: f64) -> f32 {
     (midi.clamp(1.0, 127.0) / 127.0) as f32
 }
 
@@ -233,6 +233,7 @@ fn note_json(index: usize, note: &Note) -> Value {
         "length": note.duration,
         "key": note.key,
         "velocity": midi_velocity(note.velocity),
+        "muted": note.muted,
     })
 }
 
@@ -276,6 +277,7 @@ fn new_note(value: &Value, at: usize) -> Result<Note, CommandError> {
         velocity: velocity_of(velocity),
         release_velocity: RELEASE_VELOCITY,
         channel: 0,
+        muted: false,
     })
 }
 

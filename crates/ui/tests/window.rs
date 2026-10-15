@@ -1878,6 +1878,55 @@ fn a_key_set_in_settings_runs_its_action_and_is_saved() {
 }
 
 #[test]
+fn settings_set_the_toolbar_size_and_the_mouse_switches() {
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    // The piano roll's row shows the size in use, Large by default.
+    assert!(harness.query_by_label("Toolbar size: Large").is_some(), "the row reads its value");
+    assert!(harness.query_by_label("Toolbar size: Normal").is_some());
+    assert!(harness.query_by_label("Toolbar size: Larger").is_some());
+    assert_eq!(harness.state().settings().toolbar_size, suhina_ui::settings::ToolbarSize::Large);
+    harness.get_by_label("Toolbar size: Larger").click();
+    harness.run();
+    assert_eq!(harness.state().settings().toolbar_size, suhina_ui::settings::ToolbarSize::Larger);
+    assert_eq!(
+        harness.state_mut().take_changed_settings().map(|s| s.toolbar_size),
+        Some(suhina_ui::settings::ToolbarSize::Larger)
+    );
+
+    // The four mouse switches write to the keymap, which is handed out to be saved.
+    assert!(harness.query_by_label("Right click deletes a note: On").is_some(), "each switch is an Off/On row");
+    assert!(!harness.state().keymap().mouse().right_deletes, "off until it is turned on");
+    harness.get_by_label("Right click deletes a note: On").click();
+    harness.run();
+    assert!(harness.state().keymap().mouse().right_deletes);
+    assert!(harness.state_mut().take_changed_keymap().is_some(), "the keymap is saved with it");
+    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::SelectFirst, "the name stays");
+    // And back off again.
+    harness.get_by_label("Right click deletes a note: Off").click();
+    harness.run();
+    assert!(!harness.state().keymap().mouse().right_deletes);
+    // A preset chosen on the Shortcuts page turns all four on.
+    harness.get_by_label("Settings page: Shortcuts").click();
+    harness.run();
+    harness.get_by_label("Preset: Mouse-first").click();
+    harness.run();
+    assert!(harness.state().keymap().mouse().all_on());
+    assert_eq!(
+        harness.state_mut().take_changed_keymap().map(|k| k.mouse()),
+        Some(suhina_ui::keymap::MouseSettings::ALL_ON)
+    );
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    assert!(harness.query_by_label("Right click deletes a note: On").is_some());
+    harness.get_by_label("Close settings").click();
+    harness.run();
+}
+
+#[test]
 fn keys_copy_paste_and_delete_the_selected_clip() {
     let mut harness = arrangement_app();
     let spans = |h: &Harness<'static, App>| {

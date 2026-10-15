@@ -139,7 +139,7 @@ mod tests {
     }
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.5, key, velocity: 0.75, release_velocity: 0.25, channel: 0 }
+        Note { time, duration: 0.5, key, velocity: 0.75, release_velocity: 0.25, channel: 0, muted: false }
     }
 
     fn summary(events: &[Event]) -> Vec<(u32, bool, u8)> {
