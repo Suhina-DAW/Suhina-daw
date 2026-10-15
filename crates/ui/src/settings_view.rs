@@ -1141,7 +1141,7 @@ fn audio_page(
     let r = row(y);
     let (output, latency) = match &about.audio_live {
         Some(info) => (
-            info.describe(),
+            now_playing(info, &choice),
             format!(
                 "{:.1} ms, {} underrun{}{}",
                 info.latency_ms,
@@ -1197,6 +1197,16 @@ fn preset_segmented(
         }
     }
     picked
+}
+
+/// Settings › Audio › Now › Output: the device that plays, and, when it plays in place of the
+/// chosen one that is not there, which device it goes back to once it is.
+fn now_playing(info: &suhina_session::OutputInfo, choice: &suhina_session::OutputChoice) -> String {
+    let wanted = choice.device.as_deref().or(choice.host.as_deref());
+    match wanted {
+        Some(wanted) if info.fallback => format!("{}, until {wanted} is back", info.describe()),
+        _ => info.describe(),
+    }
 }
 
 /// A dropdown on the right of `row` listing `options` (text, value). Returns the value picked,
@@ -1277,4 +1287,26 @@ fn segmented<T: Copy + PartialEq>(
         widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT_SMALL), color);
     }
     picked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_output_now_says_which_chosen_device_it_waits_for() {
+        let info = suhina_session::OutputInfo {
+            host: "WASAPI".into(),
+            device: "Speakers".into(),
+            sample_rate: 48_000,
+            engine_block: 512,
+            ..Default::default()
+        };
+        let usb = suhina_session::OutputChoice { device: Some("USB Audio".into()), ..Default::default() };
+        assert_eq!(now_playing(&info, &usb), "Speakers (WASAPI, 48000 Hz, 512 frames)");
+        let waiting = suhina_session::OutputInfo { fallback: true, ..info };
+        assert_eq!(now_playing(&waiting, &usb), "Speakers (WASAPI, 48000 Hz, 512 frames), until USB Audio is back");
+        let asio = suhina_session::OutputChoice { host: Some("ASIO".into()), ..Default::default() };
+        assert!(now_playing(&waiting, &asio).ends_with("until ASIO is back"));
+    }
 }

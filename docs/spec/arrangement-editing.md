@@ -167,6 +167,11 @@ setting, and a second Stop goes to the beginning.
 
 `launcher.state` reports `start_beat` (the marker) next to `beat` and `position` (the playhead).
 
+**A new audio output.** When the output is opened again (`audio.setOutput`, a device that
+reported an error, the chosen device back), the marker stays where it was and, while playing,
+playback goes on from the playhead: the engine jumps there without moving the marker
+(`LaunchCommand::Locate`), so a later Stop still returns to the marker.
+
 **Starting inside the arrangement.** From the marker's frame on, the arrangement plays exactly as
 it would at that frame of a render from the beginning, with two exceptions: a note that started
 before the marker is not played (notes are not picked up mid-way), and a time-stretched audio clip

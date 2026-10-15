@@ -452,11 +452,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   mode (off by default), and what plays now with its measured latency and underruns. A change
   reopens the output with the transport where it was and the plug-ins running; the engine
   renders in blocks of the buffer size, so the plug-ins' deadline follows it. A device that is
-  gone at start plays the default output, with a notice. Still to do: keeping the play marker
-  and launched clips across a reopen ([#178](https://github.com/suhina-daw/suhina-daw/issues/178)),
-  going back to the chosen device when it returns
-  ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)), the ASIO driver's control panel
-  ([#176](https://github.com/suhina-daw/suhina-daw/issues/176)).
+  gone at start plays the default output, with a notice. Still to do: the ASIO driver's control
+  panel ([#176](https://github.com/suhina-daw/suhina-daw/issues/176)).
+- A new audio output is inaudible apart from the moment it takes to open: the play start marker
+  stays, launched clips play on from where they were, waiting launches wait again, and the
+  launch quantisation and a scene's tempo carry over
+  ([#178](https://github.com/suhina-daw/suhina-daw/issues/178)).
+- When the chosen audio device is unplugged or missing at start, the default output plays in its
+  place (Settings › Audio › Now says "until … is back"); Suhina looks every few seconds and moves
+  back to the chosen device when it is connected again, with a notice
+  ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command

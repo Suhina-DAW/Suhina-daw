@@ -625,6 +625,7 @@ struct Live {
     sample_rate: u32,
     block: usize,
     exclusive: bool,
+    fallback: bool,
 }
 
 impl LiveOutput for Live {
@@ -639,6 +640,7 @@ impl LiveOutput for Live {
             latency_ms: self.progress.latency().as_secs_f64() * 1000.0,
             underruns: self.progress.underruns(),
             failed: self.progress.failed(),
+            fallback: self.fallback,
         }
     }
 }
@@ -700,6 +702,7 @@ pub fn open_chosen(
                         sample_rate: output.sample_rate,
                         block: output.block,
                         exclusive: output.exclusive,
+                        fallback: in_place_of(&choice, &output.host, &output.device_name),
                     };
                     let notice = (!output.notices.is_empty()).then(|| output.notices.join("; "));
                     if ready.send(Ok((controller, live, notice, kept))).is_ok() {
@@ -722,12 +725,46 @@ pub fn open_chosen(
     Ok(Opened { player, notice, plugins_kept })
 }
 
+/// Whether an output opened on `host`'s `device` plays in place of what `choice` names: the
+/// chosen host or device was not there.
+fn in_place_of(choice: &OutputChoice, host: &str, device: &str) -> bool {
+    choice.host.as_deref().is_some_and(|h| !devices::same_name(h, host))
+        || choice.device.as_deref().is_some_and(|d| !devices::same_name(d, device))
+}
+
+/// Whether the host and device `choice` names can be found now. Only names are read, no
+/// formats, so it is quick; an ASIO host is not looked at while an ASIO stream is open (one
+/// driver at a time). Runs on a thread of its own ([`DeviceOutput::chosen_present`]).
+fn chosen_device_present(choice: &OutputChoice) -> bool {
+    let id = match &choice.host {
+        Some(name) => match cpal::available_hosts().into_iter().find(|h| devices::same_name(h.name(), name)) {
+            Some(id) => id,
+            None => return false,
+        },
+        None => cpal::default_host().id(),
+    };
+    let Some(device) = &choice.device else { return true };
+    if id.name() == "ASIO" && ASIO_OPEN.load(Ordering::Acquire) {
+        return false;
+    }
+    let Ok(host) = cpal::host_from_id(id) else { return false };
+    host.output_devices().is_ok_and(|mut list| list.any(|d| devices::same_name(&d.to_string(), device)))
+}
+
+/// The background look for the chosen device: one at a time, its answer kept for the next ask.
+#[derive(Default)]
+struct Watch {
+    looking: bool,
+    answer: Option<(OutputChoice, bool)>,
+}
+
 /// The system's audio devices for the session ([`AudioSystem`]): the hosts cpal offers here
 /// and opening a project on the device chosen.
 #[derive(Default)]
 pub struct DeviceOutput {
     /// The last listing, for the ASIO host while its driver is in use.
     listed: std::sync::Mutex<Vec<HostInfo>>,
+    watch: Arc<std::sync::Mutex<Watch>>,
 }
 
 impl DeviceOutput {
@@ -759,6 +796,25 @@ impl AudioSystem for DeviceOutput {
         previous: Option<Player>,
     ) -> Result<Opened, String> {
         open_chosen(project, audio, choice, previous)
+    }
+
+    /// Gives the answer of the last look for `choice`'s device, once, and starts the next look
+    /// on a thread of its own, so the caller never waits for the system's device list.
+    fn chosen_present(&self, choice: &OutputChoice) -> Option<bool> {
+        let Ok(mut watch) = self.watch.lock() else { return None };
+        let answer = watch.answer.take().filter(|(asked, _)| asked == choice).map(|(_, present)| present);
+        if !watch.looking {
+            let (shared, choice) = (Arc::clone(&self.watch), choice.clone());
+            let look = move || {
+                let present = chosen_device_present(&choice);
+                if let Ok(mut watch) = shared.lock() {
+                    watch.answer = Some((choice, present));
+                    watch.looking = false;
+                }
+            };
+            watch.looking = std::thread::Builder::new().name("suhina-device-watch".into()).spawn(look).is_ok();
+        }
+        answer
     }
 }
 

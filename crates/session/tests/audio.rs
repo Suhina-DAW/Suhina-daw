@@ -20,13 +20,18 @@ const SR: u32 = 48_000;
 struct Stand {
     renderers: Mutex<Vec<Renderer>>,
     opened: Mutex<Vec<(OutputChoice, bool)>>,
-    /// The device that is "not there": choosing it falls back with a notice.
-    missing: Option<String>,
+    /// The device that is "not there": choosing it falls back with a notice. Besides
+    /// "Default", the host lists "USB" unless it is the one missing.
+    missing: Mutex<Option<String>>,
+    /// Times the hosts were listed.
+    listed: std::sync::atomic::AtomicUsize,
     /// Each opened output's error flag, to fail it as a driver would.
     failed: Mutex<Vec<Arc<std::sync::atomic::AtomicBool>>>,
 }
 
-struct Live(OutputChoice, Arc<std::sync::atomic::AtomicBool>);
+/// An output: what it was opened on, its error flag, and whether it plays in place of the
+/// device chosen.
+struct Live(OutputChoice, Arc<std::sync::atomic::AtomicBool>, bool);
 
 impl LiveOutput for Live {
     fn info(&self) -> OutputInfo {
@@ -39,6 +44,7 @@ impl LiveOutput for Live {
             latency_ms: 21.3,
             underruns: 2,
             failed: self.1.load(std::sync::atomic::Ordering::Relaxed),
+            fallback: self.2,
             ..OutputInfo::default()
         }
     }
@@ -46,21 +52,22 @@ impl LiveOutput for Live {
 
 impl AudioSystem for Stand {
     fn hosts(&self) -> Vec<HostInfo> {
-        vec![HostInfo {
-            name: "Stand".into(),
+        self.listed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let device = DeviceInfo {
+            name: "Default".into(),
             default: true,
-            devices: vec![DeviceInfo {
-                name: "Default".into(),
-                default: true,
-                channels: 2,
-                sample_rates: vec![44_100, SR],
-                default_sample_rate: Some(SR),
-                buffer_sizes: vec![256, 512, 1024],
-                buffer_range: Some((256, 1024)),
-                exclusive: false,
-            }],
-            error: None,
-        }]
+            channels: 2,
+            sample_rates: vec![44_100, SR],
+            default_sample_rate: Some(SR),
+            buffer_sizes: vec![256, 512, 1024],
+            buffer_range: Some((256, 1024)),
+            exclusive: false,
+        };
+        let mut devices = vec![device.clone()];
+        if self.missing.lock().unwrap().as_deref() != Some("USB") {
+            devices.push(DeviceInfo { name: "USB".into(), default: false, ..device });
+        }
+        vec![HostInfo { name: "Stand".into(), default: true, devices, error: None }]
     }
 
     fn open(
@@ -72,7 +79,8 @@ impl AudioSystem for Stand {
     ) -> Result<Opened, String> {
         let mut choice = choice.clone();
         let mut notice = None;
-        if choice.device.is_some() && choice.device == self.missing {
+        let fallback = choice.device.is_some() && choice.device == *self.missing.lock().unwrap();
+        if fallback {
             notice = Some("the audio device is not there; the default output plays".to_string());
             choice = OutputChoice::default();
         }
@@ -81,7 +89,7 @@ impl AudioSystem for Stand {
         let mut renderer = Renderer::stopped(project, audio, choice.sample_rate.unwrap_or(SR)).unwrap();
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.failed.lock().unwrap().push(Arc::clone(&failed));
-        let player = Player::with_output(renderer.controller(), None, Arc::new(Live(choice, failed)));
+        let player = Player::with_output(renderer.controller(), None, Arc::new(Live(choice, failed, fallback)));
         self.renderers.lock().unwrap().push(renderer);
         Ok(Opened { player, notice, plugins_kept: true })
     }
@@ -108,7 +116,7 @@ fn run(projects: &mut Projects, id: &str, params: Value) -> Result<Value, String
 }
 
 fn with_stand(missing: Option<&str>) -> (Projects, Arc<Stand>) {
-    let stand = Arc::new(Stand { missing: missing.map(String::from), ..Stand::default() });
+    let stand = Arc::new(Stand { missing: Mutex::new(missing.map(String::from)), ..Stand::default() });
     let mut projects = Projects::new();
     projects.set_audio_system(stand.clone());
     (projects, stand)
@@ -209,6 +217,7 @@ fn a_device_that_is_gone_falls_back_with_a_notice() {
     let result = run(&mut projects, "audio.setOutput", json!({ "device": "Unplugged" })).unwrap();
     assert!(result["notice"].as_str().unwrap().contains("not there"));
     assert_eq!(result["device"], json!("Default"));
+    assert_eq!(result["fallback"], json!(true));
     // The choice is kept, for when the device is back.
     assert_eq!(projects.output_choice().device.as_deref(), Some("Unplugged"));
 }
@@ -244,4 +253,152 @@ fn an_output_whose_device_fails_opens_again_but_not_every_frame() {
     stand.failed.lock().unwrap()[1].store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(projects.check_output().is_empty());
     assert_eq!(stand.opened.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn the_output_goes_back_to_the_chosen_device_when_it_is_plugged_in_again() {
+    let (mut projects, stand) = with_stand(Some("USB"));
+    projects.add(Session::new(project()), None).unwrap();
+    projects.open_output(None).unwrap();
+    let chose = run(&mut projects, "audio.setOutput", json!({ "device": "USB" })).unwrap();
+    assert_eq!((chose["device"].clone(), chose["fallback"].clone()), (json!("Default"), json!(true)));
+    {
+        let session = projects.session_mut(None).unwrap();
+        session.execute("transport.setPosition", &json!({ "beats": 2.0 })).unwrap();
+        session.execute("transport.play", &json!({})).unwrap();
+    }
+    stand.run_latest();
+
+    // Not there yet: one look, and nothing opens.
+    let listed = stand.listed.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(projects.poll_plugins().is_empty());
+    assert_eq!(stand.listed.load(std::sync::atomic::Ordering::Relaxed), listed + 1);
+    assert_eq!(stand.opened.lock().unwrap().len(), 2);
+    // The next look waits a few seconds, not a frame.
+    assert!(projects.check_output().is_empty());
+    assert_eq!(stand.listed.load(std::sync::atomic::Ordering::Relaxed), listed + 1);
+
+    // Choosing again looks at once; now the device is back and the output moves to it,
+    // playing on where it was.
+    *stand.missing.lock().unwrap() = None;
+    projects.set_output_choice(projects.output_choice().clone());
+    let before = projects.session_mut(None).unwrap().player().unwrap().monitor().beat();
+    let said = projects.check_output();
+    assert_eq!(said, ["the audio device USB is back; it plays again"]);
+    let opened = stand.opened.lock().unwrap().clone();
+    assert_eq!(opened.len(), 3);
+    assert_eq!(opened[2].0.device.as_deref(), Some("USB"));
+    stand.run_latest();
+    let info = run(&mut projects, "audio.info", json!({})).unwrap();
+    assert_eq!((info["device"].clone(), info["fallback"].clone()), (json!("USB"), json!(false)));
+    let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
+    assert!(monitor.running());
+    assert!(monitor.beat() >= before, "{} < {before}", monitor.beat());
+    assert_eq!(monitor.start_beat(), 2.0, "the marker stays");
+    // On the chosen device there is nothing to look for.
+    assert!(projects.check_output().is_empty());
+    assert_eq!(stand.opened.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn a_choice_is_found_by_its_host_and_device() {
+    let stand = Stand::default();
+    let hosts = stand.hosts();
+    let choice = |host: Option<&str>, device: Option<&str>| OutputChoice {
+        host: host.map(String::from),
+        device: device.map(String::from),
+        ..OutputChoice::default()
+    };
+    assert!(choice(None, None).found_in(&hosts));
+    assert!(choice(None, Some(" usb ")).found_in(&hosts));
+    assert!(choice(Some("stand"), Some("USB")).found_in(&hosts));
+    assert!(!choice(None, Some("Headphones")).found_in(&hosts));
+    assert!(!choice(Some("ASIO"), None).found_in(&hosts));
+    assert!(!choice(None, None).found_in(&[]));
+}
+
+/// A project with two tracks whose first launcher slots hold looping clips.
+fn launcher_project() -> Project {
+    let mut p = project();
+    let note =
+        suhina_model::Note { time: 0.0, duration: 0.25, key: 60, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    p.contents.push(suhina_model::ClipContent {
+        id: suhina_model::ContentId(900),
+        name: "loop".into(),
+        length: 4.0,
+        lanes: vec![suhina_model::ContentLane { target: None, data: suhina_model::LaneData::Notes(vec![note]) }],
+        extensions: suhina_model::Extensions::default(),
+    });
+    let clip = suhina_model::Clip {
+        content: suhina_model::ContentId(900),
+        start: 0.0,
+        length: 4.0,
+        offset: 0.0,
+        loop_range: Some(suhina_model::LoopRange { start: 0.0, end: 4.0 }),
+        enabled: true,
+        fade_in: 0.0,
+        fade_out: 0.0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        follow_action: Default::default(),
+        extensions: suhina_model::Extensions::default(),
+    };
+    for column in p.launcher.columns.iter_mut().take(2) {
+        if let Some(slot) = column.slots.first_mut() {
+            slot.clip = Some(clip.clone());
+        }
+    }
+    p
+}
+
+#[test]
+fn a_reopen_keeps_the_marker_the_launched_clips_and_the_quantization() {
+    let (mut projects, stand) = with_stand(None);
+    projects.add(Session::new(launcher_project()), None).unwrap();
+    projects.open_output(None).unwrap();
+    {
+        let session = projects.session_mut(None).unwrap();
+        session.execute("launcher.setQuantization", &json!({ "value": "1/4" })).unwrap();
+        session.execute("transport.setPosition", &json!({ "beats": 4.0 })).unwrap();
+        session.execute("transport.play", &json!({})).unwrap();
+        session.execute("clip.launch", &json!({ "track": 1, "scene": 1 })).unwrap();
+    }
+    // Long enough for the launch at the next beat, and a bit of the clip.
+    for _ in 0..30 {
+        stand.run_latest();
+    }
+    {
+        let session = projects.session_mut(None).unwrap();
+        let monitor = session.player().unwrap().monitor();
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0), "the clip plays");
+        // A launch on the second track waits for the next beat when the output reopens.
+        session.execute("clip.launch", &json!({ "track": 2, "scene": 1 })).unwrap();
+    }
+    stand.run_latest();
+    let (beat, elapsed) = {
+        let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
+        (monitor.beat(), monitor.elapsed_beats(0).unwrap())
+    };
+    assert!(elapsed > 0.0);
+
+    run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 256 })).unwrap();
+    stand.run_latest();
+    let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
+    assert!(monitor.running());
+    assert_eq!(monitor.start_beat(), 4.0, "the marker stays where it was");
+    assert!(monitor.beat() > beat, "{} <= {beat}", monitor.beat());
+    let first = monitor.column(0).unwrap();
+    assert_eq!((first.playing, first.overrides_arrangement), (Some(0), true), "the launched clip plays on");
+    let on = monitor.elapsed_beats(0).unwrap();
+    assert!(on >= elapsed && on - elapsed < 0.5, "{on} after {elapsed}");
+    // The launch that was waiting waits again, for the next quarter note: the quantisation
+    // carried over. A run is 2048 frames, so twelve are just over a beat; the default, a bar,
+    // would wait until beat 8, well past them.
+    assert_eq!(monitor.column(1).unwrap().queued, Some(suhina_engine::Queued::Launch(0)));
+    assert!(beat < 6.9, "{beat}");
+    for _ in 0..12 {
+        stand.run_latest();
+    }
+    let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
+    assert_eq!(monitor.column(1).unwrap().playing, Some(0));
 }

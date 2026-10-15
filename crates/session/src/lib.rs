@@ -79,6 +79,8 @@ pub struct Player {
     controller: Controller,
     keep_alive: Option<Box<dyn std::any::Any + Send>>,
     output: Option<std::sync::Arc<dyn LiveOutput>>,
+    /// The launch quantisation last sent, which a new output is given again.
+    quantization: Option<suhina_engine::Quantization>,
 }
 
 /// `controller`, with the follow actions' random numbers seeded from the clock, so each
@@ -92,7 +94,7 @@ fn seeded(mut controller: Controller) -> Controller {
 
 impl Player {
     pub fn new(controller: Controller, keep_alive: Option<Box<dyn std::any::Any + Send>>) -> Self {
-        Self { controller: seeded(controller), keep_alive, output: None }
+        Self { controller: seeded(controller), keep_alive, output: None, quantization: None }
     }
 
     /// A player whose output reports what it runs with (`audio.info`).
@@ -101,7 +103,7 @@ impl Player {
         keep_alive: Option<Box<dyn std::any::Any + Send>>,
         output: std::sync::Arc<dyn LiveOutput>,
     ) -> Self {
-        Self { controller: seeded(controller), keep_alive, output: Some(output) }
+        Self { controller: seeded(controller), keep_alive, output: Some(output), quantization: None }
     }
 
     /// What the output runs with now, when it says.
@@ -116,7 +118,16 @@ impl Player {
     }
 
     pub fn send(&mut self, command: suhina_engine::LaunchCommand) -> Result<(), CommandError> {
-        self.controller.send(command).map_err(CommandError)
+        self.controller.send(command).map_err(CommandError)?;
+        if let suhina_engine::LaunchCommand::SetQuantization(q) = command {
+            self.quantization = Some(q);
+        }
+        Ok(())
+    }
+
+    /// The launch quantisation last sent to this player, if any.
+    pub fn quantization(&self) -> Option<suhina_engine::Quantization> {
+        self.quantization
     }
 
     pub fn monitor(&self) -> &LauncherMonitor {
