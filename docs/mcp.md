@@ -103,6 +103,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
   onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
   outside 0 to 100 or a note that does not exist fails and changes nothing.
+- **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
+  changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
+  adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
+  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |

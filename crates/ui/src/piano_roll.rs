@@ -62,6 +62,37 @@ pub struct PianoClip {
     pub bar_beats: f64,
     /// The grid step in beats (the control bar's grid value); 0 is none.
     pub grid: f64,
+    /// Where the clip is on the arrangement, to find the playhead in its content.
+    pub placement: Placement,
+}
+
+/// Where a clip plays its content on the arrangement.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Placement {
+    /// The arrangement beat it starts at, and how long it is.
+    pub start: f64,
+    pub length: f64,
+    /// Where in the content it starts playing, and the part it loops (start, end), if any.
+    pub offset: f64,
+    pub loop_range: Option<(f64, f64)>,
+}
+
+impl Placement {
+    /// The content beat played at arrangement beat `at`; `None` outside the clip.
+    pub fn content_beat(&self, at: f64) -> Option<f64> {
+        let elapsed = at - self.start;
+        if !(elapsed >= 0.0 && elapsed < self.length) {
+            return None;
+        }
+        let mut beat = self.offset + elapsed;
+        if let Some((start, end)) = self.loop_range
+            && end > start
+            && beat >= end
+        {
+            beat = start + (beat - start) % (end - start);
+        }
+        beat.is_finite().then_some(beat.max(0.0))
+    }
 }
 
 /// The piano roll for the arrangement clip `index` on `track`, with the grid `quantization`;
@@ -97,6 +128,12 @@ pub fn arrangement_clip(
         color: Color32::from_rgb(color.0, color.1, color.2),
         bar_beats,
         grid: grid_step(quantization, bar_beats),
+        placement: Placement {
+            start: clip.start,
+            length: clip.length,
+            offset: clip.offset,
+            loop_range: clip.loop_range.map(|l| (l.start, l.end)),
+        },
     })
 }
 
@@ -168,6 +205,9 @@ pub struct PianoRollState {
     pub selected: BTreeSet<usize>,
     /// The last press was in the piano roll, so Delete deletes notes there.
     pub focused: bool,
+    /// A key this frame selected notes its command is still to add (paste, duplicate): they
+    /// are kept selected until the command has run.
+    selecting_new: bool,
     gesture: Option<Gesture>,
     panning: bool,
     /// The settings quantise uses, and whether the Quantise panel is open.
@@ -184,6 +224,7 @@ impl Default for PianoRollState {
             key_height: DEFAULT_KEY_HEIGHT,
             selected: BTreeSet::new(),
             focused: false,
+            selecting_new: false,
             gesture: None,
             panning: false,
             quantize: QuantizeSettings::default(),
@@ -218,6 +259,97 @@ impl PianoRollState {
         Some(Action::new("note.quantize", params))
     }
 
+    /// What a key does to the piano roll showing `clip`, when it has the keyboard: the selection
+    /// actions change the selection here, the others become a `note.*` command. `playhead` is the
+    /// arrangement's playhead in beats, `copied` how many notes `note.paste` would add. `None`
+    /// when the key does nothing here, so copy, cut, paste and duplicate act on the clip instead.
+    pub fn key_action(
+        &mut self,
+        action: &str,
+        clip: &PianoClip,
+        playhead: f64,
+        copied: Option<usize>,
+    ) -> Option<Action> {
+        if !self.focused || self.shown.as_ref() != Some(&clip.address) {
+            return None;
+        }
+        self.selected.retain(|i| *i < clip.notes.len());
+        let chosen: Vec<Note> = self.selected.iter().filter_map(|i| clip.notes.get(*i).copied()).collect();
+        let count = clip.notes.len();
+        let mut params = clip.address.clone();
+        if action == "selection.paste" {
+            // After the selection, or at the playhead when it is inside the clip; else where the
+            // command puts it (right after the copied notes).
+            let copied = copied?;
+            let end = chosen.iter().map(|n| n.time + n.duration).fold(f64::NEG_INFINITY, f64::max);
+            let time = if end.is_finite() { Some(end) } else { clip.placement.content_beat(playhead) };
+            if let Some(time) = time {
+                params["time"] = json!(round_beat(time));
+            }
+            self.selected = (count..count.saturating_add(copied)).collect();
+            self.selecting_new = true;
+            return Some(Action::new("note.paste", params));
+        }
+        match action {
+            "pianoRoll.selectAll" => {
+                self.selected = (0..count).collect();
+                return None;
+            }
+            "pianoRoll.deselect" => {
+                self.selected.clear();
+                return None;
+            }
+            _ if chosen.is_empty() => return None,
+            _ => {}
+        }
+        params["notes"] = json!(self.selected.iter().collect::<Vec<_>>());
+        let grid = NoteGrid::new(clip.grid, self.beat_width);
+        let moves = |beats: f64, keys: i32| {
+            let (beats, moved) = move_delta(beats, keys, &chosen, grid, false);
+            // A pitch move that does not fit leaves the pitch alone, so no note changes its name.
+            (beats, if moved == keys { keys } else { 0 })
+        };
+        let (id, beats, keys) = match action {
+            "selection.copy" => return Some(Action::new("note.copy", params)),
+            "selection.cut" => {
+                self.selected.clear();
+                return Some(Action::new("note.cut", params));
+            }
+            "selection.duplicate" => {
+                self.selected = (count..count.saturating_add(chosen.len())).collect();
+                self.selecting_new = true;
+                return Some(Action::new("note.duplicate", params));
+            }
+            "pianoRoll.shorter" | "pianoRoll.longer" => {
+                // By a step; the keys never make a note shorter than one step.
+                let shortest = chosen.iter().map(|n| n.duration).fold(f64::INFINITY, f64::min);
+                let by = if action == "pianoRoll.longer" {
+                    grid.step
+                } else {
+                    (-grid.step).max((grid.step - shortest).min(0.0))
+                };
+                if by == 0.0 || !by.is_finite() {
+                    return None;
+                }
+                params["by"] = json!(round_beat(by));
+                return Some(Action::new("note.resize", params));
+            }
+            "pianoRoll.earlier" => ("note.move", moves(-grid.step, 0).0, 0),
+            "pianoRoll.later" => ("note.move", moves(grid.step, 0).0, 0),
+            "pianoRoll.up" => ("note.move", 0.0, moves(0.0, 1).1),
+            "pianoRoll.down" => ("note.move", 0.0, moves(0.0, -1).1),
+            "pianoRoll.octaveUp" => ("note.move", 0.0, moves(0.0, 12).1),
+            "pianoRoll.octaveDown" => ("note.move", 0.0, moves(0.0, -12).1),
+            _ => return None,
+        };
+        if beats == 0.0 && keys == 0 {
+            return None;
+        }
+        params["beats"] = json!(round_beat(beats));
+        params["semitones"] = json!(keys);
+        Some(Action::new(id, params))
+    }
+
     /// Forgets the clip, so the next one shown is fitted to the view again.
     pub fn hide(&mut self) {
         self.shown = None;
@@ -225,6 +357,7 @@ impl PianoRollState {
         self.gesture = None;
         self.focused = false;
         self.quantize_open = false;
+        self.selecting_new = false;
     }
 }
 
@@ -359,7 +492,11 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         state.gesture = None;
         fit(state, area, clip);
     }
-    state.selected.retain(|i| *i < clip.notes.len());
+    // Keys run before the piano roll is drawn, and their commands after it: notes a paste or a
+    // duplicate selected this frame exist from the next frame on.
+    if !std::mem::take(&mut state.selecting_new) {
+        state.selected.retain(|i| *i < clip.notes.len());
+    }
     let lane_height = VELOCITY_LANE.min((area.height() - RULER) * 0.3).max(0.0);
     let keys = Rect::from_min_max(
         Pos2::new(area.left(), area.top() + RULER),
@@ -981,5 +1118,84 @@ mod tests {
         assert_eq!(resize_by(-1.0, &grabbed, &[grabbed], grid, false), -0.75);
         // The other selected note is shorter: it keeps the shortest length.
         assert!((resize_by(-0.75, &grabbed, &[grabbed, other], grid, false) - (MIN_LENGTH - 0.5)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_playhead_is_found_in_the_clips_content_and_its_loop() {
+        let plain = Placement { start: 8.0, length: 4.0, offset: 1.0, loop_range: None };
+        assert_eq!(plain.content_beat(9.5), Some(2.5));
+        assert_eq!(plain.content_beat(7.9), None);
+        assert_eq!(plain.content_beat(12.0), None);
+        // Looping beats 0 to 2 from offset 1: beat 2 of the content wraps to 0.
+        let looped = Placement { start: 0.0, length: 8.0, offset: 1.0, loop_range: Some((0.0, 2.0)) };
+        assert_eq!(looped.content_beat(0.5), Some(1.5));
+        assert_eq!(looped.content_beat(1.5), Some(0.5));
+        assert_eq!(looped.content_beat(f64::NAN), None);
+    }
+
+    fn clip(notes: Vec<Note>) -> PianoClip {
+        PianoClip {
+            address: json!({ "track": 1, "index": 0 }),
+            notes,
+            length: 8.0,
+            color: Color32::WHITE,
+            bar_beats: 4.0,
+            grid: 0.25,
+            placement: Placement { start: 16.0, length: 8.0, offset: 0.0, loop_range: None },
+        }
+    }
+
+    fn focused_on(clip: &PianoClip) -> PianoRollState {
+        PianoRollState { shown: Some(clip.address.clone()), focused: true, ..PianoRollState::default() }
+    }
+
+    #[test]
+    fn paste_goes_after_the_selection_else_at_the_playhead_inside_the_clip() {
+        let clip = clip(vec![note(1.0, 0.5, 60), note(2.0, 1.0, 64)]);
+        let mut state = focused_on(&clip);
+        state.selected = BTreeSet::from([0]);
+        let paste = state.key_action("selection.paste", &clip, 0.0, Some(2)).map(|a| a.params);
+        assert_eq!(paste, Some(json!({ "track": 1, "index": 0, "time": 1.5 })));
+        assert_eq!(state.selected, BTreeSet::from([2, 3]));
+        // Nothing selected: the playhead at beat 19 of the arrangement is beat 3 of the clip.
+        state.selected.clear();
+        let paste = state.key_action("selection.paste", &clip, 19.0, Some(1)).map(|a| a.params);
+        assert_eq!(paste, Some(json!({ "track": 1, "index": 0, "time": 3.0 })));
+        // Outside the clip: no time, so the command puts it right after the copied notes.
+        state.selected.clear();
+        let paste = state.key_action("selection.paste", &clip, 40.0, Some(1)).map(|a| a.params);
+        assert_eq!(paste, Some(json!({ "track": 1, "index": 0 })));
+        // Nothing copied, or no keyboard: the key is left for the clip.
+        assert!(state.key_action("selection.paste", &clip, 0.0, None).is_none());
+        state.focused = false;
+        assert!(state.key_action("selection.paste", &clip, 0.0, Some(1)).is_none());
+    }
+
+    #[test]
+    fn keys_stop_at_the_limits_and_never_make_notes_shorter_than_a_step() {
+        let clip = clip(vec![note(0.1, 0.25, 127), note(2.0, 1.0, 60)]);
+        let mut state = focused_on(&clip);
+        state.selected = BTreeSet::from([0]);
+        let params = |a: Option<Action>| a.map(|a| a.params);
+        // Earlier stops at the content's start; up past key 127 and an octave up do nothing.
+        assert_eq!(
+            params(state.key_action("pianoRoll.earlier", &clip, 0.0, None)).map(|p| p["beats"].clone()),
+            Some(json!(-0.1))
+        );
+        assert!(state.key_action("pianoRoll.up", &clip, 0.0, None).is_none());
+        assert!(state.key_action("pianoRoll.octaveUp", &clip, 0.0, None).is_none());
+        assert!(state.key_action("pianoRoll.shorter", &clip, 0.0, None).is_none());
+        state.selected = BTreeSet::from([1]);
+        assert_eq!(
+            params(state.key_action("pianoRoll.shorter", &clip, 0.0, None)).map(|p| p["by"].clone()),
+            Some(json!(-0.25))
+        );
+        // Without a selection copy is left for the clip; Ctrl+A and Escape change only the view.
+        state.selected.clear();
+        assert!(state.key_action("selection.copy", &clip, 0.0, None).is_none());
+        assert!(state.key_action("pianoRoll.selectAll", &clip, 0.0, None).is_none());
+        assert_eq!(state.selected, BTreeSet::from([0, 1]));
+        assert!(state.key_action("pianoRoll.deselect", &clip, 0.0, None).is_none());
+        assert!(state.selected.is_empty());
     }
 }

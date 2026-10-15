@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 35] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -99,14 +99,39 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("view.zoomIn", "Make the whole window larger", "View"),
     ("view.zoomOut", "Make the whole window smaller", "View"),
     ("view.zoomReset", "Make the whole window its normal size", "View"),
-    ("selection.copy", "Copy the selected clip", "Edit"),
-    ("selection.cut", "Cut the selected clip", "Edit"),
-    ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
-    ("selection.duplicate", "Duplicate the selected clip", "Edit"),
-    ("selection.delete", "Delete the selected clip", "Edit"),
+    ("selection.copy", "Copy the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.cut", "Cut the selected clip, or the selected notes in the piano roll", "Edit"),
+    (
+        "selection.paste",
+        "Paste after the selected clip, or at the playhead on the selected track; notes in the piano roll",
+        "Edit",
+    ),
+    ("selection.duplicate", "Duplicate the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.delete", "Delete the selected clip, or the selected notes in the piano roll", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
-    ("pianoRoll.quantize", "Quantise the piano roll's selected notes, or all its notes", "Edit"),
+    ("pianoRoll.quantize", "Quantise the piano roll's selected notes, or all its notes", PIANO_ROLL),
+    ("pianoRoll.selectAll", "Select every note in the piano roll", PIANO_ROLL),
+    ("pianoRoll.deselect", "Clear the piano roll's note selection", PIANO_ROLL),
+    ("pianoRoll.earlier", "Move the selected notes one grid step earlier", PIANO_ROLL),
+    ("pianoRoll.later", "Move the selected notes one grid step later", PIANO_ROLL),
+    ("pianoRoll.up", "Move the selected notes a semitone up", PIANO_ROLL),
+    ("pianoRoll.down", "Move the selected notes a semitone down", PIANO_ROLL),
+    ("pianoRoll.octaveUp", "Move the selected notes an octave up", PIANO_ROLL),
+    ("pianoRoll.octaveDown", "Move the selected notes an octave down", PIANO_ROLL),
+    ("pianoRoll.shorter", "Make the selected notes one grid step shorter", PIANO_ROLL),
+    ("pianoRoll.longer", "Make the selected notes one grid step longer", PIANO_ROLL),
 ];
+
+/// The Shortcuts list's group for the piano roll's own actions.
+const PIANO_ROLL: &str = "Piano roll";
+
+/// Whether an action works only while the piano roll has the keyboard (after a click in it). Its
+/// keys are left for the rest of the window otherwise: Escape and the arrows mean other things
+/// elsewhere. Quantise (Ctrl+U) means nothing elsewhere, so it works whenever the piano roll
+/// shows a clip.
+pub fn piano_roll_only(action: &str) -> bool {
+    action.starts_with("pianoRoll.") && action != "pianoRoll.quantize"
+}
 
 /// Every action a key can be bound to: the window's, then each command that needs no
 /// parameters.
@@ -133,7 +158,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 26] = [
+const DEFAULTS: [(&str, &[&str]); 36] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -160,6 +185,16 @@ const DEFAULTS: [(&str, &[&str]); 26] = [
     ("pianoRoll.quantize", &["Ctrl+U"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
+    ("pianoRoll.selectAll", &["Ctrl+A"]),
+    ("pianoRoll.deselect", &["Escape"]),
+    ("pianoRoll.earlier", &["Left"]),
+    ("pianoRoll.later", &["Right"]),
+    ("pianoRoll.up", &["Up"]),
+    ("pianoRoll.down", &["Down"]),
+    ("pianoRoll.octaveUp", &["Shift+Up"]),
+    ("pianoRoll.octaveDown", &["Shift+Down"]),
+    ("pianoRoll.shorter", &["Shift+Left"]),
+    ("pianoRoll.longer", &["Shift+Right"]),
 ];
 
 impl Default for Keymap {
@@ -245,11 +280,16 @@ impl Keymap {
         seen
     }
 
-    /// The actions whose keys were pressed this frame, taking the key presses so nothing else
-    /// sees them. Longer combinations are tried first, so Ctrl+Shift+Z is not read as Ctrl+Z.
-    pub fn pressed(&self, input: &mut egui::InputState) -> Vec<String> {
-        let mut all: Vec<(&String, &Shortcut)> =
-            self.bindings.iter().flat_map(|(id, keys)| keys.iter().map(move |k| (id, k))).collect();
+    /// The actions whose keys were pressed this frame, of those `wanted` lets through, taking
+    /// their key presses so nothing else sees them; the keys of the other actions are left alone.
+    /// Longer combinations are tried first, so Ctrl+Shift+Z is not read as Ctrl+Z.
+    pub fn pressed(&self, input: &mut egui::InputState, wanted: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut all: Vec<(&String, &Shortcut)> = self
+            .bindings
+            .iter()
+            .filter(|(id, _)| wanted(id))
+            .flat_map(|(id, keys)| keys.iter().map(move |k| (id, k)))
+            .collect();
         all.sort_by_key(|(_, k)| std::cmp::Reverse(k.modifier_count()));
         let mut fired = Vec::new();
         for (id, key) in all {
@@ -285,6 +325,10 @@ mod tests {
             "Ctrl+Equals",
             "Ctrl+0",
             "Minus",
+            "Escape",
+            "Shift+Up",
+            "Left",
+            "Ctrl+A",
         ] {
             let shortcut = Shortcut::parse(text).unwrap_or_else(|| panic!("{text}"));
             assert_eq!(Shortcut::parse(&shortcut.text()), Some(shortcut), "{text}");

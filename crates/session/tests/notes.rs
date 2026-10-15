@@ -451,3 +451,123 @@ fn a_shared_pattern_stays_shared_when_edited() {
         .collect();
     assert_eq!(keys, [62, 36]);
 }
+
+#[test]
+fn pasting_into_a_duplicate_leaves_the_original_alone() {
+    let mut session = Session::new(project());
+    let original = notes(&session, 1);
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [0] })).unwrap();
+    run(&mut session, "note.paste", json!({ "track": 1, "index": copy })).unwrap();
+    let own = arranged(&session)[copy];
+    assert_ne!(own, 1);
+    assert_eq!(notes(&session, 1), original);
+    assert_eq!(notes(&session, own).len(), original.len() + 1);
+}
+
+#[test]
+fn copied_notes_paste_with_their_spacing_after_the_copy_or_at_a_time() {
+    let mut session = Session::new(project());
+    let before = notes(&session, 1);
+    // Copy changes nothing and is no undo step.
+    let copied = run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [2, 1] })).unwrap();
+    assert_eq!(copied, json!({ "copied": 2, "span": 2.0 }));
+    assert_eq!(session.copied_notes(), Some(2));
+    assert!(!session.can_undo());
+    // Without a time: right after the copied notes (they spanned beats 1 to 3).
+    let pasted = run(&mut session, "note.paste", json!({ "track": 1, "index": 0 })).unwrap();
+    assert_eq!(pasted, json!({ "added": [3, 4], "count": 5 }));
+    let now = notes(&session, 1);
+    assert_eq!((now[3].time, now[3].key), (3.0, 64));
+    assert_eq!((now[4].time, now[4].key), (4.0, 67));
+    assert_eq!(now[3].velocity, before[1].velocity);
+    undoes(&mut session, 1, &before);
+    // At a time, into another clip, and again (the clipboard stays).
+    run(&mut session, "note.paste", json!({ "track": 1, "index": 1, "time": 0.5 })).unwrap();
+    run(&mut session, "note.paste", json!({ "track": 1, "scene": 1, "time": 8 })).unwrap();
+    let empty = notes(&session, 2);
+    assert_eq!(empty.iter().map(|n| (n.time, n.key)).collect::<Vec<_>>(), [(0.5, 64), (1.5, 67)]);
+    assert_eq!(notes(&session, 5).len(), 3);
+}
+
+#[test]
+fn cutting_copies_and_deletes_in_one_undo_step() {
+    let mut session = Session::new(project());
+    let before = notes(&session, 1);
+    let cut = run(&mut session, "note.cut", json!({ "track": 1, "index": 0, "notes": [0] })).unwrap();
+    assert_eq!(cut, json!({ "deleted": [0], "count": 2 }));
+    assert_eq!(notes(&session, 1), &before[1..]);
+    undoes(&mut session, 1, &before);
+    // The cut note stays copied after the undo.
+    run(&mut session, "note.paste", json!({ "track": 1, "index": 0, "time": 3 })).unwrap();
+    assert_eq!((notes(&session, 1)[3].time, notes(&session, 1)[3].key), (3.0, 60));
+}
+
+#[test]
+fn duplicating_puts_the_copy_right_after_the_notes() {
+    let mut session = Session::new(project());
+    let before = notes(&session, 1);
+    let result = run(&mut session, "note.duplicate", json!({ "track": 1, "index": 0, "notes": [0, 1] })).unwrap();
+    assert_eq!(result, json!({ "added": [3, 4], "count": 5 }));
+    let now = notes(&session, 1);
+    assert_eq!(now.iter().skip(3).map(|n| (n.time, n.key)).collect::<Vec<_>>(), [(2.0, 60), (3.0, 64)]);
+    // Duplicate leaves the clipboard alone.
+    assert_eq!(session.copied_notes(), None);
+    undoes(&mut session, 1, &before);
+}
+
+#[test]
+fn malformed_clipboard_commands_are_refused_and_change_nothing() {
+    let mut session = Session::new(project());
+    let before = session.project().clone();
+    let nothing = run(&mut session, "note.paste", json!({ "track": 1, "index": 0 }));
+    assert!(nothing.unwrap_err().contains("no notes have been copied"));
+    let cases = [
+        ("note.copy", json!({ "track": 1, "index": 0 }), "notes must be"),
+        ("note.copy", json!({ "track": 1, "index": 0, "notes": [] }), "empty"),
+        ("note.copy", json!({ "track": 1, "index": 0, "notes": [9] }), "note 9 does not exist"),
+        ("note.copy", json!({ "track": 1, "index": 2, "notes": [0] }), "audio clip"),
+        ("note.cut", json!({ "track": 1, "index": 0, "notes": [-1] }), "whole number"),
+        ("note.cut", json!({ "track": 1, "scene": 2, "notes": [0] }), "empty"),
+        ("note.duplicate", json!({ "track": 1, "index": 0, "notes": "all" }), "list"),
+        ("note.duplicate", json!({ "track": 1, "index": 1, "notes": [0] }), "does not exist"),
+    ];
+    for (id, params, error) in cases {
+        let got = run(&mut session, id, params.clone());
+        assert!(got.as_ref().is_err_and(|e| e.contains(error)), "{id} {params}: {got:?}");
+    }
+    assert_eq!(session.copied_notes(), None, "a failed copy or cut copies nothing");
+    run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [0, 2] })).unwrap();
+    let pastes = [
+        (json!({ "track": 1, "index": 0, "time": -1 }), "time must be"),
+        (json!({ "track": 1, "index": 0, "time": "now" }), "time must be"),
+        (json!({ "track": 1, "index": 0, "time": 1e12 }), "time must be"),
+        // The first note fits, the last would start past the furthest beat.
+        (json!({ "track": 1, "index": 0, "time": 119_999.0 }), "outside 0 to"),
+        (json!({ "track": 1, "index": 2 }), "audio clip"),
+        (json!({ "track": 1, "index": 3 }), "pattern"),
+        (json!({ "track": 1, "index": 0, "notes": [0] }), "unknown parameter"),
+    ];
+    for (params, error) in pastes {
+        let got = run(&mut session, "note.paste", params.clone());
+        assert!(got.as_ref().is_err_and(|e| e.contains(error)), "{params}: {got:?}");
+    }
+    assert_eq!(session.project(), &before);
+    assert!(!session.can_undo());
+}
+
+#[test]
+fn pasting_never_fills_a_clip_past_its_cap() {
+    let mut session = Session::new(project());
+    let full: Vec<Value> =
+        (0..MAX_NOTES_PER_COMMAND).map(|i| json!({ "time": (i % 64) as f64, "length": 1, "key": 60 })).collect();
+    for _ in 0..10 {
+        run(&mut session, "note.add", json!({ "track": 1, "index": 1, "notes": full })).unwrap();
+    }
+    run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [0] })).unwrap();
+    let over = run(&mut session, "note.paste", json!({ "track": 1, "index": 1 }));
+    assert!(over.unwrap_err().contains("at most"));
+    let twice = run(&mut session, "note.duplicate", json!({ "track": 1, "index": 1, "notes": [0] }));
+    assert!(twice.unwrap_err().contains("at most"));
+}

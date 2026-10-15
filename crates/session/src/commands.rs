@@ -814,6 +814,43 @@ static COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Edit,
         run: notes::quantize,
     },
+    CommandSpec {
+        id: "note.copy",
+        label: "Copy notes of a MIDI clip for note.paste; changes nothing",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Read,
+        run: notes::copy,
+    },
+    CommandSpec {
+        id: "note.cut",
+        label: "Copy notes of a MIDI clip for note.paste and delete them",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Edit,
+        run: notes::cut,
+    },
+    CommandSpec {
+        id: "note.paste",
+        label: "Add the copied notes to a MIDI clip, keeping their spacing; the result gives their indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            optional(
+                "time",
+                ParamType::Number,
+                "where the first copied note starts, in beats; default: right after the copied notes",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::paste,
+    },
+    CommandSpec {
+        id: "note.duplicate",
+        label: "Add a copy of notes of a MIDI clip right after their end; the result gives the copies' indices",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Edit,
+        run: notes::duplicate,
+    },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
         id: "edit.redo",
