@@ -747,7 +747,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "launcher.setQuantization",
-        label: "Set the grid launches wait for (default 1 bar)",
+        label: "Set the grid launches wait for and the Arrangement view snaps to (default 1 bar)",
         params: &[param(
             "value",
             ParamType::Text,
@@ -2757,7 +2757,7 @@ fn stop_all(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
 fn set_quantization(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let text = params.get("value").and_then(Value::as_str).ok_or("value must be a string such as \"1 bar\"")?;
     let quantization = parse_quantization(text)?;
-    send(session, LaunchCommand::SetQuantization(quantization))?;
+    session.set_quantization(quantization)?;
     Ok(json!({ "quantization": text.trim() }))
 }
 

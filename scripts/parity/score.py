@@ -58,9 +58,11 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.47, "partial",
+    (6, "Arrangement View", 22, 0.49, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
-     "overlap replace/stack, fades and fade shapes, grid snap, nested groups folded and unfolded, "
+     "overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to "
+     "triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades "
+     "and ruler clicks (Alt for off the grid), nested groups folded and unfolded, "
      "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
      "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "

@@ -6,6 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
+use suhina_engine::Quantization;
 use suhina_engine::model::{FadeCurve, FadeShape, TrackId};
 
 use crate::automation_lanes::{self as automation, LanesState};
@@ -45,6 +46,11 @@ const FIXED_FIELD: f32 = 90.0;
 /// Points per beat: the default and the zoom range.
 const DEFAULT_BEAT_WIDTH: f32 = 8.0;
 const BEAT_WIDTH_RANGE: (f32, f32) = (1.0, 400.0);
+/// How close grid lines may be drawn, in points: a finer grid coarsens until its lines are at
+/// least this far apart (`docs/spec/arrangement-editing.md` › The grid).
+const MIN_GRID_SPACING: f32 = 8.0;
+/// The coarsest grid, in bars, however far the view is zoomed out.
+const MAX_GRID_BARS: f64 = 1024.0;
 /// Bars of empty timeline after the last clip.
 const TAIL_BARS: f64 = 16.0;
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
@@ -167,6 +173,9 @@ pub struct ArrangementViewState {
     pub scroll: Vec2,
     /// Points per beat.
     pub beat_width: f32,
+    /// The value chosen in the control bar, which the grid is drawn from and clips snap to
+    /// (`launcher.setQuantization`); the window sets it before each frame.
+    pub grid: Quantization,
     /// Track headers on the left of the timeline instead of the right.
     pub headers_left: bool,
     /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
@@ -216,6 +225,7 @@ impl Default for ArrangementViewState {
         Self {
             scroll: Vec2::ZERO,
             beat_width: DEFAULT_BEAT_WIDTH,
+            grid: Quantization::Bars(1),
             headers_left: false,
             stack_audio: false,
             stack_midi: false,
@@ -300,8 +310,8 @@ impl ArrangementViewState {
     }
 
     /// What the clip at `key` shows: the project's gain and fades, or the value of a drag in
-    /// progress on it (fades on `grid`, or free when it is `None`).
-    fn shown(&self, key: (TrackId, usize), clip: &ClipBox, grid: Option<f64>) -> Shown {
+    /// progress on it (fade ends on `grid`, or free when it is `None`).
+    fn shown(&self, key: (TrackId, usize), clip: &ClipBox, grid: Option<Grid>) -> Shown {
         let mut shown = Shown::of(clip);
         if let Some((k, v)) = self.gain_drag
             && k == key
@@ -338,43 +348,162 @@ impl ArrangementViewState {
     }
 }
 
-/// Where a click `raw` beats into the ruler puts the play start marker: on the clip grid, or
-/// where it was with `free` (Alt held); never before the start.
-fn ruler_beat(raw: f64, bar_beats: f64, beat_width: f32, free: bool) -> f64 {
-    let grid = snap(beat_width, bar_beats);
-    let beat = if free || grid <= 0.0 { raw } else { (raw / grid).round() * grid };
+/// The Arrangement view's grid at one zoom: the lines drawn and the beats things snap to
+/// (`docs/spec/arrangement-editing.md` › The grid).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grid {
+    /// Beats between lines inside a bar; a whole number of bars when it is a bar or more.
+    pub step: f64,
+    /// Beats in a bar: lines start again at every bar line.
+    pub bar_beats: f64,
+    /// Whether clips, drops, fades and ruler clicks snap to the lines (not with `none`).
+    pub snaps: bool,
+}
+
+impl Grid {
+    /// The grid for the value `chosen` in the control bar, at `beat_width` points a beat with
+    /// bars of `bar_beats` beats. Lines are the chosen step apart, or coarser where they would be
+    /// closer than [`MIN_GRID_SPACING`]: a straight step doubles up to the beat, a triplet goes
+    /// to the beat, then the beat goes to the bar and bars double. `none` draws beats and bars
+    /// by the zoom alone and does not snap.
+    pub fn new(chosen: Quantization, beat_width: f32, bar_beats: f64) -> Self {
+        let bar_beats = if bar_beats.is_finite() && bar_beats > 0.0 { bar_beats } else { 4.0 };
+        let chosen_step = chosen.step(bar_beats);
+        let snaps = chosen_step > 0.0;
+        let mut step = if snaps { chosen_step } else { 1.0 };
+        // A note value longer than a bar that is not a whole number of bars (a half note in
+        // 3/8) is drawn on the bar lines instead, so lines stay on the bar.
+        if step > bar_beats + EPSILON && !is_whole(step / bar_beats) {
+            step = bar_beats;
+        }
+        let points = f64::from(beat_width.max(f32::MIN_POSITIVE));
+        let min = f64::from(MIN_GRID_SPACING);
+        while step * points < min && step < MAX_GRID_BARS * bar_beats {
+            step = if step >= bar_beats - EPSILON {
+                step * 2.0
+            } else if step < 1.0 - EPSILON && is_whole((1.0 / step).log2()) {
+                // A straight note value finer than a beat: 1/32, 1/16, 1/8, 1/4.
+                (step * 2.0).min(1.0)
+            } else if step < 1.0 - EPSILON {
+                // A triplet finer than a beat goes to the beat, whose lines are on the bar.
+                1.0
+            } else {
+                bar_beats
+            };
+            // A bar shorter than a beat (2/8): the beat is coarser than the bar, so go by bars.
+            if step > bar_beats + EPSILON && !is_whole(step / bar_beats) {
+                step = bar_beats;
+            }
+        }
+        Self { step, bar_beats, snaps }
+    }
+
+    /// Whether the step is one bar or more, so lines are only on bar lines.
+    fn in_bars(&self) -> bool {
+        self.step >= self.bar_beats - EPSILON
+    }
+
+    /// The grid line nearest to `beat` (never before the start), or `beat` itself with `free`
+    /// (Alt held) or a grid that does not snap.
+    pub fn place(&self, beat: f64, free: bool) -> f64 {
+        if !beat.is_finite() {
+            return 0.0;
+        }
+        let beat = beat.max(0.0);
+        if free || !self.snaps || self.step <= 0.0 {
+            return beat;
+        }
+        if self.in_bars() {
+            return (beat / self.step).round() * self.step;
+        }
+        // Inside a bar: lines from the bar line on, and the next bar line.
+        let bar_start = (beat / self.bar_beats).floor() * self.bar_beats;
+        let next_bar = bar_start + self.bar_beats;
+        let on_step = bar_start + ((beat - bar_start) / self.step).round() * self.step;
+        if on_step >= next_bar - EPSILON || (next_bar - beat) < (beat - on_step).abs() { next_bar } else { on_step }
+    }
+
+    /// The beats of the lines from `first` to `last` (both included), each with whether it is a
+    /// bar line.
+    /// At most `limit` lines, so a bad zoom can never draw without end.
+    pub fn lines(&self, first: f64, last: f64, limit: usize) -> Vec<(f64, bool)> {
+        let mut lines = Vec::new();
+        if !(first.is_finite() && last.is_finite()) || self.step <= 0.0 {
+            return lines;
+        }
+        let first = first.max(0.0);
+        if self.in_bars() {
+            let mut n = (first / self.step).floor();
+            while lines.len() < limit {
+                let beat = n * self.step;
+                if beat > last {
+                    break;
+                }
+                lines.push((beat, true));
+                n += 1.0;
+            }
+            return lines;
+        }
+        let mut bar = (first / self.bar_beats).floor();
+        'bars: while lines.len() < limit {
+            let bar_start = bar * self.bar_beats;
+            if bar_start > last {
+                break;
+            }
+            if bar_start >= first - EPSILON {
+                lines.push((bar_start, true));
+            }
+            let mut k = ((first - bar_start) / self.step).ceil().max(1.0);
+            loop {
+                let beat = bar_start + k * self.step;
+                if beat >= bar_start + self.bar_beats - EPSILON {
+                    break;
+                }
+                if lines.len() >= limit || beat > last {
+                    break 'bars;
+                }
+                lines.push((beat, false));
+                k += 1.0;
+            }
+            bar += 1.0;
+        }
+        lines
+    }
+}
+
+/// Beats closer than this are the same grid line.
+const EPSILON: f64 = 1e-9;
+
+fn is_whole(value: f64) -> bool {
+    value.is_finite() && (value - value.round()).abs() < 1e-6
+}
+
+/// Where a click `raw` beats into the ruler puts the play start marker: on `grid`, or where it
+/// was with `free` (Alt held); never before the start.
+fn ruler_beat(raw: f64, grid: Grid, free: bool) -> f64 {
+    let free = free || !grid.snaps;
+    let beat = grid.place(raw, free);
     // Free clicks keep a thousandth of a beat, as the engine reports it.
     let beat = if free { (beat * 1000.0).round() / 1000.0 } else { beat };
     if beat.is_finite() { beat.max(0.0) } else { 0.0 }
 }
 
-/// The grid clips snap to at a zoom level: a sixteenth, a beat or a bar, whichever is at least
-/// a few points wide.
-pub(crate) fn snap(beat_width: f32, bar_beats: f64) -> f64 {
-    if beat_width >= 48.0 {
-        0.25
-    } else if beat_width >= 12.0 {
-        1.0
-    } else {
-        bar_beats
-    }
-}
-
 /// A fade's length after a drag of `raw` beats: its end on the grid (unless `grid` is `None`,
-/// Alt held), and no longer than the clip leaves beside the other fade. No fade and all the room
+/// Alt held, or a grid that does not snap), and no longer than the clip leaves beside the other
+/// fade. No fade and all the room
 /// there is snap too, so a clip that does not start or end on the grid can still be faded over
 /// its whole length.
-fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<f64>) -> f64 {
+fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<Grid>) -> f64 {
     if !raw.is_finite() {
         return 0.0;
     }
     let end = clip.start + clip.length;
     let room = (clip.length - other).max(0.0);
-    let snapped = match grid.filter(|g| *g > 0.0) {
+    let snapped = match grid.filter(|g| g.snaps) {
         Some(g) => {
             let on_grid = match edge {
-                FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
-                FadeEdge::Out => end - ((end - raw) / g).round() * g,
+                FadeEdge::In => g.place(clip.start + raw, false) - clip.start,
+                FadeEdge::Out => end - g.place(end - raw, false),
             };
             [0.0, room].into_iter().fold(on_grid, |best, v| if (v - raw).abs() < (best - raw).abs() { v } else { best })
         }
@@ -563,6 +692,8 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     let (scroll_x, beat_width) = (state.scroll.x, state.beat_width);
     let x_of = move |beat: f64| time.left() - scroll_x + beat as f32 * beat_width;
     let first_beat = f64::from(state.scroll.x / state.beat_width);
+    // The grid at this zoom: what is drawn is what snaps.
+    let grid = Grid::new(state.grid, state.beat_width, bar_beats);
     let last_beat = f64::from((state.scroll.x + time.width()) / state.beat_width);
 
     // Ruler: bar numbers, a line at each labelled bar.
@@ -579,30 +710,29 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     let grid_painter = painter
         .with_clip_rect(Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(lanes_area.top(), area.bottom())));
     for bar in first_bar..=last_bar {
-        let x = x_of(f64::from(bar) * bar_beats).round() + 0.5;
-        if bar % label_every == 0 {
-            ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::border()));
-            let label = Rect::from_min_max(Pos2::new(x + 3.0, ruler.top()), Pos2::new(x + 40.0, ruler.bottom()));
-            widgets::text_in(
-                &ruler_painter,
-                label,
-                Align2::LEFT_CENTER,
-                &(bar + 1).to_string(),
-                theme::mono_font(theme::TEXT_SMALL),
-                theme::text_secondary(),
-            );
+        if bar % label_every != 0 {
+            continue;
         }
-        // Grid in the lanes: every bar, and beats when they are far enough apart.
+        let x = x_of(f64::from(bar) * bar_beats).round() + 0.5;
+        ruler_painter.vline(x, ruler.y_range(), theme::hairline(theme::border()));
+        let label = Rect::from_min_max(Pos2::new(x + 3.0, ruler.top()), Pos2::new(x + 40.0, ruler.bottom()));
+        widgets::text_in(
+            &ruler_painter,
+            label,
+            Align2::LEFT_CENTER,
+            &(bar + 1).to_string(),
+            theme::mono_font(theme::TEXT_SMALL),
+            theme::text_secondary(),
+        );
+    }
+    // Grid in the lanes: a line at every step of the grid the control bar's value sets, coarser
+    // when zoomed out; bar lines stronger than the lines between them.
+    let max_lines = (time.width() / MIN_GRID_SPACING).ceil().max(1.0) as usize * 2 + 4;
+    for (beat, on_bar) in grid.lines(first_beat, last_beat, max_lines) {
+        let x = x_of(beat).round() + 0.5;
+        let stroke = theme::hairline(if on_bar { theme::border() } else { theme::panel_background() });
         for band in grid_bands.iter().filter(|b| b.span() > 0.0) {
-            if bar_width >= 6.0 || bar % label_every == 0 {
-                grid_painter.vline(x, *band, theme::hairline(theme::border()));
-            }
-            if state.beat_width >= 10.0 {
-                for beat in 1..bar_beats.ceil() as u32 {
-                    let x = x_of(f64::from(bar) * bar_beats + f64::from(beat)).round() + 0.5;
-                    grid_painter.vline(x, *band, theme::hairline(theme::panel_background()));
-                }
-            }
+            grid_painter.vline(x, *band, stroke);
         }
     }
     painter.hline(area.x_range(), ruler.bottom() + 0.5, theme::hairline(theme::border()));
@@ -620,13 +750,10 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     {
         let free = ui.input(|i| i.modifiers.alt);
         let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width);
-        actions.push(Action::new(
-            "transport.setPosition",
-            json!({ "beats": ruler_beat(raw, bar_beats, state.beat_width, free) }),
-        ));
+        actions.push(Action::new("transport.setPosition", json!({ "beats": ruler_beat(raw, grid, free) })));
     }
     let beat_at = |x: f32, free: bool, state: &ArrangementViewState| {
-        ruler_beat(f64::from((x - time.left() + state.scroll.x) / state.beat_width), bar_beats, state.beat_width, free)
+        ruler_beat(f64::from((x - time.left() + state.scroll.x) / state.beat_width), Grid::new(state.grid, state.beat_width, bar_beats), free)
     };
     // A right-click on the ruler or the marker row offers a marker there.
     let row_response = ui.interact(marker_row, Id::new("arrangement-marker-row"), Sense::click());
@@ -702,7 +829,10 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         visible: lanes_area,
         scroll_x: state.scroll.x,
         beat_width: state.beat_width,
-        grid: snap(state.beat_width, bar_beats),
+        grid: {
+            let grid = Grid::new(state.grid, state.beat_width, bar_beats);
+            if grid.snaps { grid.step } else { 0.0 }
+        },
     };
     let lanes_painter = painter.with_clip_rect(lanes_area);
     let mut track_number = 0;
@@ -731,11 +861,11 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
                 && let Some(pointer) = body.interact_pointer_pos()
             {
                 let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
-                let start = if ui.input(|i| i.modifiers.alt) {
+                let grid = Grid::new(state.grid, state.beat_width, bar_beats);
+                let start = if ui.input(|i| i.modifiers.alt) || !grid.snaps {
                     raw
                 } else {
-                    let grid = snap(state.beat_width, bar_beats);
-                    ((raw / grid).floor() * grid).max(0.0)
+                    ((raw / grid.step).floor() * grid.step).max(0.0)
                 };
                 let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
                 actions.push(Action::new("clip.create", params));
@@ -879,15 +1009,8 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         let buttons = Rect::from_x_y_ranges(time.x_range(), empty.y_range());
         crate::session_view::empty_space(ui, &painter, buttons, actions);
     }
-    let beat_at = |x: f32, free: bool| {
-        let raw = f64::from((x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
-        if free {
-            raw
-        } else {
-            let grid = snap(state.beat_width, bar_beats);
-            ((raw / grid).round() * grid).max(0.0)
-        }
-    };
+    let beat_at =
+        |x: f32, free: bool| grid.place(f64::from((x - time.left() + state.scroll.x) / state.beat_width), free);
     let free = ui.input(|i| i.modifiers.alt);
     if let Some(probe) = state.drop.as_mut() {
         for row in rows.iter() {
@@ -963,7 +1086,7 @@ fn marker_flags(
         Some((i, raw)) if i == index => {
             let free = ui.input(|input| input.modifiers.alt);
             let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
-            ruler_beat(raw, bar_beats, state.beat_width, free)
+            ruler_beat(raw, Grid::new(state.grid, state.beat_width, bar_beats), free)
         }
         _ => beat,
     };
@@ -1067,7 +1190,7 @@ fn dragged_loop(
     raw: f64,
 ) -> Option<(f64, f64)> {
     let bar_beats = if timeline.bar_beats > 0.0 { timeline.bar_beats } else { 4.0 };
-    let snap = |beat: f64| ruler_beat(beat, bar_beats, state.beat_width, free);
+    let snap = |beat: f64| ruler_beat(beat, Grid::new(state.grid, state.beat_width, bar_beats), free);
     let brace = timeline.loop_brace.map(|b| (b.start, b.end));
     let (start, end) = match (grab, brace) {
         (LoopGrab::New(anchor), _) => {
@@ -1133,7 +1256,7 @@ fn loop_brace(
         let grab = match (part(origin.x), timeline.loop_brace) {
             (Some(LoopGrab::Body(_)), Some(brace)) => LoopGrab::Body(raw - brace.start),
             (Some(grab), _) => grab,
-            (None, _) => LoopGrab::New(ruler_beat(raw, bar_beats, state.beat_width, free)),
+            (None, _) => LoopGrab::New(ruler_beat(raw, Grid::new(state.grid, state.beat_width, bar_beats), free)),
         };
         state.loop_drag = Some((grab, raw));
     }
@@ -1230,8 +1353,10 @@ fn clip_box<'a>(
 ) -> Option<(&'a Lane, &'a ClipBox, f64)> {
     let key = (lane.track, clip.index);
     let mine = |drag: &ClipDrag| (drag.track, drag.index) == key;
-    let grid = snap(state.beat_width, bar_beats);
-    let snapped = |raw: f64| ((raw / grid).round() * grid).max(0.0);
+    // A moved clip starts on a grid line, or where it is let go with Alt held.
+    let grid = Grid::new(state.grid, state.beat_width, bar_beats);
+    let free = ui.input(|i| i.modifiers.alt);
+    let snapped = |raw: f64| grid.place(raw, free);
     let at = match state.clip_drag {
         Some(drag) if mine(&drag) => snapped(drag.start),
         _ => clip.start,
@@ -1302,7 +1427,7 @@ fn clip_box<'a>(
 
     // What the clip shows: the project's values, or those of a drag in progress, so the
     // waveform follows the gain and the fades while they are dragged.
-    let fade_grid = (!ui.input(|i| i.modifiers.alt)).then_some(grid);
+    let fade_grid = (!free).then_some(grid);
     let mut shown = state.shown(key, clip, fade_grid);
 
     // An audio clip big enough shows its gain, which a vertical drag changes.
@@ -2088,21 +2213,21 @@ mod tests {
         let mut state = ArrangementViewState::default();
         let linear = FadeCurve::default();
         assert_eq!(
-            state.shown(key, &clip, Some(1.0)),
+            state.shown(key, &clip, Some(beats(1.0))),
             Shown { gain_db: 0.0, fade_in: 1.0, fade_out: 0.0, fade_in_curve: linear, fade_out_curve: linear }
         );
         // A curve being dragged bends that fade only.
         state.curve_drag = Some(CurveDrag { key, edge: FadeEdge::In, curve: 0.4, grab: 0.0 });
-        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_in_curve.curve, 0.4);
-        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out_curve.curve, 0.0);
+        assert_eq!(state.shown(key, &clip, Some(beats(1.0))).fade_in_curve.curve, 0.4);
+        assert_eq!(state.shown(key, &clip, Some(beats(1.0))).fade_out_curve.curve, 0.0);
         state.curve_drag = None;
         // The waveform is drawn with the gain being dragged, not the one in the project.
         state.gain_drag = Some((key, -12.0));
-        assert_eq!(state.shown(key, &clip, Some(1.0)).gain_db, -12.0);
-        assert_eq!(state.shown((TrackId(1), 1), &clip, Some(1.0)).gain_db, 0.0, "only on the dragged clip");
+        assert_eq!(state.shown(key, &clip, Some(beats(1.0))).gain_db, -12.0);
+        assert_eq!(state.shown((TrackId(1), 1), &clip, Some(beats(1.0))).gain_db, 0.0, "only on the dragged clip");
         // A fade being dragged: on the grid, or free with Alt.
         state.fade_drag = Some(FadeDrag { key, edge: FadeEdge::Out, raw: 2.6 });
-        assert_eq!(state.shown(key, &clip, Some(1.0)).fade_out, 3.0);
+        assert_eq!(state.shown(key, &clip, Some(beats(1.0))).fade_out, 3.0);
         assert!((state.shown(key, &clip, None).fade_out - 2.6).abs() < 1e-9);
     }
 
@@ -2110,10 +2235,10 @@ mod tests {
     fn a_fade_ends_on_the_grid_and_leaves_room_for_the_other() {
         let clip = audio_clip();
         // The fade-in's end snaps to the grid in project beats: the clip starts at beat 2.
-        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, Some(4.0)), 2.0);
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, Some(beats(4.0))), 2.0);
         assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, None), 1.3);
         // The fade-out's start snaps: the clip ends at beat 10.
-        assert_eq!(fade_length(1.3, FadeEdge::Out, &clip, 0.0, Some(4.0)), 2.0);
+        assert_eq!(fade_length(1.3, FadeEdge::Out, &clip, 0.0, Some(beats(4.0))), 2.0);
         // Never below 0, never past the other fade.
         assert_eq!(fade_length(-5.0, FadeEdge::In, &clip, 0.0, None), 0.0);
         assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 3.0, None), 5.0);
@@ -2121,12 +2246,12 @@ mod tests {
         // The clip's own ends snap too: from beat 10 back to beat 2.6, nearer the clip's start
         // (beat 2) than the grid line at beat 4, the fade-out takes the whole clip, and the
         // fade-in from beat 2 to 9.5 takes the room the fade-out leaves.
-        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 8.0);
-        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 1.0, Some(4.0)), 7.0);
-        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 0.0, Some(4.0)), 8.0);
-        assert_eq!(fade_length(0.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 0.0);
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 0.0, Some(beats(4.0))), 8.0);
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 1.0, Some(beats(4.0))), 7.0);
+        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 0.0, Some(beats(4.0))), 8.0);
+        assert_eq!(fade_length(0.4, FadeEdge::Out, &clip, 0.0, Some(beats(4.0))), 0.0);
         // Nearer the grid line, the grid wins.
-        assert_eq!(fade_length(6.5, FadeEdge::Out, &clip, 0.0, Some(4.0)), 6.0);
+        assert_eq!(fade_length(6.5, FadeEdge::Out, &clip, 0.0, Some(beats(4.0))), 6.0);
     }
 
     #[test]
@@ -2188,22 +2313,140 @@ mod tests {
         assert_eq!(shape_label(FadeShape::SCurve), "S-curve");
     }
 
-    #[test]
-    fn clips_snap_to_a_grid_that_follows_the_zoom() {
-        assert_eq!(snap(60.0, 4.0), 0.25);
-        assert_eq!(snap(20.0, 4.0), 1.0);
-        assert_eq!(snap(4.0, 3.0), 3.0);
+    /// A grid of `step` beats at a zoom where its lines are far enough apart, in 4/4.
+    fn beats(step: f64) -> Grid {
+        Grid::new(Quantization::Beats(step), 1000.0, 4.0)
+    }
+
+    /// The grid step for the control bar's `value`, at `beat_width` points a beat.
+    fn step(value: &str, beat_width: f32, bar_beats: f64) -> f64 {
+        let chosen = suhina_session::parse_quantization(value).unwrap_or(Quantization::None);
+        Grid::new(chosen, beat_width, bar_beats).step
     }
 
     #[test]
-    fn a_ruler_click_lands_on_the_clip_grid_unless_alt_is_held() {
-        // 8 points a beat: the grid is a bar.
-        assert_eq!(ruler_beat(17.9, 4.0, 8.0, false), 16.0);
-        assert_eq!(ruler_beat(18.1, 4.0, 8.0, false), 20.0);
-        // 60 points a beat: sixteenths.
-        assert_eq!(ruler_beat(2.13, 4.0, 60.0, false), 2.25);
-        assert_eq!(ruler_beat(2.1337, 4.0, 60.0, true), 2.134);
-        assert_eq!(ruler_beat(-3.0, 4.0, 8.0, true), 0.0);
-        assert_eq!(ruler_beat(f64::NAN, 4.0, 8.0, false), 0.0);
+    fn each_choice_is_its_own_step_when_zoomed_in() {
+        // 400 points a beat: every choice is far enough apart to be drawn as it is.
+        let steps = [
+            ("8 bars", 32.0),
+            ("4 bars", 16.0),
+            ("2 bars", 8.0),
+            ("1 bar", 4.0),
+            ("1/2", 2.0),
+            ("1/4", 1.0),
+            ("1/8", 0.5),
+            ("1/16", 0.25),
+            ("1/32", 0.125),
+        ];
+        for (value, beats) in steps {
+            assert_eq!(step(value, 400.0, 4.0), beats, "{value}");
+        }
+        for (value, beats) in [("1/2T", 4.0 / 3.0), ("1/4T", 2.0 / 3.0), ("1/8T", 1.0 / 3.0), ("1/16T", 1.0 / 6.0)] {
+            assert!((step(value, 400.0, 4.0) - beats).abs() < 1e-12, "{value}");
+        }
+        // Bars follow the time signature: a bar of 3/4 is three beats.
+        assert_eq!(step("1 bar", 400.0, 3.0), 3.0);
+        assert_eq!(step("2 bars", 400.0, 3.0), 6.0);
+        assert!(Grid::new(Quantization::Beats(0.25), 400.0, 4.0).snaps);
+    }
+
+    #[test]
+    fn a_straight_grid_coarsens_by_doubling_then_beats_then_bars() {
+        // 1/16 is 0.25 beats: four lines a beat from 32 points a beat on.
+        assert_eq!(step("1/16", 32.0, 4.0), 0.25);
+        // Closer than 8 points: eighths, then quarters (the beat).
+        assert_eq!(step("1/16", 31.0, 4.0), 0.5);
+        assert_eq!(step("1/16", 16.0, 4.0), 0.5);
+        assert_eq!(step("1/16", 15.0, 4.0), 1.0);
+        assert_eq!(step("1/16", 8.0, 4.0), 1.0);
+        // A beat under 8 points: the bar, then 2, 4, 8 bars.
+        assert_eq!(step("1/16", 7.0, 4.0), 4.0);
+        assert_eq!(step("1/16", 2.0, 4.0), 4.0);
+        assert_eq!(step("1/16", 1.9, 4.0), 8.0);
+        assert_eq!(step("1/16", 1.0, 4.0), 8.0);
+        assert_eq!(step("1/16", 0.5, 4.0), 16.0);
+        // In 3/4 the beat goes to a bar of three beats, then six.
+        assert_eq!(step("1/8", 7.0, 3.0), 3.0);
+        assert_eq!(step("1/8", 2.0, 3.0), 6.0);
+        // A chosen value is never drawn finer than it is: 2 bars stays 2 bars zoomed in.
+        assert_eq!(step("2 bars", 4000.0, 4.0), 8.0);
+        assert_eq!(step("8 bars", 1.0, 4.0), 32.0);
+        // A half note in 3/4 is not on the bar: once too narrow it goes to the bar.
+        assert_eq!(step("1/2", 5.0, 3.0), 2.0);
+        assert_eq!(step("1/2", 3.0, 3.0), 3.0);
+    }
+
+    #[test]
+    fn a_triplet_grid_coarsens_to_the_beat_so_lines_stay_on_the_bar() {
+        // 1/16T is a sixth of a beat: drawn from 48 points a beat on.
+        assert!((step("1/16T", 48.0, 4.0) - 1.0 / 6.0).abs() < 1e-12);
+        // Narrower: straight to the beat, never to a third of a beat that would leave the bar.
+        assert_eq!(step("1/16T", 47.0, 4.0), 1.0);
+        assert_eq!(step("1/8T", 20.0, 4.0), 1.0);
+        assert_eq!(step("1/4T", 11.0, 3.0), 1.0);
+        assert_eq!(step("1/4T", 7.0, 3.0), 3.0);
+        // 1/2T (4/3 beats) goes to the bar.
+        assert_eq!(step("1/2T", 5.0, 4.0), 4.0);
+    }
+
+    #[test]
+    fn none_draws_beats_and_bars_by_the_zoom_and_does_not_snap() {
+        let grid = Grid::new(Quantization::None, 400.0, 4.0);
+        assert_eq!((grid.step, grid.snaps), (1.0, false));
+        assert_eq!(step("none", 7.0, 4.0), 4.0);
+        assert_eq!(grid.place(2.1337, false), 2.1337);
+        assert_eq!(ruler_beat(2.1337, grid, false), 2.134);
+        let clip = audio_clip();
+        assert_eq!(fade_length(1.3, FadeEdge::In, &clip, 0.0, Some(grid)), 1.3);
+    }
+
+    #[test]
+    fn places_snap_to_the_lines_inside_each_bar_unless_free() {
+        let sixteenths = beats(0.25);
+        assert_eq!(sixteenths.place(2.13, false), 2.25);
+        assert_eq!(sixteenths.place(2.13, true), 2.13);
+        assert_eq!(sixteenths.place(-1.0, false), 0.0);
+        assert_eq!(sixteenths.place(f64::NAN, false), 0.0);
+        // Triplet lines start again at each bar line: in 3/4 a half-note triplet (4/3 beats)
+        // has lines at 0, 4/3 and 8/3, then the bar line at 3.
+        let grid = Grid::new(Quantization::Beats(4.0 / 3.0), 400.0, 3.0);
+        assert!((grid.place(1.5, false) - 4.0 / 3.0).abs() < 1e-12);
+        assert_eq!(grid.place(2.9, false), 3.0);
+        assert!((grid.place(4.4, false) - (3.0 + 4.0 / 3.0)).abs() < 1e-12);
+        // Bars: on whole steps from the start.
+        let two_bars = Grid::new(Quantization::Bars(2), 8.0, 4.0);
+        assert_eq!(two_bars.place(11.0, false), 8.0);
+        assert_eq!(two_bars.place(13.0, false), 16.0);
+    }
+
+    #[test]
+    fn lines_are_drawn_at_every_step_with_bar_lines_marked() {
+        assert_eq!(
+            beats(1.0).lines(3.5, 6.0, 100),
+            vec![(4.0, true), (5.0, false), (6.0, false)],
+            "the bar before the view starts the lines"
+        );
+        let in_3_4 = Grid::new(Quantization::Beats(4.0 / 3.0), 400.0, 3.0);
+        let lines: Vec<f64> = in_3_4.lines(0.0, 3.0, 100).into_iter().map(|(b, _)| (b * 1000.0).round()).collect();
+        assert_eq!(lines, vec![0.0, 1333.0, 2667.0, 3000.0]);
+        let two_bars = Grid::new(Quantization::Bars(2), 8.0, 4.0);
+        assert_eq!(two_bars.lines(1.0, 17.0, 100), vec![(0.0, true), (8.0, true), (16.0, true)]);
+        // Never more than asked for.
+        assert_eq!(beats(0.125).lines(0.0, 1e9, 50).len(), 50);
+        assert!(beats(1.0).lines(f64::NAN, 4.0, 10).is_empty());
+    }
+
+    #[test]
+    fn a_ruler_click_lands_on_the_grid_unless_alt_is_held() {
+        // 1 bar at 8 points a beat: the grid is a bar.
+        let bars = Grid::new(Quantization::Bars(1), 8.0, 4.0);
+        assert_eq!(ruler_beat(17.9, bars, false), 16.0);
+        assert_eq!(ruler_beat(18.1, bars, false), 20.0);
+        // 1/16 at 60 points a beat: sixteenths.
+        let sixteenths = Grid::new(Quantization::Beats(0.25), 60.0, 4.0);
+        assert_eq!(ruler_beat(2.13, sixteenths, false), 2.25);
+        assert_eq!(ruler_beat(2.1337, sixteenths, true), 2.134);
+        assert_eq!(ruler_beat(-3.0, bars, true), 0.0);
+        assert_eq!(ruler_beat(f64::NAN, bars, false), 0.0);
     }
 }

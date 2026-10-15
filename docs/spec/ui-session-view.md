@@ -29,7 +29,8 @@ From top to bottom:
    Edit, View, Projects, Options and Help so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
-   - groove amount, metronome, global launch quantisation
+   - groove amount, metronome, global launch quantisation (in Suhina also the Arrangement
+     view's grid: [arrangement editing](arrangement-editing.md) › The grid)
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or

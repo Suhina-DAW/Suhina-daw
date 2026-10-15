@@ -33,11 +33,12 @@ use crate::themes::{FileAction, ThemeEntry, Themes};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
 
-/// Launch quantisation choices, as `launcher.setQuantization` takes them.
+/// Launch quantisation choices, as `launcher.setQuantization` takes them; the Arrangement
+/// view's grid follows the same value.
 const QUANTIZATION: [&str; 14] = [
     "none", "8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32",
 ];
-/// The engine's quantisation before anything is set.
+/// The quantisation of a session before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
 /// The piano roll's own grid value before one is picked.
 const DEFAULT_PIANO_GRID: &str = "1/16";
@@ -96,7 +97,6 @@ type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioDat
 struct Stash {
     view: SessionViewState,
     arrangement: Option<ArrangementViewState>,
-    quantization: Option<&'static str>,
     launches: HashMap<TrackId, (usize, f64)>,
     revision: u64,
     timeline: Option<(u64, Timeline)>,
@@ -193,7 +193,6 @@ pub struct App {
     view: SessionViewState,
     arrangement: ArrangementViewState,
     status: Status,
-    quantization: &'static str,
     /// Where each column's playing clip started, in beats, to show its progress.
     launches: HashMap<TrackId, (usize, f64)>,
     tempo_drag: Option<f64>,
@@ -301,7 +300,6 @@ impl App {
             meters_moved_at: 0.0,
             arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
-            quantization: DEFAULT_QUANTIZATION,
             launches: HashMap::new(),
             tempo_drag: None,
             open_request: None,
@@ -434,7 +432,6 @@ impl App {
         let stash = Stash {
             view: std::mem::take(&mut self.view),
             arrangement: Some(std::mem::take(&mut self.arrangement)),
-            quantization: Some(self.quantization),
             launches: std::mem::take(&mut self.launches),
             revision: self.revision,
             timeline: self.timeline.take(),
@@ -451,7 +448,6 @@ impl App {
         self.arrangement = stash.arrangement.unwrap_or_default();
         self.arrangement.headers_left = headers_left;
         self.arrangement.header_width = header_width;
-        self.quantization = stash.quantization.unwrap_or(DEFAULT_QUANTIZATION);
         self.launches = stash.launches;
         self.revision = stash.revision.wrapping_add(1);
         self.timeline = stash.timeline;
@@ -512,9 +508,6 @@ impl App {
     pub fn attach_player(&mut self, id: ProjectId, player: suhina_session::Player) {
         if let Some(session) = self.projects.get_mut(id) {
             session.attach_player(player);
-        }
-        if self.shown_project == Some(id) {
-            self.quantization = DEFAULT_QUANTIZATION;
         }
     }
 
@@ -1035,12 +1028,6 @@ impl App {
                 if changes_project {
                     self.revision += 1;
                 }
-                if action.id == "launcher.setQuantization"
-                    && let Some(value) = action.params["value"].as_str()
-                    && let Some(known) = QUANTIZATION.iter().find(|q| **q == value)
-                {
-                    self.quantization = known;
-                }
                 if let Some(done) = describe(action) {
                     self.status = Status::Done(done);
                 }
@@ -1229,6 +1216,9 @@ impl App {
                                     timeline
                                 }
                             };
+                            // The grid follows the value in the control bar, which each
+                            // project keeps (`launcher.setQuantization`).
+                            self.arrangement.grid = session.quantization();
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
                             self.timeline = Some((self.revision, timeline));
                             // The headers can be moved from the view itself; that is the setting too.
@@ -1485,7 +1475,11 @@ impl App {
 
     /// The grid value the piano roll uses.
     fn piano_grid_name(&self) -> &'static str {
-        if self.settings.piano_grid_follows { self.quantization } else { self.piano_grid }
+        if self.settings.piano_grid_follows {
+            self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()))
+        } else {
+            self.piano_grid
+        }
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
@@ -2988,18 +2982,28 @@ impl App {
         widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::text_secondary());
         x = ts_rect.right() + PAD;
         let quant_rect = row(x, 64.0);
-        let mut chosen = self.quantization;
+        // One value for both: when launched clips start, and the Arrangement view's grid.
+        let current = self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()));
+        let mut chosen = current;
         ui.scope_builder(egui::UiBuilder::new().max_rect(quant_rect), |ui| {
-            egui::ComboBox::from_id_salt("quantization")
+            let response = egui::ComboBox::from_id_salt("quantization")
                 .width(quant_rect.width())
+                // Tall enough for every value at once, without a scroll bar.
+                .height(QUANTIZATION.len() as f32 * 2.0 * theme::ROW)
                 .selected_text(egui::RichText::new(chosen).font(mono.clone()).color(theme::text_value()))
                 .show_ui(ui, |ui| {
                     for q in QUANTIZATION {
                         ui.selectable_value(&mut chosen, q, egui::RichText::new(q).font(mono.clone()));
                     }
-                });
+                })
+                .response;
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, QUANTIZATION_LABEL));
+            response.on_hover_text(
+                "Grid: when launched clips start, and the Arrangement view's grid lines and snapping (Alt: off the \
+                 grid)",
+            );
         });
-        if chosen != self.quantization {
+        if chosen != current {
             actions.push(Action::new("launcher.setQuantization", json!({ "value": chosen })));
         }
 
@@ -3315,6 +3319,17 @@ fn drag_label(ctx: &egui::Context, pointer: Pos2, text: &str, lands: bool) {
 }
 
 /// What the status bar says after a command ran, or nothing for silent ones.
+/// The control bar's value box, as screen readers and tests name it.
+const QUANTIZATION_LABEL: &str = "Grid and launch quantisation";
+
+/// The control bar's text for `quantization`: the choice that parses to it.
+fn quantization_label(quantization: suhina_engine::Quantization) -> &'static str {
+    QUANTIZATION
+        .into_iter()
+        .find(|q| suhina_session::parse_quantization(q).ok() == Some(quantization))
+        .unwrap_or(DEFAULT_QUANTIZATION)
+}
+
 fn describe(action: &Action) -> Option<String> {
     let p = &action.params;
     Some(match action.id {
@@ -3322,7 +3337,7 @@ fn describe(action: &Action) -> Option<String> {
         "scene.launch" => format!("Launched scene {}", p["scene"]),
         "track.stop" => format!("Stopping track {}", p["track"]),
         "launcher.stopAll" => "Stopping all clips".into(),
-        "launcher.setQuantization" => format!("Launch quantisation {}", p["value"].as_str().unwrap_or_default()),
+        "launcher.setQuantization" => format!("Grid {}", p["value"].as_str().unwrap_or_default()),
         "transport.setTempo" => format!("Tempo {}", p["bpm"]),
         "clip.copy" => "Copied the clip".into(),
         "clip.paste" if p.get("scene").is_some() => format!("Pasted into scene {} on track {}", p["scene"], p["track"]),

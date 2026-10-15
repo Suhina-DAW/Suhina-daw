@@ -46,8 +46,8 @@ pub enum Quantization {
 }
 
 impl Quantization {
-    /// The grid step in beats; 0 means none.
-    fn step(self, bar_beats: f64) -> f64 {
+    /// The grid step in beats, with bars of `bar_beats`; 0 means none.
+    pub fn step(self, bar_beats: f64) -> f64 {
         let step = match self {
             Self::None => 0.0,
             Self::Bars(bars) => f64::from(bars) * bar_beats,

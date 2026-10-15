@@ -115,7 +115,8 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 #[test]
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
-    for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport) {
+    // The quantisation is kept by the session until a player is attached (tested below).
+    for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport && c.id != "launcher.setQuantization") {
         let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0, "key": 60 });
         let params: Value = params
             .as_object()
@@ -228,6 +229,29 @@ fn quantisation_values_parse_to_beats() {
     for bad in ["", "1/3", "1/32T", "bar", "16 bars"] {
         assert!(parse_quantization(bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn the_quantisation_is_kept_without_a_player_and_handed_to_the_next() {
+    let project = project();
+    let mut session = Session::new(project.clone());
+    assert_eq!(session.quantization(), Quantization::Bars(1));
+    run(&mut session, "launcher.setQuantization", json!({ "value": "1/16" })).unwrap();
+    assert_eq!(session.quantization(), Quantization::Beats(0.25));
+    // A bad value changes nothing.
+    assert!(run(&mut session, "launcher.setQuantization", json!({ "value": "1/3" })).is_err());
+    assert_eq!(session.quantization(), Quantization::Beats(0.25));
+    run(&mut session, "launcher.setQuantization", json!({ "value": "none" })).unwrap();
+
+    // The player attached now launches at once, as `none` says, not on its own default bar.
+    let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
+    session.attach_player(Player::new(renderer.controller(), None));
+    run(&mut session, "clip.launch", json!({ "track": "Drums", "scene": 1 })).unwrap();
+    advance(&mut renderer, BEAT / 3);
+    run(&mut session, "clip.launch", json!({ "track": "Bass", "scene": 2 })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!(state["tracks"][1]["playing"]["scene"], 2);
 }
 
 #[test]

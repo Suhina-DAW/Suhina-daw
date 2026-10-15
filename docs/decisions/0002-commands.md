@@ -61,6 +61,11 @@ the project and record no undo step. Without an attached engine they return an e
 how to start one. `launcher.state` reads the engine's state the same way. See
 `docs/spec/clip-launching.md`.
 
+`launcher.setQuantization` is the one exception (2026-10-14): its value is also the Arrangement
+view's grid, so the session keeps it (not the project, no undo step) and the command works without
+an engine; an engine attached later is sent the session's value
+([arrangement editing](../spec/arrangement-editing.md) › The grid).
+
 ## Amendment: project commands (2026-10-11)
 
 With several projects open ([ADR 0007](0007-several-open-projects.md)), a fifth kind,
