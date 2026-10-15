@@ -5,7 +5,8 @@
 - **Licence:** Suhina is GPL-3.0-or-later (`LICENSE`, `NOTICE`), and contributions are
   licensed the same way. Dependencies and bundled libraries must be GPLv3-compatible (MIT,
   Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0); GPL-2.0-only and proprietary or
-  non-commercial licences are not.
+  non-commercial licences are not. CI checks every dependency's licence with `cargo-deny`
+  (see [Dependencies](#dependencies)).
 - **Never crash:** non-test code must not panic and must not use `unsafe` (the only exceptions
   are the plug-in hosting crates `ipc` and `plugin-host`, ADR 0006). Errors go through `Result`
   and `?`; input-derived indices and sizes are checked. See `AGENTS.md`.
@@ -29,6 +30,25 @@
   (`engine`, `ui`, `formats`, `browser`, `audio-io`, `plug-ins`, `devices`, `presets`, `tests`),
   plus `windows`, `macos` or `linux` when it concerns one platform. The forms set the type, and
   `.github/workflows/issue-labels.yml` adds area and platform labels from the form's answers.
+
+## Dependencies
+
+Every crate in `Cargo.lock`, with all features on and for every platform, must have a licence
+that [`deny.toml`](deny.toml) allows: the list in AGENTS.md rule 9, plus a few exceptions, each
+named for one crate with the reason. Dependencies come from crates.io only, and a crate with an
+open RustSec advisory fails unless `deny.toml` ignores it with a reason. The **Dependencies**
+workflow (`.github/workflows/deny.yml`) runs this on every pull request. Run it locally with the
+version pinned in that workflow:
+
+```sh
+cargo install cargo-deny --version 0.20.2 --locked
+cargo deny check
+```
+
+When it rejects a licence, prefer another crate. Add an exception only for a licence that is
+GPLv3-compatible, for the crate that needs it, with a comment saying what the crate is for and
+why the licence is fine. To update `cargo-deny`, change `CARGO_DENY_VERSION` and
+`CARGO_DENY_SHA256` in the workflow together, and the version above.
 
 ## Working on an issue
 

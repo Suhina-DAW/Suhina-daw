@@ -58,7 +58,9 @@ that describe them (*Code and its documents*). Read only the documents that matc
    import"), never as Suhina's own branding.
 9. **GPL-compatible dependencies only.** Suhina is GPL-3.0-or-later. Dependencies must be
    compatible with GPLv3: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0. Not GPL-2.0-only,
-   not proprietary or "non-commercial" licences.
+   not proprietary or "non-commercial" licences. CI checks it with `cargo-deny`
+   ([`deny.toml`](deny.toml), `.github/workflows/deny.yml`); run `cargo deny check` before adding
+   or updating a dependency ([CONTRIBUTING.md › Dependencies](CONTRIBUTING.md#dependencies)).
 
 ## 2. Workspace map
 
@@ -172,6 +174,7 @@ the same issue is opened only when the user asks for one, and its description sa
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo deny check   # when Cargo.lock changed (CONTRIBUTING.md › Dependencies)
 ```
 
 Keep the tree building at every step.
