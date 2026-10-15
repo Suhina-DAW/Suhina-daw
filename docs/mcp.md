@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -70,6 +70,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns` and
   `failed`. Without `--audio`, `audio.devices` returns an error.
 
+- **Tempo map.** `tempo.points` lists the start tempo, the tempo changes and the time-signature
+  changes; `tempo.addPoint {beat, bpm, ramp?}`, `tempo.movePoint` and `tempo.deletePoint` edit the
+  tempo changes (numbered from 1), `timeSignature.add {bar, numerator, denominator}`,
+  `timeSignature.move` and `timeSignature.delete` the signature changes (bars from 1). Renders and
+  the playing engine follow them ([tempo map](spec/tempo-map.md)).
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the
   marker; with `return: "here"` the marker moves to where it stopped; stopping while stopped

@@ -145,6 +145,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
+- tempo and time-signature changes over the song, from the breakpoints of the same envelopes
+  (a reading still to be confirmed by a corpus file; [tempo map](docs/spec/tempo-map.md))
 - MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read and kept; not
   played yet), routing into groups
 - scenes, session clip slots and arrangement clips
@@ -165,6 +167,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   master volume and mute apply. A group with devices is a bus: its devices run over the sum of
   its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
   track, with a voice from a DX7 file; `suhina-cli fm-synth voices` lists a file's voices.
+- Tempo and time-signature changes over the song (the tempo map): tempo steps and ramps, and
+  signature changes at bars, saved in the project file and edited with `tempo.addPoint`,
+  `tempo.movePoint`, `tempo.deletePoint` and `timeSignature.add`/`move`/`delete`. Notes, audio
+  clips (stretched or re-pitched), fades, the playhead, launched clips, launch quantisation and
+  the metronome all follow it; a ramp is converted exactly, so nothing drifts. The bar ruler
+  numbers bars through the signature changes and marks every change
+  ([spec](docs/spec/tempo-map.md)).
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits

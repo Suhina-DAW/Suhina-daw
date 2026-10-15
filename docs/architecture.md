@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -65,11 +65,11 @@ The engine runs them in chains on tracks, made through `device-registry`.
 
 | Crate | Owns | Depends on |
 |---|---|---|
-| `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation. No behaviour beyond that. | nothing |
+| `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation, and the one conversion from beats to time and bars through the tempo and time-signature changes (`TempoMap`, `Meter`; [spec](spec/tempo-map.md)). No behaviour beyond that. | nothing |
 | `stretch` | Time-stretching and pitch-shifting DSP for interleaved audio: a pure-Rust port of Signalsmith Stretch (MIT), behind every stretch mode except `Repitch` ([ADR 0003](decisions/0003-time-stretching.md)). | nothing (rustfft) |
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
 | `project-file` | Suhina's own project file (`.suhina`; `.locr` files saved before October 2026 are read as the same format): the model as versioned JSON, written and read with nothing lost, every value checked; which paths are project files (`is_project_file`); audio paths moved when a project is saved elsewhere ([ADR 0010](decisions/0010-project-files.md), [spec](spec/suhina-format.md)). | model |
-| `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), device chains on tracks, with an instrument playing its track's notes ([ADR 0004](decisions/0004-built-in-devices.md)), plug-in slots in those chains that run a hosted plug-in's audio half (`PluginProcessor`) once per block with its notes, until the block's deadline ([ADR 0006](decisions/0006-plug-in-hosting.md)), latency compensation across tracks, group and master gain, and the browser's preview voice after the main mix ([ADR 0011](decisions/0011-preview-and-added-audio.md)). Never touches files and never loads a plug-in. | model, stretch, device-api, device-registry |
+| `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), device chains on tracks, with an instrument playing its track's notes ([ADR 0004](decisions/0004-built-in-devices.md)), every beat placed through the project's tempo map in frames (`engine::tempo`; [spec](spec/tempo-map.md)), plug-in slots in those chains that run a hosted plug-in's audio half (`PluginProcessor`) once per block with its notes, until the block's deadline ([ADR 0006](decisions/0006-plug-in-hosting.md)), latency compensation across tracks, group and master gain, and the browser's preview voice after the main mix ([ADR 0011](decisions/0011-preview-and-added-audio.md)). Never touches files and never loads a plug-in. | model, stretch, device-api, device-registry |
 | `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`; what a file in the browser is (`info`: kind by extension, length, tempo and key from metadata and the name), standard MIDI files (`midi`: notes per MIDI track, every count capped) tempo detection for loops (`tempo`) ([browser spec](spec/browser.md)), and Stems files (`stems`: the master and each stem as audio, with their names, colours and mastering settings; [spec](spec/stems-format.md)). | engine, project-file, devices/compressor, devices/limiter |
 | `library` | The browser's library ([ADR 0012](decisions/0012-file-library.md)): the folders the user added, an index of their samples, MIDI files, presets and projects kept on disk and up to date (checked at start, then watched with `notify` or polled), search, pins, recent items and colour tags in `browser.json`; finding files by name in the index or by walking a folder (`find`, for missing files). | media |
 | `soundmap` | The sample map ([spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)): features of samples (MFCC, spectral shape, envelope, pitch), analysed on background threads and cached per library folder; layouts of a scope by PCA and t-SNE, kept; grids; kinds from names or guessed from neighbours; similar items. The session holds one (`Projects::sound_map_mut`) and runs the `soundmap.*` commands on it; the window shows its maps. | media |
@@ -187,7 +187,7 @@ History command changes the project, the session calls `Player::update`. The con
 new `Graph` (everything the renderer derives from the project) on the main thread and the audio
 thread swaps it in at the start of the next block (0.15 s ahead when stretched arrangement clips
 need their voices moved first), carrying over the playhead (on the same beat when the tempo
-changed), the transport, sounding notes (which take their track's new mix), device chains and
+map changed), the transport, sounding notes (which take their track's new mix), device chains and
 the launcher's playing and queued clips. A device parameter is not a new graph: it goes to the
 audio thread as a message, applied at the next block (ADR 0005, amendment).
 

@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **92**, every one reachable from the UI, the CLI and MCP |
+| Commands | **99**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -126,10 +126,10 @@ documented behaviour that exists today.
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 45 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
 | 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
-| 6 | Arrangement View | 22 | 35 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
+| 6 | Arrangement View | 22 | 38 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap, time-signature changes (commands; the ruler counts bars through them and marks them). A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, editing signature changes on the ruler, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
 | 7 | Session View | 13 | 50 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. Missing scene view/editing depth, select-on-launch options, follow actions. |
 | 8 | Clip View | 34 | 8 % | started | Detail area shows clip properties; the MIDI clip editor is a spec only (docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels. |
-| 9 | Audio Clips, Tempo, and Warping | 18 | 35 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, tempo automation. |
+| 9 | Audio Clips, Tempo, and Warping | 18 | 38 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Tempo changes over the song (steps and ramps, a tempo map every clip follows, read from a set's tempo envelope). Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an automation envelope. |
 | 10 | Editing MIDI | 41 | 5 % | started | Notes are in the model (velocity, release velocity) and import from .als; there is no note editor, no note commands beyond what a clip holds, no quantise, probability or MPE lanes. |
 | 11 | MIDI Tools | 37 | 0 % | absent | No transformation or generative MIDI tools. |
 | 12 | Editing MPE | 10 | 0 % | absent | No MPE data, editing or MPE-aware devices. |
@@ -171,7 +171,7 @@ documented behaviour that exists today.
 <!-- parity:begin area-table -->
 | Area | Manual pages | Covered |
 |---|---|---|
-| Views and editing (ch 6-10, 16) | 140 | 21 % |
+| Views and editing (ch 6-10, 16) | 140 | 22 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
@@ -345,7 +345,7 @@ or does something Live does not:
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 14 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
 | Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
-| Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
+| Views and clip editing | 140 (ch 6-10, 16) | 22 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |

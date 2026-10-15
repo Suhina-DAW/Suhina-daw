@@ -3,7 +3,7 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
@@ -81,12 +81,16 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   arrangement clip has ([arrangement editing](arrangement-editing.md) › Fades) do not apply to
   launched clips yet.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
-  0003): each one's stretcher is prepared for the project tempo when the project opens and
-  rewound at every launch.
+  0003): each one's stretcher is prepared for the project's start tempo when the project opens
+  and rewound at every launch; where the tempo map is at another tempo they are re-pitched.
+- **Tempo map.** While no scene tempo applies, the launcher clock reads its beat from the
+  project's [tempo map](tempo-map.md), so launched clips stay on the arrangement's grid through
+  tempo changes and ramps, and bar quantisation waits for the next bar line of the meter.
 - **Tempo changes** from a scene affect the launcher clock. Warped audio clips follow the new
   tempo by reading faster or slower (re-pitch), since their stretchers are prepared for the
-  project tempo; unwarped audio clips keep playing at the speed of their file. The arrangement
-  keeps its frame positions for now; a tempo map for the arrangement comes later.
+  project tempo; unwarped audio clips keep playing at the speed of their file. A scene tempo
+  takes the launcher clock off the project's [tempo map](tempo-map.md) until the map is edited;
+  the arrangement keeps following the map.
 - **Commands.** Every action is a command (`clip.launch`, `scene.launch`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,

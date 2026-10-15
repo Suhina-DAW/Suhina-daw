@@ -3,7 +3,7 @@ description: The layout of Suhina's own project file (.suhina; .locr from before
 read_when: .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/project-file/src/lib.rs
 ---
@@ -46,7 +46,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 
 | Part | Fields |
 |---|---|
-| `transport` | `tempo_bpm` (1–999, default 120); `time_signature` `[numerator, denominator]`, each 1–255 (default `[4, 4]`) |
+| `transport` | `tempo_bpm` (1–999, default 120); `time_signature` `[numerator, denominator]`, each 1–255 (default `[4, 4]`); `tempo_changes` `[{ beat, bpm, ramp }]` (beat after 0 and at most 120 000, bpm 1–999, `ramp` default false) and `time_signature_changes` `[{ bar, time_signature }]` (bar from 1, counted from 0; numerator 1–99, denominator 1, 2, 4 … 64), each at most 10 000 and left out when empty ([tempo map](tempo-map.md)) |
 | track | `id`; `name`; `color` `"#RRGGBB"` or `null`; `notes`, `audio` (what it plays); `channel` (its mixer channel) and `parent` (its group) or `null` |
 | channel | `id`; `name`; `role` `regular`, `master`, `effect` (a return) or `submix`; `volume` (linear, not negative, default 1), `pan` (−1 to 1); `mute`, `solo`; `output` (a channel, `null` for the audio output); `sends` `[{ target, level, pre_fader }]`; `devices` |
 | device | `name`; `kind` `{ "type": "builtin", "id" }`, `clap`, `vst3` (32 hex digits), `vst2` (a whole number) or `foreign` `{ format, id }`; `enabled` (default true); `state` (base64, plug-ins); `params` `[{ id, value }]` (built-in effects and instruments). A VST3 controller's state is the extension `Vst3ControllerState` |

@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/model/src/lib.rs
 ---
@@ -54,7 +54,8 @@ Its key ideas:
 `suhina-model` is a DAW-neutral model built on DAWproject's ideas, in three layers:
 
 1. **A common core** of concepts every DAW has:
-   - a transport (tempo, time signature)
+   - a transport (tempo, time signature, and their changes over the song: tempo steps and ramps,
+     time-signature changes at bars; [tempo map](../spec/tempo-map.md))
    - **tracks** (structure) and **channels** (mixer strips: volume, pan, mute, solo, sends,
      output, device chain) as separate objects
    - a pool of **clip contents**, each made of **content lanes**; a lane holds notes or audio and
