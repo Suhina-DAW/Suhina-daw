@@ -72,7 +72,8 @@ crates/
   stretch  L0 time-stretching and pitch-shifting DSP: a pure-Rust port of Signalsmith Stretch (MIT)
   engine   L1 offline/real-time rendering of notes and audio clips, real-time time-stretching (ADR 0003)
            and the clip launcher; no file I/O
-  als      L1 Live Set (.als) reader into model; later one crate per format (dawproject, flp)
+  als      L1 Live Set (.als) reader into model; later one crate per format (dawproject)
+  flp      L1 FL Studio project (.flp) container and event stream; no model mapping yet (epic #271)
   project-file L1 Suhina's own project file (.suhina, versioned JSON; .locr still read): reads and writes the model (ADR 0010)
   media    L2 finds and decodes a project's audio files (symphonia) into the engine's AudioPool;
            reads MIDI files, file metadata (tempo, key) and detects tempo
@@ -207,6 +208,17 @@ them, for any agent or person. The steps
 Write them by doing them in the build, not from the code. A change with nothing a user can notice
 (a refactor, tests, CI, documentation) says so in one line instead; an engine change a user can
 hear or measure is not one of them.
+
+**A change in what Suhina does updates the parity measurement.** Always, in the same pull request:
+every change that adds, changes or removes something a user can do (the same changes that need a
+*How to check it* section) updates the coverage of the chapters it moves in
+[`scripts/parity/score.py`](scripts/parity/score.py), and
+[`scripts/parity/devices.json`](scripts/parity/devices.json) for a built-in effect or instrument,
+runs `python scripts/parity/update_report.py`, and commits what it writes into
+[`docs/research/parity-live-12.md`](docs/research/parity-live-12.md). A pull request that moves no
+coverage writes `Parity: no change` and the reason in its description ("Parity: no change, a
+refactor"). When a pull request changes `crates/`, `devices/` or `apps/` and does neither, the
+[Parity notice](.github/workflows/parity-notice.yml) check warns; it does not fail.
 
 **Documentation is part of the change.** A pull request that changes how something works updates,
 in the same pull request, every document that describes it, so the docs never describe code

@@ -189,7 +189,7 @@ Adding the first clip to an empty track renamed the track after the clip (`4-Aud
 The named positions on the arrangement's timeline (locators) import as arrangement markers
 ([arrangement editing](arrangement-editing.md#markers)). Live's published Live Object Model
 documentation describes a locator (`CuePoint`) as a name and a time in beats. Where the set
-stores them is a **hypothesis** until [corpus series 10](als-corpus.md#series-10-locators)
+stores them is a **hypothesis** until [corpus series 11](als-corpus.md#series-11-locators)
 proves it:
 
 | What | Where | Notes |
@@ -206,7 +206,7 @@ skipped with a warning. A set without `Locators` has no markers.
 The arrangement's loop region imports as the transport's loop region ([arrangement
 editing](arrangement-editing.md#loop-region)). Live's published Live Object Model documentation
 describes the song's loop as on or off, a start and a length, in beats. Where the set stores them
-is a **hypothesis** until [corpus series 11](als-corpus.md#series-11-arrangement-loop) proves it:
+is a **hypothesis** until [corpus series 12](als-corpus.md#series-12-arrangement-loop) proves it:
 
 | What | Where | Notes |
 |---|---|---|
@@ -332,6 +332,6 @@ These change without any musical edit:
 - CLAP plug-ins, Audio Units, racks.
 - Max for Live devices: how the set refers to the `.amxd` file, what Collect All and Save does
   with it, where parameter values are stored ([corpus series 8](als-corpus.md#series-8-max-devices)).
-- Locators: where they are stored and what else a locator carries ([corpus series 10](als-corpus.md#series-10-locators)).
-- The arrangement loop: where the set stores it and in which unit ([corpus series 11](als-corpus.md#series-11-arrangement-loop)).
+- Locators: where they are stored and what else a locator carries ([corpus series 11](als-corpus.md#series-11-locators)).
+- The arrangement loop: where the set stores it and in which unit ([corpus series 12](als-corpus.md#series-12-arrangement-loop)).
 - Sets saved by older Live versions.

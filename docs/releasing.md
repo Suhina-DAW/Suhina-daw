@@ -244,6 +244,10 @@ or posting in it. It skips a pull request with no comment, a build whose artifac
 and a thread whose latest 100 messages already name the commit, so running it twice posts nothing
 twice. The run's summary lists what happened to each pull request.
 
+A webhook secret must be the whole URL Discord shows (*Copy Webhook URL*,
+`https://discord.com/api/webhooks/…`). One that is not is reported as *the URL does not start with
+https://*, never with the URL itself, and nothing is posted.
+
 When a pull request is merged, its thread in the testing forum is marked by the bot
 *Suhina GitHub* (`discord.yml`, [`scripts/discord_merged.py`](../scripts/discord_merged.py)). The
 bot finds the thread, adds ✅ to its first post, renames it `#<number> [Merged] <title>` (the
