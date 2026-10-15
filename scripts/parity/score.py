@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 100
+COMMANDS = 102
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -107,12 +107,14 @@ CHAPTERS = [
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
      "A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/"
      "chain zones, drum pads or rack presets."),
-    (26, "Automation and Editing Envelopes", 22, 0.25, "partial",
+    (26, "Automation and Editing Envelopes", 22, 0.45, "partial",
      "Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints "
-     "with curved segments and jumps, edited point by point by command, saved, played in playback "
-     "and renders (64-frame steps, ramped mixer gains), a manual change turning a lane off until "
-     "re-enabled. Missing drawing, recording and editing lanes in the UI, send, master and tempo "
-     "automation, locking, simplifying envelopes."),
+     "with curved segments and jumps, saved, played in playback and renders (64-frame steps, ramped "
+     "mixer gains), a manual change turning a lane off until re-enabled. Lanes under each track in "
+     "the Arrangement: a parameter chooser, points added, moved on the grid, selected and moved or "
+     "deleted together, curves bent by dragging, re-enabled from the lane. Missing recording, "
+     "drawing with a pencil, plug-in lanes in the view, send, master and tempo automation, "
+     "locking, simplifying envelopes."),
     (27, "Clip Envelopes", 13, 0.00, "absent", "No clip envelopes."),
     (28, "Working with Video", 6, 0.00, "absent", "No video import or window."),
     (29, "Live Audio Effect Reference", 139, 0.15, "partial",

@@ -313,7 +313,7 @@ pub(crate) fn move_points(session: &mut Session, params: &Value) -> Result<Value
     }
     // The points left in place, then the moved ones in the order given, each after any point
     // already at its beat; `None` marks a point that stayed.
-    let mut sorted: Vec<_> = indices.iter().copied().collect();
+    let mut sorted = indices.clone();
     sorted.sort_unstable();
     for index in sorted.into_iter().rev() {
         points.remove(index);

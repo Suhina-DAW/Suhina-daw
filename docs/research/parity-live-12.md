@@ -64,13 +64,13 @@ documentation and UI). The scope decision it leads to is
 | Measure | Value |
 |---|---|
 | The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
-| Page-weighted coverage of everything the manual documents | **about 16 %** |
-| Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 19 %** |
-| Same, over the scope the roadmap aims at (also without accessibility) | **about 19 %** |
+| Page-weighted coverage of everything the manual documents | **about 17 %** |
+| Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 20 %** |
+| Same, over the scope the roadmap aims at (also without accessibility) | **about 20 %** |
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **100**, every one reachable from the UI, the CLI and MCP |
+| Commands | **102**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -146,7 +146,7 @@ documented behaviour that exists today.
 | 23 | Working with Instruments and Effects (Device View) | 34 | 30 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
 | 24 | Using Plug-Ins | 12 | 60 % | partial | CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3, parameters set and automated from the engine. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
-| 26 | Automation and Editing Envelopes | 22 | 25 % | partial | Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints with curved segments and jumps, edited point by point by command, saved, played in playback and renders (64-frame steps, ramped mixer gains), a manual change turning a lane off until re-enabled. Missing drawing, recording and editing lanes in the UI, send, master and tempo automation, locking, simplifying envelopes. |
+| 26 | Automation and Editing Envelopes | 22 | 45 % | partial | Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints with curved segments and jumps, saved, played in playback and renders (64-frame steps, ramped mixer gains), a manual change turning a lane off until re-enabled. Lanes under each track in the Arrangement: a parameter chooser, points added, moved on the grid, selected and moved or deleted together, curves bent by dragging, re-enabled from the lane. Missing recording, drawing with a pencil, plug-in lanes in the view, send, master and tempo automation, locking, simplifying envelopes. |
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |
 | 28 | Working with Video | 6 | 0 % | absent | No video import or window. |
 | 29 | Live Audio Effect Reference | 139 | 15 % | partial | Suhina has 7 effects (utility, auto-pan, three-band DJ EQ, vinyl distortion, overdrive, compressor, limiter) against 42 documented audio effects; several are close equivalents in kind but far narrower in parameters and modes. |
@@ -175,7 +175,7 @@ documented behaviour that exists today.
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
-| Automation, envelopes (ch 26, 27) | 35 | 16 % |
+| Automation, envelopes (ch 26, 27) | 35 | 28 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
 | Outside scope (ch 28, 32-37, 41) | 175 | 1 % |
@@ -347,7 +347,7 @@ or does something Live does not:
 | Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
 | Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
-| Automation and clip envelopes | 35 (ch 26, 27) | 16 % | drawing and recording automation lanes, send and tempo automation, clip envelopes |
+| Automation and clip envelopes | 35 (ch 26, 27) | 28 % | drawing and recording automation lanes, send and tempo automation, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
 | Mixing, routing, I/O | 47 (ch 17, 18, 38) | 21 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 1 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |

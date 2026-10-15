@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -36,7 +36,16 @@ plays through that track's instrument and effects. The move is one undo step.
 `clip.duplicate {track, index, stack?}` places a copy right after the clip, replacing what the
 copy covers unless stacked, as a moved clip does (the window stacks when the setting for the
 clip's kind is on); `clip.delete {track, index}` removes it. In the Arrangement view a clip's
-right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip.
+right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip. Points
+selected on an automation lane are deleted by Delete before any clip; selecting a clip ends a
+selection of points, and selecting points ends the clip's selection
+([automation](automation.md#in-the-arrangement-view)).
+
+## Automation lanes
+
+Under a track, the lanes of its automation, shown and hidden with the envelope button on its
+header; a track's row grows by their height, and the next track moves down. Their gestures are
+in the [automation spec](automation.md#in-the-arrangement-view).
 
 ## Copy, cut and paste
 
