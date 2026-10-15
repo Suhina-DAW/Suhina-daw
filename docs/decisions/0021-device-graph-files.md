@@ -14,7 +14,7 @@ covers:
   - crates/device-sdk/examples/gain.rs
 ---
 
-# 0020: Data-only device graphs
+# 0021: Data-only device graphs
 
 - **Status:** accepted
 - **Date:** 2026-10-15

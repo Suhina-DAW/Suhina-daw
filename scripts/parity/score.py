@@ -179,7 +179,7 @@ CHAPTERS = [
      "One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, "
      "drum sampler, wavetable, subtractive or physical modelling yet."),
     (32, "Max for Live", 6, 0.05, "planned",
-     "ADR 0020 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; "
+     "ADR 0021 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; "
      "visual graph editing is planned. Imported Max devices remain placeholders; no Max runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
     (34, "MIDI and Key Remote Control", 9, 0.25, "partial",

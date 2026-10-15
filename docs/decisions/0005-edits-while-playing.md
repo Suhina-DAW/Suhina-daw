@@ -124,7 +124,7 @@ klingt and JUCE's graph do), now:
    its parameter id for `param`; its slot sends the value to the plug-in at the start of the
    next block (ADR 0006, decision 3), and a graph built after it sends only the values that
    changed.
-   The same message path updates parameters on prepared .sd effects (ADR 0020); changing the
+   The same message path updates parameters on prepared .sd effects (ADR 0021); changing the
    graph structure still rebuilds the renderer.
 4. **Sounding notes follow their track's mix.** Each sine voice remembers its track and
    velocity; at a swap it takes the new graph's volume, pan and mute (and bus, if the track's

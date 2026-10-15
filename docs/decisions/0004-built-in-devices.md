@@ -156,7 +156,7 @@ decision 9.
    to the same return with the same delay (`crates/engine/src/sends.rs`).
 
 11. **Data-only community effects** use the separate `suhina-device-sdk` and `.sd` format
-    ([ADR 0020](0020-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
+    ([ADR 0021](0021-device-graph-files.md)). Unlike built-in Rust devices, these graphs contain
     only supported node data; the engine prepares them off-thread and runs them in the same
     real-time-safe chain. Their parameter declarations generate UI controls.
 
