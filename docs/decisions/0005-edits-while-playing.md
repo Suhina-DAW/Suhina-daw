@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -57,7 +57,10 @@ clip; devices (ADR 0004) will add many more parameters.
    decision 9). The launcher's runtime is copied column by column (a
    column or slot that no longer exists is dropped). A playing launched clip whose prepared
    audio is unchanged keeps its stretch voice (moved from the old graph to the new); otherwise
-   the new voice is moved to the clip's position.
+   the new voice is moved to the clip's position. Level meters keep their levels and clip
+   indicators while each meter slot plays the same track as before; a slot that now holds
+   another track (tracks moved in the project's order) starts from silence
+   ([level meters](../spec/level-meters.md)).
 5. **Nothing is freed on the audio thread.** The old graph goes back to the controller through
    a second queue and is dropped there, on the next update or when the controller is dropped. If
    that queue is full, the audio thread keeps the old graph and takes no new one until it can.

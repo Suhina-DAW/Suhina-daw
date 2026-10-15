@@ -76,6 +76,7 @@ commands (scenes count from 1; a track is its name or id):
   back                  tracks that launched clips play their arrangement again
   state                 what is playing and queued
   grid                  the scenes and each track's clips
+  levels                the level meters: peak and RMS of the main output and each track, in dB
 edits (heard while playing):
   tempo <bpm>           set the project tempo
   vol <track> <db>      set a track's volume, e.g. vol Bass -6
@@ -165,6 +166,7 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["back"] => command("launcher.backToArrangement", json!({})),
         ["state" | "s"] => command("launcher.state", json!({})),
         ["grid"] => command("project.launcher", json!({})),
+        ["levels"] => command("mixer.levels", json!({})),
         ["scene", n] => command("scene.launch", json!({ "scene": scene_value(n)? })),
         ["clip", track @ .., n] if !track.is_empty() => {
             command("clip.launch", json!({ "track": track_value(track), "scene": scene_value(n)? }))
@@ -301,6 +303,7 @@ mod tests {
         assert_eq!(parse_line("stop Drums"), cmd("track.stop", json!({ "track": "Drums" })));
         assert_eq!(parse_line("stop here"), cmd("transport.stop", json!({ "return": "here" })));
         assert_eq!(parse_line("pos 16"), cmd("transport.setPosition", json!({ "beats": 16.0 })));
+        assert_eq!(parse_line("levels"), cmd("mixer.levels", json!({})));
         assert_eq!(parse_line("position 2.5"), cmd("transport.setPosition", json!({ "beats": 2.5 })));
         assert!(parse_line("pos bar5").is_err());
         assert_eq!(parse_line("quant 2 bars"), cmd("launcher.setQuantization", json!({ "value": "2 bars" })));

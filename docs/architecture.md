@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -159,7 +159,10 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   `PreviewMonitor` (whether a preview plays, and where) and a `CpuMonitor` (the audio
   thread's share of wall time spent inside the render call, smoothed over 0.2 s windows
   and kept in per mille; nothing while offline renders run flat out), both of which
-  `launcher.state` reports too — the control bar draws the CPU load from it.
+  `launcher.state` reports too — the control bar draws the CPU load from it; and a
+  `MeterMonitor` (each track's and the main output's peak and RMS level per side and clip
+  indicator, measured every block by the `meters` module and stored as atomics; read by
+  `mixer.levels` and the window's meters, [spec](spec/level-meters.md)).
 
 ## Commands
 
@@ -231,5 +234,5 @@ renderer without a deadline.
   commands edit them.
 - **Plug-ins:** consecutive plug-ins of a chain that share a host process in one round trip per
   block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
-- **UI:** the detail area (device chain, clip editor), meters, and the commands they still
+- **UI:** the detail area (device chain, clip editor), and the commands it still
   need (arm, sends) (M8). The browser's open questions are in its spec › Not decided yet.

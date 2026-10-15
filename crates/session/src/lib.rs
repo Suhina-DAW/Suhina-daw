@@ -8,6 +8,7 @@ mod commands;
 mod devices;
 mod files;
 mod library;
+mod meters;
 mod plugins;
 mod preview;
 mod projects;
@@ -141,6 +142,11 @@ impl Player {
     /// in per mille (1000 is busy all of the time).
     pub fn cpu_monitor(&self) -> &suhina_engine::CpuMonitor {
         self.controller.cpu_monitor()
+    }
+
+    /// The level meters of the main output and every track.
+    pub fn meter_monitor(&self) -> &suhina_engine::MeterMonitor {
+        self.controller.meter_monitor()
     }
 
     pub(crate) fn controller_mut(&mut self) -> &mut Controller {

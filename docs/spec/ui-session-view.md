@@ -114,7 +114,8 @@ One knob per return track (A, B, …). Return tracks show pre/post toggles on th
 
 ### Mixer (toggleable, resizable height)
 
-Per track, top to bottom: pan, volume with numeric field and meter, track on/off (shows the
+Per track, top to bottom: pan, volume with numeric field and meter ([level
+meters](level-meters.md)), track on/off (shows the
 track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends

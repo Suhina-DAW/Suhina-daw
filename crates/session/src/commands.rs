@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, devices, files, preview};
+use crate::{CommandError, Session, devices, files, meters, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -464,6 +464,23 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Transport,
         run: set_metronome,
+    },
+    CommandSpec {
+        id: "mixer.levels",
+        label: "Read the level meters of the playing engine: the main output's and each track's peak and RMS level per side in dB (null for silence), and whether it clipped",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: meters::levels,
+    },
+    CommandSpec {
+        id: "mixer.resetClip",
+        label: "Turn off clip indicators: a track's, the main output's, or every one when neither is given",
+        params: &[
+            optional("track", ParamType::Track, "track id or name, from project.tracks"),
+            optional("main", ParamType::Bool, "true turns off the main output's"),
+        ],
+        kind: CommandKind::Transport,
+        run: meters::reset_clip,
     },
     CommandSpec {
         id: "clip.launch",

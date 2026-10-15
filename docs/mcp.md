@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -106,6 +106,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.
+
+- **Level meters.** With `--audio`, `mixer.levels` reads the main output's and every track's
+  peak and RMS level per side in dB (`null` for silence) and whether it clipped;
+  `mixer.resetClip {track?, main?}` turns clip indicators off
+  ([spec](spec/level-meters.md)). An agent can play a project and check its levels this way.
 
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Suhina's settings folder) and keeps it up to date while it runs

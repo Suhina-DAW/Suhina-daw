@@ -963,6 +963,13 @@ impl App {
                 .and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
+            let meters = crate::meter::Meters::read(self.session().and_then(|s| s.player()).map(|p| p.meter_monitor()));
+            if meters.moving() {
+                // Meters fall for a moment after the sound stops.
+                ui.ctx().request_repaint();
+            }
+            self.view.meters = meters.clone();
+            self.arrangement.meters = meters;
             // The large sample map takes the main area, except while something is dragged from
             // it, so the drop can land on a track.
             if self.sample_map.view.large && self.browser.drag.is_none() {
