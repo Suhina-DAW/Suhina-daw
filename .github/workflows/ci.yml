@@ -1,8 +1,9 @@
 name: CI
 
-# Pull requests and main run on Linux only, which keeps every change's check fast. Windows and
-# macOS run when started by hand (Actions > CI > Run workflow, "all platforms"), and the release
-# workflow builds and checks all three for every tag and for the nightly.
+# Pull requests and main run clippy and the tests on Linux, Windows and macOS; GitHub's runners
+# are free for an open-source repository. Linux and Windows are part of the required check; macOS
+# is reported without blocking merges until it has proven itself. The release workflow builds and
+# checks all three for every tag and for the nightly.
 #
 # merge_group: the merge queue (CONTRIBUTING.md › Merging many pull requests) tests its
 # temporary branch, main with the queued pull requests merged onto it, with the same jobs, so the
@@ -13,11 +14,6 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
-    inputs:
-      all_platforms:
-        description: Also run clippy and the tests on Windows and macOS
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -146,7 +142,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.all_platforms && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest"]') }}
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -166,18 +162,14 @@ jobs:
       - run: xvfb-run -a cargo test --workspace
         if: runner.os == 'Linux'
 
-  # Not part of `ci`: a macOS failure is reported but does not block merging. Only when started by
-  # hand with "all platforms".
+  # Not part of `ci`: a macOS failure is reported but does not block merging.
   check-macos:
     name: clippy and tests (macos-latest)
     needs: changes
-    if: needs.changes.outputs.code == 'true' && inputs.all_platforms
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install ALSA headers (cpal)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

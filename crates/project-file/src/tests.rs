@@ -5,7 +5,7 @@ use super::*;
 
 /// A project with every kind of thing the model holds: a group, an audio and a note track, a
 /// return, sends, built-in and plug-in devices with state, shared and audio contents, loops,
-/// fades, scenes with a tempo, stop buttons and extensions.
+/// fades, a follow action, scenes with a tempo, stop buttons and extensions.
 fn everything() -> Project {
     let ext =
         |key: &str| Extensions(vec![Extension { format: "als".into(), key: key.into(), data: vec![0, 1, 2, 255] }]);
@@ -20,7 +20,17 @@ fn everything() -> Project {
         fade_out: 1.0,
         fade_in_curve: FadeCurve { shape: FadeShape::SCurve, curve: -0.5 },
         fade_out_curve: FadeCurve { shape: FadeShape::EqualPower, curve: 0.75 },
+        follow_action: Default::default(),
         extensions: Extensions::default(),
+    };
+    let follow = FollowAction {
+        enabled: true,
+        time: 6.0,
+        linked: false,
+        action_a: FollowKind::Jump(1),
+        action_b: FollowKind::Other,
+        chance_a: 30,
+        chance_b: 70,
     };
     let channel = |id: u32, role: ChannelRole, output: Option<u32>| Channel {
         id: ChannelId(id),
@@ -190,7 +200,10 @@ fn everything() -> Project {
             ],
             columns: vec![LauncherColumn {
                 track: TrackId(2),
-                slots: vec![Slot { clip: Some(clip(1, 0.0)), has_stop: true }, Slot { clip: None, has_stop: false }],
+                slots: vec![
+                    Slot { clip: Some(Clip { follow_action: follow, ..clip(1, 0.0) }), has_stop: true },
+                    Slot { clip: None, has_stop: false },
+                ],
             }],
         },
         extensions: ext("LiveSet"),
@@ -301,6 +314,14 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_shape": "wobbly" } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_out_shape": 3 } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "fade_in_curve": 2 } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": true } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "time": 0 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "time": 1e9 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "a": "up" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "b": "jump 0" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "chance_a": 101 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "chance_b": -3 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "enabled": "on" } } ] } ] } }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -346,6 +367,28 @@ fn a_clip_without_fade_shapes_has_linear_fades() {
     let clip = &project.arrangement.lanes[0].clips[0];
     assert_eq!((clip.fade_in_curve, clip.fade_out_curve), (FadeCurve::default(), FadeCurve::default()));
     assert_eq!(FadeCurve::default(), FadeCurve { shape: FadeShape::Linear, curve: 0.0 });
+}
+
+/// A clip without a follow action writes none, and a file written before follow actions reads
+/// as off.
+#[test]
+fn a_clip_without_a_follow_action_has_it_off() {
+    let mut project = everything();
+    if let Some(clip) = project.launcher.columns[0].slots[0].clip.as_mut() {
+        clip.follow_action = FollowAction::default();
+    }
+    let text = to_json(&project);
+    assert!(!text.contains("\"follow\""), "{text}");
+    let read = from_json(&text).unwrap();
+    assert_eq!(read.launcher.columns[0].slots[0].clip.as_ref().unwrap().follow_action, FollowAction::default());
+    // Only what is given changes from the default.
+    let project = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "contents": [ { "id": 1, "length": 4 } ],
+            "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "enabled": true, "b": "STOP" } } ] } ] } } }"#,
+    )
+    .unwrap();
+    let follow = project.arrangement.lanes[0].clips[0].follow_action;
+    assert_eq!(follow, FollowAction { enabled: true, action_b: FollowKind::Stop, ..FollowAction::default() });
 }
 
 #[test]

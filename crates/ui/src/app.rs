@@ -16,11 +16,12 @@ use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
 use crate::detail_view;
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
+use crate::follow_view;
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
-use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
+use crate::project_dialog::{self, AboutChoice, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
@@ -196,6 +197,8 @@ pub struct App {
     lists_wanted: bool,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
+    /// Help › About Suhina is open.
+    about_open: bool,
     new_request: Option<NewProject>,
     /// A project file saved since the app last asked, for its recent list.
     saved_path: Option<PathBuf>,
@@ -271,6 +274,7 @@ impl App {
             project_lists: Lists::default(),
             lists_wanted: false,
             save_prompt: None,
+            about_open: false,
             new_request: None,
             saved_path: None,
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
@@ -736,6 +740,17 @@ impl App {
                 None => self.save_prompt = Some(prompt),
             }
         }
+        if self.about_open {
+            match project_dialog::show_about(ui, window) {
+                Some(AboutChoice::Copy) => {
+                    let line = project_dialog::version_line();
+                    ui.ctx().copy_text(line.clone());
+                    self.status = Status::Done(format!("Copied {line}"));
+                }
+                Some(AboutChoice::Close) => self.about_open = false,
+                None => {}
+            }
+        }
         if let Some(leaving) = self.unsaved_prompt.take() {
             let name = self.projects.name(leaving.project).unwrap_or("Untitled").to_string();
             let doing = match leaving.then {
@@ -1141,6 +1156,27 @@ impl App {
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // A selected slot clip's follow action comes first, the rest of the detail beside or
+        // under it.
+        let follow = match (self.shown, self.view.selected_slot, self.session()) {
+            (View::Session, Some((t, scene)), Some(s)) => follow_view::FollowInfo::build(s.project(), t, scene),
+            _ => None,
+        };
+        let detail = match &follow {
+            Some(info) => {
+                let used = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+                    follow_view::show(ui, detail, info, stacked, actions)
+                });
+                if stacked {
+                    let top = (used.inner.bottom() + 1.0).min(detail.bottom());
+                    Rect::from_min_max(Pos2::new(detail.left(), top), detail.max)
+                } else {
+                    let left = (used.inner.right() + 1.0).min(detail.right());
+                    Rect::from_min_max(Pos2::new(left, detail.top()), detail.max)
+                }
+            }
+            None => detail,
+        };
         let mut places = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if stacked {
@@ -1591,6 +1627,11 @@ impl App {
                     self.settings_open = true;
                 }
             });
+            ui.menu_button("Help", |ui| {
+                if ui.add(egui::Button::new("About Suhina").shortcut_text(keys("help.about"))).clicked() {
+                    self.about_open = true;
+                }
+            });
         });
     }
 
@@ -1651,7 +1692,10 @@ impl App {
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
-        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
+        let dialog = self.project_dialog.is_some()
+            || self.save_prompt.is_some()
+            || self.unsaved_prompt.is_some()
+            || self.about_open;
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
@@ -1667,6 +1711,7 @@ impl App {
         let has_project = !self.projects.is_empty();
         match action {
             "settings.open" => self.settings_open = !self.settings_open,
+            "help.about" => self.about_open = !self.about_open,
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
             "view.browser" => self.toggle_browser(),
@@ -2461,11 +2506,34 @@ impl App {
             theme::text_primary(),
         );
 
-        // Right: the view switch; the current view is underlined. Left of it, the CPU
-        // load, from the engine's monitor (per mille, smoothed): how much of the time the
-        // audio engine spends rendering.
+        // Right, from the edge in: the view switch, the current view underlined, so it is
+        // the last control at the right end. Left of it the CPU load, from the engine's monitor
+        // (per mille, smoothed): how much of the time the audio engine spends rendering. In a
+        // narrow window a block that would reach the position readout is left out, the RAM
+        // first, so nothing overlaps and the order stays.
+        let centre_end = position.right() + PAD;
+        let fits = |right: f32, width: f32| right - width >= centre_end;
         let mut right = bar.right() - PAD;
-        if let Some(milli) = cpu {
+        let mut underline_at = None;
+        for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
+            let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
+            let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
+            let size = galley.size();
+            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
+            let response = widgets::button_area(ui, rect, Id::new(("view", name)), format!("{name} view"));
+            if response.clicked() {
+                self.shown = view;
+            }
+            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
+            let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
+            painter.galley(pos, galley, color);
+            if self.shown == view {
+                underline_at = Some((pos.x, pos.y + size.y + 1.0, size.x));
+            }
+            right = rect.left() - 12.0;
+        }
+        right += 12.0 - PAD;
+        if let Some(milli) = cpu.filter(|_| fits(right, 56.0)) {
             let rect = row(right - 56.0, 56.0);
             let percent = f64::from(milli.min(1000)) / 10.0;
             painter.rect_filled(rect, 0.0, theme::window_background());
@@ -2501,8 +2569,8 @@ impl App {
             });
             right = rect.left() - PAD;
         }
-        // Left of it, the program's own RAM (its resident memory), in megabytes or gigabytes.
-        if let Some(bytes) = ram {
+        // Left of that, the program's own RAM (its resident memory), in megabytes or gigabytes.
+        if let Some(bytes) = ram.filter(|_| fits(right, 76.0)) {
             let rect = row(right - 76.0, 76.0);
             painter.rect_filled(rect, 0.0, theme::window_background());
             let inner = rect.shrink2(Vec2::new(PAD - 2.0, 0.0));
@@ -2526,25 +2594,6 @@ impl App {
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("RAM usage {}", ram_text(bytes)))
             });
-            right = rect.left() - PAD;
-        }
-        let mut underline_at = None;
-        for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
-            let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
-            let galley = widgets::fitted(&painter, name, theme::ui_font(theme::TEXT), color, 120.0);
-            let size = galley.size();
-            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
-            let response = widgets::button_area(ui, rect, Id::new(("view", name)), format!("{name} view"));
-            if response.clicked() {
-                self.shown = view;
-            }
-            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
-            let pos = Pos2::new(rect.left(), rect.center().y - size.y / 2.0);
-            painter.galley(pos, galley, color);
-            if self.shown == view {
-                underline_at = Some((pos.x, pos.y + size.y + 1.0, size.x));
-            }
-            right = rect.left() - 12.0;
         }
         // The underline slides to the view that was picked.
         if let Some((x, y, width)) = underline_at {

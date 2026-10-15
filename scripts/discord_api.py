@@ -32,6 +32,9 @@ class DiscordError(Exception):
 def send(method: str, url: str, label: str, body: dict | None = None, headers: dict | None = None) -> dict:
     """One request, retried after a 429 for as long as Discord asks (up to MAX_WAIT). `label`
     names the request in messages, in place of the URL."""
+    # urllib puts a malformed URL in its error; a webhook URL is a secret, so it is checked here.
+    if not url.startswith("https://"):
+        raise DiscordError(f"{label}: the URL does not start with https://")
     data = json.dumps(body).encode() if body is not None else None
     for _ in range(ATTEMPTS):
         request = urllib.request.Request(url, data=data, method=method)
