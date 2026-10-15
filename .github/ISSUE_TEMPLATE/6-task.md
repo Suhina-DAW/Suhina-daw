@@ -17,4 +17,6 @@ labels: []
 ## Notes
 
 <!-- Where the code goes (docs/architecture.md › Where new code goes), related ADRs and specs.
-     Larger design questions belong in an ADR, not here. -->
+     Larger design questions belong in an ADR, not here. Name the paths it will touch, so a claim
+     can carry them in its `Touches:` line. Work that has to be done first is marked in the issue's
+     Relationships › Blocked by, not only here. -->

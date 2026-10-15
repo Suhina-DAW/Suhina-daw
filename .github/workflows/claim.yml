@@ -10,6 +10,10 @@ name: Claim
 # A maintainer may write `/claim @login` to claim for someone else: the same checks run for that
 # person, who is assigned, and the answer says a maintainer claimed on their behalf.
 #
+# A claim is refused while an issue it is *Blocked by* is open. A `Touches:` line in the claim names
+# the paths the work will change, and the answer lists the open pull requests and other claims that
+# touch the same paths, so overlapping work is found before it is written twice (AGENTS.md › Tasks).
+#
 # It needs the repository secret `PROJECT_TOKEN`, because the workflow's `GITHUB_TOKEN` cannot
 # reach a project owned by the organization. docs/claim-bot.md says how to make one, which
 # scopes it needs and what happens when it expires.
@@ -114,6 +118,30 @@ jobs:
                   `\`/claim @octocat Plan: …\`.`,
               );
             }
+            // `Touches: crates/ui/src/piano_roll, crates/session` in a claim: the paths the work will
+            // change, on a line of its own or after the plan (a `Plan:` or `When:` after it ends it).
+            // At most 20, each a plain relative path; a trailing `/`, `/*` or `/**` is dropped and
+            // anything else on the line is ignored, so nobody's text reaches a query as written.
+            const PATH = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+            const touchedPaths = (text) => {
+              const line = String(text || "").match(/\bTouches:[ \t]*([^\n]*)/i);
+              if (!line) return [];
+              const paths = [];
+              for (const word of line[1].split(/\s+(?:Plan|When):/i)[0].split(/[\s,;]+/)) {
+                const path = word
+                  .replace(/[`"']/g, "")
+                  .replace(/^\.\//, "")
+                  .replace(/(?:\/\*\*|\/\*|\/)+$/, "");
+                const plain = PATH.test(path) && !path.split("/").some((part) => part === "." || part === "..");
+                if (plain && !paths.includes(path)) paths.push(path);
+                if (paths.length === 20) break;
+              }
+              return paths;
+            };
+            // Two paths overlap when one is the other or lies under it.
+            const overlaps = (a, b) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+            const touches = command === "claim" ? touchedPaths(body) : [];
+
             // Claiming for oneself by name is an ordinary claim.
             const onBehalf = target !== null && !sameLogin(target, actor);
             if (onBehalf && !maintainer) {
@@ -206,6 +234,128 @@ jobs:
                   core.warning(`Could not look for linked pull requests: ${error.message}`);
                   return [];
                 }
+              };
+              // How an issue or pull request is named in an answer: `#N` here, `owner/repo#N` elsewhere.
+              const reference = (other) =>
+                other.repository && other.repository.nameWithOwner && other.repository.nameWithOwner !== slug
+                  ? `${other.repository.nameWithOwner}#${other.number}`
+                  : `#${other.number}`;
+              // Open issues this one is *Blocked by* (the issue's Relationships on GitHub): work that
+              // has to be done first. None when the lookup fails, as with pull requests above.
+              const openBlockers = async () => {
+                try {
+                  const found = await project.graphql(
+                    `query ($issue: ID!) {
+                       node(id: $issue) {
+                         ... on Issue {
+                           blockedBy(first: 20) {
+                             nodes { number title state repository { nameWithOwner } }
+                           }
+                         }
+                       }
+                     }`,
+                    { issue: issue.node_id },
+                  );
+                  const nodes = (found.node && found.node.blockedBy && found.node.blockedBy.nodes) || [];
+                  return nodes.filter((blocker) => blocker && blocker.state === "OPEN");
+                } catch (error) {
+                  core.warning(`Could not read what blocks this issue: ${error.message}`);
+                  return [];
+                }
+              };
+              // Other open work on the claimed paths: pull requests whose changed files lie under
+              // them (a pull request that closes this issue is not other work), and other issues
+              // whose newest claim, still assigned and not taken back with `/unclaim`, has a
+              // `Touches:` line that overlaps them. A notice for the claimer, never a refusal, so a
+              // lookup that fails only leaves its part out.
+              const otherWork = async (paths) => {
+                const found = [];
+                try {
+                  const open = await project.graphql(
+                    `query ($owner: String!, $name: String!) {
+                       repository(owner: $owner, name: $name) {
+                         pullRequests(states: OPEN, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
+                           nodes {
+                             number title
+                             files(first: 100) { nodes { path } }
+                             closingIssuesReferences(first: 10) { nodes { number } }
+                           }
+                         }
+                       }
+                     }`,
+                    { owner: context.repo.owner, name: context.repo.repo },
+                  );
+                  const pulls =
+                    (open.repository && open.repository.pullRequests && open.repository.pullRequests.nodes) || [];
+                  for (const pull of pulls) {
+                    const closes = ((pull.closingIssuesReferences && pull.closingIssuesReferences.nodes) || [])
+                      .some((closed) => closed.number === issue.number);
+                    if (closes) continue;
+                    const files = ((pull.files && pull.files.nodes) || []).map((file) => file.path);
+                    const hit = files.filter((file) => paths.some((path) => overlaps(file, path)));
+                    if (hit.length > 0) found.push({ name: `#${pull.number}`, title: pull.title, hit });
+                  }
+                } catch (error) {
+                  core.warning(`Could not read the open pull requests' files: ${error.message}`);
+                }
+                try {
+                  // A claim assigns the claimer, so the open issues with someone assigned are the
+                  // claims; the 50 most recently updated are read.
+                  const result = await github.rest.issues.listForRepo({
+                    ...context.repo,
+                    state: "open",
+                    assignee: "*",
+                    sort: "updated",
+                    direction: "desc",
+                    per_page: 50,
+                  });
+                  const others = ((result && result.data) || []).filter(
+                    (other) => other.number !== issue.number && !other.pull_request,
+                  );
+                  for (const other of others) {
+                    const comments = await github.paginate(github.rest.issues.listComments, {
+                      ...context.repo,
+                      issue_number: other.number,
+                      per_page: 100,
+                    });
+                    const commands = comments.filter((entry) => /^\/(un)?claim\b/i.test((entry.body || "").trim()));
+                    const newest = commands.pop();
+                    if (!newest || /^\/unclaim\b/i.test(newest.body.trim())) continue;
+                    const theirs = touchedPaths(newest.body);
+                    const hit = theirs.filter((path) => paths.some((mine) => overlaps(path, mine)));
+                    if (hit.length > 0) found.push({ name: `#${other.number}`, title: other.title, hit, claim: true });
+                  }
+                } catch (error) {
+                  core.warning(`Could not read the other claims: ${error.message}`);
+                }
+                return found;
+              };
+              // What the claim's answer says about other work on the same code.
+              const overlapNote = async () => {
+                if (touches.length === 0) {
+                  return (
+                    "\n\nA `Touches:` line in the claim, naming the paths you will change " +
+                    "(`Touches: crates/ui/src/piano_roll, crates/session`), makes this bot list other " +
+                    "open work on the same code."
+                  );
+                }
+                const found = await otherWork(touches);
+                const named = touches.slice(0, 5).map((path) => `\`${path}\``).join(", ");
+                if (found.length === 0) {
+                  return `\n\nNo other open pull request or claim touches ${named}${touches.length > 5 ? ", …" : ""}.`;
+                }
+                const lines = found.slice(0, 10).map((entry) => {
+                  const where = entry.hit.slice(0, 3).map((path) => `\`${path}\``).join(", ");
+                  const more = entry.hit.length > 3 ? `, and ${entry.hit.length - 3} more` : "";
+                  return `- ${entry.name} ${entry.title}${entry.claim ? " (a claim)" : ""}: ${where}${more}`;
+                });
+                if (found.length > 10) lines.push(`- and ${found.length - 10} more`);
+                return (
+                  `\n\nOther open work touches the same code:\n\n${lines.join("\n")}\n\n` +
+                  `Read it before you start. When it builds something you need, build on it (stack on its ` +
+                  `branch, or write \`Depends on #N\` in your pull request) rather than writing it again; ` +
+                  `when it changes the same code for another reason, say so in both (AGENTS.md › Tasks).`
+                );
               };
               const isFree = (name) => FREE.some((free) => same(name, free));
               const isNotReady = (name) => NOT_READY.some((held) => same(name, held));
@@ -402,6 +552,22 @@ jobs:
                 );
               }
 
+              // Work that has to be done first gates a claim the way a hold does. The person who has
+              // the claim already is answered below instead, so a second session of theirs is pointed
+              // at the work that exists.
+              const mine = item && same(status, CLAIMED) && assignees.length === 1 && hasClaimant;
+              if (!mine) {
+                const blockers = await openBlockers();
+                if (blockers.length > 0) {
+                  const list = blockers.map((blocker) => `- ${reference(blocker)} ${blocker.title}`).join("\n");
+                  return say(
+                    `This is blocked by work that has to be done first:\n\n${list}\n\nClaim one of those ` +
+                      `instead, or ask in this issue if the order is wrong. Once they are closed, ` +
+                      `\`/claim\` works here.`,
+                  );
+                }
+              }
+
               // A card without a Status yet is free, as it is for `/unclaim`.
               let lapsed = false;
               if (item && status !== null && !isFree(status)) {
@@ -511,7 +677,8 @@ jobs:
                   `within ${LAPSE_HOURS} hours, or the claim lapses and the next \`/claim\` takes it ` +
                   `over; comment \`/unclaim\` if you stop. A plan in a ` +
                   `comment — what you will change, and roughly when — helps whoever reviews it.` +
-                  unassigned,
+                  unassigned +
+                  (await overlapNote()),
               );
             } catch (error) {
               // A token that expired, or a query the schema no longer answers, must not leave the

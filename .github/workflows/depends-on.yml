@@ -1,0 +1,108 @@
+name: Depends on
+
+# A pull request that builds on another one says so in its description, one line each:
+#
+#   Depends on #123
+#
+# This check fails while any of them is still open, so the merge queue never merges a pull request
+# before the work it builds on (AGENTS.md › Tasks). It names what it waits for. A pull request
+# counts as done when it is merged, an issue when it is closed; a pull request closed without
+# merging still blocks, because the code it was to bring never landed. Stacked pull requests on
+# this repository (`gh stack`) are ordered by their base branches instead and need no line; the line
+# is for a pull request from a fork, which cannot be stacked, or one that builds on an issue.
+#
+# It runs again when the description is edited, when commits are pushed (a stack is rebased after
+# the pull request below it merges), and in the merge queue, where it reads the description of the
+# pull request the queue is testing.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  depends-on:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            // At most this many lines are read: more is a mistake, not a plan.
+            const MAX = 20;
+
+            // The pull request being checked: from the event, or in the merge queue from the
+            // queue's branch name, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
+            let number = null;
+            let body = "";
+            if (context.payload.pull_request) {
+              number = context.payload.pull_request.number;
+              body = context.payload.pull_request.body || "";
+            } else if (context.payload.merge_group) {
+              const ref = context.payload.merge_group.head_ref || "";
+              const found = ref.match(/\/pr-(\d+)-[0-9a-f]+$/);
+              if (!found) {
+                core.info(`No pull request number in the queue's branch ${ref}; nothing to check.`);
+                return;
+              }
+              number = Number(found[1]);
+              const pull = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+              body = pull.data.body || "";
+            }
+            if (number === null) return;
+
+            // `Depends on #123`, `Depends-On: #123`, or a link to an issue or pull request of this
+            // repository, at the start of a line. HTML comments are dropped first, so the template's
+            // example is never read as a dependency.
+            const slug = `${context.repo.owner}/${context.repo.repo}`;
+            const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const LINE = new RegExp(
+              String.raw`^\s*[-*]?\s*depends[ -]on:?\s+(?:#(\d+)|https://github\.com/` +
+                escaped +
+                String.raw`/(?:issues|pull)/(\d+))\b`,
+              "gim",
+            );
+            const text = body.replace(/<!--[\s\S]*?-->/g, "");
+            const wanted = [];
+            for (const match of text.matchAll(LINE)) {
+              const n = Number(match[1] || match[2]);
+              if (n !== number && !wanted.includes(n)) wanted.push(n);
+              if (wanted.length === MAX) break;
+            }
+            if (wanted.length === 0) {
+              core.info(`#${number} depends on nothing.`);
+              return;
+            }
+
+            const waiting = [];
+            for (const n of wanted) {
+              let item;
+              try {
+                item = (await github.rest.issues.get({ ...context.repo, issue_number: n })).data;
+              } catch (error) {
+                waiting.push(`#${n}: could not be read (${error.message})`);
+                continue;
+              }
+              if (item.pull_request) {
+                if (!item.pull_request.merged_at) {
+                  waiting.push(`#${n} ${item.title}: ${item.state === "open" ? "not merged yet" : "closed without merging"}`);
+                }
+              } else if (item.state === "open") {
+                waiting.push(`#${n} ${item.title}: the issue is still open`);
+              }
+            }
+
+            const all = wanted.map((n) => `#${n}`).join(", ");
+            if (waiting.length === 0) {
+              core.info(`Everything #${number} depends on is done: ${all}.`);
+              return;
+            }
+            await core.summary
+              .addHeading(`#${number} waits for`, 3)
+              .addList(waiting)
+              .addRaw("Run this check again (push, or edit the description) once they have merged.")
+              .write();
+            core.setFailed(`#${number} waits for: ${waiting.join("; ")}`);

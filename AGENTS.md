@@ -172,15 +172,37 @@ Several agents often run at once, so an agent never starts work that exists alre
 
 - **Before opening an issue**, search the open issues for the same problem; when one exists,
   comment there instead.
-- **Before writing code**, comment `/claim` with the plan and read the bot's answer. When it says
-  the work is taken, or that it is already yours and names a pull request, do not start a second
-  one: continue in that pull request, or stop and tell the user.
+- **Before writing code**, comment `/claim` with the plan and a `Touches:` line naming the paths
+  you will change (`Touches: crates/ui/src/piano_roll, crates/session`), and read the bot's answer.
+  When it says the work is taken, that it is blocked by another issue, or that it is already yours
+  and names a pull request, do not start a second one: continue in that pull request, take the
+  blocking issue instead, or stop and tell the user.
 - **Before opening a pull request**, check the issue's linked pull requests; when one is open,
   push to it rather than opening another.
 
 Continuing open work is always allowed, in a new session too. A second, competing pull request for
 the same issue is opened only when the user asks for one, and its description says
 `Alternative to #N`.
+
+**Overlapping work across issues.** Two issues often need the same code: a helper, a command, a
+model field. The claim bot lists the open pull requests and other claims that touch the paths in
+your `Touches:` line; without one, list them yourself before writing code
+(`gh pr list --state open --json number,title,files`), and read every one that touches the crates,
+views or commands you will change. Then:
+
+- **It already builds what you need:** do not write it again; build on it. On a branch of this
+  repository, stack on its branch (`gh stack`). From a fork, which cannot be stacked, branch from
+  its head and write `Depends on #N` on a line of its own in your description; the
+  [Depends on](.github/workflows/depends-on.yml) check keeps your pull request out of the merge
+  queue until #N has merged, so keep it a draft until then.
+- **It changes the same code for another purpose:** comment in both pull requests what overlaps and
+  which should merge first, and leave the order to a maintainer when it is not obvious.
+- **It does the same thing another way:** do not merge the two yourself, edit the other pull
+  request, or open a third; comment in both and leave the choice to a maintainer.
+
+When an issue cannot start before another one is done, mark it on GitHub (the issue's
+*Relationships › Blocked by*), not only in prose: the claim bot refuses claims on it until the
+blocking issue is closed.
 
 ## 4. Before you finish a task
 
