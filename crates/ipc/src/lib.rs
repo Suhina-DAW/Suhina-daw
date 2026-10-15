@@ -7,6 +7,11 @@
 //! output and rings back. A block can carry [`Event`]s (notes, controllers) at its frames, for
 //! instruments: [`Link::process_with_events`] and [`Served::serve_with_events`].
 //!
+//! A host process runs several plug-in instances, each with its own link. A block can name
+//! instances of the same process that run it after this link's own, in order, before the host
+//! answers ([`Link::send_joint`], [`Served::serve_joint`]): consecutive plug-ins of a chain in
+//! one process then cost one round trip a block instead of one each (ADR 0006, decision 2).
+//!
 //! One block is in flight at a time. If the host misses the deadline the engine gets
 //! [`Outcome::Missed`], and until the host answers that block, [`Outcome::Busy`] at once,
 //! without sending or waiting, so neither side touches the buffers while the other one owns
@@ -33,6 +38,8 @@ use region::Region;
 pub const MAX_CHANNELS: u32 = 64;
 /// Largest block, in frames.
 pub const MAX_FRAMES: u32 = 65_536;
+/// Most instances a block names to run after the link's own ([`Link::send_joint`]).
+pub const MAX_FOLLOWERS: usize = 63;
 
 #[derive(Debug)]
 pub enum IpcError {
@@ -140,7 +147,15 @@ impl Link {
     /// plug-ins can be out at the same time. `false` when the host has not answered an earlier
     /// block yet (the block is not sent). Real-time safe.
     pub fn send_with_events(&mut self, input: &[f32], events: &[Event], room: usize) -> bool {
-        if self.region.response() != self.sequence || self.in_flight.is_some() {
+        self.send_joint(input, events, &[], room)
+    }
+
+    /// [`Link::send_with_events`] for a block that the instances `followers` (numbers the
+    /// host process gave them, the first [`MAX_FOLLOWERS`]) run after this link's own, one
+    /// after another, each with the same `events`, before the host answers: the answer is the
+    /// last one's output. Real-time safe.
+    pub fn send_joint(&mut self, input: &[f32], events: &[Event], followers: &[u32], room: usize) -> bool {
+        if !self.ready() {
             return false;
         }
         let channels = self.region.channels() as usize;
@@ -149,11 +164,18 @@ impl Link {
         self.region.write_input(input.get(..samples).unwrap_or_default());
         self.region.set_frames((samples / channels) as u32);
         self.region.write_events(events);
+        self.region.write_followers(followers);
         self.sequence = self.sequence.wrapping_add(1);
         self.region.set_request(self.sequence);
         self.to_host.ring(self.region.request_word());
         self.in_flight = Some(samples);
         true
+    }
+
+    /// Whether a block can go now: the host has answered every block sent and none is out.
+    /// Real-time safe.
+    pub fn ready(&self) -> bool {
+        self.region.response() == self.sequence && self.in_flight.is_none()
     }
 
     /// Waits until `deadline` for the host to answer the last block sent, one whose answer was
@@ -193,6 +215,8 @@ pub struct Served {
     seen: u32,
     /// The current block's events; room for [`MAX_EVENTS`], so serving does not allocate.
     events: Vec<Event>,
+    /// The current block's followers; room for [`MAX_FOLLOWERS`].
+    followers: Vec<u32>,
 }
 
 impl Served {
@@ -202,7 +226,14 @@ impl Served {
         let to_host = Doorbell::open(region.name(), "host")?;
         let to_engine = Doorbell::open(region.name(), "engine")?;
         let seen = region.response();
-        Ok(Self { region, to_host, to_engine, seen, events: Vec::with_capacity(MAX_EVENTS) })
+        Ok(Self {
+            region,
+            to_host,
+            to_engine,
+            seen,
+            events: Vec::with_capacity(MAX_EVENTS),
+            followers: Vec::with_capacity(MAX_FOLLOWERS),
+        })
     }
 
     pub fn channels(&self) -> u32 {
@@ -223,6 +254,17 @@ impl Served {
     /// [`Served::serve`] that also hands over the block's events, in the order sent, each at a
     /// frame within the block.
     pub fn serve_with_events(&mut self, timeout: Duration, process: impl FnOnce(&[f32], &[Event], &mut [f32])) -> bool {
+        self.serve_joint(timeout, |input, events, _, output| process(input, events, output))
+    }
+
+    /// [`Served::serve_with_events`] that also hands over the instances the engine asked to
+    /// run the block after this link's own ([`Link::send_joint`]), in order; empty for most
+    /// blocks. `process` runs them all and leaves the last one's result in the output.
+    pub fn serve_joint(
+        &mut self,
+        timeout: Duration,
+        process: impl FnOnce(&[f32], &[Event], &[u32], &mut [f32]),
+    ) -> bool {
         let deadline = Instant::now() + timeout;
         let seen = self.seen;
         if !self.to_host.wait(self.region.request_word(), |v| v != seen, deadline) {
@@ -235,8 +277,11 @@ impl Served {
         self.region.read_events(&mut events);
         let last = frames.saturating_sub(1);
         events.iter_mut().for_each(|e| e.frame = e.frame.min(last));
-        self.region.with_block(samples, |input, output| process(input, &events, output));
+        let mut followers = std::mem::take(&mut self.followers);
+        self.region.read_followers(&mut followers);
+        self.region.with_block(samples, |input, output| process(input, &events, &followers, output));
         self.events = events;
+        self.followers = followers;
         self.seen = request;
         self.region.set_response(request);
         self.to_engine.ring(self.region.response_word());

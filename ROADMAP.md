@@ -11,7 +11,7 @@ primary platform; Windows and macOS are supported.
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
 | M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, follow actions and the metronome work; launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
-| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation lanes in the UI, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
+| M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation lanes in the UI, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
 | M7 | **More formats:** DAWproject import and export | not started |
 | M8 | **UI:** Session and Arrangement views on top of the commands; familiar workflow, Suhina's own look; installers (AppImage, deb, Flatpak, MSI) and signed macOS and Windows builds | in progress: Session and Arrangement views, browser, sample map, settings, themes and a nightly build work; installers and signed builds to come ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)) |
 
@@ -310,12 +310,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   without setup: `SCHED_FIFO` where the user has real-time rights, otherwise through rtkit, the
   desktop's own service for it; on Windows they join MMCSS "Pro Audio". Where the system refuses,
   Suhina plays on and says once that the sound may drop out under load.
-- Still to do: plug-ins of one process in one round trip
-  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), waiting for each chain's
-  plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)),
-  checking an imported Live Set with real plug-ins
-  ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and macOS editors, VST2
-  hosting (not decided).
+- Plug-ins next to each other in a chain that run in the same host process (by default every
+  instance of one plug-in file) share one round trip a block: the host runs them one after
+  another and answers once, which at small buffers takes about a third of the time of a round
+  trip each, with the same sound
+  ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
+- Still to do: waiting for each chain's plug-in as it answers
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+  with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
+  macOS editors, VST2 hosting (not decided).
 
 ### M8 UI (in progress)
 - `suhina` opens a Live Set (as an argument, or dropped on the window) or `--demo`, plays it

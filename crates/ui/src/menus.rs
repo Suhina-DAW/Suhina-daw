@@ -209,27 +209,6 @@ pub fn scene_field_action(field: &str, scene: usize, text: &str) -> Option<Actio
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scene_fields_become_commands() {
-        let action = |field, text| scene_field_action(field, 2, text).map(|a| (a.id, a.params));
-        assert_eq!(action("name", " Drop "), Some(("scene.rename", json!({ "scene": 2, "name": "Drop" }))));
-        assert_eq!(action("tempo", "128"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": 128.0 }))));
-        assert_eq!(action("tempo", ""), Some(("scene.setTempo", json!({ "scene": 2 }))));
-        assert_eq!(
-            action("signature", "7/8"),
-            Some(("scene.setTimeSignature", json!({ "scene": 2, "numerator": 7, "denominator": 8 })))
-        );
-        assert_eq!(action("signature", " "), Some(("scene.setTimeSignature", json!({ "scene": 2 }))));
-        // Not a number: sent as text, so the command's error says what is wrong.
-        assert_eq!(action("tempo", "fast"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": "fast" }))));
-        assert_eq!(action("colour", "red"), None);
-    }
-}
-
 /// A clip slot's right-click menu: copy its clip, or paste the copied clip into it (`scene`
 /// from 1). Copy is greyed out on an empty slot, Paste while nothing has been copied.
 pub fn slot_menu(
@@ -248,5 +227,26 @@ pub fn slot_menu(
     if ui.add_enabled(can_paste, egui::Button::new("Paste").shortcut_text("Ctrl+V")).clicked() {
         actions.push(Action::new("clip.paste", json!({ "track": track.0, "scene": scene })));
         ui.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_fields_become_commands() {
+        let action = |field, text| scene_field_action(field, 2, text).map(|a| (a.id, a.params));
+        assert_eq!(action("name", " Drop "), Some(("scene.rename", json!({ "scene": 2, "name": "Drop" }))));
+        assert_eq!(action("tempo", "128"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": 128.0 }))));
+        assert_eq!(action("tempo", ""), Some(("scene.setTempo", json!({ "scene": 2 }))));
+        assert_eq!(
+            action("signature", "7/8"),
+            Some(("scene.setTimeSignature", json!({ "scene": 2, "numerator": 7, "denominator": 8 })))
+        );
+        assert_eq!(action("signature", " "), Some(("scene.setTimeSignature", json!({ "scene": 2 }))));
+        // Not a number: sent as text, so the command's error says what is wrong.
+        assert_eq!(action("tempo", "fast"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": "fast" }))));
+        assert_eq!(action("colour", "red"), None);
     }
 }

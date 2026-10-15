@@ -59,7 +59,8 @@ pub use launcher::{
 pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
-    OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
+    Followed, Joint, MAX_JOINED, OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent,
+    plugin_devices, plugin_key,
 };
 pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
