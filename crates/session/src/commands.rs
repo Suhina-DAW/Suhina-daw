@@ -799,6 +799,21 @@ static COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Edit,
         run: notes::set_velocity,
     },
+    CommandSpec {
+        id: "note.quantize",
+        label: "Quantise notes of a MIDI clip: move their starts, and with ends their ends, towards the nearest grid line",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            optional("notes", ParamType::Integers, "note indices, from note.list; every note when left out"),
+            param("grid", ParamType::Text, "the grid, as launcher.setQuantization takes it: 1/16, 1/8T, 1 bar, ..."),
+            optional("amount", ParamType::Number, "how far towards the line, 0 to 100 percent (default 100: onto it)"),
+            optional("ends", ParamType::Bool, "also move each note's end to the nearest line (default false)"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::quantize,
+    },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
         id: "edit.redo",
