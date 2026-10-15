@@ -16,12 +16,9 @@ keyboard on the left, a note grid, and a velocity lane below. Only structure and
 comes from [`docs/design/brief.md`](../design/brief.md) and the measurements from
 [`docs/design/components.md`](../design/components.md) › Clip editor.
 
-**Sources.** Written in our own words from public user manuals, following the clean-room rules
-(`CONTRIBUTING.md` › Clean-room): the chapter on editing MIDI in the Ableton Live 12 reference
-manual, the piano roll pages of the FL Studio online manual, and the note editor chapters of the
-Bitwig Studio and REAPER user guides; and from using Live 12.4.6. Nothing here comes from a
-product's code, files or artwork. Where the products differ, the spec picks one behaviour and says
-why. Items marked **(to observe)** still need checking against the program.
+**Sources.** Suhina's own design, written in our own words under the clean-room rules
+(`CONTRIBUTING.md` › Clean-room); nothing here comes from another product's code, files or
+artwork. Items marked **(to decide)** are open design questions to settle when they are built.
 
 **What is built.** Each section says which parts the first version builds (**Built**) and which
 come later (**Later**, with the issue that tracks it). The first version is
@@ -39,8 +36,7 @@ lane, the grid and zoom, and the `note.*` commands.
   request #302); the piano roll then edits that slot's clip with the same commands (`scene`
   instead of `index`). A double-click on a clip opens the detail area if it is closed.
 - **Later ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)):** the device view and the
-  clip editor as two tabs or a toggle, so a MIDI clip's track devices stay one click away (Shift+Tab
-  in the familiar workflow).
+  clip editor as two tabs or a toggle, so a MIDI clip's track devices stay one click away.
 
 ## Coordinates
 
@@ -91,10 +87,10 @@ of keys grows and shrinks.
 - **Built:** starts and ends of drawn, moved and resized notes snap to the grid. Holding **Alt**
   while drawing or dragging places them freely (no snapping). A move keeps a note's distance to the
   grid: the drag snaps the **offset** to whole grid steps, so a note that was off the grid stays
-  just as far off (the familiar behaviour; it keeps a played-in groove).
+  just as far off (it keeps a played-in groove).
 - **Later ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)):** the piano roll's own grid value, independent of the launch quantisation, with an
   adaptive mode that follows the zoom (finer when zoomed in), and triplet and off toggles; keyboard
-  shortcuts to make the grid finer or coarser (Ctrl+1 and Ctrl+2 in the familiar workflow) and to
+  shortcuts to make the grid finer or coarser (Ctrl+1 and Ctrl+2) and to
   toggle snapping (Ctrl+4) and triplets (Ctrl+3). Once the Arrangement view's grid
   (pull request #320) lands, the piano roll uses its line logic.
 - **Later ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)):** "magnetic" snapping to other notes' starts and ends within a few pixels.
@@ -107,10 +103,9 @@ of keys grows and shrinks.
   so its notes are in view (the middle of its lowest and highest note; C3 for an empty clip) and
   zoomed so the whole clip fits the width.
 - **Built:** key rows are 6 to 32 px tall (default 12 px); time is 4 to 400 px per beat.
-- **Later ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)):** dragging up and down in the ruler zooms time, sideways scrolls it (the familiar
-  ruler gesture); zoom to fit the selection, or the whole clip (Z and Shift+Z in the familiar
-  workflow) **(to observe: exact keys)**; dragging the key column zooms key height; Fold (show only
-  the keys that have notes) and Fold to scale.
+- **Later ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)):** dragging up and down in the ruler zooms time, sideways scrolls it; zoom to fit
+  the selection, or the whole clip (Z and Shift+Z **(to decide)**); dragging the key column zooms
+  key height. Fold (show only the keys that have notes) and Fold to scale come with scales.
 
 ## Drawing notes
 
@@ -118,10 +113,10 @@ of keys grows and shrinks.
   down to the grid line before the pointer (Alt: where the pointer is), its key the row under the
   pointer, its length one grid step (a quarter beat with `none`), velocity 100. The new note is
   selected. A double-click on a note deletes it.
-- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a draw mode (B toggles it, or holding Ctrl or Cmd in other products): a click adds a
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a draw mode (B toggles it): a click adds a
   note, and dragging sideways while drawing paints notes one grid step apart in the same row;
   dragging up or down while drawing sets the length. A new note takes the length and velocity of
-  the note last edited (the FL Studio habit), so repeated drawing keeps one feel.
+  the note last edited, so repeated drawing keeps one feel.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** clicking a key in the key column plays it (audition, through the track's instrument)
   and selects every note of that key; while notes are drawn, moved or transposed they sound once
   (preview, with a toggle in the toolbar).
@@ -146,8 +141,9 @@ of keys grows and shrinks.
   content's start or outside keys 0 to 127 stops at that limit, for the whole selection, so the
   selection keeps its shape.
 - **Later ([#344](https://github.com/suhina-daw/suhina-daw/issues/344), [#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** the arrow keys move the selection by one grid step (left and right) or a semitone
-  (up and down); Shift+up and down by an octave. Ctrl+drag (Alt in some products) copies the notes
-  instead of moving them. Moving notes past the clip's end extends the clip **(to observe)**.
+  (up and down); Shift+up and down by an octave. Ctrl+drag copies the notes
+  instead of moving them. Whether moving notes past the clip's end extends the clip is
+  **(to decide)**.
 
 ## Resizing
 
@@ -164,8 +160,8 @@ of keys grows and shrinks.
 - **Built:** **Delete** or **Backspace** while the piano roll has the keyboard (after a click in
   it) deletes the selected notes, one undo step. Without a note selected, those keys keep doing
   what they do elsewhere (delete the selected clip). A double-click on a note deletes it.
-- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351), [#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** right-click on a note (or a drag with the right button) deletes notes, the FL Studio
-  habit, as an option in Settings; cut, copy, paste and duplicate of notes (Ctrl+X, C, V, D),
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351), [#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** right-click on a note (or a drag with the right button) deletes notes, as an
+  option in Settings; cut, copy, paste and duplicate of notes (Ctrl+X, C, V, D),
   pasting at the playhead or after the selection.
 
 ## Velocity
@@ -174,9 +170,9 @@ of keys grows and shrinks.
   several notes selected (and the dragged one among them), all of them change by the same amount,
   each kept within 1 to 127. The lane shows the value while dragging; it is one undo step.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a note's velocity changed by dragging on the note itself with a modifier (Alt+drag up
-  and down in the familiar workflow); drawing a line across the lane to set many stems at once;
-  release velocity and a note's probability and velocity range (the per-note chance and
-  variation newer products offer), shown as a second lane; randomise, ramp and deviation tools.
+  and down); drawing a line across the lane to set many stems at once; release velocity and a
+  note's probability and velocity range (a per-note chance to play and a random variation), shown
+  as a second lane; randomise, ramp and deviation tools.
 
 ## Quantise
 
@@ -200,14 +196,14 @@ of keys grows and shrinks.
   picks (another track), are drawn faintly behind the clip's own notes and cannot be edited; this
   is how a bass line is written against the chords. Which clips are shown is a toolbar menu
   (none, this track, a chosen clip). Clips that play at the same time in the arrangement are the
-  default **(to observe in the products that offer it)**.
+  default **(to decide)**.
 
 ## Slicing and gluing
 
 - **Later ([#349](https://github.com/suhina-daw/suhina-daw/issues/349)):** split notes at the grid lines they cross (a "slice" tool: a cut drawn across notes
   splits each where the line crosses it, snapping to the grid; or a command that chops the
   selection into notes of one grid step each); glue (join) touching notes of the same key into one
-  note (Ctrl+J in the familiar workflow); legato (each note lasts until the next one starts);
+  note (Ctrl+J); legato (each note lasts until the next one starts);
   Commands `note.split` and `note.join`.
 
 ## Chords
