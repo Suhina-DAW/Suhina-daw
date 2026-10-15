@@ -10,6 +10,7 @@ mod devices;
 mod files;
 mod follow;
 mod library;
+mod notes;
 mod plugins;
 mod preview;
 mod projects;
@@ -30,6 +31,7 @@ pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
 pub use library::{Category, Found, file_info, library_commands, search_items};
+pub use notes::{MAX_NOTES_PER_CLIP, MAX_NOTES_PER_COMMAND, midi_velocity};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{
@@ -198,6 +200,8 @@ pub struct Session {
     player: Option<Player>,
     /// A copied arrangement clip and the content it plays, for `clip.paste`.
     clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
+    /// Notes copied from a MIDI clip, for `note.paste`.
+    note_clipboard: Option<notes::NoteClipboard>,
     /// Set by an edit command whose only change is one device parameter.
     pub(crate) param_edit: Option<ParamEdit>,
     /// The project's plug-ins, running while it plays (ADR 0006).
@@ -231,6 +235,7 @@ impl Session {
             redo: Vec::new(),
             player: None,
             clipboard: None,
+            note_clipboard: None,
             param_edit: None,
             plugins: rack::Rack::default(),
             audio: suhina_engine::AudioPool::new(),
@@ -247,6 +252,12 @@ impl Session {
     pub fn copied_clip_is_audio(&self) -> Option<bool> {
         let (_, content) = self.clipboard.as_ref()?;
         Some(content.lanes.iter().any(|l| matches!(l.data, suhina_model::LaneData::Audio(_))))
+    }
+
+    /// How many notes `note.paste` would add; `None` when no notes have been copied. The piano
+    /// roll uses it to select the pasted notes.
+    pub fn copied_notes(&self) -> Option<usize> {
+        self.note_clipboard.as_ref().map(notes::NoteClipboard::len)
     }
 
     /// The project's decoded audio, which players are started with (ADR 0011).

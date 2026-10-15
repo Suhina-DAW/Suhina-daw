@@ -527,6 +527,20 @@ impl Controller {
         self.preview.send(crate::preview::PreviewCommand::Notes { notes: Box::new(notes), gain })
     }
 
+    /// Starts the notes ([`crate::preview_notes`] makes them) and holds them until
+    /// [`Controller::preview_note_off`]: the piano roll's key column (`preview.noteOn`).
+    /// Replaces any preview. Fails if the queue is full.
+    pub fn preview_note_on(&mut self, notes: crate::PreviewNotes, gain: f32) -> Result<(), String> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 0.0 };
+        self.preview.send(crate::preview::PreviewCommand::Hold { notes: Box::new(notes), gain })
+    }
+
+    /// Releases the held note of `key`, or every held note when `key` is `None`. Fails if the
+    /// queue is full.
+    pub fn preview_note_off(&mut self, key: Option<u8>) -> Result<(), String> {
+        self.preview.send(crate::preview::PreviewCommand::Release { key })
+    }
+
     /// A fallback instrument for [`crate::preview_notes`]: the FM synth with its first voice,
     /// prepared at the renderer's rate.
     pub fn preview_instrument(&self) -> Option<Box<dyn suhina_device_api::Device>> {

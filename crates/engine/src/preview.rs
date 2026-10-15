@@ -22,6 +22,9 @@ const QUEUE: usize = 16;
 /// Events the fallback instrument keeps for one block.
 const MAX_EVENTS: usize = 256;
 const NOT_HELD: u64 = u64::MAX;
+/// A held key that sounds until it is let go, not until a frame: `preview.noteOn` and
+/// `preview.noteOff`.
+const HELD_UNTIL_OFF: u64 = u64::MAX - 1;
 
 /// One note of a MIDI preview, in frames from the preview's start.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,8 +50,26 @@ pub struct PreviewNotes {
 
 /// What the controller asks the preview voice to do.
 pub(crate) enum PreviewCommand {
-    Sample { data: Arc<AudioData>, from: f64, gain: f32 },
-    Notes { notes: Box<PreviewNotes>, gain: f32 },
+    Sample {
+        data: Arc<AudioData>,
+        from: f64,
+        gain: f32,
+    },
+    Notes {
+        notes: Box<PreviewNotes>,
+        gain: f32,
+    },
+    /// Plays a note now and holds it until a [`PreviewCommand::Release`] names it: the piano
+    /// roll's key column (`preview.noteOn`).
+    Hold {
+        notes: Box<PreviewNotes>,
+        gain: f32,
+    },
+    /// Releases what [`PreviewCommand::Hold`] holds: one key, or every held key when `key` is
+    /// `None`.
+    Release {
+        key: Option<u8>,
+    },
     Stop,
 }
 
@@ -117,11 +138,18 @@ struct NotesPlay {
     /// Frames since the preview started.
     frame: u64,
     next: usize,
-    /// Per key, the preview frame its note ends at, or `NOT_HELD`.
+    /// Per key, the preview frame its note ends at, or `NOT_HELD`; `HELD_UNTIL_OFF` while a note
+    /// the key column plays waits for `preview.noteOff`.
     held: [u64; 128],
     gain: f32,
     /// The index of the track's chain in the playing graph, found again each block.
     chain: Option<usize>,
+    /// Every note is on and stays on: only `preview.noteOff` (or the end of the preview) takes
+    /// them off, so the frame loop does not start them again.
+    held_only: bool,
+    /// A `preview.noteOff` let the last held key go: the preview is over, and what it holds goes
+    /// back once the audio thread gets to it.
+    released: bool,
 }
 
 /// The renderer's end.
@@ -183,19 +211,81 @@ impl Preview {
                     None => return,
                 },
             };
-            self.stop(chains, 0);
             match command {
                 PreviewCommand::Sample { data, from, gain } => {
+                    self.stop(chains, 0);
                     let rate = f64::from(data.sample_rate.max(1));
                     let position = (from.max(0.0) * rate).min(data.frames() as f64);
                     let step = rate / f64::from(self.sample_rate.max(1));
                     self.sample = Some(SamplePlay { data, position, step, played: 0, gain });
                 }
                 PreviewCommand::Notes { notes, gain } => {
-                    self.notes = Some(NotesPlay { notes, frame: 0, next: 0, held: [NOT_HELD; 128], gain, chain: None });
+                    self.stop(chains, 0);
+                    self.notes = Some(NotesPlay {
+                        notes,
+                        frame: 0,
+                        next: 0,
+                        held: [NOT_HELD; 128],
+                        gain,
+                        chain: None,
+                        held_only: false,
+                        released: false,
+                    });
                 }
-                PreviewCommand::Stop => {}
+                PreviewCommand::Hold { notes, gain } => {
+                    self.stop(chains, 0);
+                    let mut held = [NOT_HELD; 128];
+                    for note in &notes.notes {
+                        if let Some(slot) = held.get_mut(usize::from(note.key)) {
+                            *slot = HELD_UNTIL_OFF;
+                        }
+                    }
+                    self.notes = Some(NotesPlay {
+                        notes,
+                        frame: 0,
+                        next: 0,
+                        held,
+                        gain,
+                        chain: None,
+                        held_only: true,
+                        released: false,
+                    });
+                }
+                PreviewCommand::Release { key } => self.release(chains, key),
+                PreviewCommand::Stop => self.stop(chains, 0),
             }
+        }
+    }
+
+    /// Releases the held preview keys, at `frame` of the block: one key, or every held key. A
+    /// note hold whose last key is let go ends the preview. A preview that plays to an end of its
+    /// own (a MIDI file) has no held keys and is left alone.
+    fn release(&mut self, chains: &mut [Chain], key: Option<u8>) {
+        let Some(play) = self.notes.as_mut() else { return };
+        let mut chain = play.chain.and_then(|i| chains.get_mut(i));
+        let mut any = false;
+        for held_key in 0..=127u8 {
+            if key.is_some_and(|k| k != held_key) {
+                continue;
+            }
+            let Some(held) = play.held.get_mut(usize::from(held_key)) else { continue };
+            if *held != HELD_UNTIL_OFF {
+                continue;
+            }
+            *held = NOT_HELD;
+            any = true;
+            match chain.as_mut() {
+                Some(chain) => chain.release_key(0, held_key),
+                None => {
+                    if self.events.len() < MAX_EVENTS {
+                        self.events.push((0, NoteEvent::Off { key: held_key, velocity: 0.5 }));
+                    }
+                }
+            }
+        }
+        if any && play.held.iter().all(|h| *h == NOT_HELD) {
+            play.released = true;
+            self.monitor.playing.store(false, Ordering::Relaxed);
         }
     }
 
@@ -235,57 +325,66 @@ impl Preview {
     }
 
     /// Starts and releases the MIDI preview's notes due at `frame` of the block (renderer frame
-    /// `position`).
+    /// `position`). A preview whose notes are held until they are let go (`held_only`, the key
+    /// column) starts them and never releases them by itself: only `preview.noteOff` takes them
+    /// off. Through a track's instrument they are already sounding by then, so they are started
+    /// once, and only through the fallback when it is the first block.
     pub(crate) fn frame(&mut self, chains: &mut [Chain], frame: usize, position: u64) {
         let Some(play) = self.notes.as_mut() else { return };
         let now = play.frame;
         let chain = play.chain.and_then(|i| chains.get_mut(i));
-        match chain {
-            Some(chain) => {
-                while let Some(note) = play.notes.notes.get(play.next).filter(|n| n.start <= now) {
-                    let end = position + note.length.max(1);
-                    chain.note_on(frame, position, note.key, note.velocity, end);
-                    if let Some(held) = play.held.get_mut(usize::from(note.key)) {
-                        *held = now + note.length.max(1);
-                    }
-                    play.next += 1;
+        if let Some(chain) = chain {
+            while let Some(note) = play.notes.notes.get(play.next).filter(|n| n.start <= now) {
+                let end = position + note.length.max(1);
+                chain.note_on(frame, position, note.key, note.velocity, end);
+                if play.held_only {
+                    // The key column's note is held until `preview.noteOff`: the chain must not
+                    // release it at the frame it was started with.
+                    chain.hold_key(note.key, HELD_UNTIL_OFF);
                 }
-                // The chain releases them itself; this only tracks which are still held.
-                for held in play.held.iter_mut() {
-                    if *held != NOT_HELD && *held <= now {
-                        *held = NOT_HELD;
+                if let Some(held) = play.held.get_mut(usize::from(note.key)) {
+                    *held = if play.held_only { HELD_UNTIL_OFF } else { now + note.length.max(1) };
+                }
+                play.next += 1;
+            }
+            // The chain releases them itself; this only tracks which are still held.
+            for held in play.held.iter_mut() {
+                if *held != NOT_HELD && *held != HELD_UNTIL_OFF && *held <= now {
+                    *held = NOT_HELD;
+                }
+            }
+        } else if !play.held_only {
+            for key in 0..=127u8 {
+                if let Some(held) = play.held.get_mut(usize::from(key))
+                    && *held != NOT_HELD
+                    && *held <= now
+                {
+                    *held = NOT_HELD;
+                    if self.events.len() < MAX_EVENTS {
+                        self.events.push((frame, NoteEvent::Off { key, velocity: 0.5 }));
                     }
                 }
             }
-            None => {
-                for key in 0..=127u8 {
-                    if let Some(held) = play.held.get_mut(usize::from(key))
-                        && *held != NOT_HELD
-                        && *held <= now
-                    {
-                        *held = NOT_HELD;
-                        if self.events.len() < MAX_EVENTS {
-                            self.events.push((frame, NoteEvent::Off { key, velocity: 0.5 }));
-                        }
-                    }
+        }
+        if play.chain.is_none() {
+            while let Some(note) = play.notes.notes.get(play.next).filter(|n| n.start <= now) {
+                if self.events.len() >= MAX_EVENTS {
+                    break;
                 }
-                while let Some(note) = play.notes.notes.get(play.next).filter(|n| n.start <= now) {
-                    if self.events.len() >= MAX_EVENTS {
-                        break;
+                let key = note.key;
+                if let Some(held) = play.held.get_mut(usize::from(key)) {
+                    if *held != NOT_HELD && *held != HELD_UNTIL_OFF && self.events.len() < MAX_EVENTS {
+                        self.events.push((frame, NoteEvent::Off { key, velocity: 0.5 }));
                     }
-                    let key = note.key;
-                    if let Some(held) = play.held.get_mut(usize::from(key)) {
-                        if *held != NOT_HELD && self.events.len() < MAX_EVENTS {
-                            self.events.push((frame, NoteEvent::Off { key, velocity: 0.5 }));
-                        }
+                    if *held != HELD_UNTIL_OFF {
                         *held = now + note.length.max(1);
                     }
-                    let velocity = note.velocity.clamp(1.0 / 127.0, 1.0);
-                    if self.events.len() < MAX_EVENTS {
-                        self.events.push((frame, NoteEvent::On { key, velocity }));
-                    }
-                    play.next += 1;
                 }
+                let velocity = note.velocity.clamp(1.0 / 127.0, 1.0);
+                if self.events.len() < MAX_EVENTS {
+                    self.events.push((frame, NoteEvent::On { key, velocity }));
+                }
+                play.next += 1;
             }
         }
         play.frame += 1;
@@ -324,7 +423,9 @@ impl Preview {
             }
             let seconds = play.frame as f64 / f64::from(self.sample_rate.max(1));
             self.monitor.seconds.store(seconds.to_bits(), Ordering::Relaxed);
-            ended = play.frame >= play.notes.length;
+            // A note held until it is let go has no end of its own: it plays until
+            // `preview.noteOff`, and that is what ends the preview (and frees what it holds).
+            ended = play.released || (!play.held_only && play.frame >= play.notes.length);
         }
         if let Some(play) = self.sample.as_mut() {
             let frames_in_file = play.data.frames() as f64;
