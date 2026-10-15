@@ -13,6 +13,7 @@ use suhina_model::{LaneData, Meter, Project, TempoMap};
 
 use crate::audio::{AudioEvent, AudioPool, Timing};
 use crate::chain::Chain;
+use crate::follow::{FollowPlan, Outcome, Random};
 use crate::stretch::StretchVoice;
 use crate::{AUDIO_HEADROOM, NoteStart, Renderer, bus_chain, note_velocity, route, start_note};
 
@@ -94,6 +95,9 @@ pub enum LaunchCommand {
         on: bool,
         gain: Option<f32>,
     },
+    /// Seeds the random numbers that follow actions are picked with; the same seed picks the
+    /// same actions in the same playback.
+    SeedRandom(u64),
 }
 
 /// What a column is waiting to do, as reported by [`LauncherMonitor::column`].
@@ -270,6 +274,7 @@ struct ClipPlan {
     /// Sorted by time.
     notes: Vec<PlanNote>,
     audio: Vec<PlanAudio>,
+    follow: Option<FollowPlan>,
 }
 
 impl ClipPlan {
@@ -313,6 +318,8 @@ struct Playing {
     /// Whether this playback uses the clip's stretch voices; it stops using them for good when
     /// the tempo changes.
     stretched: bool,
+    /// The clip's follow action has run (or was skipped) for this launch.
+    followed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -349,6 +356,7 @@ pub(crate) struct Launcher {
     stop_fade_frames: f64,
     pub(crate) monitor: Arc<LauncherMonitor>,
     control: Option<rtrb::Consumer<LaunchCommand>>,
+    random: Random,
 }
 
 impl Launcher {
@@ -405,6 +413,7 @@ impl Launcher {
             frames_per_beat_at_build: frames_per_beat,
             stop_fade_frames: (STOP_FADE_SECONDS * f64::from(sample_rate)).max(1.0),
             control: None,
+            random: Random::default(),
         }
     }
 
@@ -417,6 +426,7 @@ impl Launcher {
         std::mem::swap(&mut self.monitor, &mut old.monitor);
         std::mem::swap(&mut self.control, &mut old.control);
         self.quantization = old.quantization;
+        self.random = old.random;
         self.beat = old.beat;
         self.pending_tempo = old.pending_tempo;
         // An edited tempo map replaces the running tempo and puts the clock back on the map;
@@ -519,6 +529,36 @@ impl Launcher {
         let at_beat = self.launch_beat();
         if let Some(c) = self.columns.get_mut(column) {
             c.pending = Some(Pending { at_beat, action });
+        }
+    }
+
+    /// Queues, for this frame, the follow action of each playing clip whose follow time has
+    /// come; [`Renderer::apply_due`] then applies it like a launch or a stop. A column with a
+    /// launch or stop queued by hand skips its clip's follow action.
+    fn follow_up(&mut self) {
+        let Self { columns, random, beat, .. } = self;
+        for column in columns.iter_mut() {
+            let Some(playing) = column.playing.as_mut().filter(|p| !p.followed) else { continue };
+            let Some(follow) = column.slots.get(playing.slot).and_then(|s| s.clip.as_ref()).and_then(|c| c.follow)
+            else {
+                continue;
+            };
+            if !follow.due(playing.elapsed_beats) {
+                continue;
+            }
+            playing.followed = true;
+            if column.pending.is_some() {
+                continue;
+            }
+            let kind = follow.pick(random);
+            let slots = &column.slots;
+            let playable = |slot: usize| slots.get(slot).is_some_and(|s| s.clip.is_some());
+            let action = match crate::follow::resolve(kind, playing.slot, slots.len(), playable, random) {
+                Outcome::Keep => continue,
+                Outcome::Stop => Queued::Stop,
+                Outcome::Launch(slot) => Queued::Launch(slot),
+            };
+            column.pending = Some(Pending { at_beat: *beat, action });
         }
     }
 
@@ -679,6 +719,7 @@ fn plan_clip(
         loop_range,
         notes,
         audio: audio_plans,
+        follow: FollowPlan::new(clip),
     })
 }
 
@@ -768,6 +809,7 @@ impl Renderer {
                 }
             }
             LaunchCommand::SetQuantization(q) => self.graph.launcher.quantization = q,
+            LaunchCommand::SeedRandom(seed) => self.graph.launcher.random.seed(seed),
             LaunchCommand::BackToArrangement => {
                 // Every track that plays launched clips stops them (fading out, as a stop does)
                 // and plays its arrangement again.
@@ -931,6 +973,7 @@ impl Renderer {
         let mut out = (0.0f32, 0.0f32);
         let frame = self.block_frame;
         if self.running {
+            self.graph.launcher.follow_up();
             self.apply_due();
         }
         // The beats this frame moves on. On a changing tempo map the next beat is read from the
@@ -1003,6 +1046,7 @@ impl Renderer {
                 && let Some(plan) = column.slots.get(p.slot).and_then(|s| s.clip.as_ref())
                 && plan.loop_range.is_none()
                 && p.elapsed_beats >= plan.length
+                && (p.followed || plan.follow.is_none())
             {
                 column.playing = None;
                 self.graph.launcher.publish();
@@ -1058,6 +1102,7 @@ impl Renderer {
                     next_note: plan.first_note_from(plan.offset),
                     fade_left: 0.0,
                     stretched: self.graph.launcher.tempo_bpm == self.graph.launcher.project_tempo_bpm,
+                    followed: false,
                 });
                 column.overrides_since = Some(self.position);
             }
@@ -1166,6 +1211,7 @@ mod tests {
             fade_out: 0.0,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
+            follow_action: Default::default(),
             extensions: Extensions::default(),
         }
     }
