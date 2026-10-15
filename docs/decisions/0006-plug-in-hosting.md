@@ -200,6 +200,7 @@ workspace forbids.
     information is read from in it, as DPF-built modules (Cardinal, plugdata) do on macOS:
     answering a class query before the entry has run crashes them (a null dereference in the
     module), which a scan would then report as a crash while loading.
+
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
    the SDK writes them (`moduleinfo.json`, the model): on Windows the first three fields of the
