@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/model/src/lib.rs
 ---
@@ -74,7 +74,12 @@ Its key ideas:
 
 Objects refer to each other by typed ids (`TrackId`, `ChannelId`, `ContentId`), not by pointers.
 `Project::validate` checks that every id resolves and that every arrangement clip's fades fit it,
-so a malformed import becomes an error instead of a crash.
+so a malformed import becomes an error instead of a crash. A track's `parent` is the group it is
+in, and groups nest: validation also refuses a track that is inside itself through its groups,
+and one inside more than `MAX_GROUP_DEPTH` (16) groups, so walking up a track's groups always
+ends (added 2026-10-15, [#209](https://github.com/suhina-daw/suhina-daw/issues/209)). A group's
+routing is its channel's `output`; the commands that move tracks between groups keep the two
+in step.
 
 How each DAW maps onto the core:
 

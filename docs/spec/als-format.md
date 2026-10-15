@@ -3,7 +3,7 @@ description: The Live Set (.als) format as observed: container, tracks, clips, n
 read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/als/src/lib.rs
   - crates/als/src/devices.rs
@@ -68,7 +68,7 @@ Per track:
 |---|---|---|
 | Name | `Name/EffectiveName@Value` | Default names look like `1-MIDI`, `3-Audio`, `A-Reverb`. |
 | Colour | `Color@Value` | Index into Live's colour palette. |
-| Group | `TrackGroupId@Value` | `-1` when not in a group; otherwise the group track's `Id`. Grouping two tracks (file `60`) inserted a `GroupTrack` before them and renumbered the default names (`3-Audio` became `4-Audio`). |
+| Group | `TrackGroupId@Value` | `-1` when not in a group; otherwise the group track's `Id`. Grouping two tracks (file `60`) inserted a `GroupTrack` before them and renumbered the default names (`3-Audio` became `4-Audio`). A `GroupTrack` has a `TrackGroupId` too, so a group inside a group names the outer group's `Id`; the reader takes any depth (the synthetic tests write such sets by hand from this; no corpus file holds one yet). A track whose groups contain each other, or that sits deeper than Suhina nests groups (16 levels), is moved to the top level and plays to the main output, with a warning. |
 | Mixer | `DeviceChain/Mixer` | see below |
 | Output | `DeviceChain/AudioOutputRouting/Target@Value` | `AudioOut/Main` routes to the main output; `AudioOut/GroupTrack` to the track's group. |
 | Session clips | `DeviceChain/MainSequencer/ClipSlotList/ClipSlot` | One slot per scene, in scene order. Return tracks have no slots. |

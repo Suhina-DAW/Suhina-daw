@@ -76,8 +76,23 @@ pub struct Column {
     /// groups it is inside.
     pub position: usize,
     pub depth: usize,
+    /// The group the track is directly in.
+    pub parent: Option<TrackId>,
     /// -1 is full left, 1 full right.
     pub pan: f64,
+}
+
+impl Column {
+    /// Where the track sits in the track list.
+    pub fn place(&self) -> crate::nesting::Place {
+        crate::nesting::Place {
+            track: self.track,
+            parent: self.parent,
+            depth: self.depth,
+            position: self.position,
+            group: self.kind == ColumnKind::Group,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -168,6 +183,7 @@ impl Grid {
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
+                parent: track.parent,
                 pan: channel.map_or(0.0, |c| c.pan),
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }

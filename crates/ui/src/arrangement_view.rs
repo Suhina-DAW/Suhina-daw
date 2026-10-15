@@ -2,7 +2,7 @@
 //! (`docs/design/components.md` › Arrangement view). Track headers show more controls as a lane
 //! grows. Like the Session view it draws data and turns gestures into [`Action`]s.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
@@ -12,6 +12,7 @@ use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
 use crate::motion;
+use crate::nesting::{self, Place};
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
 use crate::waveform::{self, Waveforms};
@@ -164,6 +165,8 @@ pub struct ArrangementViewState {
     /// A track header being dragged to a new place, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
+    /// Group tracks folded shut: the tracks inside them are hidden. The session view shares it.
+    pub folded: BTreeSet<TrackId>,
     /// The middle button is held after being pressed over the timeline: the view follows it.
     panning: bool,
     /// A drag from the browser over the window: the view says which target is under the
@@ -190,6 +193,7 @@ impl Default for ArrangementViewState {
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
+            folded: BTreeSet::new(),
             panning: false,
             drop: None,
         }
@@ -399,6 +403,10 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
     // Return tracks and the main track are fixed rows along the bottom.
     let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
+    // The tracks in their groups, and those a folded group hides.
+    let places: Vec<Place> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).map(Lane::place).collect();
+    let hidden = nesting::hidden(&places, &state.folded);
+    let shown = |l: &&Lane| l.kind != ColumnKind::Return && !hidden.contains(&l.track);
     let fixed_rows = returns.len() + usize::from(timeline.main_volume_db.is_some());
     let fixed_height = fixed_rows as f32 * (ROW + 1.0);
     let fixed_top = (area.bottom() - fixed_height).max(ruler.bottom() + 1.0);
@@ -446,8 +454,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     let content_width = ((timeline.end + TAIL_BARS * bar_beats) as f32) * state.beat_width;
-    let content_height: f32 =
-        timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).map(|l| state.height(l) + 1.0).sum();
+    let content_height: f32 = timeline.lanes.iter().filter(shown).map(|l| state.height(l) + 1.0).sum();
     state.scroll.x = state.scroll.x.clamp(0.0, (content_width - time.width()).max(0.0));
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - lanes_area.height()).max(0.0));
 
@@ -540,7 +547,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     // Where every lane is this frame, so a dragged clip can find the lane under the pointer.
     let mut rows = Vec::new();
     let mut y = lanes_area.top() - state.scroll.y;
-    for lane in timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return) {
+    for lane in timeline.lanes.iter().filter(shown) {
         let height = state.height(lane);
         let lane_time = Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(y, y + height));
         rows.push(Row { track: lane.track, time: lane_time, clip: lane_time.intersect(lanes_area) });
@@ -589,12 +596,14 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             }
         }
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
-        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &groups, state, actions);
+        let nest = Nest { places: &places, groups: &groups };
+        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &nest, state, actions);
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::border_strong()));
     }
 
-    // A track header let go over a lane moves the track (and a group's tracks) there: above the
-    // lane under the pointer, or below it from its lower half.
+    // A track header let go over a lane moves the track (and a group's tracks) there, into the
+    // lane's group: above the lane under the pointer, or below it from its lower half; below an
+    // open group's header is into that group.
     let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
     let target_of = |y: f32| {
         let lane = tracks.iter().find(|l| row_of(l.track).is_some_and(|r| r.time.y_range().contains(y)))?;
@@ -613,19 +622,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     }
     if let Some((dragged, y)) = state.track_drop.take()
         && let Some((lane, below)) = target_of(y)
-        && let Some(source) = tracks.iter().find(|l| l.track == dragged)
-        && lane.track != dragged
+        && let Some(action) = nesting::drop_action(&places, dragged, lane.track, below, &state.folded)
     {
-        // The dragged track's block: it and the lanes nested under it.
-        let index = tracks.iter().position(|l| l.track == dragged).unwrap_or_default();
-        let block = 1 + tracks.iter().skip(index + 1).take_while(|l| l.depth > source.depth).count();
-        let mut to = lane.position + usize::from(below);
-        if lane.position > source.position {
-            to = to.saturating_sub(block);
-        }
-        if to != source.position {
-            actions.push(Action::new("track.move", json!({ "track": dragged.0, "to": to })));
-        }
+        actions.push(action);
     }
 
     // Fixed rows: return tracks, then the main track, each a name and a volume.
@@ -1291,6 +1290,14 @@ fn fixed_row(
     value_control(ui, painter, field, clip, lane, Control::Volume, true, id, state, actions);
 }
 
+/// The track list's groups, for a header's fold arrow and menu.
+struct Nest<'a> {
+    /// Every track but the returns, in track order.
+    places: &'a [Place],
+    /// The group tracks, with their names.
+    groups: &'a [(TrackId, String)],
+}
+
 #[allow(clippy::too_many_arguments)]
 fn track_header(
     ui: &mut Ui,
@@ -1299,7 +1306,7 @@ fn track_header(
     lanes_area: Rect,
     lane: &Lane,
     track_number: usize,
-    groups: &[(TrackId, String)],
+    nest: &Nest<'_>,
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) {
@@ -1332,11 +1339,17 @@ fn track_header(
     }
     let selection = state.selected_tracks.clone();
     body.context_menu(|ui| {
+        let into: Vec<(TrackId, String)> = nesting::move_targets(nest.places, lane.track)
+            .into_iter()
+            .filter_map(|g| nest.groups.iter().find(|(t, _)| *t == g).cloned())
+            .collect();
         let menu = TrackMenu {
             track: lane.track,
             name: &lane.name,
             is_group: lane.kind == ColumnKind::Group,
             selection: &selection,
+            into: &into,
+            out: nesting::out_of_group(nest.places, lane.track),
         };
         menus::track_menu(ui, &menu, actions);
     });
@@ -1352,7 +1365,16 @@ fn track_header(
     let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
     let solo = Rect::from_min_size(Pos2::new(toggle.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
     let square = Rect::from_min_size(Pos2::new(solo.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
-    painter.rect_filled(square, 0.0, if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) });
+    let color = if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) };
+    if lane.kind == ColumnKind::Group {
+        // A group's colour mark is its fold arrow.
+        let arrow = Rect::from_center_size(square.center(), Vec2::new(PAD + 6.0, HEADER_ROW)).intersect(clip);
+        if arrow.is_positive() {
+            nesting::fold_arrow(ui, painter, arrow, id.with("fold"), lane.track, &lane.name, color, &mut state.folded);
+        }
+    } else {
+        painter.rect_filled(square, 0.0, color);
+    }
     let name = Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), row.max);
     let name_color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), name_color);
@@ -1392,7 +1414,7 @@ fn track_header(
         let top = row.bottom() + PAD + FIELD + PAD + 4.0;
         let line = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), top + DROPDOWN));
         if line.intersects(clip) {
-            routing(ui, painter, line, lane, groups, actions);
+            routing(ui, painter, line, lane, nest.groups, actions);
         }
     }
 

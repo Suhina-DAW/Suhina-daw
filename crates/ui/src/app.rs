@@ -974,7 +974,10 @@ impl App {
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
                     (Some(grid), View::Session) => {
-                        session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
+                        // Both views fold the same groups.
+                        std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
+                        session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
+                        std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
