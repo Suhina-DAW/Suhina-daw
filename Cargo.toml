@@ -13,6 +13,7 @@ rust-version = "1.95"
 suhina-model = { path = "crates/model" }
 suhina-engine = { path = "crates/engine" }
 suhina-als = { path = "crates/als" }
+suhina-flp = { path = "crates/flp" }
 suhina-project-file = { path = "crates/project-file" }
 suhina-session = { path = "crates/session" }
 suhina-automation = { path = "crates/automation" }

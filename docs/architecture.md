@@ -50,8 +50,8 @@ L2  session ------- library, soundmap ------- media
       the project's     the sample map            metadata, detects tempo
       audio, plug-ins
         |        \                                  |
-L1  als, project-file  engine -----------------------+      plugins
-      Live Set,         rendering, launcher,                   plug-in host processes
+L1  als, flp, project-file  engine ------------------+      plugins
+      Live Set, .flp,   rendering, launcher,                   plug-in host processes
       .suhina files     no file I/O                             (suhina-plugin-host)
         \        /                                              |
 L0        model        stretch      dsp, device-api, device-registry      ipc
@@ -68,6 +68,7 @@ The engine runs them in chains on tracks, made through `device-registry`.
 | `model` | The DAW-neutral project: tracks, mixer channels, a pool of clip contents, clips that place them, the launcher grid ([ADR 0001](decisions/0001-daw-neutral-model.md)). Validation. No behaviour beyond that. | nothing |
 | `stretch` | Time-stretching and pitch-shifting DSP for interleaved audio: a pure-Rust port of Signalsmith Stretch (MIT), behind every stretch mode except `Repitch` ([ADR 0003](decisions/0003-time-stretching.md)). | nothing (rustfft) |
 | `als` | Reading Live Sets into `model`, with warnings for what it skips ([spec](spec/als-format.md)). One crate per format later. | model |
+| `flp` | Reading an FL Studio project's container and event stream: the `FLhd` header, the `FLdt` chunk, events with typed values and strings in the encoding the version event decides, every error with its offset ([spec](spec/flp-format.md)). No model mapping yet ([epic #271](https://github.com/suhina-daw/suhina-daw/issues/271)). | nothing |
 | `project-file` | Suhina's own project file (`.suhina`; `.locr` files saved before October 2026 are read as the same format): the model as versioned JSON, written and read with nothing lost, every value checked; which paths are project files (`is_project_file`); audio paths moved when a project is saved elsewhere ([ADR 0010](decisions/0010-project-files.md), [spec](spec/suhina-format.md)). | model |
 | `engine` | Turning a project into audio: note voices, audio clips, real-time time-stretching ([ADR 0003](decisions/0003-time-stretching.md)), the clip launcher ([spec](spec/clip-launching.md)), device chains on tracks, with an instrument playing its track's notes ([ADR 0004](decisions/0004-built-in-devices.md)), plug-in slots in those chains that run a hosted plug-in's audio half (`PluginProcessor`) once per block with its notes, until the block's deadline ([ADR 0006](decisions/0006-plug-in-hosting.md)), latency compensation across tracks, group and master gain, and the browser's preview voice after the main mix ([ADR 0011](decisions/0011-preview-and-added-audio.md)). Never touches files and never loads a plug-in. | model, stretch, device-api, device-registry |
 | `media` | Finding a project's audio files and decoding them (symphonia) on all cores into an `AudioPool`; what a file in the browser is (`info`: kind by extension, length, tempo and key from metadata and the name), standard MIDI files (`midi`: notes per MIDI track, every count capped) tempo detection for loops (`tempo`) ([browser spec](spec/browser.md)), and Stems files (`stems`: the master and each stem as audio, with their names, colours and mastering settings; [spec](spec/stems-format.md)). | engine, project-file, devices/compressor, devices/limiter |
