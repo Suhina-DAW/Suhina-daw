@@ -139,6 +139,25 @@ instead was rejected because it would leave nothing for a linked copy to share a
 contents of a set full of repeats that are never edited. `clip.paste` already gives the pasted
 clip its own content. Audio content edits (`clip.setGain`) still act on the shared content.
 
+## Amendment: muted notes (2026-10-15)
+
+A `Note` also has a `muted` flag (`false` when nothing says otherwise, so a project without muted
+notes is unchanged). A muted note stays in the clip, keeps its time, length, key and velocity, and
+is shown by the editor as a note that does not play; the engine emits no voice for it at all, the
+same as if it were not there
+([clip editor spec](../spec/ui-clip-editor.md) › Muting, [#460](https://github.com/suhina-daw/suhina-daw/issues/460)).
+
+It is a flag on the note rather than a delete, because the note is still the user's material: mute
+is how a part is taken out and put back while the arrangement around it stays, and it survives
+saving. The other two ways a note can be taken out of a clip are not this: a length of zero is a
+malformed note, and a velocity of zero means a note-off in MIDI, so neither can carry the meaning.
+
+The flag rides on every command that copies notes (paste, duplicate, cut) and does not change what
+they mean; a note written by a command that does not name mute is unmuted. A source format that
+marks a note as not playing maps onto it instead of losing the note
+([.als format](../spec/als-format.md) › Notes): a note that is there but silent in another program
+is a muted note here, not a hole.
+
 ## Consequences
 
 - Importers do real conversion work instead of copying a file's structure, and every importer

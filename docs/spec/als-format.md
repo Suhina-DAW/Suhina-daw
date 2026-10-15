@@ -1,9 +1,9 @@
 ---
 description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices
-read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
+read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters, muted note, deactivated note, IsEnabled
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/als/src/lib.rs
   - crates/als/src/devices.rs
@@ -141,6 +141,13 @@ number) and its notes in `Notes/MidiNoteEvent`:
 | `OffVelocity` | Release velocity, 0–127 |
 | `NoteId` | Per-clip note id |
 | `IsEnabled` | Present as `false` on a deactivated note (file `59`); absent otherwise |
+
+A note with `IsEnabled="false"` is read as a **muted** note (`Note::muted`): it is kept, with its
+time, length, key and velocity, and the importer does not play it
+([ADR 0001](../decisions/0001-daw-neutral-model.md) › Amendment: muted notes). Before this the
+importer dropped such notes, so a deactivated note in a set came in as a hole in the clip. File
+`59` is the corpus file for it; a Suhina project saved with muted notes writes `"muted": true` on
+those notes ([project files](../decisions/0010-project-files.md)).
 
 Live names MIDI note 60 "C3" (so 64 is E3, 67 is G3). Notes drawn without changing anything got
 velocity 100 in one clip and 98 in another.
