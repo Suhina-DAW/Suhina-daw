@@ -196,6 +196,9 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
+- **No session links.** The repository is public: leave out links to your agent's own session
+  (such as `https://claude.ai/code/session_...`) from commit messages, pull requests, issues and
+  comments, even when the tool adds one by default.
 - **Steps anyone can follow.** A change in what Suhina does, in the app, its sound, the files it
   reads and writes, the CLI or MCP, comes with a *How to check it* section in the pull request:
   numbered steps from opening Suhina with nothing loaded, every control named as it reads on
