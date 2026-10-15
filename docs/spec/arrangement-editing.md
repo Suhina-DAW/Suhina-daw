@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -16,6 +16,7 @@ covers:
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
+  - crates/ui/src/settings.rs
 ---
 
 # Arrangement editing
@@ -151,7 +152,7 @@ setting, and a second Stop goes to the beginning.
 | Command | Does |
 |---|---|
 | `transport.setPosition {beats}` | Moves the marker to `beats` (0 … 120 000; a negative, too large or non-numeric value is an error). Stopped, the next `transport.play` starts there. Playing, playback jumps there at once. |
-| `transport.play` | Starts the transport from the marker; nothing happens while it runs. Launching a clip or scene while stopped also starts the arrangement from the marker. |
+| `transport.play {from?, track?, index?}` | `from: "marker"` (the default): starts the transport from the marker; nothing happens while it runs. Launching a clip or scene while stopped also starts the arrangement from the marker. `from: "clip"`: `track` and `index` (from `project.clips`) name an arrangement clip; the marker moves to that clip's start and the transport starts there, or, while it runs, jumps there as `transport.setPosition` does. A missing or unknown clip, a track without an arrangement lane, another `from`, or `track`/`index` without `from: "clip"` is an error and changes nothing. |
 | `transport.stop {return?}` | Stops everything at once. `return: "marker"` (the default): the playhead goes back to the marker. `return: "here"`: the marker moves to where the playhead stopped, so the next start carries on from there. Either way, stopping while already stopped moves the marker to beat 0. |
 
 `launcher.state` reports `start_beat` (the marker) next to `beat` and `position` (the playhead).
@@ -178,8 +179,25 @@ the ruler and the lanes, at the marker while stopped (measurements in
 pass the setting **Stop** (Settings › General): **Marker** (default) or **Stay**, saved as
 `stop = marker | here`.
 
+**Playing from the selected clip.** A clip's start is often where one wants to listen from;
+moving the marker there by hand first is a step too many. **Suhina:** the play/stop key and the
+Play button pass the setting **Play from** (Settings › General): **Marker** (default) or
+**Selected clip**, saved as `play_from = marker | clip`. With **Selected clip** and a clip
+selected in the Arrangement view, they run `transport.play {from: "clip"}` on that clip; with no
+clip selected, or while the Session view is shown (where the selection is not seen), they play
+from the marker. **Shift+Space** (`transport.playFromSelection` in the keymap) plays from the
+selected clip whatever the setting; while playing, it jumps there.
+
+Playing from a clip **moves the marker** to the clip's start rather than leaving it where it was.
+The marker is where the playhead rests while stopped and where Stop returns, so moving it keeps
+what is seen and what is heard the same: Stop goes back to the clip's start, the next Play
+(with either setting) starts there again, and auditioning one clip over and over is Shift+Space
+and Space in turn. Leaving the marker behind would make Stop jump to a place the user did not
+start from.
+
 **From the command line** (`suhina-cli play --launcher`): `stop` returns to the marker,
-`stop here` stays, `pos <beats>` moves the marker. Agents pass `return` themselves; without it,
+`stop here` stays, `pos <beats>` moves the marker, `play <track> <i>` plays from the start of
+the track's arrangement clip `i` (0 first, as `project.clips` lists them). Agents pass `return` themselves; without it,
 Stop returns to the marker.
 
 ## Tracks

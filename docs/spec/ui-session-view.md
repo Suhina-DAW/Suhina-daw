@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -30,8 +30,9 @@ From top to bottom:
    - groove amount, metronome, global launch quantisation
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
-     start, punch, loop, loop length. **Suhina:** play starts from the play start marker and
-     stop returns to it or stays, as Settings › General › Stop says
+     start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
+     from the selected Arrangement clip as Settings › General › Play from says, and stop
+     returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`

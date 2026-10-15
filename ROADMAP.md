@@ -277,6 +277,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
+- **Play from the selected clip:** Shift+Space plays from the start of the clip selected in the
+  Arrangement view, and the setting Settings › General › Play from (**Marker** or **Selected
+  clip**) makes Play and Space do the same; the marker moves to the clip's start, so Stop returns
+  there (`transport.play {from: "clip", track, index}`, `play <track> <i>` in
+  `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template

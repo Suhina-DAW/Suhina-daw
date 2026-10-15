@@ -80,13 +80,14 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
     ("file.saveAs", "Save the project under another name", "File"),
     ("file.saveTemplate", "Save the project as a template", "File"),
     ("transport.toggle", "Play or stop", "Transport"),
+    ("transport.playFromSelection", "Play from the start of the selected clip", "Transport"),
     ("view.toggle", "Switch between Session and Arrangement", "View"),
     ("view.session", "Show the Session view", "View"),
     ("view.arrangement", "Show the Arrangement view", "View"),
@@ -132,12 +133,13 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 25] = [
+const DEFAULTS: [(&str, &[&str]); 26] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
     ("file.saveAs", &["Ctrl+Shift+S"]),
     ("transport.toggle", &["Space"]),
+    ("transport.playFromSelection", &["Shift+Space"]),
     ("view.toggle", &["Tab"]),
     ("view.detail", &["Shift+Tab"]),
     ("view.browser", &["Ctrl+B"]),

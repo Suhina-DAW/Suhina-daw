@@ -52,8 +52,8 @@ CHAPTERS = [
      "relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
     (6, "Arrangement View", 22, 0.35, "partial",
-     "Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and "
-     "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
+     "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
+     "overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
      "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.50, "partial",

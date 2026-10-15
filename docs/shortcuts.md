@@ -3,7 +3,7 @@ description: Keyboard shortcuts in the desktop app: the default keys, the keymap
 read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -56,7 +56,8 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 
 | Action | Keys |
 |---|---|
-| Play or stop (`transport.toggle`; Stop goes back to the play start marker or stays, as Settings › General › Stop says) | Space |
+| Play or stop (`transport.toggle`; Play starts from the play start marker or the selected clip, as Settings › General › Play from says; Stop goes back to the marker or stays, as Settings › General › Stop says) | Space |
+| Play from the start of the clip selected in the Arrangement view, whatever the setting (`transport.playFromSelection`; from the marker when no clip is selected) | Shift+Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
 | Show or hide the browser (`view.browser`) | Ctrl+B |

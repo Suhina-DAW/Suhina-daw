@@ -365,6 +365,78 @@ fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
 }
 
 #[test]
+fn play_starts_from_the_selected_clip_with_shift_space_or_the_setting() {
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let monitor = renderer.monitor();
+    let stop = |harness: &mut Harness<'static, App>, renderer: &mut suhina_engine::Renderer| {
+        harness.get_by_label("Stop").click();
+        harness.run_steps(2);
+        render_a_block(renderer);
+    };
+
+    // By default Play starts from the marker, a selected clip or not.
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+    stop(&mut harness, &mut renderer);
+
+    // Shift+Space plays from the selected clip's start (bar 17, beat 64), and Stop returns there.
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 64.0));
+    for _ in 0..100 {
+        render_a_block(&mut renderer);
+    }
+    stop(&mut harness, &mut renderer);
+    assert_eq!((monitor.running(), monitor.beat()), (false, 64.0));
+
+    // With Play from set to the selected clip, Space and the Play button start there too.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    harness.get_by_label("Play from: Selected clip").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_changed_settings().map(|s| s.play_from),
+        Some(suhina_ui::settings::PlayFrom::Clip)
+    );
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+    stop(&mut harness, &mut renderer);
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 64.0));
+    stop(&mut harness, &mut renderer);
+
+    // In the Session view the selection is not shown, so Play starts from the marker; stopping
+    // again first puts the marker at the beginning.
+    stop(&mut harness, &mut renderer);
+    assert_eq!(monitor.start_beat(), 0.0);
+    harness.get_by_label("Session view").click();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+}
+
+#[test]
 fn arrangement_headers_turn_tracks_off() {
     let mut harness = arrangement_app();
     harness.get_by_label("Turn Keys off").click();
