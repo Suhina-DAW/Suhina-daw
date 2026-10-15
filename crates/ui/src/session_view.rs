@@ -686,10 +686,13 @@ fn send_knobs(
 ) -> Option<(String, f64)> {
     let track = column.track;
     let step = theme::KNOB + SEND_GAP;
-    let fit = ((inner.right() - pan.right()) / step).floor().max(0.0) as usize;
+    // The strip's meter stands right of the pan knob (see `strip_meter`); the sends follow it.
+    let first = theme::KNOB + PAD + meter::WIDTH + SEND_GAP;
+    let room = inner.right() - pan.left() - first - theme::KNOB;
+    let fit = if room < 0.0 { 0 } else { (room / step).floor() as usize + 1 };
     let mut sending = None;
     for (index, send) in column.sends.iter().take(fit).enumerate() {
-        let rect = pan.translate(Vec2::new(step * (index + 1) as f32, 0.0));
+        let rect = pan.translate(Vec2::new(first + step * index as f32, 0.0));
         let letter = send.name.chars().next().map(String::from).unwrap_or_default();
         let control = Control::Send(send.target);
         let mode = if send.pre_fader { "pre" } else { "post" };
