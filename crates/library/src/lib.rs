@@ -604,6 +604,19 @@ impl Library {
         self.store.tagged.get(item).cloned().unwrap_or_default()
     }
 
+    /// How the browser shows the installed plug-ins.
+    pub fn plugins_view(&mut self) -> crate::store::PluginsView {
+        self.load();
+        self.store.plugins_view
+    }
+
+    /// Sets how the browser shows the installed plug-ins, kept for the next start.
+    pub fn set_plugins_view(&mut self, view: crate::store::PluginsView) -> Result<(), String> {
+        self.load();
+        self.store.plugins_view = view;
+        self.save()
+    }
+
     /// Every tagged item with its tags.
     pub fn tagged(&mut self) -> Vec<(String, Vec<String>)> {
         self.load();

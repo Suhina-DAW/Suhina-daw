@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Release notes from git history, for the release workflow (docs/releasing.md).
 
-    release_notes.py --repo OWNER/REPO --head REF [--base REF] --style STYLE [--version V]
+    release_notes.py --repo OWNER/REPO --head REF [--base REF] --style STYLE [--version V] [--tag T]
 
 `--base` is the previous release (or nightly); without it the history starts at the beginning.
 Styles:
@@ -9,7 +9,9 @@ Styles:
   release   the draft of a tagged release: the ROADMAP "What works now" bullets that are new
             since the base, by milestone, then every change
   nightly   the list of changes for the nightly's release page
-  discord   the post announcing a nightly (at most 2000 characters, Discord's limit)
+  discord   the post announcing a nightly (at most 2000 characters, Discord's limit), linking
+            the release under `--tag`: the night's own `nightly-YYYYMMDD`, so the link keeps
+            pointing at the build it announced after the rolling `nightly` has moved on
 
 A change is a commit on main's first-parent line; pull requests are squash-merged, so it is one
 pull request, titled "Area: what changed (#123)". Changes that touch only documentation, CI,
@@ -154,9 +156,14 @@ def nightly_notes(listed: list[str], internal: int, base: str | None, repo: str)
 
 
 def discord_post(
-    listed: list[str], internal: int, base: str | None, repo: str, version: str
+    listed: list[str],
+    internal: int,
+    base: str | None,
+    repo: str,
+    version: str,
+    tag: str = "nightly",
 ) -> str:
-    page = f"https://github.com/{repo}/releases/tag/nightly"
+    page = f"https://github.com/{repo}/releases/tag/{tag}"
     head = f"**Suhina nightly `{version}`** is out: <{page}>"
     if not base:
         return f"{head}\nThe first nightly: try the current state and tell us how it goes."
@@ -213,6 +220,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", default="")
     parser.add_argument("--style", required=True, choices=["release", "nightly", "discord"])
     parser.add_argument("--version", default="")
+    parser.add_argument("--tag", default="nightly")
     args = parser.parse_args(argv)
     base = args.base or None
 
@@ -227,7 +235,7 @@ def main(argv: list[str]) -> int:
     if args.style == "nightly":
         print(nightly_notes(listed, internal, base, args.repo))
     elif args.style == "discord":
-        print(discord_post(listed, internal, base, args.repo, args.version))
+        print(discord_post(listed, internal, base, args.repo, args.version, args.tag))
     else:
         print(release_notes(listed, internal, base, args.head, args.repo))
     return 0

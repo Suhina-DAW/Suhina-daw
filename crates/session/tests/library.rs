@@ -161,6 +161,56 @@ fn pins_and_tags_are_kept_between_runs() {
     let _ = std::fs::remove_dir_all(&settings);
 }
 
+/// A plug-in catalog as a scan leaves one, in the settings' plug-in library.
+fn catalog(settings: &Path) {
+    let text = json!({
+        "version": 2,
+        "entries": [
+            { "path": "/VST3/Alpha Verb.vst3", "modified": 1_760_000_000, "size": 10, "plugins": [
+                { "id": "ABCDEF019182FAEB49746D78426E6477", "name": "Alpha Verb", "vendor": "Alpha", "version": "1.0", "features": ["Fx", "Reverb"], "replaces": [] }] },
+            { "path": "/VST3/Alpha Delay.vst3", "modified": 1_760_100_000, "size": 10, "plugins": [
+                { "id": "ABCDEF019182FAEB49746D78426E6476", "name": "Alpha Delay", "vendor": "Alpha", "version": "1.0", "features": ["Fx", "Delay"], "replaces": [] }] },
+            { "path": "/CLAP/Zeta Synth.clap", "modified": 1_760_200_000, "size": 10, "plugins": [
+                { "id": "ABCDEF019182FAEB49746D78426E6478", "name": "Zeta Synth", "vendor": "Zeta", "version": "2.0", "features": ["instrument", "synthesizer"], "replaces": [] }] },
+        ],
+    });
+    std::fs::create_dir_all(settings.join("plugins")).unwrap();
+    std::fs::write(settings.join("plugins").join("plugin-catalog.json"), text.to_string()).unwrap();
+}
+
+#[test]
+fn a_plugins_view_is_kept_and_plug_ins_are_pinned_and_tagged_like_files() {
+    let settings = temp("views");
+    catalog(&settings);
+    let verb = "plugin:vst3:/VST3/Alpha Verb.vst3#ABCDEF019182FAEB49746D78426E6477";
+    let mut p = projects(&settings);
+    // The view choice: a real one is set and kept; junk is an error, not a change.
+    assert!(run(&mut p, "library.setPluginsView", json!({ "view": "nope" })).is_err());
+    run(&mut p, "library.setPluginsView", json!({ "view": "flat" })).unwrap();
+    // Pins and tags work on a plug-in's key like on a file's.
+    run(&mut p, "library.pin", json!({ "item": verb })).unwrap();
+    run(&mut p, "library.setTag", json!({ "name": "Go-to", "color": "#336699" })).unwrap();
+    run(&mut p, "library.tag", json!({ "item": verb, "tag": "Go-to", "on": true })).unwrap();
+
+    let mut again = projects(&settings);
+    let pinned = run(&mut again, "library.search", json!({ "place": "pinned" })).unwrap();
+    assert_eq!(names(&pinned), ["Alpha Verb"]);
+    assert_eq!(pinned["items"][0]["tags"], json!(["Go-to"]));
+    let tagged = run(&mut again, "library.search", json!({ "tags": ["Go-to"] })).unwrap();
+    assert_eq!(names(&tagged), ["Alpha Verb"]);
+    // The view survives a restart (it is kept in browser.json), and the flat search lists the
+    // plug-ins with their details.
+    let mut view = Library::new(Some(settings.to_path_buf()));
+    assert_eq!(view.plugins_view(), suhina_library::store::PluginsView::Flat);
+    let all = run(&mut again, "library.search", json!({ "category": "plugins" })).unwrap();
+    let mut all_names = names(&all);
+    all_names.sort();
+    assert_eq!(all_names, ["Alpha Delay", "Alpha Verb", "Zeta Synth"]);
+    assert_eq!(all["items"][0]["detail"], json!("vst3 Alpha"));
+    assert_eq!(all["items"][0]["kind"], json!("effect"));
+    let _ = std::fs::remove_dir_all(&settings);
+}
+
 #[test]
 fn library_commands_are_listed_and_need_no_project() {
     let settings = temp("listed");

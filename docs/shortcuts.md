@@ -73,6 +73,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Next, previous project (`projects.next`, `projects.previous`) | Ctrl+Tab, Ctrl+Shift+Tab |
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
+| Show which version of Suhina this is (`help.about`, Help › About Suhina, [spec](spec/about.md)) | none |
 
 Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
 moved clip, it replaces what it covers unless the stacking setting for its kind is on
