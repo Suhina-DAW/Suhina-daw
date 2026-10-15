@@ -9,6 +9,11 @@ use std::fmt;
 
 pub mod automation;
 
+mod launch;
+mod mapping;
+pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
+pub use mapping::{KEY_NAME_MAX, LaunchMapping, MappingSource, MappingTarget};
+
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(pub u32);
@@ -421,6 +426,8 @@ pub struct Clip {
     pub fade_out_curve: FadeCurve,
     /// What a launched clip does after it has played for a while; arrangement clips ignore it.
     pub follow_action: FollowAction,
+    /// How the clip launches from a launcher slot: mode, legato and its own quantisation.
+    pub launch: LaunchSettings,
     pub extensions: Extensions,
 }
 
@@ -735,6 +742,9 @@ pub struct ArrangementLane {
 pub struct Launcher {
     pub scenes: Vec<Scene>,
     pub columns: Vec<LauncherColumn>,
+    /// Keys and MIDI notes that launch slots, scenes and stop buttons. A mapping whose track or
+    /// scene is gone stays, unused, so an undo brings it back working.
+    pub mappings: Vec<LaunchMapping>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -1071,6 +1081,7 @@ mod tests {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         }
     }
@@ -1136,6 +1147,7 @@ mod tests {
                 markers: Vec::new(),
             },
             launcher: Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default(), Scene::default()],
                 columns: vec![LauncherColumn {
                     track: TrackId(1),

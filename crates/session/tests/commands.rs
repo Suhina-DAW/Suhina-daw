@@ -40,6 +40,7 @@ fn project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -745,7 +746,7 @@ fn slot_project() -> Project {
                 Slot { clip: Some(notes), has_stop: true },
                 Slot { clip: None, has_stop: true },
             ],
-        }],
+        }], mappings: Default::default(),
     };
     p
 }
@@ -1004,7 +1005,7 @@ fn launcher_project() -> Project {
                 track: TrackId(3),
                 slots: vec![Slot { clip: Some(held), has_stop: true }, Slot::default()],
             },
-        ],
+        ], mappings: Default::default(),
     };
     p
 }
@@ -1126,7 +1127,7 @@ fn midi_slot_project() -> Project {
         slots: vec![Slot { clip: None, has_stop: true }, Slot { clip: None, has_stop: true }],
     };
     p.launcher =
-        Launcher { scenes: vec![Scene::default(), Scene::default()], columns: vec![column(1), column(2), column(3)] };
+        Launcher { scenes: vec![Scene::default(), Scene::default()], columns: vec![column(1), column(2), column(3)], mappings: Default::default(), };
     let full = Clip { start: 0.0, ..p.arrangement.lanes[0].clips[0].clone() };
     p.launcher.columns[1].slots[0].clip = Some(full);
     p

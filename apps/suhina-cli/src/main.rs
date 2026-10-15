@@ -871,6 +871,7 @@ fn demo_project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
 
@@ -949,6 +950,7 @@ mod tests {
         let mut project = demo_project();
         let clip = project.arrangement.lanes[0].clips[0].clone();
         project.launcher = Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default(), Scene::default()],
             columns: vec![LauncherColumn {
                 track: TrackId(1),

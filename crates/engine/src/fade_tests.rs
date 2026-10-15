@@ -31,6 +31,7 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -71,6 +72,7 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
             markers: Vec::new(),
         },
         launcher: Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default()],
             columns: vec![LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(clip), has_stop: true }] }],
         },

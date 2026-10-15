@@ -8,7 +8,7 @@ use suhina_model::{
     Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, meters, notes, preview};
+use crate::{CommandError, Session, automation, devices, files, follow, launch, mapping, meters, notes, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -829,6 +829,77 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: follow::set_follow_action,
+    },
+    CommandSpec {
+        id: "clip.release",
+        label: "Release a slot's launch button (clip.launch is the press): stops a clip in gate mode, ends the repeats of one in repeat mode",
+        params: &[TRACK, SCENE],
+        kind: CommandKind::Transport,
+        run: launch::release_clip,
+    },
+    CommandSpec {
+        id: "clip.setLaunchMode",
+        label: "Set what launching a slot's clip does: trigger (plays until stopped), gate (plays while held), toggle (a second launch stops it) or repeat (relaunches at its quantisation while held)",
+        params: &[TRACK, SCENE, param("mode", ParamType::Text, "trigger, gate, toggle or repeat")],
+        kind: CommandKind::Edit,
+        run: launch::set_launch_mode,
+    },
+    CommandSpec {
+        id: "clip.setLegato",
+        label: "Set whether a slot's clip starts at the position of the clip it replaces on its track (legato) instead of at its start",
+        params: &[TRACK, SCENE, param("on", ParamType::Bool, "true for legato")],
+        kind: CommandKind::Edit,
+        run: launch::set_legato,
+    },
+    CommandSpec {
+        id: "clip.setQuantization",
+        label: "Set the grid a slot's clip waits for when launched: global (the launcher's), none, or its own",
+        params: &[
+            TRACK,
+            SCENE,
+            param(
+                "value",
+                ParamType::Text,
+                "global, none, 8 bars, 4 bars, 2 bars, 1 bar, 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T or 1/32",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: launch::set_quantization,
+    },
+    CommandSpec {
+        id: "launcher.addMapping",
+        label: "Map a computer key or a MIDI note to a slot, a scene or a track's stop button: its press launches it (and its release releases a gate or repeat clip); a source already mapped moves to the new target",
+        params: &[
+            param(
+                "source",
+                ParamType::Text,
+                "key:<name> (key:Q, key:1, key:Space) or note:<channel 1-16>:<note 0-127>",
+            ),
+            param("target", ParamType::Text, "slot, scene or stop"),
+            optional("track", ParamType::Track, "track id or name, for slot and stop"),
+            optional("scene", ParamType::Integer, "scene number, from 1, for slot and scene"),
+        ],
+        kind: CommandKind::Edit,
+        run: mapping::add_mapping,
+    },
+    CommandSpec {
+        id: "launcher.removeMapping",
+        label: "Remove a key or note mapping: the one of a source, or every mapping of a target",
+        params: &[
+            optional("source", ParamType::Text, "key:<name> or note:<channel>:<note>"),
+            optional("target", ParamType::Text, "slot, scene or stop, instead of source"),
+            optional("track", ParamType::Track, "track id or name, for slot and stop"),
+            optional("scene", ParamType::Integer, "scene number, from 1, for slot and scene"),
+        ],
+        kind: CommandKind::Edit,
+        run: mapping::remove_mapping,
+    },
+    CommandSpec {
+        id: "launcher.mappings",
+        label: "List the keys and MIDI notes mapped to slots, scenes and stop buttons (source, target, track, scene, whether the target is gone)",
+        params: &[],
+        kind: CommandKind::Read,
+        run: mapping::list_mappings,
     },
     CommandSpec {
         id: "devices.list",
@@ -2586,6 +2657,9 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
                         "loop": clip.loop_range.is_some(),
                         "enabled": clip.enabled,
                         "follow_action": follow::describe(&clip.follow_action),
+                        "launch_mode": clip.launch.mode.name(),
+                        "legato": clip.launch.legato,
+                        "quantization": clip.launch.quantization.name(),
                     }),
                     None => json!({ "scene": number, "clip": null, "stop_button": slot.has_stop }),
                 })

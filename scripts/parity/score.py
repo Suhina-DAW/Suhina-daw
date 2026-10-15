@@ -104,13 +104,14 @@ CHAPTERS = [
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.52, "partial",
+    (16, "Launching Clips", 12, 0.77, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time "
      "signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by "
      "chance, linked or timed, jump to a slot; by command and in the detail area), samples looping "
-     "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop). "
-     "Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier "
-     "and scene follow actions."),
+     "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), "
+     "launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch "
+     "quantisation, slots and scenes launched from computer keys. Missing velocity amount, clip "
+     "offset/nudge, launching from live MIDI notes, follow-action multiplier and scene follow actions."),
     (17, "Routing and I/O", 22, 0.35, "partial",
      "Track output to main or a group (track.setOutput); MIDI controllers play the armed tracks, "
      "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
@@ -172,9 +173,11 @@ CHAPTERS = [
      "ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; "
      "no patching runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
-    (34, "MIDI and Key Remote Control", 9, 0.15, "partial",
-     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote "
-     "mapping, takeover modes or mapping browser."),
+    (34, "MIDI and Key Remote Control", 9, 0.25, "partial",
+     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode "
+     "(Ctrl+M) maps keys to clip slots, scenes and stop buttons, saved in the project, and "
+     "launcher.addMapping takes MIDI notes too. No live MIDI remote input, CC mapping, takeover "
+     "modes or mapping browser."),
     (35, "Using Push 1", 40, 0.00, "absent", "No control-surface support."),
     (36, "Using Push 2", 59, 0.00, "absent", "No control-surface support."),
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",

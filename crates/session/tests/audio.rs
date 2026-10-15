@@ -344,7 +344,7 @@ fn launcher_project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: suhina_model::Extensions::default(),
+        extensions: suhina_model::Extensions::default(), launch: Default::default(),
     };
     for column in p.launcher.columns.iter_mut().take(2) {
         if let Some(slot) = column.slots.first_mut() {

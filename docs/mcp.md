@@ -47,7 +47,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `projects.close` (through `command_run`) manage them. Tools work on the active project, or on
   the one their `project` argument names, without switching. At most 32 are open.
 - **Audio output.** With `--audio`, each opened project also plays on the chosen output device
-  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
+  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `clip.release`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`) are heard. Without it they return an error, except `launcher.setQuantization`,
@@ -187,6 +187,18 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   key go, or every held preview note when `key` is left out. Both are transport commands: the
   project, its undo history and the transport are untouched.
 
+- **Launch settings.** `clip.setLaunchMode {track, scene, mode}` (trigger, gate, toggle,
+  repeat), `clip.setLegato {track, scene, on}` and `clip.setQuantization {track, scene, value}`
+  (global, none or a grid value) set how a slot's clip launches, one undo step each;
+  `project.launcher` shows them. `clip.launch` is a press of the slot's launch button and
+  `clip.release` its release, which stops a gate clip and ends a repeat clip's repeats; in a
+  `project_render` script the two can be steps at different times
+  ([spec](spec/clip-launching.md#launch-settings)).
+- **Launch keys and notes.** `launcher.addMapping {source, target, track?, scene?}` maps a key
+  (`key:Q`) or a MIDI note (`note:1:36`) to a slot, a scene or a track's stop button;
+  `launcher.removeMapping` and `launcher.mappings` remove and list them. Agents launch with
+  `clip.launch` and friends as before; the mappings are for the window and controllers
+  ([spec](spec/clip-launching.md#launching-from-keys-and-notes)).
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.

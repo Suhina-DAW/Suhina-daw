@@ -222,6 +222,7 @@ mod tests {
                 extensions: Extensions::default(),
             }],
             launcher: Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default()],
                 columns: vec![LauncherColumn {
                     track: TrackId(1),
@@ -238,6 +239,7 @@ mod tests {
                             fade_in_curve: Default::default(),
                             fade_out_curve: Default::default(),
                             follow_action: Default::default(),
+                            launch: Default::default(),
                             extensions: Extensions::default(),
                         }),
                         has_stop: true,

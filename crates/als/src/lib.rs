@@ -205,7 +205,7 @@ impl Reader {
             channels,
             contents: std::mem::take(&mut self.contents),
             arrangement: Arrangement { lanes, markers: self.markers(live_set) },
-            launcher: Launcher { scenes, columns },
+            launcher: Launcher { scenes, columns, mappings: Vec::new() },
             extensions: Extensions::default(),
         };
         self.untangle_groups(&mut project);
@@ -624,6 +624,7 @@ impl Reader {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         })
     }

@@ -21,6 +21,7 @@ fn everything() -> Project {
         fade_in_curve: FadeCurve { shape: FadeShape::SCurve, curve: -0.5 },
         fade_out_curve: FadeCurve { shape: FadeShape::EqualPower, curve: 0.75 },
         follow_action: Default::default(),
+        launch: LaunchSettings { mode: LaunchMode::Gate, legato: true, quantization: LaunchQuantization::Triplet(8) },
         extensions: Extensions::default(),
     };
     let follow = FollowAction {
@@ -213,6 +214,21 @@ fn everything() -> Project {
             markers: vec![Marker::new(0.0, "Intro"), Marker::new(16.0, "Verse"), Marker::new(16.0, "")],
         },
         launcher: Launcher {
+            mappings: vec![
+                LaunchMapping {
+                    source: MappingSource::key("Q").unwrap(),
+                    target: MappingTarget::Slot { track: TrackId(2), scene: 1 },
+                },
+                LaunchMapping {
+                    source: MappingSource::note(10, 36).unwrap(),
+                    target: MappingTarget::Scene { scene: 0 },
+                },
+                // Its track is gone: kept, unused.
+                LaunchMapping {
+                    source: MappingSource::key("Space").unwrap(),
+                    target: MappingTarget::Stop { track: TrackId(99) },
+                },
+            ],
             scenes: vec![
                 Scene {
                     name: "Intro".into(),
@@ -238,6 +254,22 @@ fn every_part_of_a_project_survives_a_round_trip() {
     let project = everything();
     assert_eq!(project.validate(), Ok(()));
     assert_eq!(from_json(&to_json(&project)), Ok(project));
+}
+
+/// Mappings are written under the launcher with 1-based scenes, and left out when there are none.
+#[test]
+fn launch_mappings_are_written_with_their_targets() {
+    let written: Value = serde_json::from_str(&to_json(&everything())).unwrap();
+    assert_eq!(
+        written["project"]["launcher"]["mappings"],
+        json!([
+            { "source": "key:Q", "target": "slot", "track": 2, "scene": 2 },
+            { "source": "note:10:36", "target": "scene", "scene": 1 },
+            { "source": "key:Space", "target": "stop", "track": 99 },
+        ])
+    );
+    let empty: Value = serde_json::from_str(&to_json(&Project::default())).unwrap();
+    assert!(empty["project"]["launcher"].get("mappings").is_none(), "{empty}");
 }
 
 #[test]
@@ -374,6 +406,25 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": "loud" } } ] }"#,
         r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": 1 } } ] }"#,
         r#"{ "tracks": [ { "id": 1, "audio_input": [1] } ] }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": 3 } ] } ] } }"#,
+        r#"{ "launcher": { "mappings": 3 } }"#,
+        r#"{ "launcher": { "mappings": [ 3 ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q" } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "pad", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "slot", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "slot", "track": 1, "scene": 0 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "scene", "scene": -1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "stop" } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "stop", "track": 99999999999 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "Q", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": 81, "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "note:17:60", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "note:1:128", "target": "scene", "scene": 1 } ] } }"#,
+        r#"{ "launcher": { "mappings": [ { "source": "key:Q", "target": "scene", "scene": 1 }, { "source": "key:Q", "target": "scene", "scene": 2 } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": "hold" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "mode": 1 } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "legato": "yes" } } ] } ] } }"#,
+        r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "launch": { "quantization": "3 bars" } } ] } ] } }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -522,6 +573,38 @@ fn nested_groups_survive_a_round_trip_and_a_group_cycle_is_refused() {
     project.tracks[0].parent = Some(TrackId(5));
     let error = from_json(&to_json(&project)).err().map(|e| e.0).unwrap_or_default();
     assert!(error.contains("inside itself"), "{error}");
+}
+
+/// A clip written before launch settings launches as before: trigger, no legato, the global
+/// quantisation; one with some of the keys takes the defaults for the others. A clip with the
+/// defaults is written without them.
+#[test]
+fn launch_settings_default_when_missing_and_are_written_only_when_changed() {
+    let read = |launch: &str| {
+        let text = format!(
+            r#"{{ "format": "suhina", "version": 1, "project": {{ "contents": [ {{ "id": 1, "length": 4 }} ],
+            "arrangement": {{ "lanes": [ {{ "clips": [ {{ "content": 1, "start": 0, "length": 4 {launch} }} ] }} ] }} }} }}"#
+        );
+        from_json(&text).unwrap().arrangement.lanes[0].clips[0].launch
+    };
+    assert_eq!(read(""), LaunchSettings::default());
+    assert_eq!(read(r#", "launch": null"#), LaunchSettings::default());
+    assert_eq!(
+        read(r#", "launch": { "mode": "toggle" }"#),
+        LaunchSettings { mode: LaunchMode::Toggle, ..LaunchSettings::default() }
+    );
+    assert_eq!(
+        read(r#", "launch": { "legato": true, "quantization": "none" }"#),
+        LaunchSettings { legato: true, quantization: LaunchQuantization::None, ..LaunchSettings::default() }
+    );
+    let mut project = everything();
+    project.launcher.columns[0].slots[0].clip.as_mut().unwrap().launch = LaunchSettings::default();
+    let json = to_json(&project);
+    let written: Value = serde_json::from_str(&json).unwrap();
+    let slot = &written["project"]["launcher"]["columns"][0]["slots"][0]["clip"];
+    assert!(slot.get("launch").is_none(), "{slot}");
+    let arrangement = &written["project"]["arrangement"]["lanes"][0]["clips"][0];
+    assert_eq!(arrangement["launch"], json!({ "mode": "gate", "legato": true, "quantization": "1/8T" }));
 }
 
 #[test]

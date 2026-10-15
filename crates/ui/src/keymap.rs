@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 49] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 50] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -94,6 +94,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 49] = [
     ("view.arrangement", "Show the Arrangement view", "View"),
     ("settings.open", "Open or close Settings", "View"),
     ("view.detail", "Show or hide the detail area", "View"),
+    ("view.mappingMode", "Map keys to clip slots, scenes and stop buttons, or stop mapping", "View"),
     ("view.browser", "Show or hide the browser", "View"),
     ("browser.search", "Search in the browser", "View"),
     ("view.sampleMap", "Show or hide the sample map in the main area", "View"),
@@ -238,7 +239,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 50] = [
+const DEFAULTS: [(&str, &[&str]); 51] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -247,6 +248,7 @@ const DEFAULTS: [(&str, &[&str]); 50] = [
     ("transport.playFromSelection", &["Shift+Space"]),
     ("view.toggle", &["Tab"]),
     ("view.detail", &["Shift+Tab"]),
+    ("view.mappingMode", &["Ctrl+M"]),
     ("view.browser", &["Ctrl+B"]),
     ("browser.search", &["Ctrl+F"]),
     ("view.sampleMap", &["Ctrl+Shift+M"]),

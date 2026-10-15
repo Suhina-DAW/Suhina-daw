@@ -24,7 +24,7 @@ fn clip(content: u32) -> Clip {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), launch: Default::default(),
     }
 }
 
@@ -63,7 +63,7 @@ fn project(notes: Vec<Note>) -> Project {
             columns: vec![LauncherColumn {
                 track: TrackId(1),
                 slots: vec![Slot { clip: Some(clip(3)), has_stop: true }],
-            }],
+            }], mappings: Default::default(),
         },
         ..Project::default()
     }

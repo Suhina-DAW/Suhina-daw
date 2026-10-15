@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use egui::{Align2, Color32, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::TrackId;
+use suhina_engine::model::{MappingTarget, TrackId};
 
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
@@ -64,6 +64,8 @@ pub struct SessionViewState {
     pub drop: Option<DropProbe>,
     /// The engine's levels this frame, for the mixer's meters.
     pub meters: Meters,
+    /// Keys that launch slots, scenes and stop buttons, and the mode that maps them.
+    pub launch_keys: crate::launch_keys::LaunchKeys,
 }
 
 impl SessionViewState {
@@ -182,6 +184,7 @@ pub fn show(
         scenes: grid.scenes.len(),
         places,
         groups,
+        mapped: &grid.mapped,
     };
     // Where each track column is this frame, for a dragged header to find its place.
     let mut spans: Vec<(&Column, egui::Rangef)> = Vec::new();
@@ -302,6 +305,7 @@ pub fn show(
         scene_span,
         body.top() - state.scroll.y,
         grid,
+        &mut state.launch_keys,
         actions,
     );
     let main_mixer = Rect::from_x_y_ranges(scene_span, mixer.y_range());
@@ -353,7 +357,8 @@ pub(crate) fn empty_space(ui: &Ui, painter: &egui::Painter, area: Rect, actions:
     }
 }
 
-/// The view's horizontal bands, and where the first scene row is after scrolling.
+/// The view's horizontal bands, where the first scene row is after scrolling, and the keys
+/// mapped to slots and stop buttons.
 struct Bands<'a> {
     /// The MIDI input ports there are, and the audio input device's channels, for the tracks'
     /// menus.
@@ -367,6 +372,7 @@ struct Bands<'a> {
     /// Every track but the returns, in track order, and the group tracks with their names.
     places: Vec<Place>,
     groups: Vec<(TrackId, String)>,
+    mapped: &'a [(MappingTarget, String)],
 }
 
 /// One column: header, slots and stop button, mixer strip, and its separator, inside `clip`.
@@ -392,8 +398,7 @@ fn draw_column(
         &painter.with_clip_rect(body_clip),
         body_clip,
         span,
-        bands.top,
-        bands.scenes,
+        bands,
         column,
         progress,
         id,
@@ -483,8 +488,7 @@ fn column_body(
     painter: &egui::Painter,
     clip: Rect,
     span: egui::Rangef,
-    top: f32,
-    scenes: usize,
+    bands: &Bands,
     column: &Column,
     progress: Option<f32>,
     id: Id,
@@ -494,6 +498,9 @@ fn column_body(
     // A track's slots can be selected, copied, pasted into and dragged; a group's only launch.
     let editable = column.kind == ColumnKind::Track;
     let can_paste = state.can_paste;
+    let (top, scenes) = (bands.top, bands.scenes);
+    let mapping = state.launch_keys.mode.on && column.kind != ColumnKind::Return;
+    let label = |target: MappingTarget| bands.mapped.iter().find(|(t, _)| *t == target).map(|(_, l)| l.as_str());
     for (scene, slot) in column.slots.iter().enumerate() {
         let rect = Rect::from_x_y_ranges(
             span,
@@ -503,6 +510,23 @@ fn column_body(
             continue;
         }
         let number = scene + 1;
+        let target = MappingTarget::Slot { track: column.track, scene };
+        if mapping {
+            // The mapping mode: a click picks the slot, empty or not, and launches nothing.
+            let response = widgets::button_area(
+                ui,
+                rect.intersect(clip),
+                id.with(scene),
+                format!("Map a key to {} scene {number}", column.name),
+            );
+            if response.clicked() {
+                state.launch_keys.pick(target);
+            }
+            slot_cell(painter, rect, column, slot, 0.0, 1.0, progress, false);
+            crate::launch_keys::overlay(painter, rect, label(target), state.launch_keys.mode.selected == Some(target), 0.0);
+            painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
+            continue;
+        }
         let has_clip = !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
         let key = (column.track, scene);
         // A clip on a track: its mark launches it, its name selects it. A group's slot launches
@@ -549,11 +573,15 @@ fn column_body(
         });
         let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
-        if slot.state != SlotState::Empty && launch.as_ref().is_some_and(Response::clicked) {
-            actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
-            if selectable && !state.keep_selection_on_launch {
-                state.select_slot(column.track, scene);
-            }
+        // The launch button launches as the pointer goes down, and releases a gate or repeat
+        // clip as it goes up.
+        if slot.state != SlotState::Empty
+            && let Some(response) = &launch
+            && crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions)
+            && selectable
+            && !state.keep_selection_on_launch
+        {
+            state.select_slot(column.track, scene);
         }
         if !has_clip && column.notes && launch.as_ref().is_some_and(Response::double_clicked) {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
@@ -572,8 +600,17 @@ fn column_body(
                     state.selected_slot = Some(key);
                     state.slot_drag = Some(key);
                 }
-                response.context_menu(|ui| menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions));
+                // The slot's menu, and a clip's launch settings under it.
+                response.context_menu(|ui| {
+                    menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions);
+                    if let Some(launch) = slot.launch {
+                        ui.separator();
+                        crate::slot_launch::launch_menu(ui, column.track, number, launch, actions);
+                    }
+                });
             }
+        } else if let (Some(response), Some(launch)) = (&launch, slot.launch) {
+            response.context_menu(|ui| crate::slot_launch::launch_menu(ui, column.track, number, launch, actions));
         }
         let selected = state.selected_slot == Some(key);
         slot_cell(painter, rect, column, slot, hover, pulse, progress, selectable && selected);
@@ -598,14 +635,22 @@ fn column_body(
     }
     let response =
         widgets::button_area(ui, stop_rect.intersect(clip), id.with("stop"), format!("Stop {}", column.name));
+    let target = MappingTarget::Stop { track: column.track };
     if response.clicked() {
-        actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
+        if mapping {
+            state.launch_keys.pick(target);
+        } else {
+            actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
+        }
     }
     let fill = motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response));
     painter.rect_filled(stop_rect, 0.0, fill);
     let square = Rect::from_center_size(stop_rect.center(), Vec2::splat(7.0));
     let color = if column.stop_queued { theme::accent() } else { theme::text_secondary() };
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
+    if mapping {
+        crate::launch_keys::overlay(painter, stop_rect, label(target), state.launch_keys.mode.selected == Some(target), 0.0);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -928,6 +973,7 @@ fn scene_column(
     span: egui::Rangef,
     top: f32,
     grid: &Grid,
+    keys: &mut crate::launch_keys::LaunchKeys,
     actions: &mut Vec<Action>,
 ) {
     let clip = painter.clip_rect();
@@ -943,8 +989,13 @@ fn scene_column(
             format!("Launch scene {} {}", scene.number, scene.name)
         };
         let response = widgets::button_area(ui, rect.intersect(clip), Id::new(("scene", scene.number)), label);
+        let target = MappingTarget::Scene { scene: scene.number.saturating_sub(1) };
         if response.clicked() {
-            actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
+            if keys.mode.on {
+                keys.pick(target);
+            } else {
+                actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
+            }
         }
         // A click in the menu's text fields keeps it open; its buttons close it.
         egui::Popup::context_menu(&response)
@@ -980,6 +1031,15 @@ fn scene_column(
             theme::ui_font(theme::TEXT),
             theme::text_primary(),
         );
+        if keys.mode.on {
+            crate::launch_keys::overlay(
+                painter,
+                rect,
+                grid.mapped_to(target),
+                keys.mode.selected == Some(target),
+                18.0,
+            );
+        }
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
     let stop_top = top + grid.scenes.len() as f32 * PITCH;

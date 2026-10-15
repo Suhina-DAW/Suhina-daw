@@ -1348,6 +1348,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {

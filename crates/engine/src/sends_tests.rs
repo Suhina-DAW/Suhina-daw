@@ -51,7 +51,7 @@ fn sending(level: f64, pre_fader: bool, return_devices: Vec<Device>) -> Project 
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), launch: Default::default(),
     };
     Project {
         tracks: vec![track(1, true), track(2, false), track(3, false)],

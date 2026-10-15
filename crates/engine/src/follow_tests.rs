@@ -28,7 +28,7 @@ fn slot(content: u32, length: f64, looping: bool, follow: FollowAction) -> Slot 
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: follow,
-            extensions: Extensions::default(),
+            extensions: Extensions::default(), launch: Default::default(),
         }),
         has_stop: true,
     }
@@ -73,7 +73,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             .collect(),
         launcher: Launcher {
             scenes: vec![Scene::default(); slots.len()],
-            columns: vec![LauncherColumn { track: TrackId(1), slots }],
+            columns: vec![LauncherColumn { track: TrackId(1), slots }], mappings: Default::default(),
         },
         ..Project::default()
     }

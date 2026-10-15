@@ -43,7 +43,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
         fade_in_curve: curve,
         fade_out_curve: curve,
         follow_action: Default::default(),
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), launch: Default::default(),
     };
     let region = AudioRegion {
         file: "noise.wav".into(),

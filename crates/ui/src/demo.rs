@@ -97,6 +97,7 @@ pub fn demo_project() -> Project {
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.launcher = Launcher {
+        mappings: Vec::new(),
         scenes: SCENES.iter().map(|name| Scene { name: (*name).into(), ..Scene::default() }).collect(),
         columns,
     };
@@ -155,6 +156,7 @@ fn clip_of(content: ContentId) -> Clip {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     }
 }

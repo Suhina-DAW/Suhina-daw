@@ -2,7 +2,7 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TimeSignature, Track, TrackId};
+use suhina_engine::model::{ChannelRole, LaunchSettings, MappingTarget, Project, Rgb, TimeSignature, Track, TrackId};
 use suhina_engine::{LauncherMonitor, Meter, Queued};
 
 use crate::theme;
@@ -55,6 +55,8 @@ pub struct Slot {
     pub enabled: bool,
     /// The clip's loop length in beats, for its progress while playing.
     pub length: f64,
+    /// The clip's launch settings; `None` for an empty slot.
+    pub launch: Option<LaunchSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +162,9 @@ pub struct Grid {
     /// The time signature playing and where its bars start: the project's, or, while the
     /// engine plays, the one a launched scene changed it to.
     pub meter: Meter,
+    /// The keys and notes mapped to slots, scenes and stop buttons that still exist, with the
+    /// label the mapping mode shows (`docs/spec/ui-session-view.md` › Launch keys).
+    pub mapped: Vec<(MappingTarget, String)>,
 }
 
 impl Grid {
@@ -195,7 +200,10 @@ impl Grid {
             let slots = match (kind, launcher.and_then(|i| project.launcher.columns.get(i))) {
                 (ColumnKind::Return, _) => Vec::new(),
                 (_, None) => {
-                    vec![Slot { state: SlotState::Empty, name: String::new(), enabled: true, length: 0.0 }; scene_count]
+                    vec![
+                        Slot { state: SlotState::Empty, name: String::new(), enabled: true, length: 0.0, launch: None };
+                        scene_count
+                    ]
                 }
                 (_, Some(column)) => (0..scene_count)
                     .map(|scene| {
@@ -216,6 +224,7 @@ impl Grid {
                                 .unwrap_or_default(),
                             enabled: clip.is_none_or(|c| c.enabled),
                             length: clip.map_or(0.0, |c| c.loop_range.map_or(c.length, |r| r.end - r.start)),
+                            launch: clip.map(|c| c.launch),
                         }
                     })
                     .collect(),
@@ -295,7 +304,19 @@ impl Grid {
             Meter { time_signature: project.transport.time_signature, ..Meter::default() },
             LauncherMonitor::meter,
         );
-        Self { columns, midi_ports: Vec::new(), input_channels: 0, scenes, running, beat, tempo_bpm, meter }
+        let mut mapped: Vec<(MappingTarget, String)> = Vec::new();
+        for m in project.launcher.mappings.iter().filter(|m| suhina_session::target_exists(project, &m.target)) {
+            match mapped.iter_mut().find(|(t, _)| *t == m.target) {
+                Some((_, label)) => *label = format!("{label} {}", m.source.label()),
+                None => mapped.push((m.target, m.source.label())),
+            }
+        }
+        Self { columns, midi_ports: Vec::new(), input_channels: 0, scenes, running, beat, tempo_bpm, meter, mapped }
+    }
+
+    /// The keys and notes mapped to `target`, as the mapping mode shows them.
+    pub fn mapped_to(&self, target: MappingTarget) -> Option<&str> {
+        self.mapped.iter().find(|(t, _)| *t == target).map(|(_, label)| label.as_str())
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.

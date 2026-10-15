@@ -1,12 +1,15 @@
 ---
-description: Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser
-read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
+description: Functional spec of the main window and the Session view: regions, clip slots, scenes, launch keys and their mapping mode, I/O, mixer, browser
+read_when: Session view, main window layout, clip slot behaviour, scene launch, launch keys, mapping mode, Map button, Ctrl+M, mixer section, browser structure
 type: spec
 status: draft
 last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
+  - crates/ui/src/slot_launch.rs
+  - crates/ui/src/launch_keys.rs
+  - crates/ui/tests/launch_keys.rs
   - crates/ui/src/app.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/detail_view.rs
@@ -121,6 +124,12 @@ Settings › Interface › Detail area › **Select on launch** (On by default, 
 return tracks are skipped) and keep the scene, up and down stay in the track. They act in the
 Session view only, and only while a clip slot is selected. Multiple selection is not built.
 
+**Suhina:** a clip's launch control launches when the mouse button goes down on it, not when the
+click ends, and going up is the release a clip in gate or repeat mode listens for
+([clip launching](clip-launching.md#launch-settings)). Right-clicking a clip opens the slot's menu
+with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repeat), **Launch
+quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
+
 Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
 empty MIDI clip there, one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
 [arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the
@@ -175,6 +184,33 @@ each applied with Enter, then **Insert scene below**, **Duplicate scene** and **
 (greyed out for the only scene). Every entry is a `scene.*` command, undone with Ctrl+Z. The
 control bar shows the time signature playing, and its position counts bars in it; a launched
 scene can change it.
+
+### Launch keys
+
+**Suhina:** a computer key can launch a slot, a scene or a track's stop button
+([clip launching](clip-launching.md#launching-from-keys-and-notes)).
+
+- **Mapping mode.** **Map keys** at the right end of the title bar, after the view names, or
+  Ctrl+M (`view.mappingMode`) turns it on and shows the Session view; **Map keys** is lit while
+  it is on.
+  Every slot (empty ones too), scene launch button and track stop button gets a tint, and a
+  control with keys mapped to it shows them in small text at its right edge (`Q`, `Note 36`).
+  A click picks a control (an outline) and launches nothing; clicking it again drops it.
+- **Mapping a key.** With a control picked, the next key pressed without Ctrl, Alt, Shift or Cmd
+  is mapped to it (`launcher.addMapping`), one undo step; a key mapped elsewhere moves here.
+  Delete or Backspace removes the picked control's keys (`launcher.removeMapping`). Escape, Ctrl+M
+  or **Map keys** again leaves the mode; so does showing the Arrangement view. With nothing picked,
+  keys do what they always do.
+- **Playing.** Outside the mapping mode a mapped key going down is the press (`clip.launch`,
+  `scene.launch`, `track.stop`) and going up the release (`clip.release`, for a clip in gate or
+  repeat mode). Holding a key down does not press it again.
+- **Keys that are also shortcuts.** A mapped key wins over a shortcut on the same key while the
+  Session view is shown, no text field has the keyboard and no dialog or Settings is open;
+  anywhere else the shortcut works as before. A key pressed with Ctrl, Alt, Shift or Cmd is
+  always a shortcut, so Ctrl+Z still undoes when Z is mapped.
+- **Releases are never lost.** A key held when the window loses focus, or when one of the
+  conditions above ends (a text field takes the keyboard, the Arrangement view is shown), is
+  released then, so a gate clip does not play on.
 
 ### I/O section (below the grid, per track, toggleable)
 
