@@ -159,6 +159,12 @@ Applying a macro:
 
 Nothing about a device changes when it moves into a group.
 
+- **A branch is a point in the signal flow**, so a device that reads its detector signal from elsewhere
+  ([sidechain](sidechain.md)) can read **a branch** — at the branch's input, after its devices, or after its
+  fader — and a device *inside* a branch can be keyed from a track, from another branch or from the group's own
+  track. A key across branches is a read edge like any other: the engine orders it, compensates its latency and
+  refuses a cycle that closes through it.
+
 - **Built-in devices** run in the engine as they do now (ADR 0004): made, prepared and given their
   parameters when the graph is built, real-time safe on the audio thread.
 - **Plug-ins** still run out of process (ADR 0006, AGENTS.md rule 5). A group is not a process
@@ -393,8 +399,16 @@ For the maintainer; each has the choice this spec made, so work can start withou
    built-in devices and plug-in references only, with the plug-in state left out.
 9. **Return and master channels** (ADR 0004, *Not decided yet*): groups follow wherever chains
    go; nothing here needs return chains first.
-10. **Side-chain inputs into a branch** wait for side-chain inputs in general (ADR 0004, *Not
-    decided yet*).
+10. **Side-chain inputs into a branch** are decided in [sidechain](sidechain.md) › *Device groups
+    (racks)*: a branch is a key source at its own three tap points (before its devices, after them,
+    after its fader), and a device inside a branch can be keyed, because a key names a *point* in the
+    signal flow rather than a channel. Nothing in this document's model changes; the read path is the
+    sidechain spec's work, and it lands before groups do.
+11. **A MIDI effect group.** This document has effect groups and instrument groups. Device sets also
+    have a group that holds MIDI effects only (a MIDI effect rack), and the device SDK's `midi_effect`
+    role is the first thing that would need one. It is a third kind with its own placement rules (MIDI
+    effects only, on a track that plays notes); nothing here forecloses it, and it is not planned until
+    MIDI effects exist.
 11. **Importing other formats' grouped devices** onto device groups: a section of
     [device import](device-import.md) once the model lands, from our own test files.
 
