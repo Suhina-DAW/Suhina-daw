@@ -2219,28 +2219,30 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
 
 #[test]
 fn the_sample_map_opens_in_a_window_of_its_own_and_docks_back() {
+    // The map lays itself out on a thread and asks for frames until it is done, which takes
+    // longer than `run` waits on a slow machine: step a fixed number of frames instead.
     let mut harness = window(demo_app());
     // Hiding the browser for the test changed a setting already.
     let _ = harness.state_mut().take_changed_settings();
     assert!(harness.query_by_label("Dock").is_none());
     harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::M);
-    harness.run();
+    harness.run_steps(4);
     // Without windows of their own (as here) the toolkit draws it as a window inside this one.
     assert!(harness.state().sample_map.view.window);
     assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(true));
     assert!(harness.query_by_label("Dock").is_some(), "the map's bar offers to dock it");
     assert!(harness.query_by_label("Large").is_none(), "no large view while it has a window");
     harness.get_by_label("Dock").click();
-    harness.run();
+    harness.run_steps(4);
     assert!(!harness.state().sample_map.view.window);
     assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
     assert!(harness.query_by_label("Dock").is_none());
 
     // The View menu does the same.
     harness.get_by_label("View").click();
-    harness.run();
+    harness.run_steps(4);
     harness.get_by_label_contains("Sample map in a window").click();
-    harness.run();
+    harness.run_steps(4);
     assert!(harness.state().sample_map.view.window);
 }
 
