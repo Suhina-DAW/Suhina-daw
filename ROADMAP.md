@@ -103,7 +103,8 @@ command with undo. Behaviour, detectors and tests: [`docs/spec/audio-to-midi.md`
   one that writes every note of a mix; snap results to the project's tempo, warp grid and key.
 - **Stem separation** before detecting is the largest single gain in quality, and is also offered
   on its own, as separating stems to new audio tracks
-  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
+  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146), [spec](docs/spec/stem-separation.md);
+  the pipeline around a model and a test backend exist in `crates/separation`).
 - **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass,
   melody and chords, then stem separation. An ADR comes before the detectors.
 

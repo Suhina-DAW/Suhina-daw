@@ -35,6 +35,7 @@ suhina-stretch = { path = "crates/stretch" }
 suhina-output = { path = "crates/output" }
 suhina-ui = { path = "crates/ui" }
 suhina-soundmap = { path = "crates/soundmap" }
+suhina-separation = { path = "crates/separation" }
 
 # external (licences must be GPLv3-compatible)
 hound = "3.5"  # Apache-2.0
