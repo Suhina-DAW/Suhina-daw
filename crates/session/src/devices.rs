@@ -332,9 +332,9 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
     }
     let id = plugin_param_id(param)?;
     let mut points = Vec::with_capacity(numbers.len() / 2);
-    for pair in numbers.chunks_exact(2) {
+    for [beat, value] in numbers.as_chunks::<2>().0 {
         let number = |v: &Value| v.as_f64().filter(|n| n.is_finite());
-        let (Some(beat), Some(value)) = (pair.first().and_then(number), pair.get(1).and_then(number)) else {
+        let (Some(beat), Some(value)) = (number(beat), number(value)) else {
             return Err(POINTS.into());
         };
         if !(0.0..=suhina_engine::MAX_START_BEAT).contains(&beat) {
