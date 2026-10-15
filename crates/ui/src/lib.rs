@@ -15,6 +15,7 @@ pub mod grid;
 pub mod keymap;
 pub mod loading_dialog;
 pub mod menus;
+pub mod meter;
 pub mod midi_tools;
 pub mod missing_files;
 pub mod motion;

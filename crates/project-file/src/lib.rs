@@ -217,7 +217,7 @@ fn project_value(p: &Project) -> Value {
     out.insert(
         "launcher".into(),
         json!({
-            "scenes": p.launcher.scenes.iter().map(|s| json!({ "name": s.name, "tempo_bpm": s.tempo_bpm.map(number) })).collect::<Vec<_>>(),
+            "scenes": p.launcher.scenes.iter().map(scene_value).collect::<Vec<_>>(),
             "columns": p.launcher.columns.iter().map(|c| json!({
                 "track": c.track.0,
                 "slots": c.slots.iter().map(|s| json!({ "clip": s.clip.as_ref().map(clip_value), "has_stop": s.has_stop })).collect::<Vec<_>>(),
@@ -545,31 +545,37 @@ fn extensions(o: &Obj, at: &str) -> Result<Extensions, ProjectFileError> {
     Ok(Extensions(out))
 }
 
+fn scene_value(s: &Scene) -> Value {
+    let mut scene = json!({ "name": s.name, "tempo_bpm": s.tempo_bpm.map(number) });
+    if let (Some(ts), Some(object)) = (s.time_signature, scene.as_object_mut()) {
+        object.insert("time_signature".into(), json!([ts.numerator, ts.denominator]));
+    }
+    scene
+}
+
+/// A time signature written as `[numerator, denominator]`, or `None` when absent or null.
+fn read_signature(value: Option<&Value>, at: &str) -> Result<Option<TimeSignature>, ProjectFileError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(pair)) if pair.len() == 2 => {
+            let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
+            match (pair.first().and_then(part), pair.get(1).and_then(part)) {
+                (Some(numerator), Some(denominator)) => Ok(Some(TimeSignature { numerator, denominator })),
+                _ => Err(format!("{at}: expected two whole numbers").into()),
+            }
+        }
+        Some(_) => Err(format!("{at}: expected [numerator, denominator]").into()),
+    }
+}
+
 fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
     let p = object(value, "project")?;
     let transport = match p.get("transport") {
         None | Some(Value::Null) => Transport::default(),
         Some(t) => {
             let t = object(t, "project.transport")?;
-            let signature = match t.get("time_signature") {
-                Some(Value::Array(pair)) if pair.len() == 2 => {
-                    let part = |v: &Value| v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n > 0);
-                    match (pair.first().and_then(part), pair.get(1).and_then(part)) {
-                        (Some(numerator), Some(denominator)) => TimeSignature { numerator, denominator },
-                        _ => {
-                            return Err("project.transport.time_signature: expected two whole numbers"
-                                .to_string()
-                                .into());
-                        }
-                    }
-                }
-                None | Some(Value::Null) => TimeSignature { numerator: 4, denominator: 4 },
-                Some(_) => {
-                    return Err("project.transport.time_signature: expected [numerator, denominator]"
-                        .to_string()
-                        .into());
-                }
-            };
+            let signature = read_signature(t.get("time_signature"), "project.transport.time_signature")?
+                .unwrap_or(TimeSignature { numerator: 4, denominator: 4 });
             let tempo = float_or(t, "tempo_bpm", 120.0, "project.transport")?;
             if !(1.0..=999.0).contains(&tempo) {
                 return Err(format!("project.transport.tempo_bpm: {tempo} is not a tempo").into());
@@ -622,7 +628,11 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
             for (i, v) in list(l, "scenes", "project.launcher")?.iter().enumerate() {
                 let at = format!("project.launcher.scenes[{i}]");
                 let s = object(v, &at)?;
-                scenes.push(Scene { name: text(s, "name", &at)?, tempo_bpm: optional_float(s, "tempo_bpm", &at)? });
+                scenes.push(Scene {
+                    name: text(s, "name", &at)?,
+                    tempo_bpm: optional_float(s, "tempo_bpm", &at)?,
+                    time_signature: read_signature(s.get("time_signature"), &format!("{at}.time_signature"))?,
+                });
             }
             let mut columns = Vec::new();
             for (i, v) in list(l, "columns", "project.launcher")?.iter().enumerate() {

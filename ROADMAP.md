@@ -30,7 +30,8 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 2. **Automation:** device, plug-in and mixer parameters first, then tempo
    ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
 3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
-4. **Sends, returns, cue and level meters:** return tracks are shown but play nothing yet.
+4. **Cue, and the rest of the mixer:** sends and return tracks play and level meters are done;
+   the cue output follows.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
@@ -146,8 +147,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
-- MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read and kept; not
-  played yet), routing into groups
+- MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read, kept and
+  played), routing into groups
 - scenes, session clip slots and arrangement clips
 - MIDI clips with notes (velocity, release velocity, deactivated notes), start and end markers,
   loop, deactivated clips
@@ -166,6 +167,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   master volume and mute apply. A group with devices is a bus: its devices run over the sum of
   its tracks, with latency compensation on every path. `--fm` on `play` and `render` puts the FM synth on every MIDI
   track, with a voice from a DX7 file; `suhina-cli fm-synth voices` lists a file's voices.
+- Sends and return tracks play: each track sends to each return before or after its fader; a
+  return runs its devices over what it is sent and plays into the main channel or a group, with
+  latency compensation on every send; loops are refused (`track.setSend`, `track.setSendMode`,
+  `return.add`, `return.remove`, `return.rename`; [spec](docs/spec/sends-and-returns.md)).
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
@@ -201,7 +206,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `automation.*` commands ([#420](https://github.com/suhina-daw/suhina-daw/issues/420),
   [spec](docs/spec/automation.md#in-the-arrangement-view)).
 - Still to do: more commands (notes, [#200](https://github.com/suhina-daw/suhina-daw/issues/200);
-  clips; sends), MCP resources.
+  clips), MCP resources.
 
 ### M4 Clip launching (in progress)
 - The engine launches clips and scenes on a quantisation grid: bars or note values (triplets
@@ -211,6 +216,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
 - A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- Scenes are edited with commands and from the scene button's right-click menu: insert,
+  duplicate (with copies of its clips), delete, rename, and a tempo and time signature that
+  apply when the scene launches (bars and the metronome count in the new time signature from
+  there). Playing clips stay with their row when scenes are inserted or deleted while playing
+  ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.
@@ -395,8 +405,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   while no engine plays) and the program's RAM in megabytes or gigabytes (its resident
   memory, measured once a second); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and
   redo. Every click is a command, the same the CLI and MCP run.
+- Level meters for every track, group and return and the main output, in the Session mixer and
+  the Arrangement headers: peak and RMS per side on the volume's dB scale, a held peak line and a
+  clip light a click turns off; `mixer.levels` reads them and `mixer.resetClip` resets them over
+  the CLI and MCP ([spec](docs/spec/level-meters.md),
+  [#397](https://github.com/suhina-daw/suhina-daw/issues/397)).
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
+- Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
+  double-click for off, right-click for before or after the fader.
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
@@ -492,7 +509,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
-  input routing and sends, arm, level meters, device editing
+  input routing, arm, level meters, device editing
   ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the rest of the clip editor
   ([#200](https://github.com/suhina-daw/suhina-daw/issues/200)) in the detail area, installers and
   signed builds ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)).

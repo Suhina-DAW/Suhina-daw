@@ -10,6 +10,7 @@ mod devices;
 mod files;
 mod follow;
 mod library;
+mod meters;
 mod note_tools;
 mod notes;
 mod plugins;
@@ -17,6 +18,7 @@ mod preview;
 mod projects;
 mod rack;
 mod relink;
+mod sends;
 mod soundmap;
 
 use std::fmt;
@@ -126,6 +128,16 @@ impl Player {
         self.controller.update(project).map_err(CommandError)
     }
 
+    /// Like [`Player::update`], for a project with one scene inserted or removed since the last
+    /// update: what plays and what is queued move with their slots.
+    pub fn update_with_scenes(
+        &mut self,
+        project: &Project,
+        scenes: Option<suhina_engine::SceneShift>,
+    ) -> Result<(), CommandError> {
+        self.controller.update_with_scenes(project, scenes).map_err(CommandError)
+    }
+
     /// Sets one parameter of a device on a track from the next audio block, without building a
     /// new graph (ADR 0005, amendment).
     pub fn set_device_param(&mut self, change: ParamEdit) -> Result<(), CommandError> {
@@ -156,6 +168,11 @@ impl Player {
     /// in per mille (1000 is busy all of the time).
     pub fn cpu_monitor(&self) -> &suhina_engine::CpuMonitor {
         self.controller.cpu_monitor()
+    }
+
+    /// The level meters of the main output and every track.
+    pub fn meter_monitor(&self) -> &suhina_engine::MeterMonitor {
+        self.controller.meter_monitor()
     }
 
     pub(crate) fn controller_mut(&mut self) -> &mut Controller {
@@ -610,8 +627,10 @@ impl Session {
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
                 self.open_step = None;
+                let scenes = self.project.launcher.clone();
                 let value = (spec.run)(self, params)?;
-                self.update_player()?;
+                let shift = suhina_engine::SceneShift::between(&scenes, &self.project.launcher);
+                self.update_player(shift)?;
                 Ok(value)
             }
             CommandKind::Edit => {
@@ -636,6 +655,7 @@ impl Session {
                 match result {
                     Ok(value) => {
                         if self.project != before {
+                            let shift = suhina_engine::SceneShift::between(&before.launcher, &self.project.launcher);
                             if self.open_step.is_some() {
                                 // Joins the open step, which keeps the project from before it.
                                 self.changes = self.changes.wrapping_add(1);
@@ -651,7 +671,7 @@ impl Session {
                                 _ => false,
                             };
                             if !sent {
-                                match self.update_player() {
+                                match self.update_player(shift) {
                                     Ok(()) => self.player_behind = false,
                                     // A drag sends a value every frame and may outrun the engine
                                     // taking new graphs: the engine catches up on a later frame.
@@ -674,20 +694,21 @@ impl Session {
     /// Sends the project to the playing engine again if a continued edit could not reach it
     /// (its queue was full). The window calls it every frame, through `Projects::poll_plugins`.
     pub fn catch_up_player(&mut self) {
-        if self.player_behind && self.update_player().is_ok() {
+        if self.player_behind && self.update_player(None).is_ok() {
             self.player_behind = false;
         }
     }
 
     /// Lets a playing engine hear the project as it is now, with any audio added to the pool.
     /// The edit stays made if this fails.
-    fn update_player(&mut self) -> Result<(), CommandError> {
+    /// `scenes` is the scene inserted or removed since the last update, if that is what changed.
+    fn update_player(&mut self, scenes: Option<suhina_engine::SceneShift>) -> Result<(), CommandError> {
         let Some(player) = self.player.as_mut() else { return Ok(()) };
         if self.audio_changed {
             player.set_audio(std::sync::Arc::new(self.audio.clone()));
             self.audio_changed = false;
         }
-        player.update(&self.project).map_err(|e| {
+        player.update_with_scenes(&self.project, scenes).map_err(|e| {
             CommandError(format!("the edit was made, but the playing engine could not follow it: {}", e.0))
         })
     }

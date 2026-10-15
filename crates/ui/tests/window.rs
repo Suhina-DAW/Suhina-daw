@@ -90,6 +90,23 @@ fn scenes_and_stop_buttons_send_their_commands() {
 }
 
 #[test]
+fn a_scene_menu_inserts_duplicates_and_deletes_scenes() {
+    let mut harness = view();
+    for (entry, action) in [
+        ("Insert scene below", Action::new("scene.insert", json!({ "scene": 4 }))),
+        ("Duplicate scene", Action::new("scene.duplicate", json!({ "scene": 3 }))),
+        ("Delete scene", Action::new("scene.delete", json!({ "scene": 3 }))),
+    ] {
+        harness.state_mut().actions.clear();
+        harness.get_by_label("Launch scene 3 Build").click_secondary();
+        harness.run();
+        harness.get_by_label(entry).click();
+        harness.run();
+        assert_eq!(harness.state().actions, [action], "{entry}");
+    }
+}
+
+#[test]
 fn return_tracks_have_a_mixer_but_no_slots() {
     let harness = view();
     assert!(harness.query_by_label("Turn A Reverb off").is_some());
@@ -1987,6 +2004,49 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+/// Bass's send to the A Reverb return in the project: level and before the fader.
+fn bass_send(harness: &Harness<'static, App>) -> Option<(f64, bool)> {
+    let project = harness.state().session()?.project();
+    let bass = project.tracks.iter().find(|t| t.name == "Bass")?.channel?;
+    let reverb = project.tracks.iter().find(|t| t.name == "A Reverb")?.channel?;
+    let send = project.channels.iter().find(|c| c.id == bass)?.sends.iter().find(|s| s.target == reverb)?;
+    Some((send.level, send.pre_fader))
+}
+
+#[test]
+fn a_send_knob_sets_the_send_level_and_its_menu_the_mode() {
+    let mut harness = window(demo_app());
+    let before = bass_send(&harness).map(|(level, _)| 20.0 * level.log10()).unwrap_or_default();
+    let knob = harness.get_by_label("Bass send to A Reverb").rect().center();
+    harness.hover_at(knob);
+    harness.run();
+    harness.drag_at(knob);
+    harness.run();
+    harness.hover_at(knob - egui::vec2(0.0, 10.0));
+    harness.run();
+    harness.hover_at(knob - egui::vec2(0.0, 20.0));
+    harness.run();
+    harness.drop_at(knob - egui::vec2(0.0, 20.0));
+    harness.run();
+    // 20 points up at 0.25 dB a point: 5 dB louder, rounded to 0.1 dB.
+    let after = bass_send(&harness).map(|(level, _)| 20.0 * level.log10()).unwrap_or_default();
+    assert!((after - before - 5.0).abs() < 0.11, "{before} to {after}");
+
+    harness.get_by_label("Bass send to A Reverb").click_secondary();
+    harness.run();
+    harness.get_by_label("Before the fader (pre)").click();
+    harness.run();
+    assert_eq!(bass_send(&harness).map(|(_, pre)| pre), Some(true));
+
+    // Two undo steps: the mode, then the level.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    let undone = bass_send(&harness).map(|(level, pre)| (20.0 * level.log10(), pre));
+    assert!(undone.is_some_and(|(db, pre)| (db - before).abs() < 1e-9 && !pre), "{undone:?}");
 }
 
 #[test]

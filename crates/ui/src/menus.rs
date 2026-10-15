@@ -2,7 +2,7 @@
 
 use egui::{Id, Key, Sense, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::{Rgb, TrackId};
+use suhina_engine::model::{Rgb, TimeSignature, TrackId};
 
 use crate::grid::to_rgb;
 use crate::theme;
@@ -105,5 +105,102 @@ pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions
     if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() {
         actions.push(Action::new("clip.delete", json!({ "track": track.0, "index": index })));
         ui.close();
+    }
+}
+
+/// What a scene's menu needs to know.
+pub struct SceneMenu<'a> {
+    /// Counted from 1, as commands take it.
+    pub number: usize,
+    pub name: &'a str,
+    pub tempo_bpm: Option<f64>,
+    pub time_signature: Option<TimeSignature>,
+    /// The scene is the only one, so it cannot be deleted.
+    pub only: bool,
+}
+
+/// The menu of a scene's launch button: name, tempo, time signature, insert, duplicate, delete.
+pub fn scene_menu(ui: &mut Ui, menu: &SceneMenu<'_>, actions: &mut Vec<Action>) {
+    let scene = menu.number;
+    ui.set_min_width(180.0);
+    let tempo = menu.tempo_bpm.map(|bpm| format!("{bpm}")).unwrap_or_default();
+    let signature = menu.time_signature.map(|ts| format!("{}/{}", ts.numerator, ts.denominator)).unwrap_or_default();
+    let fields = [
+        ("name", menu.name.to_string(), "Name"),
+        ("tempo", tempo, "Tempo (bpm), empty for none"),
+        ("signature", signature, "Time signature, such as 3/4"),
+    ];
+    for (key, current, hint) in fields {
+        let id = Id::new(("scene-field", key, scene));
+        let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.clone());
+        let response = ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(f32::INFINITY));
+        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            if text.trim() != current {
+                actions.extend(scene_field_action(key, scene, &text));
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+            ui.close();
+            return;
+        }
+        ui.data_mut(|d| d.insert_temp(id, text));
+    }
+    ui.separator();
+    if ui.button("Insert scene below").clicked() {
+        actions.push(Action::new("scene.insert", json!({ "scene": scene + 1 })));
+        ui.close();
+    }
+    if ui.button("Duplicate scene").clicked() {
+        actions.push(Action::new("scene.duplicate", json!({ "scene": scene })));
+        ui.close();
+    }
+    if ui.add_enabled(!menu.only, egui::Button::new("Delete scene")).clicked() {
+        actions.push(Action::new("scene.delete", json!({ "scene": scene })));
+        ui.close();
+    }
+}
+
+/// The command a scene menu field sends when its text is applied: a rename, a tempo or a time
+/// signature, cleared by empty text. Text that is not a number or a time signature is sent as
+/// it is, so the command says what is wrong with it.
+pub fn scene_field_action(field: &str, scene: usize, text: &str) -> Option<Action> {
+    let text = text.trim();
+    match field {
+        "name" => Some(Action::new("scene.rename", json!({ "scene": scene, "name": text }))),
+        "tempo" if text.is_empty() => Some(Action::new("scene.setTempo", json!({ "scene": scene }))),
+        "tempo" => {
+            let bpm = text.parse::<f64>().map_or_else(|_| json!(text), |bpm| json!(bpm));
+            Some(Action::new("scene.setTempo", json!({ "scene": scene, "bpm": bpm })))
+        }
+        "signature" if text.is_empty() => Some(Action::new("scene.setTimeSignature", json!({ "scene": scene }))),
+        "signature" => {
+            let (numerator, denominator) = text.split_once('/').unwrap_or((text, ""));
+            let part = |p: &str| p.trim().parse::<u64>().map_or_else(|_| json!(p.trim()), |n| json!(n));
+            Some(Action::new(
+                "scene.setTimeSignature",
+                json!({ "scene": scene, "numerator": part(numerator), "denominator": part(denominator) }),
+            ))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_fields_become_commands() {
+        let action = |field, text| scene_field_action(field, 2, text).map(|a| (a.id, a.params));
+        assert_eq!(action("name", " Drop "), Some(("scene.rename", json!({ "scene": 2, "name": "Drop" }))));
+        assert_eq!(action("tempo", "128"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": 128.0 }))));
+        assert_eq!(action("tempo", ""), Some(("scene.setTempo", json!({ "scene": 2 }))));
+        assert_eq!(
+            action("signature", "7/8"),
+            Some(("scene.setTimeSignature", json!({ "scene": 2, "numerator": 7, "denominator": 8 })))
+        );
+        assert_eq!(action("signature", " "), Some(("scene.setTimeSignature", json!({ "scene": 2 }))));
+        // Not a number: sent as text, so the command's error says what is wrong.
+        assert_eq!(action("tempo", "fast"), Some(("scene.setTempo", json!({ "scene": 2, "bpm": "fast" }))));
+        assert_eq!(action("colour", "red"), None);
     }
 }

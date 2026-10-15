@@ -12,6 +12,7 @@ use crate::automation_lanes::{self as automation, LanesState};
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
+use crate::meter::{self, Meters};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
@@ -170,6 +171,8 @@ pub struct ArrangementViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// The engine's levels this frame, for the headers' meters.
+    pub meters: Meters,
     /// The piano roll is pulled to the top: the view shows only this track, highlighted, and
     /// no return tracks or main track (`docs/spec/ui-clip-editor.md` › Pulled to the top).
     pub focus: Option<TrackId>,
@@ -198,6 +201,7 @@ impl Default for ArrangementViewState {
             track_drop: None,
             panning: false,
             drop: None,
+            meters: Meters::default(),
             focus: None,
             automation: LanesState::default(),
         }
@@ -738,6 +742,9 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::text_primary());
         let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
         volume_text(&fixed_painter, field, db, 0.0);
+        let at = lying_meter(field.left() - PAD, inner.center().y);
+        let level = state.meters.main;
+        meter::show(ui, &fixed_painter, at, "Main", meter::Source::Main, &level, actions);
     }
 
     // A clip dragged onto another lane is drawn there, over everything in that lane.
@@ -1345,7 +1352,15 @@ fn routing(
     }
 }
 
-/// A return track's row: its name and its volume.
+/// Width of the meter lying in a return or main row, left of its volume.
+const LYING_METER: f32 = 48.0;
+
+/// Where a return or main row shows its meter: lying down, ending at `right`, centred on `y`.
+fn lying_meter(right: f32, y: f32) -> Rect {
+    Rect::from_min_max(Pos2::new(right - LYING_METER, y - meter::WIDTH / 2.0), Pos2::new(right, y + meter::WIDTH / 2.0))
+}
+
+/// A return track's row: its name, its meter and its volume.
 fn fixed_row(
     ui: &Ui,
     painter: &egui::Painter,
@@ -1358,7 +1373,10 @@ fn fixed_row(
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let inner = rect.shrink2(Vec2::new(PAD, 2.0));
     let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
-    let name = Rect::from_min_max(inner.min, Pos2::new(field.left() - PAD, inner.bottom()));
+    let level = state.meters.track(lane.track);
+    let at = lying_meter(field.left() - PAD, inner.center().y);
+    meter::show(ui, painter, at.intersect(clip), &lane.name, meter::Source::Track(lane.track), &level, actions);
+    let name = Rect::from_min_max(inner.min, Pos2::new(at.left() - PAD, inner.bottom()));
     let color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), color);
     let id = Id::new(("arrangement-header", lane.track.0));
@@ -1417,10 +1435,20 @@ fn track_header(
     });
     let selected = state.selected_tracks.contains(&lane.track) || state.focus == Some(lane.track);
     painter.rect_filled(rect, 0.0, if selected { theme::control_background() } else { theme::panel_background() });
+    // The meter stands at the right edge; the rows keep clear of it.
+    let meter_x = rect.right() - PAD - meter::WIDTH;
     let inner = Rect::from_min_max(
         Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
-        Pos2::new(rect.right() - PAD, rect.bottom() - HEADER_PAD_Y),
+        Pos2::new(meter_x - PAD, rect.bottom() - HEADER_PAD_Y),
     );
+    let meter_bottom =
+        if rect.height() >= SHOWS_MIXER { inner.top() + HEADER_ROW + PAD + FIELD } else { inner.top() + HEADER_ROW };
+    let at = Rect::from_min_max(
+        Pos2::new(meter_x, inner.top()),
+        Pos2::new(meter_x + meter::WIDTH, meter_bottom.min(inner.bottom())),
+    );
+    let level = state.meters.track(lane.track);
+    meter::show(ui, painter, at.intersect(clip), &lane.name, meter::Source::Track(lane.track), &level, actions);
 
     // Row 1: track on, colour, name.
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));

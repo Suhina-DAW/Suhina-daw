@@ -4,10 +4,11 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Scene, Slot,
+    TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, note_tools, notes, preview};
+use crate::{CommandError, Session, automation, devices, files, follow, meters, note_tools, notes, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -121,6 +122,7 @@ const CONTINUE: Param = optional(
      when no other edit came between (one drag, one step)",
 );
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
+const RETURN: Param = param("return", ParamType::Track, "return track id or name, from project.tracks");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 /// A note command's clip: an arrangement clip by index, or a launcher clip by scene.
 const CLIP_INDEX: Param =
@@ -534,6 +536,23 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_metronome,
     },
     CommandSpec {
+        id: "mixer.levels",
+        label: "Read the level meters of the playing engine: the main output's and each track's peak and RMS level per side in dB (null for silence), and whether it clipped",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: meters::levels,
+    },
+    CommandSpec {
+        id: "mixer.resetClip",
+        label: "Turn off clip indicators: a track's, the main output's, or every one when neither is given",
+        params: &[
+            optional("track", ParamType::Track, "track id or name, from project.tracks"),
+            optional("main", ParamType::Bool, "true turns off the main output's"),
+        ],
+        kind: CommandKind::Transport,
+        run: meters::reset_clip,
+    },
+    CommandSpec {
         id: "clip.launch",
         label: "Launch the clip in a track's slot at the next quantisation boundary (an empty slot with a stop button stops the track)",
         params: &[TRACK, SCENE],
@@ -546,6 +565,66 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[SCENE],
         kind: CommandKind::Transport,
         run: launch_scene,
+    },
+    CommandSpec {
+        id: "scene.insert",
+        label: "Insert an empty scene (a row of empty slots with stop buttons) at a position, or after the last scene",
+        params: &[
+            optional(
+                "scene",
+                ParamType::Integer,
+                "number the new scene gets, from 1 to one past the last scene; after the last scene if left out",
+            ),
+            optional("name", ParamType::Text, "the new scene's name; empty if left out"),
+        ],
+        kind: CommandKind::Edit,
+        run: insert_scene,
+    },
+    CommandSpec {
+        id: "scene.duplicate",
+        label: "Copy a scene, with its name, tempo, time signature and the clips in its row, to a new scene right below it",
+        params: &[SCENE],
+        kind: CommandKind::Edit,
+        run: duplicate_scene,
+    },
+    CommandSpec {
+        id: "scene.delete",
+        label: "Delete a scene and the clips in its row; the last scene left cannot be deleted",
+        params: &[SCENE],
+        kind: CommandKind::Edit,
+        run: delete_scene,
+    },
+    CommandSpec {
+        id: "scene.rename",
+        label: "Rename a scene",
+        params: &[SCENE, param("name", ParamType::Text, "the new name; empty clears it")],
+        kind: CommandKind::Edit,
+        run: rename_scene,
+    },
+    CommandSpec {
+        id: "scene.setTempo",
+        label: "Set the tempo a scene switches the project to when it launches, or clear it",
+        params: &[
+            SCENE,
+            optional("bpm", ParamType::Number, "20 … 999; left out or null, the scene keeps the tempo playing"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_scene_tempo,
+    },
+    CommandSpec {
+        id: "scene.setTimeSignature",
+        label: "Set the time signature a scene switches to when it launches, or clear it",
+        params: &[
+            SCENE,
+            optional(
+                "numerator",
+                ParamType::Integer,
+                "beats in a bar, 1 … 99; left out with the denominator, the scene keeps the time signature playing",
+            ),
+            optional("denominator", ParamType::Integer, "the note value of a beat: 1, 2, 4, 8 or 16"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_scene_time_signature,
     },
     CommandSpec {
         id: "track.stop",
@@ -964,6 +1043,45 @@ static COMMANDS: &[CommandSpec] = &[
         run: devices::restart,
     },
     CommandSpec {
+        id: "track.setSend",
+        label: "Set how much of a track goes to a return track (its send); the return runs its devices over what it is sent",
+        params: &[
+            TRACK,
+            RETURN,
+            param("level", ParamType::Decibels, "send level in dB, at most +6; \"-inf\" or below -150 is silence"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::sends::set_send,
+    },
+    CommandSpec {
+        id: "track.setSendMode",
+        label: "Take a track's send to a return before its volume and pan (pre) or after them (post, the default)",
+        params: &[TRACK, RETURN, param("mode", ParamType::Text, "\"pre\" or \"post\"")],
+        kind: CommandKind::Edit,
+        run: crate::sends::set_send_mode,
+    },
+    CommandSpec {
+        id: "return.add",
+        label: "Add a return track, after every other track, playing into the main channel; tracks reach it through sends",
+        params: &[optional("name", ParamType::Text, "its name (default: A Return, B Return and so on)")],
+        kind: CommandKind::Edit,
+        run: crate::sends::add_return,
+    },
+    CommandSpec {
+        id: "return.remove",
+        label: "Remove a return track and every send to it",
+        params: &[RETURN],
+        kind: CommandKind::Edit,
+        run: crate::sends::remove_return,
+    },
+    CommandSpec {
+        id: "return.rename",
+        label: "Rename a return track",
+        params: &[RETURN, param("name", ParamType::Text, "the new name, not empty")],
+        kind: CommandKind::Edit,
+        run: crate::sends::rename_return,
+    },
+    CommandSpec {
         id: "note.list",
         label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127 and whether it is muted",
         params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
@@ -1290,6 +1408,7 @@ fn tracks(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
                     "pan": channel.map(|c| c.pan),
                     "mute": channel.map(|c| c.mute),
                     "devices": channel.map(|c| c.devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>()),
+                    "sends": channel.map(|c| crate::sends::sends_json(p, c)),
                     "arrangement_clips": clips,
                 })
             })
@@ -1508,7 +1627,7 @@ fn ungroup_track(session: &mut Session, params: &Value) -> Result<Value, Command
 }
 
 /// Removes a track, its channel, its lanes and slots, and every reference to them.
-fn remove_track(p: &mut Project, track: TrackId, channel: ChannelId) {
+pub(crate) fn remove_track(p: &mut Project, track: TrackId, channel: ChannelId) {
     p.tracks.retain(|t| t.id != track);
     p.channels.retain(|c| c.id != channel);
     for c in &mut p.channels {
@@ -1996,7 +2115,14 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
         .scenes
         .iter()
         .zip(1..)
-        .map(|(scene, number): (_, u32)| json!({ "scene": number, "name": scene.name, "tempo_bpm": scene.tempo_bpm }))
+        .map(|(scene, number): (_, u32)| {
+            json!({
+                "scene": number,
+                "name": scene.name,
+                "tempo_bpm": scene.tempo_bpm,
+                "time_signature": scene.time_signature.map(signature_text),
+            })
+        })
         .collect();
     let tracks: Vec<Value> = p
         .launcher
@@ -2035,11 +2161,9 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
     let (running, beat, tempo) = (monitor.running(), monitor.beat(), monitor.tempo_bpm());
     let start_beat = monitor.start_beat();
     let monitor_metronome = monitor.metronome();
+    let meter = monitor.meter();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
-    let ts = p.transport.time_signature;
-    let bar_beats =
-        if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
     let tracks: Vec<Value> = p
         .launcher
         .columns
@@ -2070,12 +2194,15 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         .collect();
     // Rounded once, so the beat and the position agree.
     let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
+    let (bar, into_bar) = meter.locate(beat);
+    let position = format!("{bar}.{}", into_bar.floor() as u64 + 1);
     Ok(json!({
         "running": running,
         "metronome": monitor_metronome,
         "tempo_bpm": tempo,
         "beat": beat,
-        "position": format!("{}.{}", (beat / bar_beats).floor() as u64 + 1, (beat % bar_beats).floor() as u64 + 1),
+        "time_signature": signature_text(meter.time_signature),
+        "position": position,
         "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
         "preview": preview_state,
@@ -2157,6 +2284,154 @@ fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandE
     let scene = scene_index(session.project(), params)?;
     send(session, LaunchCommand::LaunchScene { scene })?;
     Ok(json!({ "scene": scene + 1, "queued": "launch" }))
+}
+
+/// Scenes a project can have; inserting stops there.
+const MAX_SCENES: usize = 1000;
+
+/// Gives every launcher column one slot per scene, so a row can be inserted or removed in all of
+/// them at the same index.
+fn even_slots(p: &mut Project) {
+    let scenes = p.launcher.scenes.len();
+    for column in &mut p.launcher.columns {
+        column.slots.resize_with(scenes, || Slot { clip: None, has_stop: true });
+    }
+}
+
+/// An optional scene name: trimmed text, empty when left out.
+fn scene_name(params: &Value) -> Result<String, CommandError> {
+    match params.get("name") {
+        None | Some(Value::Null) => Ok(String::new()),
+        Some(Value::String(name)) => Ok(name.trim().to_string()),
+        Some(_) => Err("name must be a text".into()),
+    }
+}
+
+fn insert_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let count = p.launcher.scenes.len();
+    if count >= MAX_SCENES {
+        return Err(format!("the project has {count} scenes, as many as it can have").into());
+    }
+    let at = match params.get("scene") {
+        None | Some(Value::Null) => count,
+        Some(value) => value
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .and_then(|n| n.checked_sub(1))
+            .filter(|i| *i <= count)
+            .ok_or_else(|| format!("scene must be a whole number from 1 to {}", count + 1))?,
+    };
+    let name = scene_name(params)?;
+    even_slots(p);
+    p.launcher.scenes.insert(at, Scene { name, ..Scene::default() });
+    for column in &mut p.launcher.columns {
+        column.slots.insert(at, Slot { clip: None, has_stop: true });
+    }
+    Ok(json!({ "scene": at + 1 }))
+}
+
+fn duplicate_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(&session.project, params)?;
+    let p = &mut session.project;
+    if p.launcher.scenes.len() >= MAX_SCENES {
+        return Err(format!("the project has {} scenes, as many as it can have", p.launcher.scenes.len()).into());
+    }
+    even_slots(p);
+    let copy = p.launcher.scenes.get(scene).cloned().unwrap_or_default();
+    p.launcher.scenes.insert(scene + 1, copy);
+    let mut next_content = p.contents.iter().map(|c| c.id.0).max().unwrap_or(0);
+    for column in &mut p.launcher.columns {
+        let mut slot = column.slots.get(scene).cloned().unwrap_or(Slot { clip: None, has_stop: true });
+        // Each copied clip plays its own content, so editing one does not change the other.
+        if let Some(clip) = slot.clip.as_mut()
+            && let Some(content) = p.contents.iter().find(|c| c.id == clip.content).cloned()
+        {
+            next_content = next_content.checked_add(1).ok_or("the project has too many clip contents")?;
+            let id = suhina_model::ContentId(next_content);
+            p.contents.push(suhina_model::ClipContent { id, ..content });
+            clip.content = id;
+        }
+        column.slots.insert(scene + 1, slot);
+    }
+    Ok(json!({ "scene": scene + 2 }))
+}
+
+fn delete_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(&session.project, params)?;
+    let p = &mut session.project;
+    if p.launcher.scenes.len() <= 1 {
+        return Err("the last scene cannot be deleted".into());
+    }
+    even_slots(p);
+    p.launcher.scenes.remove(scene);
+    for column in &mut p.launcher.columns {
+        column.slots.remove(scene);
+    }
+    Ok(json!({ "deleted": scene + 1 }))
+}
+
+fn rename_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(&session.project, params)?;
+    let name = match params.get("name") {
+        Some(Value::String(name)) => name.trim().to_string(),
+        _ => return Err("name must be a text (empty clears it)".into()),
+    };
+    if let Some(s) = session.project.launcher.scenes.get_mut(scene) {
+        s.name.clone_from(&name);
+    }
+    Ok(json!({ "scene": scene + 1, "name": name }))
+}
+
+fn set_scene_tempo(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(&session.project, params)?;
+    let bpm = match params.get("bpm") {
+        None | Some(Value::Null) => None,
+        Some(_) => {
+            let bpm = number(params, "bpm")?;
+            if !(20.0..=999.0).contains(&bpm) {
+                return Err(format!("bpm must be between 20 and 999, got {bpm}").into());
+            }
+            Some(bpm)
+        }
+    };
+    if let Some(s) = session.project.launcher.scenes.get_mut(scene) {
+        s.tempo_bpm = bpm;
+    }
+    Ok(json!({ "scene": scene + 1, "tempo_bpm": bpm }))
+}
+
+fn set_scene_time_signature(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(&session.project, params)?;
+    let part = |key: &str| match params.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| CommandError::from(format!("{key} must be a whole number"))),
+    };
+    let signature = match (part("numerator")?, part("denominator")?) {
+        (None, None) => None,
+        (Some(numerator), Some(denominator)) => {
+            if !(1..=99).contains(&numerator) {
+                return Err(format!("numerator must be between 1 and 99, got {numerator}").into());
+            }
+            if ![1, 2, 4, 8, 16].contains(&denominator) {
+                return Err(format!("denominator must be 1, 2, 4, 8 or 16, got {denominator}").into());
+            }
+            Some(TimeSignature { numerator, denominator })
+        }
+        _ => return Err("give both numerator and denominator, or neither to clear the time signature".into()),
+    };
+    if let Some(s) = session.project.launcher.scenes.get_mut(scene) {
+        s.time_signature = signature;
+    }
+    Ok(json!({ "scene": scene + 1, "time_signature": signature.map(signature_text) }))
+}
+
+fn signature_text(ts: TimeSignature) -> String {
+    format!("{}/{}", ts.numerator, ts.denominator)
 }
 
 fn stop_track(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
