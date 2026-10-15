@@ -557,7 +557,7 @@ fn plug_ins_sharing_a_process_render_the_same_as_each_in_its_own() {
     // Four plug-ins in a row (the test processor and the CLAP test plug-in, twice each).
     let devices = vec![plugin_device("gain"), plugin_device("clap"), plugin_device("gain"), plugin_device("clap")];
     let p = project(2.0, true, devices);
-    let render = |group: Box<dyn Fn(&PluginInfo) -> Option<String> + std::marker::Send + Sync>| {
+    let render = |group: suhina_session::ProcessGroup| {
         let env = PluginEnv { catalog: catalog(), host: host(), group };
         let started = suhina_session::start_offline(&p, &env, SR);
         assert_eq!(started.running(), 4, "{:?}", started.notices);
