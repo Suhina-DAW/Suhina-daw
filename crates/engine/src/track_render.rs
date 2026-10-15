@@ -35,11 +35,9 @@ pub fn render_track(
     // Undo the centred pan and the headroom the mix gives every audio clip.
     let undo = |gain: f32| if gain > 0.0 { 1.0 / (gain * AUDIO_HEADROOM) } else { 0.0 };
     let (left, right) = (undo(left), undo(right));
-    for frame in out.chunks_exact_mut(2) {
-        if let [l, r] = frame {
-            *l *= left;
-            *r *= right;
-        }
+    for [l, r] in out.as_chunks_mut::<2>().0 {
+        *l *= left;
+        *r *= right;
     }
     Ok(out)
 }
@@ -185,12 +183,12 @@ mod tests {
         let (l, r) = track_gains(&project, TrackId(3)).unwrap_or((0.0, 0.0));
         let peak = alone.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak > 0.3, "the clip is heard at its own level, peak {peak}");
-        for (frame, (a, m)) in alone.chunks_exact(2).zip(mixed.chunks_exact(2)).enumerate() {
-            let expected = (a[0] * l * AUDIO_HEADROOM, a[1] * r * AUDIO_HEADROOM);
-            assert!((expected.0 - m[0]).abs() < 1e-5 && (expected.1 - m[1]).abs() < 1e-5, "frame {frame}");
+        for (frame, ([al, ar], [ml, mr])) in alone.as_chunks::<2>().0.iter().zip(mixed.as_chunks::<2>().0).enumerate() {
+            let expected = (al * l * AUDIO_HEADROOM, ar * r * AUDIO_HEADROOM);
+            assert!((expected.0 - ml).abs() < 1e-5 && (expected.1 - mr).abs() < 1e-5, "frame {frame}");
         }
         // Left and right are the same: centred.
-        assert!(alone.chunks_exact(2).all(|f| (f[0] - f[1]).abs() < 1e-6));
+        assert!(alone.as_chunks::<2>().0.iter().all(|[l, r]| (l - r).abs() < 1e-6));
     }
 
     #[test]
