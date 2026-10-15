@@ -692,6 +692,17 @@ fn render_the_browser() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
     std::fs::create_dir_all(&out).unwrap_or_else(|e| panic!("{e}"));
     image.save(out.join("browser.png")).unwrap_or_else(|e| panic!("{e}"));
+    // With the tag editor open, for the design review.
+    harness.get_by_label("Edit tags").click();
+    for _ in 0..10 {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    image.save(out.join("browser-tag-editor.png")).unwrap_or_else(|e| panic!("{e}"));
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }
@@ -816,6 +827,95 @@ fn a_plugin_drags_to_a_track_from_every_view() {
     let from = harness.get_by_label(&row("Zeta Synth")).rect().center();
     drag(&mut harness, from, to);
     assert!(until(&mut harness, |app| devices(app) == before + 1), "from the tree by type");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_tag_editor_lists_renames_adds_and_removes_tags() {
+    let (settings, folder) = (temp("editor-settings"), temp("editor"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    // Open it from the footer's Edit tags button.
+    harness.get_by_label("Edit tags").click();
+    harness.run();
+    // Every tag in a list, each with its name field, its item count and Remove; the last
+    // row adds one.
+    assert!(harness.query_by_label_contains("Tag row Red").is_some());
+    assert!(harness.query_by_label_contains("Tag row Purple").is_some());
+    assert!(harness.query_by_label("New tag name").is_some());
+    // The row's checkbox filters by it, as the footer's dots do.
+    harness.get_by_label("Filter tag Red").click();
+    harness.run();
+    assert_eq!(harness.state().browser.tag_filter, ["Red"]);
+    // A tag's name typed into its field renames it, and the footer's dot with it.
+    harness.get_by_label("Tag name Red").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.get_by_label("Tag name Red").type_text("Hot");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Hot").is_some(), "the row carries the new name");
+    assert!(harness.query_by_label_contains("Tag row Red").is_none());
+    // The last row adds a tag: a name and Enter, the next default colour with it.
+    harness.get_by_label("New tag name").click();
+    harness.run();
+    harness.get_by_label("New tag name").type_text("Punchy");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Punchy").is_some(), "the editor lists it");
+    // Remove: the first click arms it (the row asks), the second removes.
+    harness.get_by_label("Remove tag Punchy").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Punchy").is_some(), "the first click only arms the remove");
+    assert!(harness.query_by_label("Keep").is_some(), "the row asks with a Keep beside it");
+    harness.get_by_label("Remove tag Punchy").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Punchy").is_none(), "the second click removes it");
+    assert!(harness.query_by_label_contains("Tag row Punchy").is_none());
+    // Keep stands the remove down instead.
+    harness.get_by_label("Remove tag Hot").click();
+    harness.run();
+    assert!(harness.query_by_label("Keep").is_some());
+    harness.get_by_label("Keep").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Hot").is_some(), "the tag is still there");
+    // With an item selected, the checkbox tags the selection: Red's count says one carries
+    // it, and unticking takes it off again.
+    harness.get_by_label("Edit tags").click();
+    harness.run();
+    // The filter from the checkbox part is still on; the tree needs it off.
+    harness.state_mut().browser.tag_filter.clear();
+    harness.run();
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    double_click(&mut harness, &row(&name));
+    double_click(&mut harness, &row("Drums"));
+    harness.run();
+    harness.get_by_label(&row("Kick Hard.wav")).click();
+    harness.run();
+    harness.get_by_label("Edit tags").click();
+    harness.run();
+    harness.get_by_label("Apply tag Hot").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Hot (1 items)").is_some(), "the sample carries Hot now");
+    harness.get_by_label("Apply tag Hot").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Hot (0 items)").is_some(), "unticked takes it off");
+    // Closing the editor puts the footer's dots back, the renamed one among them — and a
+    // click anywhere outside the popup closes it too.
+    harness.get_by_label("Edit tags").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row").is_none());
+    assert!(harness.query_by_label("Tag Hot").is_some(), "the footer's dot carries the new name");
+    harness.get_by_label("Edit tags").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row Hot").is_some(), "the editor is open again");
+    harness.get_by_label("Place Pinned").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Tag row").is_none(), "a click outside closed the popup");
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }
