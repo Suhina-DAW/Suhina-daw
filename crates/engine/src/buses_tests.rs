@@ -42,6 +42,7 @@ pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     let players: Vec<u32> = if outside { vec![1, 2, 4] } else { vec![1, 2] };
