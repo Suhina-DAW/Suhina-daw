@@ -75,7 +75,7 @@ impl Scale {
     /// Where `value` (as the lane keeps it) sits on the lane, 0 at the bottom to 1 at the top.
     pub fn position(&self, value: f64) -> f64 {
         let position = match self {
-            Self::Volume => f64::from(crate::arrangement_view::volume_position(gain_to_db(value))),
+            Self::Volume => volume_position(gain_to_db(value)),
             Self::Pan => (value + 1.0) / 2.0,
             Self::Mute => value,
             Self::Device(info) => info.to_normalized(value),
@@ -168,6 +168,20 @@ fn round(value: f64, per: f64) -> f64 {
 
 fn gain_to_db(gain: f64) -> f64 {
     if gain > 0.0 { 20.0 * gain.log10() } else { f64::NEG_INFINITY }
+}
+
+/// Where a volume in decibels sits on a lane, 0 … 1: as the mixer's volume field places it
+/// (`arrangement_view::volume_position`, 0 dB at 85 %), in full precision so a point dragged
+/// keeps its value.
+fn volume_position(db: f64) -> f64 {
+    if !db.is_finite() || db <= VOLUME_FLOOR {
+        0.0
+    } else if db <= 0.0 {
+        let x = (db - VOLUME_FLOOR) / -VOLUME_FLOOR;
+        0.85 * x * x
+    } else {
+        0.85 + 0.15 * (db / 6.0).min(1.0)
+    }
 }
 
 /// The volume in decibels at `position` on a lane: the inverse of the volume field's placing
@@ -1012,6 +1026,11 @@ mod tests {
         assert_eq!(scale.command(0.0), json!("-inf"));
         assert_eq!(scale.command(1.0), json!(0.0));
         assert!((scale.position(1.0) - 0.85).abs() < 1e-6);
+        // The lane places a volume where the mixer's field does.
+        for db in [-70.0, -30.0, -6.0, 0.0, 4.0] {
+            let field = f64::from(crate::arrangement_view::volume_position(db));
+            assert!((volume_position(db) - field).abs() < 1e-6, "{db}");
+        }
     }
 
     #[test]
