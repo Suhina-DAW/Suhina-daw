@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/model/src/lib.rs
 ---
@@ -102,6 +102,21 @@ Each fade of a `Clip` also has a `FadeCurve` (`fade_in_curve`, `fade_out_curve`)
 Linear with curve 0 is the default, so a project without them sounds as before. A curve outside
 −1 … +1 does not validate (`ValidationError::BadFades`). The formulas are in
 [arrangement editing](../spec/arrangement-editing.md) › Fades.
+
+## Amendment: copy on edit for duplicated clips (2026-10-15)
+
+`clip.duplicate` keeps placing the same content: a duplicate costs one `Clip`, and a later
+linked copy (a clip that stays shared on purpose) builds on that. Independence comes when the
+notes are edited instead: the first `note.*` edit that changes the notes of a clip whose
+content other clips also play gives that clip its own copy of the content (a new `ContentId`,
+the same name), inside the same command and so the same undo step; the other clips keep the
+original ([clip editor spec](../spec/ui-clip-editor.md) › Coordinates,
+[#352](https://github.com/suhina-daw/suhina-daw/issues/352)). This is the "make unique" the
+consequences below ask for, done without asking. A content with a lane that targets a track (a
+shared pattern) is not copied: its placements are one pattern on purpose. Copying on duplicate
+instead was rejected because it would leave nothing for a linked copy to share and doubles the
+contents of a set full of repeats that are never edited. `clip.paste` already gives the pasted
+clip its own content. Audio content edits (`clip.setGain`) still act on the shared content.
 
 ## Consequences
 

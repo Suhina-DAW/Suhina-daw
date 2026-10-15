@@ -71,7 +71,8 @@ CHAPTERS = [
      "of long samples, warp-marker editing, quantise audio, tempo automation."),
     (10, "Editing MIDI", 41, 0.20, "started",
      "A first piano roll draws, selects (click, rectangle), moves, resizes and deletes notes on the "
-     "grid (Alt off-grid) and edits velocity in a lane, through note.* commands with undo. No "
+     "grid (Alt off-grid) and edits velocity in a lane, through note.* commands with undo; a "
+     "duplicated clip's notes are its own once edited. No "
      "copy/paste of notes, quantise, transpose tools, fold, scales, chords, deactivated notes, "
      "probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
