@@ -1,9 +1,9 @@
 ---
 description: How versions are numbered, how release builds, the nightly and test builds of pull requests are made
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, Discord announcement, release notes, changelog
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog
 type: howto
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - .github/workflows/release.yml
   - .github/workflows/discord.yml
@@ -11,6 +11,7 @@ covers:
   - .github/workflows/test-build-links.yml
   - scripts/release_notes.py
   - scripts/discord_post.py
+  - scripts/discord_merged.py
 ---
 
 # Releasing
@@ -161,6 +162,16 @@ the event. The nightly never reaches `discord.yml`: it is created with the workf
 which starts no other workflow. `discord.yml` runs on `pull_request_target`, so pull requests from
 forks are posted too; it checks out the base branch and never runs the pull request's code. No
 repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice.
+
+When a pull request is merged, its thread in the testing forum is marked by the bot
+*Suhina GitHub* (`discord.yml`, [`scripts/discord_merged.py`](../scripts/discord_merged.py)). The
+bot finds the thread whose name starts with `#<number> `, among the server's active threads and then
+the forum's archived ones, adds ✅ to its first post, renames it `#<number> [Merged] <title>` (the
+number stays first) and archives it. A thread already marked is not renamed again. It needs the
+secret `DISCORD_BOT_TOKEN` and the variables `DISCORD_GUILD_ID` and `DISCORD_TESTING_FORUM_ID`; the
+bot may manage posts and add reactions in that forum only. No thread, a missing setting or a
+Discord error is logged and fails nothing. Discord allows two renames of a thread in ten minutes,
+so a rate limit is waited out.
 
 ## Packages
 
