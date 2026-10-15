@@ -103,7 +103,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.copy {track, scene}`
   copies a clip slot's clip and `clip.paste {track, scene}` puts the copied clip into a slot, so a
   clip goes from the arrangement into a slot and back
-  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots).
+  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots). `clip.setFades` with
+  `scene` instead of `index` sets a launcher slot clip's fades
+  ([clip launching](spec/clip-launching.md)). `clip.create {track, scene? | start?, length?,
+  stack?}` makes an empty MIDI clip, a bar long by default, in an empty slot or at a beat
+  ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
 
 - **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
   it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`

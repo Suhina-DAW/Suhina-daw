@@ -565,6 +565,14 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.device_layout = layout;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(&painter, r, "Select on launch", "Launching a clip in the Session view shows it here");
+            if let Some(on) =
+                segmented(ui, &painter, control_rect(r, 2), "Select on launch", &on_off, settings.select_on_launch)
+            {
+                settings.select_on_launch = on;
+                outcome.changed = true;
+            }
         }
         Page::Graphics => {
             section(&mut y, "Graphics");

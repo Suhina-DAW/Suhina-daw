@@ -1,6 +1,6 @@
 ---
-description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement
-read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, follow actions
+description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launched clip fades, follow actions, launcher over arrangement
+read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, fades on launched clips, follow actions
 type: spec
 status: current
 last_verified: 2026-10-15
@@ -10,6 +10,7 @@ covers:
   - crates/engine/src/follow_tests.rs
   - crates/session/src/follow.rs
   - crates/session/tests/launcher.rs
+  - crates/engine/src/fade_tests.rs
   - crates/session/tests/scenes.rs
   - crates/ui/src/menus.rs
   - crates/session/tests/follow.rs
@@ -168,9 +169,17 @@ own decision (**Suhina:**), not yet compared with Live 12 (see *To observe*).
   column or stopping the transport releases them (ADR 0004).
 - **Fades.** A stopped or replaced audio clip fades out over 5 ms instead of cutting, and every
   launched audio clip fades in over 2 ms, to avoid clicks; one that does not loop also fades out
-  over 2 ms at its end marker. The fade-in and fade-out an
-  arrangement clip has ([arrangement editing](arrangement-editing.md) › Fades) do not apply to
-  launched clips yet.
+  over 2 ms at its end marker. These click guards stay under the clip's own fades below.
+- **Clip fades.** A clip in a slot has the same fade-in and fade-out as an arrangement clip
+  (lengths in beats, shapes and curves; [arrangement editing](arrangement-editing.md) › Fades),
+  fitted to the clip's own length. The **fade-in** plays once, from the launch: a looping clip
+  does not fade in again at each loop pass, since a fade at every pass would make the loop pulse.
+  The **fade-out** plays where the clip ends by itself, at the end marker of a clip without a
+  loop, with the same envelope an arrangement clip of that length has. A looping clip never
+  ends by itself, so its fade-out does not sound. Stopping or replacing a launched clip keeps the
+  5 ms stop fade rather than the clip's fade-out, so the stop stays on its quantisation
+  boundary. `clip.setFades {track, scene, …}` sets a slot clip's fades, with the same parameters
+  and checks as for an arrangement clip (`scene` instead of `index`); one undo step.
 - **Time-stretching.** Launched warped clips are time-stretched like arrangement clips (ADR
   0003): each one's stretcher is prepared for the project tempo when the project opens and
   rewound at every launch.

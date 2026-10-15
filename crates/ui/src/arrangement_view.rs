@@ -264,6 +264,11 @@ impl ArrangementViewState {
         self.clip_drag = None;
     }
 
+    /// Selects a clip: its track and index.
+    pub fn select_clip(&mut self, track: TrackId, index: usize) {
+        self.selected = Some((track, index));
+    }
+
     /// Sets a lane's height, as dragging its lower edge does.
     pub fn set_lane_height(&mut self, track: TrackId, height: f32) {
         self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
@@ -709,6 +714,32 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         let below = state.automation.height(lane.track, &timeline.automation);
         if lane_rect.bottom() + below < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
+        }
+        // A double-click on an empty spot of a lane that plays notes makes a MIDI clip a bar
+        // long in the grid cell under the pointer (Alt: where the pointer is). The clips are
+        // laid over it, so a double-click on one is the clip's.
+        if lane.notes {
+            let body = ui.interact(
+                row.clip.intersect(lanes_area),
+                Id::new(("arrangement-lane", lane.track.0)),
+                Sense::click(),
+            );
+            body.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Lane {}", lane.name))
+            });
+            if body.double_clicked()
+                && let Some(pointer) = body.interact_pointer_pos()
+            {
+                let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
+                let start = if ui.input(|i| i.modifiers.alt) {
+                    raw
+                } else {
+                    let grid = snap(state.beat_width, bar_beats);
+                    ((raw / grid).floor() * grid).max(0.0)
+                };
+                let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
+                actions.push(Action::new("clip.create", params));
+            }
         }
         // The track the piano roll edits, alone in the view: lit, so it is clear which it is.
         if focus == Some(lane.track) {

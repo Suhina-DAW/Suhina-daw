@@ -728,6 +728,82 @@ fn bad_fades_are_errors_that_change_nothing() {
     assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");
 }
 
+/// The audio project with launcher slots on Bass: scene 1 the audio loop, scene 2 the notes
+/// clip, scene 3 empty.
+fn slot_project() -> Project {
+    let mut p = audio_project();
+    let lane = &p.arrangement.lanes[0];
+    let (notes, audio) = (lane.clips[0].clone(), Clip { start: 0.0, ..lane.clips[1].clone() });
+    p.launcher = Launcher {
+        scenes: vec![Scene::default(); 3],
+        columns: vec![LauncherColumn {
+            track: TrackId(1),
+            slots: vec![
+                Slot { clip: Some(audio), has_stop: true },
+                Slot { clip: Some(notes), has_stop: true },
+                Slot { clip: None, has_stop: true },
+            ],
+        }],
+    };
+    p
+}
+
+/// A launcher clip's fades are set by its scene, leave the arrangement as it is, and undo (#104).
+#[test]
+fn a_launcher_clip_takes_fades_by_scene_that_undo() {
+    let mut session = Session::new(slot_project());
+    let slot_clip = |session: &Session| session.project().launcher.columns[0].slots[0].clip.clone().unwrap();
+    let done = run(
+        &mut session,
+        "clip.setFades",
+        json!({ "track": "Bass", "scene": 1, "in": 1, "out": 0.5, "inShape": "fast", "outCurve": 0.5 }),
+    )
+    .unwrap();
+    assert_eq!(
+        done,
+        json!({ "fade_in": 1.0, "fade_out": 0.5, "fade_in_shape": "fast", "fade_in_curve": 0.0,
+                "fade_out_shape": "linear", "fade_out_curve": 0.5 })
+    );
+    let clip = slot_clip(&session);
+    assert_eq!((clip.fade_in, clip.fade_out), (1.0, 0.5));
+    assert_eq!(clip.fade_in_curve.shape, FadeShape::Fast);
+    assert_eq!(session.project().arrangement, slot_project().arrangement, "the arrangement is untouched");
+
+    run(&mut session, "clip.setFades", json!({ "track": "Bass", "scene": 1, "in": 0 })).unwrap();
+    assert_eq!((slot_clip(&session).fade_in, slot_clip(&session).fade_out), (0.0, 0.5));
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(slot_clip(&session).fade_in, 1.0);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project(), &slot_project());
+}
+
+#[test]
+fn bad_launcher_clip_fades_are_errors_that_change_nothing() {
+    let mut session = Session::new(slot_project());
+    for params in [
+        // Both an arrangement index and a scene.
+        json!({ "track": "Bass", "index": 1, "scene": 1, "in": 1 }),
+        // Neither.
+        json!({ "track": "Bass", "in": 1 }),
+        // The notes clip, an empty slot, scenes that do not exist, a track without slots.
+        json!({ "track": "Bass", "scene": 2, "in": 1 }),
+        json!({ "track": "Bass", "scene": 3, "in": 1 }),
+        json!({ "track": "Bass", "scene": 0, "in": 1 }),
+        json!({ "track": "Bass", "scene": 4, "in": 1 }),
+        json!({ "track": "Bass", "scene": -1, "in": 1 }),
+        json!({ "track": "Bass", "scene": "one", "in": 1 }),
+        json!({ "track": "Lead", "scene": 1, "in": 1 }),
+        // Longer than the 4-beat clip, negative, no change asked.
+        json!({ "track": "Bass", "scene": 1, "in": 3, "out": 2 }),
+        json!({ "track": "Bass", "scene": 1, "out": -1 }),
+        json!({ "track": "Bass", "scene": 1 }),
+    ] {
+        assert!(run(&mut session, "clip.setFades", params.clone()).is_err(), "{params}");
+    }
+    assert_eq!(session.project(), &slot_project());
+    assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");
+}
+
 #[test]
 fn clips_shortened_or_split_by_a_move_keep_fades_that_fit() {
     let mut p = lane_project();
@@ -1032,4 +1108,126 @@ fn malformed_copies_and_pastes_into_slots_are_errors_that_record_nothing() {
     assert!(run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).is_err());
     assert_eq!(session.project(), &before);
     assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");
+}
+
+/// Bass and Lead play notes, Drums audio; each has two clip slots, Lead's first one full.
+fn midi_slot_project() -> Project {
+    let mut p = project();
+    let mut drums = p.tracks[0].clone();
+    drums.id = TrackId(3);
+    drums.name = "Drums".into();
+    drums.channel = None;
+    drums.content = ContentKinds { notes: false, audio: true };
+    p.tracks.push(drums);
+    let column = |track: u32| LauncherColumn {
+        track: TrackId(track),
+        slots: vec![Slot { clip: None, has_stop: true }, Slot { clip: None, has_stop: true }],
+    };
+    p.launcher =
+        Launcher { scenes: vec![Scene::default(), Scene::default()], columns: vec![column(1), column(2), column(3)] };
+    let full = Clip { start: 0.0, ..p.arrangement.lanes[0].clips[0].clone() };
+    p.launcher.columns[1].slots[0].clip = Some(full);
+    p
+}
+
+fn content_of<'a>(session: &'a Session, clip: &Clip) -> Option<&'a ClipContent> {
+    session.project().contents.iter().find(|c| c.id == clip.content)
+}
+
+#[test]
+fn an_empty_midi_clip_is_made_in_a_slot_one_bar_long_and_looping() {
+    let mut session = Session::new(midi_slot_project());
+    let made = run(&mut session, "clip.create", json!({ "track": "Bass", "scene": 2 })).unwrap();
+    assert_eq!((made["track"].as_u64(), made["scene"].as_u64()), (Some(1), Some(2)));
+    let clip = session.project().launcher.columns[0].slots[1].clip.clone().unwrap();
+    assert_eq!(clip.length, 4.0, "one bar of 4/4");
+    assert_eq!(clip.loop_range, Some(LoopRange { start: 0.0, end: 4.0 }));
+    let content = content_of(&session, &clip).unwrap();
+    assert_eq!(content.name, "MIDI clip");
+    assert!(matches!(content.lanes.as_slice(), [ContentLane { data: LaneData::Notes(notes), .. }] if notes.is_empty()));
+    // One undo step takes it back.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().launcher.columns[0].slots[1].clip.is_none());
+    assert_eq!(session.project(), &midi_slot_project());
+}
+
+#[test]
+fn an_empty_midi_clip_in_the_arrangement_replaces_what_it_covers_unless_stacked() {
+    let mut session = Session::new(lane_project());
+    // A bar in 3/4 is three beats.
+    let mut three = lane_project();
+    three.transport.time_signature = TimeSignature { numerator: 3, denominator: 4 };
+    let mut waltz = Session::new(three);
+    let made = run(&mut waltz, "clip.create", json!({ "track": "Lead", "start": 0 })).unwrap();
+    assert_eq!(made["index"], 0);
+    let lead = waltz.project().arrangement.lanes.iter().find(|l| l.track == Some(TrackId(2))).unwrap();
+    assert_eq!((lead.clips[0].start, lead.clips[0].length, lead.clips[0].loop_range), (0.0, 3.0, None));
+
+    let made = run(&mut session, "clip.create", json!({ "track": "Bass", "start": 2, "length": 4 })).unwrap();
+    assert_eq!((made["start"].as_f64(), made["index"].as_u64()), (Some(2.0), Some(1)));
+    assert_eq!(spans(&session)[..3], [(0.0, 2.0, 0.0), (2.0, 4.0, 0.0), (6.0, 2.0, 2.0)]);
+    let new = session.project().arrangement.lanes[0].clips[1].clone();
+    assert_eq!(content_of(&session, &new).unwrap().name, "MIDI clip");
+
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let made = run(&mut session, "clip.create", json!({ "track": "Bass", "start": 2, "stack": true })).unwrap();
+    assert_eq!(made["index"], 1);
+    assert_eq!(spans(&session).len(), 5, "nothing shortened");
+    assert_eq!(spans(&session)[..3], [(0.0, 4.0, 0.0), (2.0, 4.0, 0.0), (4.0, 4.0, 0.0)]);
+}
+
+#[test]
+fn an_empty_midi_clip_is_refused_where_it_cannot_go_and_changes_nothing() {
+    let mut session = Session::new(midi_slot_project());
+    for (params, why) in [
+        (json!({ "track": "Drums", "scene": 1 }), "MIDI track"),
+        (json!({ "track": "Lead", "scene": 1 }), "already has a clip"),
+        (json!({ "track": "Bass", "scene": 3 }), "from 1 to 2"),
+        (json!({ "track": "Bass", "scene": 0 }), "from 1"),
+        (json!({ "track": "Bass", "scene": -1 }), "from 1"),
+        (json!({ "track": "Bass", "scene": "one" }), "from 1"),
+        (json!({ "track": "Bass" }), "either start"),
+        (json!({ "track": "Bass", "scene": 1, "start": 0 }), "either start"),
+        (json!({ "track": "Bass", "start": -1 }), "start must be"),
+        (json!({ "track": "Bass", "start": 1e300 }), "start must be"),
+        (json!({ "track": "Bass", "start": "0" }), "start must be"),
+        (json!({ "track": "Bass", "start": 0, "length": 0 }), "length must be"),
+        (json!({ "track": "Bass", "start": 0, "length": -4 }), "length must be"),
+        (json!({ "track": "Bass", "start": 0, "length": 1e300 }), "length must be"),
+        (json!({ "track": "Bass", "start": 0, "stack": "yes" }), "stack"),
+        (json!({ "track": "Nobody", "start": 0 }), "no track"),
+        (json!({ "scene": 1 }), "track"),
+    ] {
+        let error = run(&mut session, "clip.create", params.clone()).unwrap_err();
+        assert!(error.contains(why), "{params}: {error}");
+    }
+    assert_eq!(session.project(), &midi_slot_project());
+    assert!(!session.can_undo(), "nothing was recorded");
+}
+
+#[test]
+fn an_empty_midi_clip_follows_odd_time_signatures_splits_a_clip_it_falls_inside_and_makes_a_lane() {
+    // One bar of 7/8 is three and a half beats, in a slot; a given length wins.
+    let mut odd = midi_slot_project();
+    odd.transport.time_signature = TimeSignature { numerator: 7, denominator: 8 };
+    let mut session = Session::new(odd);
+    let made = run(&mut session, "clip.create", json!({ "track": "Bass", "scene": 1 })).unwrap();
+    let slot = session.project().launcher.columns[0].slots[0].clip.clone().unwrap();
+    assert_eq!((made["scene"].as_u64(), slot.length), (Some(1), 3.5), "one bar of 7/8");
+    run(&mut session, "clip.create", json!({ "track": "Bass", "scene": 2, "length": 16 })).unwrap();
+    let slot = session.project().launcher.columns[0].slots[1].clip.clone().unwrap();
+    assert_eq!(slot.loop_range, Some(LoopRange { start: 0.0, end: 16.0 }));
+
+    // Inside the looping clip at 12 to 20: it is split around the new one.
+    let mut session = Session::new(lane_project());
+    let made = run(&mut session, "clip.create", json!({ "track": "Bass", "start": 14, "length": 2 })).unwrap();
+    assert_eq!(made["index"], 4);
+    let after: Vec<(f64, f64)> = spans(&session).into_iter().filter(|s| s.0 >= 12.0).map(|s| (s.0, s.1)).collect();
+    assert_eq!(after, [(12.0, 2.0), (14.0, 2.0), (16.0, 4.0)], "split around it");
+
+    // Lead has no lane yet: one is made, named after the track.
+    run(&mut session, "clip.create", json!({ "track": "Lead", "start": 0 })).unwrap();
+    let lead = session.project().arrangement.lanes.iter().find(|l| l.track == Some(TrackId(2))).unwrap();
+    assert_eq!((lead.name.as_str(), lead.clips.len()), ("Lead", 1));
+    assert!(session.project().validate().is_ok());
 }

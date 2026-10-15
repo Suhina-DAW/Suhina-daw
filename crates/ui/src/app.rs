@@ -14,7 +14,7 @@ use suhina_session::{CommandKind, ProjectId, Projects, Session};
 use crate::arrangement_view::{self, ArrangementViewState};
 use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
-use crate::detail_view;
+use crate::detail_view::{self, ClipRef};
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
 use crate::follow_view;
 use crate::grid::{Grid, SlotState};
@@ -25,7 +25,7 @@ use crate::piano_roll::{self, PianoRollState};
 use crate::project_dialog::{
     self, AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
 };
-use crate::session_view::{self, SessionViewState};
+use crate::session_view::{self, SessionViewState, Step};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
@@ -640,6 +640,11 @@ impl App {
         self.shown
     }
 
+    /// The clip selected in the Arrangement view: its track and index.
+    pub fn selected_clip(&self) -> Option<(TrackId, usize)> {
+        self.arrangement.selected_clip()
+    }
+
     /// `transport.stop`, with where the playhead goes from the settings.
     fn stop_action(&self) -> Action {
         Action::new("transport.stop", json!({ "return": self.settings.stop.param() }))
@@ -1010,7 +1015,19 @@ impl App {
         self.projects.back_up_before(action.id);
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
-            Ok(_) => {
+            Ok(result) => {
+                // A clip made by a double-click is selected, ready to edit: in the Arrangement
+                // the clip, in the Session its slot, so the detail area shows it.
+                if action.id == "clip.create"
+                    && let Some(track) = result["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId)
+                {
+                    let at = |key: &str| result[key].as_u64().and_then(|i| usize::try_from(i).ok());
+                    match (at("index"), at("scene").and_then(|s| s.checked_sub(1))) {
+                        (Some(index), _) => self.arrangement.select_clip(track, index),
+                        (None, Some(scene)) => self.view.select_slot(track, scene),
+                        (None, None) => self.view.selected = Some(track),
+                    }
+                }
                 let changes_project = suhina_session::commands()
                     .iter()
                     .find(|c| c.id == action.id)
@@ -1188,6 +1205,7 @@ impl App {
                     // The piano roll pulled to the top over the whole window: no view.
                     _ if inner.height() < 1.0 => {}
                     (Some(grid), View::Session) => {
+                        self.view.keep_selection_on_launch = !self.settings.select_on_launch;
                         // Both views fold the same groups.
                         std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
@@ -1280,14 +1298,17 @@ impl App {
         let stacked = self.settings.device_layout == DeviceLayout::Stack;
         // What it shows: the selected clip, or the selected track's devices.
         let (track, clip) = match self.shown {
-            View::Session => (self.view.selected, None),
-            View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
+            View::Session => (self.view.selected, self.view.selected_slot.map(|(t, s)| ClipRef::Slot(t, s))),
+            View::Arrangement => (
+                self.arrangement.selected_tracks.first().copied(),
+                self.arrangement.selected_clip().map(|(t, i)| ClipRef::Arrangement(t, i)),
+            ),
         };
         // Where each plug-in on the shown track stands, read first: reading it needs the session
         // itself, building the detail only the project; and an editor embedded in the panel
         // decides how tall the panel is.
         let mut reports = std::collections::HashMap::new();
-        if let Some(shown_track) = clip.map(|(t, _)| t).or(track)
+        if let Some(shown_track) = clip.map(ClipRef::track).or(track)
             && let Ok(session) = self.projects.session_mut(None)
         {
             let devices = session
@@ -1315,10 +1336,15 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let piano = self.piano_clip(clip);
+        let arrangement_clip = match clip {
+            Some(detail_view::ClipRef::Arrangement(track, index)) => Some((track, index)),
+            _ => None,
+        };
+        let piano = self.piano_clip(arrangement_clip);
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
-        let focus = clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        let focus =
+            arrangement_clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
         self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
@@ -1374,7 +1400,7 @@ impl App {
         let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
         painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_hint());
 
-        if let Some(shown_track) = clip.map(|(t, _)| t).or(track) {
+        if let Some(shown_track) = clip.map(ClipRef::track).or(track) {
             self.detail_drop = Some((detail, shown_track));
         }
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
@@ -2002,9 +2028,14 @@ impl App {
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        // The piano roll's own keys only while it has the keyboard.
+        // The piano roll's own keys only while it has the keyboard; the selected slot's keys
+        // only while it does not, as the two share keys.
         let notes = self.piano_roll.focused;
-        let pressed = ui.input_mut(|i| self.keymap.pressed(i, |id| notes || !crate::keymap::piano_roll_only(id)));
+        let pressed = ui.input_mut(|i| {
+            self.keymap.pressed(i, |id| {
+                if notes { !crate::keymap::slot_only(id) } else { !crate::keymap::piano_roll_only(id) }
+            })
+        });
         for action in pressed {
             self.do_action(&action, actions);
         }
@@ -2169,6 +2200,24 @@ impl App {
                 let beat = monitor.map_or(0.0, |m| if m.running() { m.beat() } else { m.start_beat() });
                 let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
                 actions.push(Action::new("marker.add", json!({ "beat": beat })));
+            }
+            "selection.launch" => {
+                if let (View::Session, Some((track, scene))) = (self.shown, self.view.selected_slot) {
+                    actions.push(Action::new("clip.launch", json!({ "track": track.0, "scene": scene + 1 })));
+                }
+            }
+            "selection.up" | "selection.down" | "selection.left" | "selection.right" => {
+                let (View::Session, Some(from)) = (self.shown, self.view.selected_slot) else { return };
+                let step = match action {
+                    "selection.up" => Step::Up,
+                    "selection.down" => Step::Down,
+                    "selection.left" => Step::Left,
+                    _ => Step::Right,
+                };
+                let grid = self.session().map(|s| Grid::build(s.project(), None));
+                if let Some((track, scene)) = grid.and_then(|g| session_view::step_slot(&g, from, step)) {
+                    self.view.select_slot(track, scene);
+                }
             }
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),

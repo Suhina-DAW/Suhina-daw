@@ -458,6 +458,79 @@ pub(crate) fn add_files(session: &mut Session, params: &Value) -> Result<Value, 
     Ok(json!({ "clips": placed, "tracks": tracks, "groups": stem_groups, "skipped": skipped }))
 }
 
+/// The name of a clip made empty with `clip.create`.
+pub const EMPTY_CLIP_NAME: &str = "MIDI clip";
+
+/// `clip.create`: an empty MIDI clip on a track that plays notes, in an empty clip slot or at a
+/// beat in the arrangement, one bar long unless `length` says otherwise.
+pub(crate) fn create_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &session.project;
+    let track = track_at(p, params, "track")?;
+    let target = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
+    if !target.content.notes {
+        return Err(format!("track {:?} does not play notes; a MIDI clip needs a MIDI track", target.name).into());
+    }
+    let start = match params.get("start") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(number(params, "start")?),
+    };
+    let scene = match params.get("scene") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .and_then(|n| n.checked_sub(1))
+                .ok_or("scene must be a whole number from 1")?,
+        ),
+    };
+    let length = match params.get("length") {
+        None | Some(Value::Null) => bar_beats(p),
+        Some(_) => number(params, "length")?,
+    };
+    if !(length > 0.0 && length <= suhina_engine::MAX_START_BEAT) {
+        return Err(format!("length must be more than 0 and at most {} beats", suhina_engine::MAX_START_BEAT).into());
+    }
+    let stack = flag(params, "stack")?;
+    match (start, scene) {
+        (Some(_), Some(_)) | (None, None) => {
+            return Err("give either start (a beat in the arrangement) or scene (a row of clip slots)".into());
+        }
+        (Some(s), None) if !(0.0..=suhina_engine::MAX_START_BEAT).contains(&s) => {
+            return Err(format!("start must be from 0 to {}", suhina_engine::MAX_START_BEAT).into());
+        }
+        (None, Some(row)) => {
+            let scenes = p.launcher.scenes.len();
+            let column = p.launcher.columns.iter().find(|c| c.track == track).ok_or("the track has no clip slots")?;
+            match column.slots.get(row) {
+                _ if row >= scenes => return Err(format!("scene must be from 1 to {scenes}").into()),
+                Some(slot) if slot.clip.is_some() => {
+                    return Err(format!("scene {} of track {:?} already has a clip", row + 1, target.name).into());
+                }
+                Some(_) => {}
+                None => return Err("the slot is missing".into()),
+            }
+        }
+        _ => {}
+    }
+    let source = Source {
+        kind: TrackKind::Midi,
+        name: EMPTY_CLIP_NAME.into(),
+        length,
+        lane: LaneData::Notes(Vec::new()),
+        loops: true,
+    };
+    let at = start.unwrap_or(0.0);
+    let mut done = place_clip(&mut session.project, track, source, scene, at, stack)?;
+    // An arrangement clip is found again by its index on the track, as project.clips gives it.
+    if scene.is_none()
+        && let Some(lane) = session.project.arrangement.lanes.iter().find(|l| l.track == Some(track))
+        && let Some(index) = lane.clips.iter().rposition(|c| c.start == at && c.length == length)
+    {
+        done["index"] = json!(index);
+    }
+    Ok(done)
+}
+
 /// Puts one source as a clip on `track`: in slot `row` of the Session, or at beat `at` in the
 /// Arrangement (replacing what it covers unless `stack`).
 fn place_clip(

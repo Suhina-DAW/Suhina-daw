@@ -5,6 +5,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
+use suhina_engine::model::TrackId;
 use suhina_session::Session;
 use suhina_ui::arrangement_view::{self, ArrangementViewState};
 use suhina_ui::demo::demo_project;
@@ -939,7 +940,7 @@ fn solo_is_exclusive_unless_ctrl_is_held() {
 
 /// The demo project with a group track, "Group", that tracks can play into.
 fn project_with_a_group() -> suhina_engine::model::Project {
-    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
+    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track};
     let mut project = demo_project();
     project.tracks.push(Track {
         id: TrackId(20),
@@ -2176,6 +2177,182 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+/// Presses and lets go twice at `at`, a frame apart: a double-click. It waits a second first,
+/// as a person would, so an earlier click does not make it a triple-click.
+fn double_click_at(harness: &mut Harness<'static, App>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(at);
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.step();
+    }
+    harness.run();
+}
+
+/// The name of each clip's content in Keys' slots, `None` for an empty slot.
+fn keys_slots(harness: &Harness<'static, App>) -> Vec<Option<String>> {
+    let Some(session) = harness.state().session() else { return Vec::new() };
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+    let column = p.launcher.columns.iter().find(|c| Some(c.track) == keys);
+    column
+        .map(|c| {
+            c.slots
+                .iter()
+                .map(|s| s.clip.as_ref().and_then(|clip| p.content(clip.content)).map(|c| c.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(keys_slots(&harness).first(), Some(&Some("MIDI clip".to_string())));
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some());
+    // One undo step takes it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    // A double-click on a slot with a clip launches it and makes nothing.
+    let before = harness.state().session().map(|s| s.project().clone());
+    let at = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(harness.state().session().map(|s| s.project().clone()), before);
+}
+
+#[test]
+fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    let lane = harness.get_by_label("Lane Keys").rect();
+    let clips: Vec<egui::Rect> = harness.query_all_by_label_contains(" on Keys at bar ").map(|n| n.rect()).collect();
+    // The rightmost spot of the lane that no clip covers, a little into a bar (8 points a beat).
+    let at = (0..200)
+        .map(|i| egui::pos2(lane.right() - 12.0 - i as f32 * 8.0, lane.center().y))
+        .find(|p| lane.contains(*p) && !clips.iter().any(|c| c.expand(2.0).contains(*p)))
+        .unwrap();
+    let count = |h: &Harness<'static, App>| {
+        h.state().session().map_or(0, |s| {
+            let p = s.project();
+            let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+            p.arrangement.lanes.iter().filter(|l| l.track == keys).map(|l| l.clips.len()).sum::<usize>()
+        })
+    };
+    let before = count(&harness);
+    double_click_at(&mut harness, at);
+    assert_eq!(count(&harness), before + 1);
+    let session = harness.state().session().unwrap();
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id).unwrap();
+    let lane = p.arrangement.lanes.iter().find(|l| l.track == Some(keys)).unwrap();
+    let (index, made) = lane
+        .clips
+        .iter()
+        .enumerate()
+        .find(|(_, c)| p.content(c.content).is_some_and(|x| x.name == "MIDI clip"))
+        .unwrap();
+    assert_eq!(made.length, 4.0, "one bar of 4/4");
+    assert_eq!(made.start % 4.0, 0.0, "on the bar grid at this zoom: {}", made.start);
+    assert_eq!(harness.state().selected_clip(), Some((keys, index)), "the new clip is selected");
+}
+
+#[test]
+fn a_clips_name_selects_it_and_its_mark_launches_it() {
+    let mut harness = view();
+    let walk = (TrackId(2), 1);
+    assert!(clicked(&mut harness, "Select Walk on Bass (scene 2)").is_empty(), "selecting does not launch");
+    assert_eq!(harness.state().state.selected_slot, Some(walk));
+    assert_eq!(harness.state().state.selected, Some(TrackId(2)), "its track is selected with it");
+
+    // A launch selects the clip too, unless Select on launch is off.
+    assert_eq!(
+        clicked(&mut harness, "Launch Chords 1 on Keys (scene 2)"),
+        [Action::new("clip.launch", json!({ "track": 3, "scene": 2 }))]
+    );
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+    harness.state_mut().state.keep_selection_on_launch = true;
+    clicked(&mut harness, "Launch Walk on Bass (scene 2)");
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+
+    // A track's header selects the track and ends the clip's selection.
+    clicked(&mut harness, "Track Drums");
+    assert_eq!((harness.state().state.selected_slot, harness.state().state.selected), (None, Some(TrackId(1))));
+}
+
+#[test]
+fn the_arrows_step_through_the_slots_of_tracks_and_stop_at_the_edges() {
+    use suhina_ui::session_view::{Step, step_slot};
+    let grid = Grid::build(&demo_project(), None);
+    let (drums, bass, vox) = (TrackId(1), TrackId(2), TrackId(4));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Up), Some((bass, 0)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Down), Some((bass, 2)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Left), Some((drums, 1)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Right), Some((TrackId(3), 1)));
+    assert_eq!(step_slot(&grid, (bass, 0), Step::Up), None);
+    assert_eq!(step_slot(&grid, (bass, 5), Step::Down), None);
+    assert_eq!(step_slot(&grid, (drums, 2), Step::Left), None);
+    // Return tracks have no slots, so the last track is the edge.
+    assert_eq!(step_slot(&grid, (vox, 2), Step::Right), None);
+    assert_eq!(step_slot(&grid, (TrackId(10), 0), Step::Down), None, "a return track is not in the grid of slots");
+}
+
+#[test]
+fn a_selected_slot_shows_in_the_detail_area_and_keys_move_and_launch_it() {
+    let mut harness = window(demo_app());
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_none());
+    harness.get_by_label("Select Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some());
+
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 3").is_some());
+    harness.key_press(Key::ArrowRight);
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_some());
+
+    // Enter launches it: here without an audio engine, which the status says.
+    harness.key_press(Key::Enter);
+    harness.run();
+    match harness.state().status() {
+        Status::Error(message) => assert!(message.contains("no audio engine"), "{message}"),
+        other => panic!("expected the launch to be tried, got {other:?}"),
+    }
+
+    // The Arrangement view keeps its own selection.
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_none());
+}
+
+#[test]
+fn with_select_on_launch_off_a_launch_leaves_the_detail_area_alone() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "on by default: a launch selects");
+
+    let ctx = harness.ctx.clone();
+    let settings = suhina_ui::settings::Settings { select_on_launch: false, ..Default::default() };
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.state_mut().set_browser_open(false);
+    harness.get_by_label("Launch Chords 1 on Keys (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "the selection stays");
+    assert!(harness.query_by_label("Clip Chords 1, scene 2").is_none());
 }
 
 /// Bass's send to the A Reverb return in the project: level and before the fader.

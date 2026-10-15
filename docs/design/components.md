@@ -90,7 +90,7 @@ the view with the detail area, status bar.
 | Drop overlay | While a project file is dragged over the window: `window.background` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Browser | 300 px wide by default, dragged from 200 to 600 px by a 4 px handle at its inner edge (`border`, `border.strong` under the pointer); left of the view, or right (Settings › Interface › Browser); Ctrl+B and View › Show browser hide and show it. See Browser below |
 | Detail splitter | 6 px, `control.background`, a 32 × 2 grip in `text.hint` in the middle; the cursor shows which way it moves |
-| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view, and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
+| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view, and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; a selected clip (on the arrangement, or in a slot) shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
 | Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`), followed by " · backed up 14:05" once the active project has been backed up in this run. There is no separate info view |
 
 ## Browser
@@ -135,7 +135,7 @@ Track colours: the track's own colour if it has one, else `track.1`–`track.4` 
 
 ### Clip slot
 
-20 px high, 6 px side padding, 6 px gap between mark and name.
+20 px high, 6 px side padding, 6 px gap between mark and name. On a track's clip, the first 18 px (the mark and its padding) launch it and the rest, its name, selects it; a group's slot launches from anywhere.
 
 | State | Background | Mark | Extra |
 |---|---|---|---|
@@ -144,6 +144,7 @@ Track colours: the track's own colour if it has one, else `track.1`–`track.4` 
 | Stopped | `control.background`, text `#C9C4BB` | 6 × 6 track colour | |
 | Queued | `control.background` | 6 × 6 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
 | Playing | `control.playingBackground`, text `#FFFFFF` | 6 × 6 track colour | 2 px `accent` progress line along the bottom |
+| Selected | `control.activeBackground` (playing keeps `control.playingBackground`) | as its state | 1 px inset `text.primary` outline (a queued clip keeps its `accent` outline) |
 | Recording | (planned) `#3A2B2A`, text `#FFFFFF` | 6 px red dot | 2 px red progress line |
 
 The slot clicked last (on a track, not a group) is selected: a 1 px `text.primary` inset over
@@ -275,6 +276,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Interface › Detail area | Device chain | Row (default), Stack |
+| Interface › Detail area | Select on launch | On (default), Off: launching a clip in the Session view selects it, so the detail area shows it ([spec](../spec/ui-session-view.md)) |
 | Interface › Browser | Side | Left (default), Right |
 | Interface › Browser | Auto-play | On (default), Off: selecting a sample or MIDI file previews it |
 | Interface › Browser | Preview volume | −18, −12, −6 (default), 0 dB |
@@ -378,9 +380,9 @@ until none is loading or it is sent to the background; a project opened next sho
 
 ## Clip properties
 
-The detail area for a selected arrangement clip: a 196 px `panel.background` column with the clip's name
+The detail area for a selected clip, on the arrangement or in a clip slot: a 196 px `panel.background` column with the clip's name
 (20 px title, 11 px) and 16 px rows of label (10 px `text.secondary`) and value (10 px mono
-`#C9C4BB`): Track, Start (bar.beat), Length (bars.beats), Loop, then Gain, Fade in and Fade out (beats,
+`#C9C4BB`): Track, Start (bar.beat; for a slot's clip, Scene and its number), Length (bars.beats), Loop, then Gain, Fade in and Fade out (beats,
 "-" for none) for an audio clip, or Notes for a MIDI clip; a value keeps 52 px clear of its label, so a long track name is shortened
 rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
 the column is then as tall as its rows). For a MIDI clip the piano roll (below) takes the place of the

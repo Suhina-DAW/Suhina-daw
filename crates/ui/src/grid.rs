@@ -63,6 +63,8 @@ pub struct Column {
     pub name: String,
     pub color: Rgb,
     pub kind: ColumnKind,
+    /// The track plays notes: a double-click on an empty slot makes a MIDI clip there.
+    pub notes: bool,
     /// Index into the launcher's columns and the monitor's, if the track has slots.
     pub launcher: Option<usize>,
     /// One per scene; empty for a return track.
@@ -208,6 +210,7 @@ impl Grid {
                 name: track.name.clone(),
                 color: track.color.unwrap_or_else(|| default_track_colour(index)),
                 kind,
+                notes: kind == ColumnKind::Track && track.content.notes,
                 launcher,
                 slots,
                 stop_queued: queued == Some(Queued::Stop),
