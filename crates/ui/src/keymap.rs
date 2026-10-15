@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 43] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 44] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -128,6 +128,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 43] = [
     ("pianoRoll.tool3", "Choose the Paint tool", PIANO_ROLL),
     ("pianoRoll.tool4", "Choose the Erase tool", PIANO_ROLL),
     ("pianoRoll.tool5", "Choose the Slice tool", PIANO_ROLL),
+    ("marker.addAtPlayhead", "Add an arrangement marker at the playhead", "Edit"),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
@@ -221,7 +222,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 43] = [
+const DEFAULTS: [(&str, &[&str]); 45] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -247,6 +248,8 @@ const DEFAULTS: [(&str, &[&str]); 43] = [
     ("selection.delete", &["Delete", "Backspace"]),
     ("selection.group", &["Ctrl+G"]),
     ("pianoRoll.quantize", &["Ctrl+U"]),
+    ("marker.addAtPlayhead", &["M"]),
+    ("transport.setLoopEnabled", &["Ctrl+L"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
     ("pianoRoll.selectAll", &["Ctrl+A"]),

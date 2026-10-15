@@ -1,6 +1,6 @@
 ---
-description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker)
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
+description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), and named markers on the timeline
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -11,12 +11,14 @@ covers:
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
   - crates/engine/src/launcher.rs
+  - crates/engine/src/loop_tests.rs
   - apps/suhina-cli/src/play.rs
   - crates/ui/src/menus.rs
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
   - crates/ui/src/settings.rs
+  - crates/ui/src/keymap.rs
 ---
 
 # Arrangement editing
@@ -215,6 +217,81 @@ start from.
 the track's arrangement clip `i` (0 first, as `project.clips` lists them). Agents pass `return` themselves; without it,
 Stop returns to the marker.
 
+## Markers
+
+A **marker** is a named position on the arrangement's timeline (other DAWs call it a locator or
+a cue): a beat from 0 on and a name. Playback jumps to it. A project keeps its markers in beat
+order; two can share a beat, and the one added later comes after. A marker is named by its index
+in that order, as `project.markers` lists it, so moving one can change its index (the command
+returns the new one).
+
+| Command | Does |
+|---|---|
+| `project.markers` | Lists the markers: `index`, `beat`, `name`. `project.info` counts them. |
+| `marker.add {beat, name?}` | Adds a marker at `beat` (0 … 120 000). Without a name it is "Marker n", n the first number from the marker count up that no marker uses. Returns its index. |
+| `marker.move {index, beat}` | Moves a marker to `beat`; it goes after any marker already there. Returns its new index. |
+| `marker.rename {index, name}` | Renames it; the name is trimmed and may not be empty. |
+| `marker.delete {index}` | Deletes it. |
+| `marker.jump {index}` | A transport command, not an edit: runs as `transport.setPosition` at the marker's beat. Stopped, the play start marker moves there; playing, playback jumps there at once. Needs the audio engine, as every transport command does. |
+
+The four edits are one undo step each; a bad index, beat or name is an error and changes nothing.
+The project file keeps markers in `arrangement.markers` ([format](suhina-format.md)); a Live Set's
+locators import as markers ([.als format](als-format.md) › Locators).
+
+**In the Arrangement view** markers sit in a row of their own under the ruler: a line at the
+marker's beat with its name in a tag beside it, cut short where the next marker starts. A click on
+a marker runs `marker.jump`. Dragging it moves it (`marker.move` when let go) on the same grid a
+ruler click uses (Alt held: free). A right-click on a marker opens its menu: a field with its name
+and **Rename** (or Enter), **Jump to marker**, **Delete marker**. A right-click on the ruler or on
+an empty part of the marker row offers **Add marker here**, on that grid. The key **M** (the action
+`marker.addAtPlayhead`, in the keymap) adds a marker where the playhead is while playing, and at the
+play start marker while stopped.
+
+## Loop region
+
+The **loop region** is a span of the arrangement's timeline, a start and an end in beats, that
+playback repeats while **looping** is on. The project keeps the region while looping is off, so
+turning it on again repeats the same span. It is separate from a clip's own loop
+([Start marker and loop](#start-marker-and-loop)), which repeats inside one clip.
+
+**Playing.** While looping is on and the playhead reaches the loop end, playback goes on from the
+loop start on the very next frame: the frame after the loop end's last one is the loop start's
+first, whatever the audio block size. The wrap is a jump while playing ([Play
+position](#play-position)): notes that sound are released, notes that start at the loop start or
+later play again, and audio clips play on from where they are at the loop start, sample for
+sample. The play start marker does not move, so Stop goes back to it as usual. A playhead that is
+already at or past the loop end (the play start marker set there, or a jump there) plays on
+without wrapping; one before the loop start plays into the region and then repeats it. A loop
+region shorter than one sample frame does not repeat.
+
+Offline, the same path loops (`render_launches`, the oracle for playback). A render of the whole
+arrangement (`suhina-cli render`, the MCP render tools) plays it once from start to end and does
+not repeat the region.
+
+**Commands.**
+
+| Command | Does |
+|---|---|
+| `transport.setLoop {start, end, enabled?}` | Sets the region: `start` from 0, `end` after it, at most 120 000. Without `enabled` looping stays as it was; `enabled: true` or `false` turns it on or off as well. Returns `{start, end, enabled}`. |
+| `transport.setLoopEnabled {enabled?}` | Turns looping on or off; without `enabled` it toggles. Turned on when the project has no region, it first makes one over the first 4 bars (in the project's time signature). |
+
+Both are edits, one undo step each; a bad value is an error and changes nothing. `project.info`
+reports `loop` (`{start, end, enabled}`, or null without a region). The project file keeps it
+under `transport.loop` ([format](suhina-format.md)); a Live Set's arrangement loop imports
+([.als format](als-format.md#arrangement-loop)).
+
+**In the Arrangement view** the loop brace sits in a row of its own between the ruler and the
+marker row: a bar from the loop start to the loop end, bright while looping is on and dim while
+it is off. Dragging along an empty part of the row draws a new region on the grid a ruler click
+uses (Alt held: free) and turns looping on. Dragging within 4 px of an end of the brace moves that
+end; dragging its middle moves the whole region, keeping its length. A click on the brace, the key
+**Ctrl+L** (`transport.setLoopEnabled`, in the keymap) and a right-click on the row (**Turn loop
+on** or **Turn loop off**) turn looping on or off.
+
+**Limits.** A time-stretched audio clip in the region is silent for a moment after each wrap in
+real-time playback, until the stretch worker has caught up with the loop start, as after any jump
+while playing; offline it plays without a gap.
+
 ## Tracks
 
 | Command | Does |
@@ -272,4 +349,4 @@ overlaps shows one row.
   pasting already do).
 - Moving several selected clips at once.
 - Whether a stacked lane should grow taller automatically.
-- Dragging along the ruler to scrub, and a loop brace.
+- Dragging along the ruler to scrub.

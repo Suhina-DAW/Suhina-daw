@@ -103,6 +103,24 @@ pub struct Lane {
     pub clips: Vec<ClipBox>,
 }
 
+/// A marker on the timeline, as the marker row under the ruler draws it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarkerFlag {
+    /// Index in beat order, as `marker.move` and `project.markers` count it.
+    pub index: usize,
+    pub beat: f64,
+    pub name: String,
+}
+
+/// The arrangement's loop region, as the loop brace row under the ruler draws it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoopBrace {
+    pub start: f64,
+    pub end: f64,
+    /// Playback repeats it.
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Timeline {
     /// Tracks in project order, then return tracks.
@@ -117,6 +135,10 @@ pub struct Timeline {
     pub beat: f64,
     /// The play start marker: where the transport starts, in beats.
     pub start_beat: f64,
+    /// The arrangement's markers, in beat order.
+    pub markers: Vec<MarkerFlag>,
+    /// The loop region, when the project has one (on or off).
+    pub loop_brace: Option<LoopBrace>,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
     /// The parameters each track's automation lanes can show, with their points.
@@ -191,7 +213,28 @@ impl Timeline {
             if kind == ColumnKind::Return { returns.push(lane) } else { lanes.push(lane) }
         }
         lanes.extend(returns);
-        let end = lanes.iter().flat_map(|l| &l.clips).map(|c| c.start + c.length).fold(0.0, f64::max);
+        let markers: Vec<MarkerFlag> = project
+            .arrangement
+            .markers
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_valid())
+            .map(|(index, m)| MarkerFlag { index, beat: m.beat, name: m.name.clone() })
+            .collect();
+        let transport = &project.transport;
+        let loop_brace = transport.loop_range.filter(|r| r.is_valid_region()).map(|r| LoopBrace {
+            start: r.start,
+            end: r.end,
+            enabled: transport.loop_enabled,
+        });
+        // The timeline reaches past the last marker and the loop end too, so every marker can be scrolled to.
+        let end = lanes
+            .iter()
+            .flat_map(|l| &l.clips)
+            .map(|c| c.start + c.length)
+            .chain(markers.iter().map(|m| m.beat))
+            .chain(loop_brace.map(|l| l.end))
+            .fold(0.0, f64::max);
         let main_volume_db =
             project.channels.iter().find(|c| c.role == ChannelRole::Master).map(|c| gain_to_db(c.volume));
         let mut timeline = Self {
@@ -202,6 +245,8 @@ impl Timeline {
             running: false,
             beat: 0.0,
             start_beat: 0.0,
+            markers,
+            loop_brace,
             waveforms: Arc::default(),
             automation: crate::automation_lanes::Params::build(project),
         };

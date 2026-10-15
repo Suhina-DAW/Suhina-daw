@@ -1115,6 +1115,50 @@ impl Renderer {
     /// While running: playback goes on from `beat` at once. Launches and a scene tempo still
     /// waiting are queued again for the next boundary from there.
     fn jump(&mut self, beat: f64) {
+        self.jump_to(self.start_beat);
+    }
+
+    /// The loop region as arrangement frames, while playback repeats it: the region is on and
+    /// at least one frame long.
+    fn loop_frames(&self) -> Option<(u64, u64)> {
+        if !self.follow_loop {
+            return None;
+        }
+        let (start, end) = self.graph.loop_beats?;
+        let (start, end) = (self.frame_of_beat(start), self.frame_of_beat(end));
+        (end > start).then_some((start, end))
+    }
+
+    /// Frames until the playhead reaches the loop end, while it is running before it. A
+    /// playhead past the loop end (moved there) plays on without wrapping.
+    pub(crate) fn frames_to_loop_end(&self) -> Option<usize> {
+        if !self.running {
+            return None;
+        }
+        let (_, end) = self.loop_frames()?;
+        let to_end = end.checked_sub(self.time()).filter(|frames| *frames > 0)?;
+        Some(usize::try_from(to_end).unwrap_or(usize::MAX))
+    }
+
+    /// At the loop end, playback jumps back to the loop start, as a jump while playing does:
+    /// notes sounding are released, notes and audio clips play on from the loop start
+    /// (`docs/spec/arrangement-editing.md` › Loop region). The play start marker stays.
+    pub(crate) fn wrap_loop(&mut self) {
+        if !self.running {
+            return;
+        }
+        let Some((_, end)) = self.loop_frames() else { return };
+        if self.time() != end {
+            return;
+        }
+        if let Some((start, _)) = self.graph.loop_beats {
+            self.jump_to(start);
+        }
+        self.graph.launcher.publish();
+    }
+
+    /// While running, playback continues from `beat` from the next frame on.
+    fn jump_to(&mut self, beat: f64) {
         self.release_sounding();
         self.locate(beat);
         // Read from the new place; until the worker gets there, stretched clips are silent.

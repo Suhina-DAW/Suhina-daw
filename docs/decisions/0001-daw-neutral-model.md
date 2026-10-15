@@ -54,7 +54,7 @@ Its key ideas:
 `suhina-model` is a DAW-neutral model built on DAWproject's ideas, in three layers:
 
 1. **A common core** of concepts every DAW has:
-   - a transport (tempo, time signature)
+   - a transport (tempo, time signature, the arrangement's loop region and whether it is on)
    - **tracks** (structure) and **channels** (mixer strips: volume, pan, mute, solo, sends,
      output, device chain) as separate objects
    - a pool of **clip contents**, each made of **content lanes**; a lane holds notes or audio and
@@ -62,7 +62,8 @@ Its key ideas:
    - **clips** that place a content from the pool on the arrangement or in a launcher slot, with
      their own start, length, offset and loop range, and (audio on the arrangement) a fade-in and
      a fade-out in beats ([arrangement editing](../spec/arrangement-editing.md) › Fades)
-   - an **arrangement** of lanes, each optionally bound to a track
+   - an **arrangement** of lanes, each optionally bound to a track, and its **markers** (named
+     beats on the timeline, kept in beat order)
    - a **launcher**: scenes and per-track slot columns
 2. **Per-format extensions.** Every object carries an `Extensions` list where an importer keeps
    data the core does not model, keyed by format, verbatim, so that a future exporter for the
@@ -73,8 +74,9 @@ Its key ideas:
    convert to and from the core. Adding a format never requires changing another format.
 
 Objects refer to each other by typed ids (`TrackId`, `ChannelId`, `ContentId`), not by pointers.
-`Project::validate` checks that every id resolves and that every arrangement clip's fades fit it,
-so a malformed import becomes an error instead of a crash.
+`Project::validate` checks that every id resolves, that every arrangement clip's fades fit it and
+that every marker is at a beat from 0 on, so a malformed import becomes an error instead of a
+crash.
 
 How each DAW maps onto the core:
 
@@ -149,7 +151,9 @@ clip its own content. Audio content edits (`clip.setGain`) still act on the shar
 - Plug-in state stays opaque, but in each plug-in format's standard container where a source
   format keeps its own: a VST2 plug-in's state is the standard VST2 bank (`.fxb`), which other
   hosts and a VST3 version of the plug-in read (ADR 0006, decision 8).
-- The core will grow (automation, tempo maps, markers, comping). Each addition is checked
+- Arrangement markers are a beat and a name: what a Live Set's locators hold, and what
+  DAWproject's arrangement `Markers` (a time and a name, with an optional colour) hold.
+- The core will grow (automation, tempo maps, comping). Each addition is checked
   against at least two formats before it lands, so it does not bake in one DAW's assumptions.
 - Positions are `f64` beats in the core. If rounding errors appear against tick-based formats
   (FL uses PPQ ticks), we revisit this with a rational or tick-based time type.

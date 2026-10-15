@@ -21,10 +21,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
-    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
-    FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb,
-    Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation,
+    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker, automation, Marker,
 };
 
 /// The file extension, without the dot.
@@ -196,24 +193,30 @@ fn slashes(path: &Path) -> String {
 
 fn project_value(p: &Project) -> Value {
     let mut out = Map::new();
-    out.insert(
-        "transport".into(),
-        json!({
-            "tempo_bpm": number(p.transport.tempo_bpm),
-            "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
-        }),
-    );
+    let mut transport = json!({
+        "tempo_bpm": number(p.transport.tempo_bpm),
+        "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
+    });
+    // Left out when there is no loop region, so such a project is written as before.
+    if let Some(range) = p.transport.loop_range {
+        transport["loop"] =
+            json!({ "start": number(range.start), "end": number(range.end), "enabled": p.transport.loop_enabled });
+    }
+    out.insert("transport".into(), transport);
     out.insert("tracks".into(), p.tracks.iter().map(track_value).collect());
     out.insert("channels".into(), p.channels.iter().map(channel_value).collect());
     out.insert("contents".into(), p.contents.iter().map(content_value).collect());
-    out.insert(
-        "arrangement".into(),
-        json!({ "lanes": p.arrangement.lanes.iter().map(|lane| json!({
-            "name": lane.name,
-            "track": lane.track.map(|t| t.0),
-            "clips": lane.clips.iter().map(clip_value).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>() }),
-    );
+    let mut arrangement = json!({ "lanes": p.arrangement.lanes.iter().map(|lane| json!({
+        "name": lane.name,
+        "track": lane.track.map(|t| t.0),
+        "clips": lane.clips.iter().map(clip_value).collect::<Vec<_>>(),
+    })).collect::<Vec<_>>() });
+    // Left out when there are none, so a project without markers is written as before.
+    if !p.arrangement.markers.is_empty() {
+        arrangement["markers"] =
+            p.arrangement.markers.iter().map(|m| json!({ "beat": number(m.beat), "name": m.name })).collect();
+    }
+    out.insert("arrangement".into(), arrangement);
     out.insert(
         "launcher".into(),
         json!({
@@ -566,7 +569,19 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
             if !(1.0..=999.0).contains(&tempo) {
                 return Err(format!("project.transport.tempo_bpm: {tempo} is not a tempo").into());
             }
-            Transport { tempo_bpm: tempo, time_signature: signature }
+            let (loop_range, loop_enabled) = match t.get("loop") {
+                None | Some(Value::Null) => (None, false),
+                Some(l) => {
+                    let at = "project.transport.loop";
+                    let l = object(l, at)?;
+                    let range = LoopRange { start: float(l, "start", at)?, end: float(l, "end", at)? };
+                    if !range.is_valid_region() {
+                        return Err(format!("{at}: expected a start from 0 on and an end after it").into());
+                    }
+                    (Some(range), flag(l, "enabled", false, at)?)
+                }
+            };
+            Transport { tempo_bpm: tempo, time_signature: signature, loop_range, loop_enabled }
         }
     };
     let tracks = list(p, "tracks", "project")?
@@ -603,7 +618,19 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
                     clips,
                 });
             }
-            Arrangement { lanes }
+            let mut markers = Vec::new();
+            for (i, v) in list(a, "markers", "project.arrangement")?.iter().enumerate() {
+                let at = format!("project.arrangement.markers[{i}]");
+                let m = object(v, &at)?;
+                let beat = float(m, "beat", &at)?;
+                if beat < 0.0 {
+                    return Err(format!("{at}.beat: expected a beat from 0 on").into());
+                }
+                markers.push(Marker { beat, name: text(m, "name", &at)? });
+            }
+            let mut arrangement = Arrangement { lanes, markers };
+            arrangement.sort_markers();
+            arrangement
         }
     };
     let launcher = match p.get("launcher") {

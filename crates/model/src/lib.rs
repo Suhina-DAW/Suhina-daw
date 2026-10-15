@@ -38,11 +38,28 @@ pub struct Project {
 pub struct Transport {
     pub tempo_bpm: f64,
     pub time_signature: TimeSignature,
+    /// The arrangement's loop region, in beats from the start: kept while looping is off, so
+    /// turning it on again repeats the same span ([`Transport::looping`]).
+    pub loop_range: Option<LoopRange>,
+    /// Whether playback repeats the loop region.
+    pub loop_enabled: bool,
 }
 
 impl Default for Transport {
     fn default() -> Self {
-        Self { tempo_bpm: 120.0, time_signature: TimeSignature { numerator: 4, denominator: 4 } }
+        Self {
+            tempo_bpm: 120.0,
+            time_signature: TimeSignature { numerator: 4, denominator: 4 },
+            loop_range: None,
+            loop_enabled: false,
+        }
+    }
+}
+
+impl Transport {
+    /// The span playback repeats: the loop region while looping is on and the region is valid.
+    pub fn looping(&self) -> Option<LoopRange> {
+        self.loop_range.filter(|r| self.loop_enabled && r.is_valid_region())
     }
 }
 
@@ -480,6 +497,14 @@ pub struct LoopRange {
     pub end: f64,
 }
 
+impl LoopRange {
+    /// Whether it can be the arrangement's loop region: finite, starting at 0 or later and
+    /// ending after it starts.
+    pub fn is_valid_region(&self) -> bool {
+        self.start.is_finite() && self.end.is_finite() && self.start >= 0.0 && self.end > self.start
+    }
+}
+
 /// What a launched clip does after it has played for its follow time: action A or action B,
 /// picked by chance with their weights (`docs/spec/clip-launching.md` › Follow actions).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -594,6 +619,41 @@ impl FollowKind {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Arrangement {
     pub lanes: Vec<ArrangementLane>,
+    /// Named positions on the timeline, sorted by beat ([`Arrangement::sort_markers`]).
+    pub markers: Vec<Marker>,
+}
+
+impl Arrangement {
+    /// Puts the markers in order of their beats; markers on the same beat keep their order.
+    pub fn sort_markers(&mut self) {
+        self.markers.sort_by(|a, b| a.beat.total_cmp(&b.beat));
+    }
+
+    /// Adds a marker after any already on its beat and returns its index.
+    pub fn insert_marker(&mut self, marker: Marker) -> usize {
+        let at = self.markers.partition_point(|m| m.beat <= marker.beat);
+        self.markers.insert(at, marker);
+        at
+    }
+}
+
+/// A named position on the arrangement's timeline (a locator): playback can jump to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marker {
+    /// Beats from the start, at least 0.
+    pub beat: f64,
+    pub name: String,
+}
+
+impl Marker {
+    pub fn new(beat: f64, name: impl Into<String>) -> Self {
+        Self { beat, name: name.into() }
+    }
+
+    /// Whether the beat is a finite number, not negative.
+    pub fn is_valid(&self) -> bool {
+        self.beat.is_finite() && self.beat >= 0.0
+    }
 }
 
 /// A row of the arrangement. Bound to a track, or free (a row of a pattern playlist, whose clips
@@ -664,6 +724,10 @@ pub enum ValidationError {
         lane: usize,
         clip: usize,
     },
+    /// The arrangement marker at this index has a beat that is negative or not finite.
+    BadMarker(usize),
+    /// The transport's loop region is not finite, starts before 0 or does not end after it starts.
+    BadLoop,
 }
 
 impl fmt::Display for ValidationError {
@@ -682,6 +746,8 @@ impl fmt::Display for ValidationError {
                      or a fade curve outside -1 to +1"
                 )
             }
+            Self::BadMarker(index) => write!(f, "arrangement marker {index} is not at a beat from 0 on"),
+            Self::BadLoop => write!(f, "the loop region does not start at a beat from 0 on and end after it starts"),
         }
     }
 }
@@ -747,6 +813,14 @@ impl Project {
                     errors.push(ValidationError::BadFades { lane: lane_index, clip: clip_index });
                 }
             }
+        }
+        for (index, marker) in self.arrangement.markers.iter().enumerate() {
+            if !marker.is_valid() {
+                errors.push(ValidationError::BadMarker(index));
+            }
+        }
+        if self.transport.loop_range.is_some_and(|r| !r.is_valid_region()) {
+            errors.push(ValidationError::BadLoop);
         }
         for column in &self.launcher.columns {
             track_ref(column.track, &mut errors);
@@ -896,6 +970,7 @@ mod tests {
                     track: Some(TrackId(1)),
                     clips: vec![clip(1, 0.0)],
                 }],
+                markers: Vec::new(),
             },
             launcher: Launcher {
                 scenes: vec![Scene::default(), Scene::default()],
@@ -936,6 +1011,7 @@ mod tests {
                     track: None,
                     clips: vec![clip(1, 0.0), clip(1, 4.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -960,6 +1036,7 @@ mod tests {
                     track: Some(TrackId(5)),
                     clips: vec![clip(3, 0.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -1042,6 +1119,7 @@ mod tests {
                     track: None,
                     clips: vec![with(1.0, 1.0), with(3.0, 3.0)],
                 }],
+                markers: Vec::new(),
             },
             ..Project::default()
         };
@@ -1059,6 +1137,49 @@ mod tests {
         let mut c = Clip { fade_in: 1.0, fade_out: 0.5, ..clip(1, 0.0) };
         c.fit_fades();
         assert_eq!((c.fade_in, c.fade_out), (1.0, 0.5), "fades that fit are kept");
+    }
+
+    #[test]
+    fn the_loop_region_repeats_only_while_on_and_must_end_after_it_starts() {
+        let mut transport = Transport { loop_range: Some(LoopRange { start: 4.0, end: 8.0 }), ..Transport::default() };
+        assert_eq!(transport.looping(), None, "off: kept, not repeated");
+        transport.loop_enabled = true;
+        assert_eq!(transport.looping(), Some(LoopRange { start: 4.0, end: 8.0 }));
+
+        for bad in [(4.0, 4.0), (8.0, 4.0), (-1.0, 4.0), (0.0, f64::INFINITY), (f64::NAN, 1.0)] {
+            let project = Project {
+                transport: Transport {
+                    loop_range: Some(LoopRange { start: bad.0, end: bad.1 }),
+                    ..Transport::default()
+                },
+                ..Project::default()
+            };
+            assert_eq!(project.validate(), Err(vec![ValidationError::BadLoop]), "{bad:?}");
+            assert_eq!(Transport { loop_enabled: true, ..project.transport }.looping(), None);
+        }
+    }
+
+    #[test]
+    fn markers_stay_in_beat_order_and_must_be_at_a_beat_from_0() {
+        let mut arrangement = Arrangement::default();
+        assert_eq!(arrangement.insert_marker(Marker::new(8.0, "Chorus")), 0);
+        assert_eq!(arrangement.insert_marker(Marker::new(0.0, "Intro")), 0);
+        assert_eq!(arrangement.insert_marker(Marker::new(8.0, "Drop")), 2, "after the one already on beat 8");
+        let names: Vec<&str> = arrangement.markers.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Intro", "Chorus", "Drop"]);
+        arrangement.markers[0].beat = 12.0;
+        arrangement.sort_markers();
+        let names: Vec<&str> = arrangement.markers.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Chorus", "Drop", "Intro"]);
+
+        let project = Project {
+            arrangement: Arrangement {
+                lanes: Vec::new(),
+                markers: vec![Marker::new(0.0, "ok"), Marker::new(-1.0, "before"), Marker::new(f64::NAN, "nan")],
+            },
+            ..Project::default()
+        };
+        assert_eq!(project.validate(), Err(vec![ValidationError::BadMarker(1), ValidationError::BadMarker(2)]));
     }
 
     #[test]

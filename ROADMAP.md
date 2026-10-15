@@ -333,6 +333,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
+- **Markers** on the arrangement's timeline, in a row under the ruler: M adds one at the
+  playhead, a right-click on the ruler or the row adds one there; a click jumps to it, a drag
+  moves it, its menu renames or deletes it (`marker.add`, `marker.move`, `marker.rename`,
+  `marker.delete`, `marker.jump`, `project.markers`). Saved in the project file, and a Live Set's
+  locators import as markers ([spec](docs/spec/arrangement-editing.md#markers)).
+- **Loop region** in the arrangement: drag in the loop brace row under the ruler to draw it, drag
+  its ends or its middle to change it, click it or press Ctrl+L to turn looping on or off. While
+  on, playback repeats the span, wrapping on the exact sample (`transport.setLoop`,
+  `transport.setLoopEnabled`). Saved in the project file, and a Live Set's loop imports
+  ([spec](docs/spec/arrangement-editing.md#loop-region)).
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
   (the templates folder is a setting) or open one (a typed path or the recent ones); Ctrl+S saves
   as `.suhina` (asking for a name and folder the first time), Ctrl+Shift+S saves as, and File ›

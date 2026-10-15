@@ -396,6 +396,33 @@ fn the_play_start_marker_moves_and_stop_returns_to_it() {
 }
 
 #[test]
+fn jumping_to_a_marker_moves_the_play_start_marker_and_playback() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "marker.add", json!({ "beat": 6.0, "name": "Verse" })).unwrap();
+    run(&mut session, "marker.add", json!({ "beat": 2.0, "name": "Intro" })).unwrap();
+    let jump = run(&mut session, "marker.jump", json!({ "index": 1 })).unwrap();
+    assert_eq!(jump["start_beat"], 6.0);
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["start_beat"].as_f64(), state["position"].as_str()), (Some(6.0), Some("2.3")));
+
+    // While playing, playback jumps there at once.
+    run(&mut session, "transport.play", json!({})).unwrap();
+    advance(&mut renderer, BEAT);
+    run(&mut session, "marker.jump", json!({ "index": 0 })).unwrap();
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["running"].as_bool(), state["position"].as_str()), (Some(true), Some("1.3")));
+
+    // A jump is not an edit: undo takes back the second marker, not the jump.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().arrangement.markers.len(), 1);
+    // A marker that is not there is an error.
+    assert!(run(&mut session, "marker.jump", json!({ "index": 1 })).unwrap_err().contains("does not exist"));
+    assert!(run(&mut session, "marker.jump", json!({})).is_err());
+}
+
+#[test]
 fn bad_positions_and_stop_returns_are_errors() {
     let (mut session, mut renderer) = playing();
     run(&mut session, "transport.setPosition", json!({ "beats": 2 })).unwrap();
@@ -577,4 +604,22 @@ fn launcher_state_reports_the_cpu_load() {
     // The monitor the player reads is the one the renderer writes.
     advance(&mut renderer, 2);
     assert_eq!(session.player().unwrap().cpu_monitor().load_milli(), renderer.cpu_monitor().load_milli());
+}
+
+#[test]
+fn a_loop_turned_on_while_playing_repeats_its_span() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "transport.setLoop", json!({ "start": 1.0, "end": 2.0, "enabled": true })).unwrap();
+    run(&mut session, "transport.play", json!({})).unwrap();
+    // 3.5 beats in: past the loop end twice, so half a beat into the loop.
+    advance(&mut renderer, 7 * BEAT / 2);
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["running"].as_bool(), state["position"].as_str()), (Some(true), Some("1.2")));
+
+    // Off: playback carries on past the loop end.
+    run(&mut session, "transport.setLoopEnabled", json!({ "enabled": false })).unwrap();
+    advance(&mut renderer, BEAT);
+    advance(&mut renderer, 1);
+    assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["position"], "1.3");
 }

@@ -1,9 +1,9 @@
 ---
 description: How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces
-read_when: making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
+read_when: making test sets, locators, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/als/tests/corpus.rs
   - scripts/test-signal.py
@@ -535,6 +535,57 @@ is in the log, to confirm by ear that the reference really keys the device.
 `corpus/als/README.md`, as in the Log section at the end, plus for every file what the choosers listed,
 whether a tap choice appeared, and (optionally) a bounce of `602`'s first bar (48 kHz, 32-bit float) as
 `602-bounce.wav`, to hear the ducking.
+
+## Series 11: locators
+
+Shows where a Live Set stores the arrangement's locators (named positions on the timeline) and
+what each one holds, so the importer can read them into arrangement markers. Until then
+`als-format.md` › Locators lists the structure as a hypothesis.
+
+### Setup
+
+1. Start from `00-base.als` (series 1) and Save As `corpus/als/700-locators-base.als`.
+2. Switch to Arrangement View. Set the arrangement grid to one bar, so locators land on bars.
+
+### Files (700–704)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 700 | `700-locators-base.als` | No edit. |
+| 701 | `701-locator-bar-5.als` | Put the insert marker at bar 5 and add a locator there (Create › Add Locator). |
+| 702 | `702-locator-renamed.als` | Rename that locator to `Verse`. |
+| 703 | `703-locator-bar-2.als` | Put the insert marker at bar 2 and add a second locator there, so the second one added is the earlier one. |
+| 704 | `704-locator-moved.als` | Drag the `Verse` locator from bar 5 to bar 9. |
+
+### Log
+
+`corpus/als/README.md`, as in the Log section at the end, plus the default name Live gave each new
+locator.
+
+## Series 12: arrangement loop
+
+Shows where a Live Set stores the arrangement's loop region and whether it is on, so the
+importer can read them into the transport's loop region. Until then `als-format.md` › Arrangement
+loop lists the structure as a hypothesis.
+
+### Setup
+
+1. Start from `00-base.als` (series 1) and Save As `corpus/als/800-loop-base.als`.
+2. Switch to Arrangement View. Set the arrangement grid to one bar.
+
+### Files (800–803)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 800 | `800-loop-base.als` | No edit. |
+| 801 | `801-loop-bars-5-9.als` | Set the loop brace to start at bar 5 and end at bar 9 (four bars), and turn the loop on. |
+| 802 | `802-loop-off.als` | Turn the loop off; leave the brace where it is. |
+| 803 | `803-loop-bars-3-4.als` | Drag the brace to start at bar 3 and set its length to one bar; turn the loop on again. |
+
+### Log
+
+`corpus/als/README.md`, as in the Log section at the end, plus the loop start and length the
+transport bar showed for each file.
 
 ## Tips from the first run
 

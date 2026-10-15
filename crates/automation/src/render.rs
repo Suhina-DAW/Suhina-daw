@@ -164,7 +164,7 @@ pub fn scene_as_arrangement(project: &Project, scene: usize) -> Result<Project, 
         })
         .collect();
     let mut project = project.clone();
-    project.arrangement = Arrangement { lanes };
+    project.arrangement = Arrangement { lanes, markers: Vec::new() };
     Ok(project)
 }
 

@@ -18,7 +18,7 @@ const GUARD: f64 = 0.002 * SR as f64;
 
 /// One audio track playing `file` from an arrangement clip of `length` beats with the given
 /// fades, and the same clip in its launcher slot.
-fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Project {
+pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Project {
     let clip = Clip {
         content: ContentId(1),
         start: 0.0,
@@ -66,6 +66,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "Audio".into(), track: Some(TrackId(1)), clips: vec![clip.clone()] }],
+            markers: Vec::new(),
         },
         launcher: Launcher {
             scenes: vec![Scene::default()],
@@ -75,7 +76,7 @@ fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Pro
     }
 }
 
-fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f64) -> AudioRegion {
+pub(crate) fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f64) -> AudioRegion {
     AudioRegion {
         file: file.into(),
         absolute_file: None,
@@ -111,11 +112,11 @@ fn sine() -> AudioPool {
     pool
 }
 
-fn left(out: &[f32]) -> Vec<f32> {
+pub(crate) fn left(out: &[f32]) -> Vec<f32> {
     out.as_chunks::<2>().0.iter().map(|[l, _]| *l).collect()
 }
 
-fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn max_diff(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
 }
 
@@ -137,7 +138,7 @@ fn golden_dir() -> PathBuf {
 
 /// Compares `render` with the golden file `name`, little-endian f32. With `SUHINA_BLESS=1` the
 /// file is written instead (see tests/golden/README.md).
-fn assert_golden(name: &str, render: &[f32]) {
+pub(crate) fn assert_golden(name: &str, render: &[f32]) {
     let path = golden_dir().join(format!("{name}.f32"));
     if std::env::var_os("SUHINA_BLESS").is_some() {
         let bytes: Vec<u8> = render.iter().flat_map(|s| s.to_le_bytes()).collect();
