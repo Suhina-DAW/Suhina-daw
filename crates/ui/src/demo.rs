@@ -93,7 +93,7 @@ pub fn demo_project() -> Project {
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.launcher = Launcher {
-        scenes: SCENES.iter().map(|name| Scene { name: (*name).into(), tempo_bpm: None }).collect(),
+        scenes: SCENES.iter().map(|name| Scene { name: (*name).into(), ..Scene::default() }).collect(),
         columns,
     };
     project
@@ -112,6 +112,7 @@ fn channel(id: ChannelId, name: &str, role: ChannelRole, output: Option<ChannelI
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     }
 }
 

@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
@@ -80,7 +80,8 @@ code a scan runs.
 ## Amendment: running plug-ins (2026-10-12)
 
 A seventh kind, **plugin**, acts on one of the project's running plug-ins:
-`device.openEditor`, `device.closeEditor` and `device.restart` ([ADR 0006](0006-plug-in-hosting.md)).
+`device.openEditor`, `device.closeEditor`, `device.restart` and `device.pluginParams`, which asks
+the plug-in for its parameters ([ADR 0006](0006-plug-in-hosting.md)).
 They run on the session, never change the project and record no undo step. Adding a plug-in
 (`device.addPlugin`) is an edit like `device.add`; `device.plugin` reads where a plug-in device
 stands. `plugins.setHosting` (kind plugins) chooses how a plug-in shares host processes.
@@ -90,7 +91,10 @@ search, pins, recent items and colour tags (`library.*`, [ADR 0012](0012-file-li
 never changes a project. A successful edit that adds something from the browser (`clip.addFiles`,
 `track.add`, `device.add`, `device.addPlugin`) is recorded among the library's recent items by
 `Projects`, so the CLI, MCP and the window all keep them. Parameters may also be a list of
-texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings.
+texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings,
+a list of whole numbers (`ParamType::Integers`, the note indices of `note.delete` and the other
+`note.*` edits), or a list of new notes (`ParamType::Notes`, `note.add`'s `notes`, each an object
+`{time, length, key, velocity?}` whose fields the JSON Schema spells out).
 The sample map's commands (`soundmap.*`, [ADR 0013](0013-sample-map-analysis.md)) are of the
 library kind too: they read the library's samples and the analysis `Projects` keeps beside it.
 
@@ -107,7 +111,29 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 `device.add`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
 `track.devices` read. A device is addressed by its track and its index in the track's chain
 (`device`, from 0, as `track.devices` lists them), and a parameter by its stable id
-([ADR 0004](0004-built-in-devices.md)). Agents may run all of them.
+([ADR 0004](0004-built-in-devices.md)), or a plug-in's by its parameter id. `device.setAutomation`
+(also an edit) sets or removes a plug-in parameter's automation lane; its `points` are a list of
+numbers (`ParamType::Numbers`, beat and value in turn), shown to agents as an array of numbers.
+Agents may run all of them.
+
+## Amendment: one drag, one undo step (2026-10-15)
+
+A value dragged in the window (a track's pan or volume) is heard while it moves, so the window
+runs the command on every frame of the drag, not only on release
+([#313](https://github.com/suhina-daw/suhina-daw/issues/313)). One drag still records one undo
+step: `track.setVolume` and `track.setPan` take an optional `continue`. With `continue: true`
+the change joins the undo step that the previous call of the same command on the same track
+made, as long as nothing else happened in between; any other edit, a call without `continue`
+(even one that changes nothing), undo and redo end that step. The window sends the first frame
+of a drag without `continue` and the rest, and the release, with it; a double-click reset is a
+step of its own. Agents can do the same over MCP.
+
+A dragged value reaches the playing engine as any edit does, a new graph at the next block
+([ADR 0005](0005-edits-while-playing.md)). A drag can send graphs faster than the engine takes
+them (the queue holds 16, and graphs with stretched audio wait 0.15 s before they take over); a
+continued call whose graph does not fit is therefore not an error. The project keeps the
+value and `Session::catch_up_player`, which the window calls every frame through
+`Projects::poll_plugins`, sends the project again until the engine has it.
 
 ## Consequences
 

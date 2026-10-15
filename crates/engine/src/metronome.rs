@@ -55,14 +55,16 @@ impl Metronome {
         }
     }
 
-    /// The click's sample for a frame at launcher beat `beat` (`bar_beats` beats to a bar).
-    pub(crate) fn frame(&mut self, running: bool, beat: f64, bar_beats: f64) -> f32 {
+    /// The click's sample for a frame at launcher beat `beat` (`bar_beats` beats to a bar, bars
+    /// counted from beat `bar_origin`, where the time signature last changed).
+    pub(crate) fn frame(&mut self, running: bool, beat: f64, bar_beats: f64, bar_origin: f64) -> f32 {
         if running && beat.is_finite() {
             let index = beat.floor() as i64;
             if self.last_beat != Some(index) {
                 self.last_beat = Some(index);
                 if self.on {
-                    let bar_start = bar_beats > 0.0 && (index as f64 / bar_beats).fract().abs() < 1e-9;
+                    let into_bar = (index as f64 - bar_origin).rem_euclid(bar_beats);
+                    let bar_start = bar_beats > 0.0 && (into_bar < 1e-9 || bar_beats - into_bar < 1e-9);
                     let hz = if bar_start { BAR_HZ } else { BEAT_HZ };
                     self.sounding = Some((0.0, hz / self.sample_rate));
                 }

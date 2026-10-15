@@ -26,6 +26,15 @@ on:
 permissions:
   contents: read
 
+# Events about one item arrive together (an issue is opened and closed, a pull request is merged
+# right after it was pushed). A newer event about the same item replaces one that is still waiting,
+# so a burst waits as one run per item instead of one per event. A post that is already running is
+# never cut off (cancel-in-progress: false): a half-posted notification is one nobody sees. Items
+# never share a group, so their posts do not wait for each other either.
+concurrency:
+  group: discord-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.release.tag_name || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   post:
     runs-on: ubuntu-latest

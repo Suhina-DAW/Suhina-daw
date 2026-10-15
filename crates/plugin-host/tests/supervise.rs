@@ -300,12 +300,14 @@ fn a_bank_of_programs_is_set_as_parameters() {
     bank.extend_from_slice(&0.125f32.to_be_bytes());
     plugin.load_state(bank.clone()).unwrap();
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
-    // A bank with more parameters than the plug-in has ids for is not set by number.
+    // A bank with more parameters than the plug-in has ids for (two: gain and latency) is not
+    // set by number.
     let mut wider = bank.clone();
     wider.extend_from_slice(&0.5f32.to_be_bytes());
-    let size = 4u32 * 5 + 28 + 8;
+    wider.extend_from_slice(&0.5f32.to_be_bytes());
+    let size = 4u32 * 5 + 28 + 12;
     wider[156 + 4..156 + 8].copy_from_slice(&size.to_be_bytes());
-    wider[156 + 24..156 + 28].copy_from_slice(&2u32.to_be_bytes());
+    wider[156 + 24..156 + 28].copy_from_slice(&3u32.to_be_bytes());
     assert!(matches!(plugin.load_state(wider), Err(PluginError::Host(_))));
     assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
 }
@@ -494,7 +496,10 @@ fn parameters_are_listed_set_and_kept_over_a_restart() {
     for spec in ["test:clap", "test:vst3"] {
         let (mut plugin, mut audio) = start(spec);
         let params = plugin.params().unwrap();
-        let [gain] = params.as_slice() else { panic!("{spec}: {params:?}") };
+        // The VST3 test plug-in has its latency as a second parameter.
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, if spec == "test:vst3" { vec!["Gain", "Latency"] } else { vec!["Gain"] }, "{spec}");
+        let gain = &params[0];
         assert_eq!((gain.id, gain.name.as_str(), gain.value, gain.default), (0, "Gain", 0.5, 0.5), "{spec}");
         assert_eq!((gain.min, gain.max, gain.automatable), (0.0, 1.0, true), "{spec}");
 
@@ -513,4 +518,89 @@ fn parameters_are_listed_set_and_kept_over_a_restart() {
     }
     let (mut plain, _audio) = start("test:gain");
     assert!(plain.params().unwrap().is_empty());
+}
+
+/// Runs blocks of `input` (`FRAMES` frames, stereo) until the plug-in reports `latency`, and
+/// returns the time that took.
+fn until_latency(plugin: &mut Plugin, audio: &mut PluginAudio, latency: u32) -> Duration {
+    let started = Instant::now();
+    let mut output = [0.0f32; FRAMES * 2];
+    while plugin.follow_latency() != latency {
+        assert!(started.elapsed() < PATIENT, "still {} frames, not {latency}", plugin.latency());
+        // Blocks during the plug-in's restart may go unanswered.
+        audio.process(&[0.0; FRAMES * 2], &mut output, PATIENT);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    started.elapsed()
+}
+
+/// The frame of the first sound in the left channel of the blocks an impulse at frame 0 makes,
+/// after a block of silence to empty the plug-in's delay.
+fn impulse_at(audio: &mut PluginAudio) -> Option<usize> {
+    let mut output = [0.0f32; FRAMES * 2];
+    assert_eq!(audio.process(&[0.0; FRAMES * 2], &mut output, PATIENT), Outcome::Done);
+    let mut input = [0.0f32; FRAMES * 2];
+    input[0] = 1.0;
+    input[1] = 1.0;
+    let mut left = Vec::new();
+    for block in [input, [0.0; FRAMES * 2]] {
+        assert_eq!(audio.process(&block, &mut output, PATIENT), Outcome::Done);
+        left.extend(output.chunks(2).map(|f| f[0]));
+    }
+    left.iter().position(|s| s.abs() > 0.5)
+}
+
+/// A CLAP plug-in whose latency is a parameter asks for a restart when it changes (#110): the
+/// host deactivates and activates it again, the engine is told the new latency unasked, and its
+/// audio comes that much later. A restart of the plug-in brings the value back.
+#[test]
+fn a_clap_plug_in_that_changes_its_latency_tells_the_engine() {
+    let (mut plugin, mut audio) = start("test:clap-delay");
+    assert_eq!(plugin.latency(), 0);
+    assert_eq!(impulse_at(&mut audio), Some(0));
+    assert_eq!(plugin.set_param(0, 10.0).unwrap().value, 10.0);
+    until_latency(&mut plugin, &mut audio, 10);
+    assert_eq!(plugin.latency(), 10);
+    assert_eq!(impulse_at(&mut audio), Some(10), "the audio is as late as it says");
+    // Longer than a block too.
+    plugin.set_param(0, 100.0).unwrap();
+    until_latency(&mut plugin, &mut audio, 100);
+    assert_eq!(impulse_at(&mut audio), Some(100));
+    // Asked again with the value it has, it does not restart, and nothing is reported.
+    plugin.set_param(0, 100.0).unwrap();
+    assert_eq!(impulse_at(&mut audio), Some(100));
+    assert_eq!(plugin.follow_latency(), 100);
+
+    // A restart loads it fresh (no latency) and sets the value again, which it reports again.
+    let mut audio = plugin.restart().unwrap();
+    until_latency(&mut plugin, &mut audio, 100);
+    assert_eq!(impulse_at(&mut audio), Some(100));
+}
+
+/// A VST3 plug-in says its latency changed through `restartComponent` (#110): the host hands the
+/// processor the parameter that changed it, deactivates and activates it, and tells the engine
+/// the latency it reports then. It goes on processing as before.
+#[test]
+fn a_vst3_plug_in_that_changes_its_latency_tells_the_engine() {
+    let (mut plugin, mut audio) = start("test:vst3");
+    assert_eq!(plugin.latency(), 32);
+    let latency = &plugin.params().unwrap()[1];
+    assert_eq!((latency.id, latency.name.as_str()), (1, "Latency"));
+    plugin.set_param(1, 64.0 / 4096.0).unwrap();
+    until_latency(&mut plugin, &mut audio, 64);
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5), "it processes as before");
+    plugin.set_param(1, 0.0).unwrap();
+    until_latency(&mut plugin, &mut audio, 0);
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.5));
+}
+
+/// A plug-in whose latency changes with no restart of its own (the `test:` processors) is
+/// followed too.
+#[test]
+fn a_test_processor_that_changes_its_latency_tells_the_engine() {
+    let (mut plugin, mut audio) = start("test:delay-after:2:8");
+    assert_eq!(plugin.latency(), 0);
+    let took = until_latency(&mut plugin, &mut audio, 8);
+    assert!(took < PATIENT, "{took:?}");
+    assert_eq!(impulse_at(&mut audio), Some(8));
 }

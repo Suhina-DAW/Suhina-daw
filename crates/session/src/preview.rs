@@ -1,5 +1,7 @@
 //! `preview.play` and `preview.stop` (ADR 0011): the browser's preview of a sample or a MIDI
-//! file, through the attached engine. They never change the project.
+//! file, through the attached engine. `preview.noteOn` and `preview.noteOff` are the piano
+//! roll's key column: a note through the track's instrument until it is let go. They never
+//! change the project.
 
 use std::path::Path;
 
@@ -13,6 +15,8 @@ use crate::{CommandError, Session};
 
 /// The preview's level when none is given: −6 dB.
 const DEFAULT_GAIN_DB: f64 = -6.0;
+/// The velocity a previewed key takes when none is given, MIDI 1 to 127.
+const DEFAULT_VELOCITY: f64 = 100.0;
 
 pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     session.player_mut()?;
@@ -65,4 +69,49 @@ pub(crate) fn play(session: &mut Session, params: &Value) -> Result<Value, Comma
 pub(crate) fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
     session.player_mut()?.controller_mut().preview_stop().map_err(CommandError)?;
     Ok(json!({ "stopped": true }))
+}
+
+/// `preview.noteOn`: plays `key` through `track`'s instrument until `preview.noteOff`. The note
+/// is prepared on this thread and held on the audio thread, so nothing allocates, locks or does
+/// I/O there. Transport kind: the project and the undo history are untouched.
+pub(crate) fn note_on(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let track = track_at(&session.project, params, "track")?;
+    let key = params
+        .get("key")
+        .and_then(Value::as_u64)
+        .and_then(|k| u8::try_from(k).ok())
+        .filter(|k| *k <= 127)
+        .ok_or("key must be a whole number from 0 to 127")?;
+    let midi = match params.get("velocity") {
+        None | Some(Value::Null) => DEFAULT_VELOCITY,
+        Some(v) => v.as_f64().filter(|v| (1.0..=127.0).contains(v)).ok_or("velocity must be 1 to 127")?,
+    };
+    let gain = 10f64.powf(DEFAULT_GAIN_DB / 20.0) as f32;
+    let bpm = session.project.transport.tempo_bpm;
+    let player = session.player_mut()?;
+    let rate = player.sample_rate();
+    let controller = player.controller_mut();
+    let fallback = controller.preview_instrument();
+    // A preview note of no length: the engine holds it until it is let go.
+    let notes =
+        suhina_engine::preview_notes([(0.0, 0.0, key, (midi / 127.0) as f32)], bpm, rate, Some(track), fallback);
+    controller.preview_note_on(notes, gain).map_err(CommandError)?;
+    Ok(json!({ "track": track.0, "key": key, "velocity": midi }))
+}
+
+/// `preview.noteOff`: releases the key `key` on `track`, or every held preview note when `key`
+/// is left out.
+pub(crate) fn note_off(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    track_at(&session.project, params, "track")?;
+    let key = match params.get("key") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|k| u8::try_from(k).ok())
+                .filter(|k| *k <= 127)
+                .ok_or("key must be a whole number from 0 to 127")?,
+        ),
+    };
+    session.player_mut()?.controller_mut().preview_note_off(key).map_err(CommandError)?;
+    Ok(json!({ "key": key }))
 }

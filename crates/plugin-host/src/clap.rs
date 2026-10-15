@@ -13,8 +13,14 @@
 //! main loop. Parameters are read on the main thread; a value set goes to the audio thread
 //! and reaches the plug-in as a parameter event at the start of the next block.
 //!
+//! A plug-in that asks for a restart (`request_restart`, as one whose latency changes while it
+//! runs must) is restarted from the main loop: its audio thread stops, it is deactivated and
+//! activated again, and a new audio thread serves the same link. Its latency is read again then,
+//! and when it says `latency.changed`.
+//!
 //! A plug-in is named `clap:<file>` (the first plug-in in the file) or `clap:<file>#<id>`, or
 //! `test:clap` for the gain plug-in built into the host for tests ([`crate::test_clap`]), or
+//! `test:clap-delay` for the delay whose latency is a parameter ([`crate::test_clap_delay`]), or
 //! `test:clap-ports` for the one with a rack's port layout ([`crate::test_clap_ports`]).
 
 use std::ffi::CString;
@@ -48,6 +54,8 @@ pub(crate) struct Host;
 
 pub(crate) struct Shared {
     callback_requested: AtomicBool,
+    /// The plug-in asked to be deactivated and activated again (from any thread).
+    restart_requested: AtomicBool,
     state: OnceLock<Option<PluginState>>,
     latency: OnceLock<Option<PluginLatency>>,
     audio_ports: OnceLock<Option<PluginAudioPorts>>,
@@ -170,7 +178,9 @@ impl<'a> SharedHandler<'a> for Shared {
         let _ = self.gui.set(instance.get_extension());
     }
 
-    fn request_restart(&self) {}
+    fn request_restart(&self) {
+        self.restart_requested.store(true, Ordering::Release);
+    }
 
     fn request_process(&self) {}
 
@@ -187,6 +197,8 @@ impl HostLogImpl for Shared {
 
 /// The plug-in's timers and (on Unix) the descriptors it waits on, served from the main loop.
 pub(crate) struct MainThread {
+    /// The plug-in said its latency changed (`latency.changed`).
+    latency_changed: std::cell::Cell<bool>,
     timers: std::cell::RefCell<crate::run_loop::Timers<u32>>,
     next_timer: std::cell::Cell<u32>,
     #[cfg(unix)]
@@ -196,6 +208,7 @@ pub(crate) struct MainThread {
 impl MainThread {
     fn new() -> Self {
         Self {
+            latency_changed: std::cell::Cell::new(false),
             timers: std::cell::RefCell::new(crate::run_loop::Timers::new()),
             next_timer: std::cell::Cell::new(0),
             #[cfg(unix)]
@@ -255,7 +268,9 @@ impl HostStateImpl for MainThread {
 }
 
 impl HostLatencyImpl for MainThread {
-    fn changed(&self) {}
+    fn changed(&self) {
+        self.latency_changed.set(true);
+    }
 }
 
 impl HostHandlers for Host {
@@ -275,12 +290,20 @@ impl HostHandlers for Host {
     }
 }
 
+/// What the audio thread hands back when it stops: the processor, to deactivate, and the link,
+/// for the next audio thread after a restart.
+type Stopped = (StoppedPluginAudioProcessor<Host>, Served);
+
 /// A loaded, active CLAP plug-in and its audio thread.
 pub(crate) struct ClapPlugin {
     instance: PluginInstance<Host>,
-    audio: Option<thread::JoinHandle<StoppedPluginAudioProcessor<Host>>>,
+    audio: Option<thread::JoinHandle<Stopped>>,
     stop: Arc<AtomicBool>,
     latency: u32,
+    /// How it was activated, to activate it the same way after a restart.
+    configuration: PluginAudioConfiguration,
+    /// Its audio ports (inputs, outputs), as they were when it was activated.
+    ports: (Ports, Ports),
     pending: PendingParams,
     editor: Option<ClapEditor>,
     /// The plug-in's name, for its editor's window.
@@ -292,6 +315,11 @@ pub(crate) struct ClapPlugin {
 fn entry(spec: &str) -> Result<(PluginEntry, Option<String>), String> {
     if spec == "test:clap" {
         let entry = PluginEntry::load_from_clack::<crate::test_clap::Entry>(c"suhina-test-clap")
+            .map_err(|e| format!("test plug-in: {e}"))?;
+        return Ok((entry, None));
+    }
+    if spec == "test:clap-delay" {
+        let entry = PluginEntry::load_from_clack::<crate::test_clap_delay::Entry>(c"suhina-test-clap-delay")
             .map_err(|e| format!("test plug-in: {e}"))?;
         return Ok((entry, None));
     }
@@ -349,6 +377,7 @@ impl ClapPlugin {
                 .map_err(|e| e.to_string())?;
         let shared = |_: &()| Shared {
             callback_requested: AtomicBool::new(false),
+            restart_requested: AtomicBool::new(false),
             state: OnceLock::new(),
             latency: OnceLock::new(),
             audio_ports: OnceLock::new(),
@@ -367,18 +396,31 @@ impl ClapPlugin {
         let max_frames = served.max_frames();
         let configuration = PluginAudioConfiguration { sample_rate, min_frames_count: 1, max_frames_count: max_frames };
         let stopped = instance.activate(|_, _| (), configuration).map_err(|e| e.to_string())?;
-        let latency = match instance.access_shared_handler(|s| s.latency.get().copied().flatten()) {
-            Some(latency) => latency.get(&instance.plugin_handle()),
-            None => 0,
-        };
+        let latency = read_latency(&mut instance);
 
         let ports =
             (Ports::of(&mut instance, true, served.channels()), Ports::of(&mut instance, false, served.channels()));
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let audio_stop = stop.clone();
-        let pending = PendingParams::default();
-        let audio_pending = pending.clone();
+        let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
+        let mut plugin = Self {
+            instance,
+            audio: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            latency,
+            configuration,
+            ports,
+            pending: PendingParams::default(),
+            editor: None,
+            name,
+        };
+        plugin.start_audio(stopped, served)?;
+        Ok(plugin)
+    }
+
+    /// Starts an audio thread that serves blocks from `served` through the activated plug-in.
+    fn start_audio(&mut self, stopped: StoppedPluginAudioProcessor<Host>, served: Served) -> Result<(), String> {
+        self.stop = Arc::new(AtomicBool::new(false));
+        let (audio_stop, audio_pending, ports) = (self.stop.clone(), self.pending.clone(), self.ports.clone());
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
             .spawn(move || {
@@ -386,12 +428,51 @@ impl ClapPlugin {
                 serve(stopped, served, ports, audio_pending, &audio_stop)
             })
             .map_err(|e| e.to_string())?;
-        let name = String::from_utf8_lossy(id.to_bytes()).into_owned();
-        Ok(Self { instance, audio: Some(audio), stop, latency, pending, editor: None, name })
+        self.audio = Some(audio);
+        Ok(())
     }
 
     pub(crate) fn latency(&self) -> u32 {
         self.latency
+    }
+
+    /// A latency the plug-in reported since this was last asked. A plug-in that asked for a
+    /// restart is restarted first (its latency may change only while it is deactivated).
+    pub(crate) fn latency_changed(&mut self) -> Option<u32> {
+        let restart = self.instance.access_shared_handler(|s| s.restart_requested.swap(false, Ordering::AcqRel));
+        let changed = self.instance.access_handler(|m| m.latency_changed.replace(false));
+        if !restart && !changed {
+            return None;
+        }
+        if restart && let Err(why) = self.reactivate() {
+            eprintln!("plug-in {}: could not restart it: {why}", self.name);
+        }
+        let latency = read_latency(&mut self.instance);
+        (latency != self.latency).then(|| {
+            self.latency = latency;
+            latency
+        })
+    }
+
+    /// Stops the audio thread, deactivates the plug-in, activates it again as it was and starts
+    /// a new audio thread on the same link. An audio thread stuck in the plug-in is left as it
+    /// is, and so is the plug-in.
+    fn reactivate(&mut self) -> Result<(), String> {
+        if !self.stop_audio(crate::UNLOAD_WAIT) {
+            return Err("its audio thread does not stop".into());
+        }
+        let (stopped, served) =
+            self.audio.take().ok_or("it has no audio thread")?.join().map_err(|_| "its audio thread failed")?;
+        self.instance.deactivate(stopped);
+        let stopped = self.instance.activate(|_, _| (), self.configuration).map_err(|e| e.to_string())?;
+        // What it said while activating is what is read next.
+        self.instance.access_handler(|m| m.latency_changed.set(false));
+        // A restart may also be for ports it changed.
+        self.ports = (
+            Ports::of(&mut self.instance, true, served.channels()),
+            Ports::of(&mut self.instance, false, served.channels()),
+        );
+        self.start_audio(stopped, served)
     }
 
     /// Asks the audio thread to stop and waits up to `wait` for it; whether it stopped.
@@ -599,25 +680,33 @@ impl Drop for ClapPlugin {
         self.close_editor();
         self.stop.store(true, Ordering::Release);
         if let Some(audio) = self.audio.take()
-            && let Ok(stopped) = audio.join()
+            && let Ok((stopped, _served)) = audio.join()
         {
             self.instance.deactivate(stopped);
         }
     }
 }
 
+/// The plug-in's latency as it reports it now (0 without the extension).
+fn read_latency(instance: &mut PluginInstance<Host>) -> u32 {
+    match instance.access_shared_handler(|s| s.latency.get().copied().flatten()) {
+        Some(latency) => latency.get(&instance.plugin_handle()),
+        None => 0,
+    }
+}
+
 /// The audio thread: serves blocks from the link through the plug-in until `stop` is set, and
-/// hands the stopped processor back for deactivation on the main thread.
+/// hands the stopped processor back for deactivation on the main thread, with the link.
 fn serve(
     stopped: StoppedPluginAudioProcessor<Host>,
     mut served: Served,
     (input_ports, output_ports): (Ports, Ports),
     pending: PendingParams,
     stop: &AtomicBool,
-) -> StoppedPluginAudioProcessor<Host> {
+) -> Stopped {
     let mut processor = match stopped.start_processing() {
         Ok(started) => started,
-        Err(e) => return e.into_stopped_processor(),
+        Err(e) => return (e.into_stopped_processor(), served),
     };
     let channels = served.channels() as usize;
     let max_frames = served.max_frames() as usize;
@@ -696,7 +785,7 @@ fn serve(
             }
         });
     }
-    processor.stop_processing()
+    (processor.stop_processing(), served)
 }
 
 /// The host's window as the parent CLAP's `gui` extension takes on this system.

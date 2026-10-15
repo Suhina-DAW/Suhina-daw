@@ -6,7 +6,13 @@ name: Test build links
 # maintainer pushes to it, so the new commits wait for review before they are built.
 #
 # A run that built nothing (a push that only merged main, see test-build.yml) leaves the comment
-# as it is, so it keeps linking the last real build.
+# as it is, so it keeps linking the last real build. A build that was skipped, cancelled or
+# superseded linked nothing either, and starts no run at all: see the `link` job's `if`.
+#
+# The runs are grouped by the pull request they link (a run from a fork lists none there, so those
+# are grouped by their head repository and branch), so a burst of builds for one pull request waits
+# as one run instead of one per platform: the runners are a shared, limited resource
+# (docs/releasing.md › Test builds).
 #
 # test-build.yml from a fork runs as the fork has it, so a build is linked only when a maintainer
 # started its run: their own push, or the label they added. See docs/releasing.md › Test builds.
@@ -41,7 +47,21 @@ permissions: {}
 jobs:
   link:
     name: link the build
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    # Only a run that built and has platforms to report is answered, so that a run with nothing to
+    # link takes no runner from the builds that do: it was skipped (the *what to build* job decided
+    # not to build), cancelled or superseded, or it is a fork's first run, waiting for a
+    # maintainer's *Approve and run*. A failed build is answered: its comment names the platform
+    # that failed and links its log.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      contains(fromJSON('["success", "failure", "timed_out"]'), github.event.workflow_run.conclusion)
+    # The pull request's newest build is the one to try, and each platform finishing is its own
+    # event, so a newer link replaces one that is still waiting. cancel-in-progress: true also
+    # drops a link that is running: the newer run writes the same comment afterwards.
+    concurrency:
+      group: test-build-links-${{ github.event.workflow_run.pull_requests[0].number || format('{0}:{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_branch) }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
       actions: read

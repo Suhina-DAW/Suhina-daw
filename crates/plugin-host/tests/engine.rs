@@ -35,6 +35,7 @@ fn catalog() -> Catalog {
         ("clap", vec!["audio-effect"]),
         ("crash-after:40", vec!["audio-effect"]),
         ("hang-after:40", vec!["audio-effect"]),
+        ("delay-after:60:480", vec!["audio-effect"]),
     ] {
         let path = PathBuf::from(format!("test:{name}"));
         let info = PluginInfo {
@@ -62,6 +63,7 @@ fn plugin_device(id: &str) -> Device {
         enabled: true,
         state: None,
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }
@@ -94,6 +96,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),
@@ -551,4 +554,77 @@ fn a_plug_in_that_could_not_start_starts_again_on_restart() {
     let status = session.execute("device.plugin", &json!({ "track": 1, "device": 0 })).unwrap();
     assert_eq!(status["status"], "stopped", "removed, to be started again");
     until(&mut session, &mut renderer, "failing again", |s| s["status"] == "failed");
+}
+
+/// `project` with a second track playing the same, panned apart: the first track hard left with
+/// no devices, the second hard right through `devices`.
+fn left_and_right(length: f64, devices: Vec<Device>) -> Project {
+    let mut p = project(length, false, Vec::new());
+    p.channels[0].pan = -1.0;
+    let mut track = p.tracks[0].clone();
+    track.id = TrackId(2);
+    track.channel = Some(ChannelId(2));
+    p.tracks.push(track);
+    let mut channel = p.channels[0].clone();
+    channel.id = ChannelId(2);
+    channel.pan = 1.0;
+    channel.devices = devices;
+    p.channels.push(channel);
+    let mut lane = p.arrangement.lanes[0].clone();
+    lane.track = Some(TrackId(2));
+    p.arrangement.lanes.push(lane);
+    p
+}
+
+/// The left and right channels of `out`, apart.
+fn sides(out: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    (out.chunks(2).map(|f| f[0]).collect(), out.chunks(2).map(|f| f[1]).collect())
+}
+
+/// A plug-in that changes its latency while the project plays (#110): the session hears of it
+/// from the host, builds a new graph, and the tracks are lined up again. Two tracks play the
+/// same note, one hard left without devices, one hard right through a plug-in that starts with
+/// no latency and, from its 60th block, delays by 480 frames and says so. Rendered offline
+/// through the session, left and right are the same sound before the change and again after it.
+#[test]
+fn tracks_stay_lined_up_when_a_plug_in_changes_its_latency() {
+    let p = left_and_right(256.0, vec![plugin_device("delay-after:60:480")]);
+    let (mut session, mut renderer) = session(p, true);
+    session.execute("transport.play", &json!({})).unwrap();
+    let device = json!({ "track": 2, "device": 0 });
+    let status = |session: &mut Session| session.execute("device.plugin", &device).unwrap();
+    let deadline = Instant::now() + PATIENT;
+    while status(&mut session)["status"] != "running" {
+        assert!(Instant::now() < deadline, "starting: {}", status(&mut session));
+        session.sync_plugins();
+        play(&mut renderer, 1);
+    }
+    assert_eq!(status(&mut session)["latency"], 0);
+    // The graph with the plug-in in it, then a few blocks through it: lined up, no delay.
+    session.sync_plugins();
+    play(&mut renderer, 1);
+    let (out, _) = play(&mut renderer, 10);
+    let (left, right) = sides(&out);
+    assert!(left.iter().any(|s| s.abs() > 0.1), "the note sounds");
+    assert!(max_diff(&left, &right) < 1e-6, "before: {}", max_diff(&left, &right));
+    assert_eq!(renderer.latency(), 0);
+
+    // Played on until the plug-in has changed its latency and the session has taken it in.
+    let deadline = Instant::now() + PATIENT;
+    while status(&mut session)["latency"] != 480 {
+        assert!(Instant::now() < deadline, "changing: {}", status(&mut session));
+        session.sync_plugins();
+        play(&mut renderer, 1);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // The new graph takes over with the next block; its delay lines fill in one more.
+    play(&mut renderer, 2);
+    assert_eq!(renderer.latency(), 480, "the other track waits for the plug-in's");
+    let (out, _) = play(&mut renderer, 10);
+    let (left, right) = sides(&out);
+    assert!(right.iter().any(|s| s.abs() > 0.1), "the note still sounds");
+    assert!(max_diff(&left, &right) < 1e-6, "after: {}", max_diff(&left, &right));
+    // Out of line, the same note 480 frames apart is not the same sound: the check above
+    // would see it.
+    assert!(max_diff(&left[480..], &right[..right.len() - 480]) > 0.1);
 }

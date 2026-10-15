@@ -70,12 +70,15 @@ commands (scenes count from 1; a track is its name or id):
   play / stop           start the transport from the play start marker / stop everything now
                         and go back to the marker (stop again: the marker to the beginning)
   stop here             stop, and move the marker to where it stopped
+  play <track> <i>      play from the start of a track's arrangement clip i (from project.clips,
+                        0 first): the marker moves there
   pos <beats>           move the play start marker, e.g. pos 16 (bar 5 in 4/4); jumps while playing
   metronome on|off [db] click on every beat, e.g. metronome on -12
   quant <value>         launch quantisation: none, 8 bars ... 1 bar, 1/2 ... 1/32, triplets as 1/8T
   back                  tracks that launched clips play their arrangement again
   state                 what is playing and queued
   grid                  the scenes and each track's clips
+  levels                the level meters: peak and RMS of the main output and each track, in dB
 edits (heard while playing):
   tempo <bpm>           set the project tempo
   vol <track> <db>      set a track's volume, e.g. vol Bass -6
@@ -155,6 +158,10 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["quit" | "exit"] => Ok(Line::Quit),
         ["help" | "?"] => Ok(Line::Help),
         ["play"] => command("transport.play", json!({})),
+        ["play", track @ .., index] if !track.is_empty() => {
+            let index: u64 = index.parse().map_err(|_| format!("{index:?} is not a clip index"))?;
+            command("transport.play", json!({ "from": "clip", "track": track_value(track), "index": index }))
+        }
         ["stop"] => command("transport.stop", json!({})),
         ["stop", "here"] => command("transport.stop", json!({ "return": "here" })),
         ["pos" | "position", beats] => {
@@ -165,6 +172,7 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["back"] => command("launcher.backToArrangement", json!({})),
         ["state" | "s"] => command("launcher.state", json!({})),
         ["grid"] => command("project.launcher", json!({})),
+        ["levels"] => command("mixer.levels", json!({})),
         ["scene", n] => command("scene.launch", json!({ "scene": scene_value(n)? })),
         ["clip", track @ .., n] if !track.is_empty() => {
             command("clip.launch", json!({ "track": track_value(track), "scene": scene_value(n)? }))
@@ -300,7 +308,13 @@ mod tests {
         assert_eq!(parse_line("stop"), cmd("transport.stop", json!({})));
         assert_eq!(parse_line("stop Drums"), cmd("track.stop", json!({ "track": "Drums" })));
         assert_eq!(parse_line("stop here"), cmd("transport.stop", json!({ "return": "here" })));
+        assert_eq!(
+            parse_line("play Lead Vox 2"),
+            cmd("transport.play", json!({ "from": "clip", "track": "Lead Vox", "index": 2 }))
+        );
+        assert!(parse_line("play Drums first").is_err());
         assert_eq!(parse_line("pos 16"), cmd("transport.setPosition", json!({ "beats": 16.0 })));
+        assert_eq!(parse_line("levels"), cmd("mixer.levels", json!({})));
         assert_eq!(parse_line("position 2.5"), cmd("transport.setPosition", json!({ "beats": 2.5 })));
         assert!(parse_line("pos bar5").is_err());
         assert_eq!(parse_line("quant 2 bars"), cmd("launcher.setQuantization", json!({ "value": "2 bars" })));

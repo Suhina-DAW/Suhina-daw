@@ -31,8 +31,9 @@ From top to bottom:
    - groove amount, metronome, global launch quantisation
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
-     start, punch, loop, loop length. **Suhina:** play starts from the play start marker and
-     stop returns to it or stays, as Settings › General › Stop says
+     start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
+     from the selected Arrangement clip as Settings › General › Play from says, and stop
+     returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
@@ -55,7 +56,9 @@ From top to bottom:
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
-   the selected clip's editor.
+   the selected clip's editor. **Suhina:** a splitter above it sets its height; under the
+   Arrangement view, while the piano roll shows a clip, the splitter pulls it all the way up
+   ([clip editor](ui-clip-editor.md) › Pulled to the top).
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
 6. **Status bar:** messages, the selected track's name and a mini overview.
 
@@ -107,6 +110,14 @@ One launch control per scene with its number or name. Launching a scene launches
 its row and stops tracks whose slot in that row is empty with a stop button. Scenes can carry a
 tempo and time signature that apply when launched.
 
+**Suhina:** the launch button shows the scene's name, then its tempo and time signature when it
+has them (`Drop 128 3/4`), with the number on the right. Right-clicking it opens the scene menu:
+fields for the name, the tempo (empty for none) and the time signature (`3/4`, empty for none),
+each applied with Enter, then **Insert scene below**, **Duplicate scene** and **Delete scene**
+(greyed out for the only scene). Every entry is a `scene.*` command, undone with Ctrl+Z. The
+control bar shows the time signature playing, and its position counts bars in it; a launched
+scene can change it.
+
 ### I/O section (below the grid, per track, toggleable)
 
 - MIDI tracks: "MIDI From" (source, channel), monitoring (In / Auto / Off), "MIDI To" or "Audio
@@ -119,10 +130,19 @@ tempo and time signature that apply when launched.
 
 One knob per return track (A, B, …). Return tracks show pre/post toggles on the main column.
 
+**Built:** the send knobs sit in the mixer strip's knob row beside the pan knob, after the
+strip's meter, as many as fit (two in a track column; none in a return column); the pre/post
+choice is in each knob's right-click menu rather than on the main column, and a dot under the
+knob marks a send before the fader. Behaviour and commands: [sends and returns](sends-and-returns.md).
+
 ### Mixer (toggleable, resizable height)
 
-Per track, top to bottom: pan, volume with numeric field and meter, track on/off (shows the
-track number), solo, arm (MIDI and audio tracks). **Solo:** while any track is soloed, only the
+Per track, top to bottom: pan, volume with numeric field and meter ([level
+meters](level-meters.md)), track on/off (shows the
+track number), solo, arm (MIDI and audio tracks). Pan and volume are dragged up or down and
+double-clicked to reset; the change is heard while dragging, and one drag is one undo step
+(`track.setPan`, `track.setVolume` with `continue`). The Arrangement view's track headers work
+the same. **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
 the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no

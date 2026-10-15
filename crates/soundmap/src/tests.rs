@@ -234,3 +234,392 @@ fn timing_of_large_scopes() {
         assert_eq!(grid.cells.len(), n);
     }
 }
+
+/// Generated drum and bass sounds, at 44.1 kHz, for the tests of kinds (issue #325): every one a
+/// little different by `v`.
+mod sounds {
+    use super::noise;
+
+    const RATE: f32 = 44_100.0;
+
+    fn samples(seconds: f32) -> usize {
+        (seconds * RATE) as usize
+    }
+
+    /// A two-pole band-pass (constant peak gain) around `hz`.
+    fn band(input: &[f32], hz: f32, q: f32) -> Vec<f32> {
+        let w = std::f32::consts::TAU * hz / RATE;
+        let alpha = w.sin() / (2.0 * q);
+        let (b0, b2) = (alpha, -alpha);
+        let (a0, a1, a2) = (1.0 + alpha, -2.0 * w.cos(), 1.0 - alpha);
+        let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+        input
+            .iter()
+            .map(|&x| {
+                let y = (b0 * x + b2 * x2 - a1 * y1 - a2 * y2) / a0;
+                (x2, x1, y2, y1) = (x1, x, y1, y);
+                y
+            })
+            .collect()
+    }
+
+    /// A one-pole high-pass at `hz`.
+    fn high(input: &[f32], hz: f32) -> Vec<f32> {
+        let r = (-std::f32::consts::TAU * hz / RATE).exp();
+        let (mut x1, mut y1) = (0.0, 0.0);
+        input
+            .iter()
+            .map(|&x| {
+                let y = r * (y1 + x - x1);
+                (x1, y1) = (x, y);
+                y
+            })
+            .collect()
+    }
+
+    fn decay(input: &mut [f32], seconds: f32) {
+        for (i, s) in input.iter_mut().enumerate() {
+            *s *= (-(i as f32) / RATE / seconds).exp();
+        }
+    }
+
+    fn normalise(mut s: Vec<f32>, peak: f32) -> Vec<f32> {
+        let m = s.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-9);
+        s.iter_mut().for_each(|v| *v *= peak / m);
+        s
+    }
+
+    /// A falling low sine with a click.
+    pub fn kick(v: u32) -> Vec<f32> {
+        let mut phase = 0.0f32;
+        let base = 45.0 + (v % 5) as f32 * 4.0;
+        let sweep = 110.0 + (v % 3) as f32 * 30.0;
+        let n = samples(0.45 + (v % 4) as f32 * 0.05);
+        let click = noise(v + 100, 200);
+        let out = (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE;
+                phase += std::f32::consts::TAU * (base + sweep * (-t * 35.0).exp()) / RATE;
+                phase.sin() * (-t * 7.0).exp() + click.get(i).copied().unwrap_or(0.0) * 0.3
+            })
+            .collect();
+        normalise(out, 0.9)
+    }
+
+    /// A short tone near 200 Hz under bright noise.
+    pub fn snare(v: u32) -> Vec<f32> {
+        let n = samples(0.3);
+        let hz = 180.0 + (v % 4) as f32 * 15.0;
+        let mut rattle = band(&noise(v + 200, n), 4_000.0 + (v % 3) as f32 * 800.0, 0.5);
+        decay(&mut rattle, 0.07 + (v % 3) as f32 * 0.01);
+        let out = (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE;
+                (std::f32::consts::TAU * hz * t).sin() * (-t * 30.0).exp() * 0.5 + rattle[i] * 2.0
+            })
+            .collect();
+        normalise(out, 0.9)
+    }
+
+    /// Three or four noise bursts a few milliseconds apart, around 1.5 kHz, and a short tail.
+    pub fn clap(v: u32) -> Vec<f32> {
+        let n = samples(0.35);
+        let raw = band(&noise(v + 300, n), 1_300.0 + (v % 4) as f32 * 150.0, 1.5);
+        let gap = 0.009 + (v % 3) as f32 * 0.002;
+        let bursts = 3 + v % 2;
+        let out = raw
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let t = i as f32 / RATE;
+                let last = bursts as f32 * gap;
+                let level = if t < last { (-(t % gap) * 300.0).exp() } else { (-(t - last) * 18.0).exp() };
+                s * level
+            })
+            .collect();
+        normalise(out, 0.9)
+    }
+
+    /// Very short, very high noise.
+    pub fn closed_hat(v: u32) -> Vec<f32> {
+        let n = samples(0.12);
+        let mut out = high(&high(&noise(v + 400, n), 7_000.0), 7_000.0);
+        decay(&mut out, 0.012 + (v % 4) as f32 * 0.003);
+        normalise(out, 0.9)
+    }
+
+    /// Jingles: high ringing partials, struck a few times, over high noise, ringing longer than a
+    /// hat.
+    pub fn tambourine(v: u32) -> Vec<f32> {
+        let n = samples(0.5);
+        let partials = [5_200.0, 6_900.0, 8_300.0, 9_700.0].map(|hz: f32| hz * (1.0 + (v % 5) as f32 * 0.01));
+        let mut shimmer = high(&noise(v + 500, n), 5_000.0);
+        decay(&mut shimmer, 0.08);
+        let out = (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE;
+                let strikes: f32 =
+                    [0.0, 0.025, 0.05].iter().map(|s| if t >= *s { (-(t - s) * 9.0).exp() } else { 0.0 }).sum();
+                let ring: f32 = partials.iter().map(|hz| (std::f32::consts::TAU * hz * t).sin()).sum();
+                ring * strikes * 0.2 + shimmer[i]
+            })
+            .collect();
+        normalise(out, 0.8)
+    }
+
+    /// Band noise around 6 kHz that swells in and out, without a sharp attack.
+    pub fn shaker(v: u32) -> Vec<f32> {
+        let n = samples(0.22 + (v % 3) as f32 * 0.03);
+        let raw = band(&noise(v + 600, n), 5_500.0 + (v % 4) as f32 * 400.0, 0.8);
+        let length = n as f32 / RATE;
+        let out = raw
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let t = i as f32 / RATE;
+                s * (std::f32::consts::PI * t / length).sin().powi(2)
+            })
+            .collect();
+        normalise(out, 0.7)
+    }
+
+    /// A sine between 90 and 200 Hz that falls a little, ringing longer than a snare.
+    pub fn tom(v: u32) -> Vec<f32> {
+        let n = samples(0.7);
+        let hz = 90.0 + (v % 6) as f32 * 20.0;
+        let mut phase = 0.0f32;
+        let mut skin = band(&noise(v + 700, n), 900.0, 1.0);
+        decay(&mut skin, 0.01);
+        let out = (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE;
+                phase += std::f32::consts::TAU * hz * (1.0 + 0.25 * (-t * 12.0).exp()) / RATE;
+                (phase.sin() + 0.3 * (2.0 * phase).sin()) * (-t * 5.0).exp() + skin[i] * 0.5
+            })
+            .collect();
+        normalise(out, 0.9)
+    }
+
+    /// A held low tone, rich in harmonics, with no fall in pitch.
+    pub fn bass(v: u32) -> Vec<f32> {
+        let n = samples(1.0 + (v % 3) as f32 * 0.25);
+        let hz = 41.0 + (v % 7) as f32 * 6.0;
+        let out = (0..n)
+            .map(|i| {
+                let t = i as f32 / RATE;
+                let tone: f32 = (1..=6).map(|h| (std::f32::consts::TAU * hz * h as f32 * t).sin() / h as f32).sum();
+                let envelope = (t / 0.01).min(1.0) * (-t * 1.2).exp();
+                tone * envelope
+            })
+            .collect();
+        normalise(out, 0.8)
+    }
+
+    /// The sound after `seconds` of silence (with a faint noise floor, as a recording has).
+    pub fn late(sound: &[f32], seconds: f32, seed: u32) -> Vec<f32> {
+        let mut out: Vec<f32> = noise(seed, samples(seconds)).iter().map(|s| s * 1e-4).collect();
+        out.extend_from_slice(sound);
+        out
+    }
+
+    /// The sound with a room's tail, a second and a half long: four feedback combs in parallel
+    /// (a Schroeder reverb without its all-passes), its peak 18 dB under the sound's.
+    pub fn reverb(sound: &[f32], seed: u32) -> Vec<f32> {
+        let mut dry = sound.to_vec();
+        dry.resize(sound.len() + samples(1.5), 0.0);
+        let mut wet = vec![0.0f32; dry.len()];
+        for (k, delay) in [1557usize, 1617, 1491, 1422].into_iter().enumerate() {
+            let delay = delay + (seed as usize + k) % 7;
+            let mut line = vec![0.0f32; dry.len()];
+            for i in 0..dry.len() {
+                let back = if i >= delay { line[i - delay] } else { 0.0 };
+                line[i] = dry[i] + 0.84 * back;
+                wet[i] += back * 0.25;
+            }
+        }
+        let peak = |s: &[f32]| s.iter().fold(0.0f32, |m, v| m.max(v.abs())).max(1e-9);
+        let gain = 0.125 * peak(&dry) / peak(&wet);
+        dry.iter().zip(&wet).map(|(d, w)| d + w * gain).collect()
+    }
+
+    /// The sound at another level.
+    pub fn level(sound: &[f32], gain: f32) -> Vec<f32> {
+        sound.iter().map(|s| s * gain).collect()
+    }
+}
+
+/// The kinds the generated sounds have, each with its name and how it is made.
+#[allow(clippy::type_complexity)]
+const SOUNDS: [(Kind, &str, fn(u32) -> Vec<f32>); 8] = [
+    (Kind::Kick, "kick", sounds::kick),
+    (Kind::Snare, "snare", sounds::snare),
+    (Kind::Clap, "clap", sounds::clap),
+    (Kind::ClosedHat, "closed hat", sounds::closed_hat),
+    (Kind::Percussion, "tambourine", sounds::tambourine),
+    (Kind::Percussion, "shaker", sounds::shaker),
+    (Kind::Tom, "tom", sounds::tom),
+    (Kind::Bass, "bass", sounds::bass),
+];
+
+/// The variations of an unnamed sound: leading silence, a room's tail, another level, all three.
+fn varied(sound: &[f32], variation: u32) -> Vec<f32> {
+    match variation % 4 {
+        0 => sounds::late(sound, 0.15 + variation as f32 * 0.05, variation + 1),
+        1 => sounds::reverb(sound, variation + 1),
+        2 => sounds::level(sound, 0.03 + variation as f32 * 0.01),
+        _ => sounds::level(&sounds::reverb(&sounds::late(sound, 0.4, variation), variation), 0.2),
+    }
+}
+
+/// A library of the generated sounds: named ones in folders of their kind, unnamed varied ones in
+/// a folder that names nothing, and sounds of one kind in a folder named for another.
+fn kinds_library(library: &Library) -> (Vec<SourceFile>, Vec<(SourceFile, Kind)>) {
+    let mut files = Vec::new();
+    let mut unnamed = Vec::new();
+    for (k, (kind, name, make)) in SOUNDS.iter().enumerate() {
+        for v in 0..10 {
+            files.push(library.write(&format!("Drums/{name}s/{name} {v}.wav"), &make(v)));
+        }
+        for v in 0..4 {
+            let file = library.write(&format!("Misc/hit {k}-{v}.wav"), &varied(&make(20 + v), v));
+            unnamed.push((file.clone(), *kind));
+            files.push(file);
+        }
+    }
+    // A tambourine and a shaker in a folder of kicks, a kick in a folder of hats.
+    for (relative, sound, kind) in [
+        ("Drums/Kicks/01.wav", sounds::tambourine(31), Kind::Percussion),
+        ("Drums/Kicks/02.wav", sounds::shaker(32), Kind::Percussion),
+        ("Drums/Hats/03.wav", sounds::kick(33), Kind::Kick),
+    ] {
+        let file = library.write(relative, &sound);
+        unnamed.push((file.clone(), kind));
+        files.push(file);
+    }
+    (files, unnamed)
+}
+
+#[test]
+fn generated_sounds_get_their_kind_and_land_in_its_region() {
+    let library = Library::new("kinds");
+    let (files, unnamed) = kinds_library(&library);
+    let mut map = analysed(&library, &files);
+    let laid = map.map(&files, DEFAULT_MAX_SECONDS);
+    assert_eq!(laid.points.len(), files.len());
+    let point = |file: &SourceFile| laid.points.iter().find(|p| p.path == file.path).unwrap();
+    let mut wrong = Vec::new();
+    for (file, kind) in &unnamed {
+        let p = point(file);
+        if (p.kind, p.guessed) != (*kind, true) {
+            wrong.push(format!("{} is {:?} (guessed {}), not {kind:?}", file.path.display(), p.kind, p.guessed));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    // On the map, most of each one's nearest points are of its kind: it sits in its kind's region.
+    for (file, kind) in &unnamed {
+        let at = point(file).position;
+        let mut near: Vec<&Point> = laid.points.iter().filter(|p| p.path != file.path).collect();
+        near.sort_by(|a, b| {
+            let d = |p: &Point| (p.position[0] - at[0]).powi(2) + (p.position[1] - at[1]).powi(2);
+            d(a).total_cmp(&d(b))
+        });
+        let same = near.iter().take(7).filter(|p| p.kind == *kind).count();
+        assert!(same >= 5, "{} has {same} of 7 neighbours of its kind {kind:?}", file.path.display());
+    }
+    // Every named item keeps the kind its file name gives.
+    for p in &laid.points {
+        if let Some(kind) = p.path.file_stem().and_then(|s| s.to_str()).and_then(kinds::kind_of_name) {
+            assert_eq!((p.kind, p.guessed), (kind, false), "{}", p.path.display());
+        }
+    }
+}
+
+#[test]
+fn a_kind_set_by_hand_wins_and_survives_reanalysis_and_new_layouts() {
+    let library = Library::new("hand");
+    let mut files = Vec::new();
+    for v in 0..8 {
+        files.push(library.write(&format!("kick {v}.wav"), &sounds::kick(v)));
+        files.push(library.write(&format!("closed hat {v}.wav"), &sounds::closed_hat(v)));
+    }
+    let odd = library.write("Misc/odd.wav", &sounds::kick(40));
+    files.push(odd.clone());
+    let data = library.root.join(".cache");
+    let mut map = analysed(&library, &files);
+    let before = map.map(&files, DEFAULT_MAX_SECONDS);
+    let kind_of = |m: &Map| m.points.iter().find(|p| p.path == odd.path).map(|p| (p.kind, p.guessed, p.by_hand));
+    assert_eq!(kind_of(&before), Some((Kind::Kick, true, false)));
+
+    // Set by hand: it wins over the sound at once, and the layout is made again with it.
+    map.set_kind(&odd.path, Some(Kind::Tom)).unwrap();
+    assert_eq!(map.kind_by_hand(&odd.path), Some(Kind::Tom));
+    let after = map.map(&files, DEFAULT_MAX_SECONDS);
+    assert_eq!(kind_of(&after), Some((Kind::Tom, false, true)));
+    assert_ne!(after.key, before.key);
+    // Over a file's own name as well.
+    map.set_kind(&files[0].path, Some(Kind::Snare)).unwrap();
+    let named = map.map(&files, DEFAULT_MAX_SECONDS);
+    assert_eq!(named.points.iter().find(|p| p.path == files[0].path).map(|p| p.kind), Some(Kind::Snare));
+
+    // It is kept: a new sound map reads it, and analysing the folder again keeps it.
+    drop(map);
+    let mut map = SoundMap::new(Some(data.clone()), 1);
+    map.update(&files);
+    map.reanalyse(&library.root, &files);
+    map.wait();
+    assert_eq!(kind_of(&map.map(&files, DEFAULT_MAX_SECONDS)), Some((Kind::Tom, false, true)));
+
+    // Cleared, the sound decides again.
+    map.set_kind(&odd.path, None).unwrap();
+    assert_eq!(kind_of(&map.map(&files, DEFAULT_MAX_SECONDS)), Some((Kind::Kick, true, false)));
+    drop(map);
+    assert_eq!(SoundMap::new(Some(data), 1).kind_by_hand(&odd.path), None);
+}
+
+#[test]
+fn the_file_of_kinds_set_by_hand_round_trips_and_refuses_the_malformed() {
+    let mut kinds = HashMap::new();
+    kinds.insert(PathBuf::from("/lib/a b.wav"), Kind::Tom);
+    kinds.insert(PathBuf::from("/lib/tab\there.wav"), Kind::ClosedHat);
+    assert_eq!(hand_kinds_from_text(&hand_kinds_to_text(&kinds)), kinds);
+    assert!(hand_kinds_from_text("").is_empty());
+    assert!(hand_kinds_from_text("another header\ntom\t/lib/a.wav\n").is_empty());
+    // Lines that do not parse are left out; the rest are read.
+    let text = format!("{HAND_KINDS_HEADER}\nnokind\t/x.wav\ntom\n\t/y.wav\ntom\t\nkick\t/z.wav\n");
+    assert_eq!(hand_kinds_from_text(&text), HashMap::from([(PathBuf::from("/z.wav"), Kind::Kick)]));
+    let mut map = SoundMap::new(None, 1);
+    assert!(map.set_kind(Path::new("/a\nb.wav"), Some(Kind::Kick)).is_err());
+    assert!(map.set_kind(Path::new("/a.wav"), Some(Kind::Kick)).is_ok());
+    assert_eq!(map.kind_by_hand(Path::new("/a.wav")), Some(Kind::Kick));
+}
+
+#[test]
+fn an_old_cache_is_analysed_again_never_misread() {
+    let library = Library::new("old-cache");
+    let file = library.write("kick.wav", &sounds::kick(1));
+    let data = library.root.join(".cache");
+    std::fs::create_dir_all(&data).unwrap();
+    // A version 1 cache: the same header with the old feature version and 44 numbers.
+    let mut bytes = b"LWSM".to_vec();
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&8u16.to_le_bytes());
+    bytes.extend_from_slice(b"kick.wav");
+    bytes.extend_from_slice(&file.size.to_le_bytes());
+    bytes.extend_from_slice(&file.modified.to_le_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&0.5f32.to_le_bytes());
+    for _ in 0..44 {
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    }
+    std::fs::write(data.join(cache::file_name(&library.root)), bytes).unwrap();
+    let mut map = SoundMap::new(Some(data), 1);
+    map.update(std::slice::from_ref(&file));
+    assert!(map.queued.contains(&file.path));
+    map.wait();
+    match map.analysis(&file) {
+        Some(Analysis::Analysed { features, .. }) => assert_ne!(features, [1.0; features::FEATURE_COUNT]),
+        other => panic!("{other:?}"),
+    }
+}

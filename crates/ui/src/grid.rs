@@ -2,8 +2,8 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
-use suhina_engine::{LauncherMonitor, Queued};
+use suhina_engine::model::{ChannelRole, Project, Rgb, TimeSignature, Track, TrackId};
+use suhina_engine::{LauncherMonitor, Meter, Queued};
 
 use crate::theme;
 
@@ -78,6 +78,19 @@ pub struct Column {
     pub depth: usize,
     /// -1 is full left, 1 full right.
     pub pan: f64,
+    /// One per return track, in their order, for a track or group column; empty for a return.
+    pub sends: Vec<SendKnob>,
+}
+
+/// A track's send to one return track, as the mixer strip shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SendKnob {
+    /// The return track.
+    pub target: TrackId,
+    pub name: String,
+    /// Minus infinity without a send.
+    pub level_db: f64,
+    pub pre_fader: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,8 +99,22 @@ pub struct Scene {
     pub number: usize,
     pub name: String,
     pub tempo_bpm: Option<f64>,
+    pub time_signature: Option<TimeSignature>,
     /// Every clip in the row is playing, and at least one is.
     pub playing: bool,
+}
+
+impl Scene {
+    /// What the scene's menu shows; `only` when it is the project's only scene.
+    pub fn menu(&self, only: bool) -> crate::menus::SceneMenu<'_> {
+        crate::menus::SceneMenu {
+            number: self.number,
+            name: &self.name,
+            tempo_bpm: self.tempo_bpm,
+            time_signature: self.time_signature,
+            only,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -98,20 +125,26 @@ pub struct Grid {
     /// Beats since the transport started.
     pub beat: f64,
     pub tempo_bpm: f64,
-    /// Beats per bar, from the time signature.
-    pub bar_beats: f64,
+    /// The time signature playing and where its bars start: the project's, or, while the
+    /// engine plays, the one a launched scene changed it to.
+    pub meter: Meter,
 }
 
 impl Grid {
     /// The grid for `project`; with a monitor, slots show what the engine plays and has queued.
     pub fn build(project: &Project, monitor: Option<&LauncherMonitor>) -> Self {
-        let ts = project.transport.time_signature;
-        let bar_beats =
-            if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
         let scene_count = project.launcher.scenes.len();
 
         let mut columns = Vec::new();
         let mut returns = Vec::new();
+        let return_tracks: Vec<&Track> = project
+            .tracks
+            .iter()
+            .filter(|t| {
+                let channel = t.channel.and_then(|id| project.channels.iter().find(|c| c.id == id));
+                channel.is_some_and(|c| c.role == ChannelRole::Effect)
+            })
+            .collect();
         for (index, track) in project.tracks.iter().enumerate() {
             let channel = track.channel.and_then(|id| project.channels.iter().find(|c| c.id == id));
             let role = channel.map_or(ChannelRole::Regular, |c| c.role);
@@ -169,6 +202,21 @@ impl Grid {
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
                 pan: channel.map_or(0.0, |c| c.pan),
+                sends: match (kind, channel) {
+                    (ColumnKind::Return, _) | (_, None) => Vec::new(),
+                    (_, Some(channel)) => return_tracks
+                        .iter()
+                        .map(|r| {
+                            let send = channel.sends.iter().find(|s| Some(s.target) == r.channel);
+                            SendKnob {
+                                target: r.id,
+                                name: r.name.clone(),
+                                level_db: send.map_or(f64::NEG_INFINITY, |s| gain_to_db(s.level)),
+                                pre_fader: send.is_some_and(|s| s.pre_fader),
+                            }
+                        })
+                        .collect(),
+                },
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }
         }
@@ -188,7 +236,13 @@ impl Grid {
                     .collect();
                 let playing = !with_clips.is_empty()
                     && with_clips.iter().all(|c| c.slots.get(index).is_some_and(|s| s.state == SlotState::Playing));
-                Scene { number: index + 1, name: scene.name.clone(), tempo_bpm: scene.tempo_bpm, playing }
+                Scene {
+                    number: index + 1,
+                    name: scene.name.clone(),
+                    tempo_bpm: scene.tempo_bpm,
+                    time_signature: scene.time_signature,
+                    playing,
+                }
             })
             .collect();
 
@@ -197,14 +251,16 @@ impl Grid {
             None => (false, 0.0, project.transport.tempo_bpm),
         };
         let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
-        Self { columns, scenes, running, beat, tempo_bpm, bar_beats }
+        let meter = monitor.map_or(
+            Meter { time_signature: project.transport.time_signature, ..Meter::default() },
+            LauncherMonitor::meter,
+        );
+        Self { columns, scenes, running, beat, tempo_bpm, meter }
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.
     pub fn position(&self) -> String {
-        let bar_beats = if self.bar_beats > 0.0 { self.bar_beats } else { 4.0 };
-        let bar = (self.beat / bar_beats).floor() as u64 + 1;
-        let in_bar = self.beat % bar_beats;
+        let (bar, in_bar) = self.meter.locate(self.beat);
         let beat = in_bar.floor() as u64 + 1;
         let sixteenth = ((in_bar.fract()) * 4.0).floor() as u64 + 1;
         format!("{bar}.{beat}.{sixteenth}")
@@ -266,9 +322,9 @@ mod tests {
 
     #[test]
     fn position_counts_bars_beats_and_sixteenths_from_one() {
-        let grid = Grid { beat: 5.5, bar_beats: 4.0, ..Grid::default() };
+        let grid = Grid { beat: 5.5, ..Grid::default() };
         assert_eq!(grid.position(), "2.2.3");
-        let start = Grid { bar_beats: 4.0, ..Grid::default() };
+        let start = Grid::default();
         assert_eq!(start.position(), "1.1.1");
     }
 }

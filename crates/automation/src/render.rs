@@ -200,6 +200,7 @@ mod tests {
                 sends: Vec::new(),
                 devices: Vec::new(),
                 extensions: Extensions::default(),
+                automation: Vec::new(),
             }],
             contents: vec![ClipContent {
                 id: ContentId(1),
