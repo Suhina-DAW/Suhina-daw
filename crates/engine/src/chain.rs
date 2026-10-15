@@ -25,6 +25,7 @@ use suhina_model::{DeviceKind, Project, TrackId};
 use crate::automation::{DeviceLanes, MixLanes};
 use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
 use crate::plugin_params::SlotParams;
+use crate::sends::SendOut;
 
 /// The most frames one block of a chain holds; the renderer splits longer blocks.
 pub(crate) const MAX_BLOCK: usize = 1024;
@@ -73,7 +74,11 @@ pub(crate) struct Chain {
     /// Some chain plays into this one (a group bus): it runs after them, in order, rather than
     /// in the stages the other chains run their plug-ins in together. Set with `target`.
     pub(crate) is_bus: bool,
-    buffer: Vec<f32>,
+    /// The returns this chain sends to (see `sends`), each after its devices.
+    pub(crate) sends: Vec<SendOut>,
+    /// What a send reads through its delay line; empty without sends.
+    pub(crate) scratch: Vec<f32>,
+    pub(crate) buffer: Vec<f32>,
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
     span_events: Vec<(usize, NoteEvent)>,
@@ -188,6 +193,8 @@ impl Chain {
             mix: None,
             target: None,
             is_bus: false,
+            sends: Vec::new(),
+            scratch: Vec::new(),
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
@@ -219,6 +226,8 @@ impl Chain {
             mix: None,
             target: None,
             is_bus: false,
+            sends: Vec::new(),
+            scratch: Vec::new(),
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::new(),
             span_events: Vec::new(),
@@ -444,11 +453,16 @@ impl Chain {
         *done = to;
     }
 
-    /// Runs the devices over the rest of a block of `frames` frames and adds the result, at
-    /// the track's gains, to `out`.
-    pub(crate) fn finish(&mut self, out: &mut [f32], frames: usize, context: &ProcessContext) {
+    /// Runs the devices over the rest of a block of `frames` frames; [`Chain::mix`] then adds
+    /// the result to where the track plays into, and the sends read it before that.
+    pub(crate) fn complete(&mut self, frames: usize, context: &ProcessContext) {
         self.context = *context;
         self.run(frames);
+    }
+
+    /// Adds what the devices made of the block, through the latency compensation and at the
+    /// track's gains, to `out`.
+    pub(crate) fn mix(&mut self, out: &mut [f32], frames: usize) {
         let (gain_left, gain_right) = self.post;
         let Some(buffer) = self.buffer.get_mut(..frames.min(MAX_BLOCK) * 2) else { return };
         self.delay.run(buffer);
@@ -468,6 +482,13 @@ impl Chain {
                 }
             }
         }
+    }
+
+    /// The first `frames` frames of the block's output, before the track's gains, once
+    /// [`Chain::finish`] has run.
+    pub(crate) fn output(&self, frames: usize) -> &[f32] {
+        let end = (frames.min(MAX_BLOCK) * 2).min(self.buffer.len());
+        self.buffer.get(..end).unwrap_or_default()
     }
 
     /// Sets parameter `param` of the device at `position` among the channel's devices, as a
@@ -532,6 +553,7 @@ impl Chain {
         self.held = old.held;
         self.next_off = old.next_off;
         self.delay.adopt(&mut old.delay);
+        self.adopt_sends(old);
         true
     }
 

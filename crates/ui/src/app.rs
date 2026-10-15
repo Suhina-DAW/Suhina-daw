@@ -129,8 +129,13 @@ enum AfterLeaving {
     Quit(Vec<ProjectId>),
 }
 
+/// How long after the level meters last moved the window keeps looking for new levels.
+const METERS_SETTLE_SECONDS: f64 = 0.3;
+
 /// The window's state.
 pub struct App {
+    /// When the level meters last showed something new (`ui.input` time).
+    meters_moved_at: f64,
     projects: Projects,
     /// The project whose view state is in the fields below; others are in `stashes`.
     shown_project: Option<ProjectId>,
@@ -246,6 +251,7 @@ impl App {
             closed: Vec::new(),
             shown: View::Session,
             view: SessionViewState::default(),
+            meters_moved_at: 0.0,
             arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
             quantization: DEFAULT_QUANTIZATION,
@@ -1015,6 +1021,20 @@ impl App {
                 dragged.and_then(|items| self.drag_pointer(ui.ctx()).map(|pointer| DropProbe::new(pointer, items)));
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
+            let meters = crate::meter::Meters::read(self.session().and_then(|s| s.player()).map(|p| p.meter_monitor()));
+            // Meters fall for a moment after the sound stops: drawn again at once while they
+            // move, and looked at again soon after they last moved, as the engine renders in
+            // blocks that can be longer than a frame. An engine that stopped rendering leaves
+            // the window at rest.
+            let now = ui.input(|i| i.time);
+            if meters != self.view.meters {
+                self.meters_moved_at = now;
+                ui.ctx().request_repaint();
+            } else if meters.moving() && now - self.meters_moved_at < METERS_SETTLE_SECONDS {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+            }
+            self.view.meters = meters.clone();
+            self.arrangement.meters = meters;
             // The large sample map takes the main area, except while something is dragged, so
             // the drop can land on a track.
             if self.sample_map.view.large && dragged.is_none() {

@@ -247,6 +247,7 @@ impl Renderer {
             }
         }
         self.graph.direct_delay.adopt(&mut old.direct_delay);
+        self.meters.assign(self.graph.levels.tracks());
         // Parameter messages newer than the new graph's project apply to it again, in order.
         let mut newer = [usize::MAX; RECENT_PARAMS];
         let mut count = 0;
@@ -268,9 +269,16 @@ impl Renderer {
         // Sounding voices follow their track: its mix (volume, pan, mute) and its chain in the
         // new graph. A voice whose track is gone ends.
         for voice in self.voices.iter_mut().filter(|v| v.active) {
-            match self.graph.routes.iter().find(|(track, _, _)| track.0 == voice.track) {
-                Some(&(_, bus, (left, right))) => {
+            match self.graph.routes.iter().position(|(track, _, _)| track.0 == voice.track) {
+                Some(index) => {
+                    let Some(&(_, bus, (left, right))) = self.graph.routes.get(index) else { continue };
                     voice.bus = bus;
+                    // The routes are in the project's track order, as the meter slots are.
+                    voice.meter = if index < crate::MAX_METERED_TRACKS {
+                        u32::try_from(index).unwrap_or(crate::meters::NO_METER)
+                    } else {
+                        crate::meters::NO_METER
+                    };
                     voice.gain_left = left * voice.velocity;
                     voice.gain_right = right * voice.velocity;
                 }
