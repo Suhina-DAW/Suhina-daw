@@ -17,8 +17,8 @@ use roxmltree::Node;
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
-    LoopRange, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
-    ValidationError, WarpMarker,
+    LoopRange, MAX_GROUP_DEPTH, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId,
+    Transport, ValidationError, WarpMarker,
 };
 
 /// Upper bound for the decompressed XML, so a malicious file cannot exhaust memory.
@@ -197,7 +197,7 @@ impl Reader {
             }
         }
 
-        Project {
+        let mut project = Project {
             transport,
             tracks,
             channels,
@@ -205,6 +205,38 @@ impl Reader {
             arrangement: Arrangement { lanes },
             launcher: Launcher { scenes, columns },
             extensions: Extensions::default(),
+        };
+        self.untangle_groups(&mut project);
+        project
+    }
+
+    /// Takes out of its group a track whose groups lead back to it, or that sits deeper than
+    /// Suhina nests groups ([`MAX_GROUP_DEPTH`]), so the set still opens: the track moves to the
+    /// top level and plays to the main output instead of into that group.
+    fn untangle_groups(&mut self, project: &mut Project) {
+        for _ in 0..project.tracks.len() {
+            let tangled = project
+                .tracks
+                .iter()
+                .find(|t| project.group_depth(t.id).is_none_or(|depth| depth > MAX_GROUP_DEPTH))
+                .map(|t| (t.id, t.name.clone(), t.channel, t.parent));
+            let Some((id, name, channel, parent)) = tangled else { return };
+            let deep = project.group_depth(id).is_some();
+            let group_channel = parent.and_then(|p| project.tracks.iter().find(|t| t.id == p)).and_then(|t| t.channel);
+            if let Some(track) = project.tracks.iter_mut().find(|t| t.id == id) {
+                track.parent = None;
+            }
+            if let Some(c) = project.channels.iter_mut().find(|c| Some(c.id) == channel)
+                && c.output.is_some()
+                && c.output == group_channel
+            {
+                c.output = None;
+            }
+            self.warn(if deep {
+                format!("track {name}: groups nest more than {MAX_GROUP_DEPTH} deep; moved out of its group")
+            } else {
+                format!("track {name}: its groups contain each other; moved out of its group")
+            });
         }
     }
 

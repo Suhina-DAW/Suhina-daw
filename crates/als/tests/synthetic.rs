@@ -258,3 +258,91 @@ fn reads_plugins_and_placeholders() {
     assert_eq!(eq.kind, DeviceKind::Foreign { format: "als".into(), id: "Eq8".into() });
     assert!(!eq.enabled);
 }
+
+/// A Live Set of the tracks `(kind, id, name, group id)`, each routed into its group when it has
+/// one ("-1" is none).
+fn grouped_set(tracks: &[(&str, &str, &str, &str)]) -> String {
+    let tracks: String = tracks
+        .iter()
+        .map(|(kind, id, name, group)| {
+            let target = if *group == "-1" { "AudioOut/Main" } else { "AudioOut/GroupTrack" };
+            format!(
+                r#"<{kind} Id="{id}"><Name><EffectiveName Value="{name}"/></Name><TrackGroupId Value="{group}"/>
+                   <DeviceChain><AudioOutputRouting><Target Value="{target}"/></AudioOutputRouting>{mixer}</DeviceChain>
+                   </{kind}>"#,
+                mixer = mixer("1", "0", "true", &[]),
+            )
+        })
+        .collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Ableton MajorVersion="5" MinorVersion="12.0_12402" Creator="Ableton Live 12.4.6">
+  <LiveSet><Tracks>{tracks}</Tracks>
+    <MainTrack><DeviceChain><Mixer><Tempo><Manual Value="120"/></Tempo></Mixer></DeviceChain></MainTrack>
+  </LiveSet>
+</Ableton>"#
+    )
+}
+
+#[test]
+fn reads_groups_inside_groups() {
+    let set = grouped_set(&[
+        ("GroupTrack", "20", "Band", "-1"),
+        ("GroupTrack", "21", "Drums", "20"),
+        ("MidiTrack", "22", "Kick", "21"),
+        ("AudioTrack", "23", "Vocal", "20"),
+        ("MidiTrack", "24", "Pad", "-1"),
+    ]);
+    let import = read_xml(&set).unwrap();
+    let p = &import.project;
+    let id = |name: &str| p.tracks.iter().find(|t| t.name == name).unwrap().id;
+    let output = |name: &str| {
+        let channel = p.tracks.iter().find(|t| t.name == name).unwrap().channel.unwrap();
+        let out = p.channels.iter().find(|c| c.id == channel).unwrap().output?;
+        p.tracks.iter().find(|t| t.channel == Some(out)).map(|t| t.name.clone())
+    };
+    assert_eq!(p.ancestors(id("Kick")), [id("Drums"), id("Band")]);
+    assert_eq!(p.group_depth(id("Vocal")), Some(1));
+    assert_eq!(p.group_depth(id("Pad")), Some(0));
+    assert_eq!(output("Kick").as_deref(), Some("Drums"));
+    assert_eq!(output("Drums").as_deref(), Some("Band"));
+    assert_eq!(output("Band"), None);
+    let roles: Vec<ChannelRole> =
+        ["Band", "Drums"].iter().map(|n| p.channels.iter().find(|c| c.name == *n).unwrap().role).collect();
+    assert_eq!(roles, [ChannelRole::Submix, ChannelRole::Submix]);
+    assert!(import.warnings.is_empty(), "{:?}", import.warnings);
+}
+
+#[test]
+fn groups_that_contain_each_other_or_nest_too_deep_still_open() {
+    // Two groups inside each other: one of them is taken out, with a warning.
+    let set = grouped_set(&[
+        ("GroupTrack", "20", "A", "21"),
+        ("GroupTrack", "21", "B", "20"),
+        ("MidiTrack", "22", "Kick", "21"),
+    ]);
+    let import = read_xml(&set).unwrap();
+    assert_eq!(import.project.validate(), Ok(()));
+    assert!(import.warnings.iter().any(|w| w.contains("contain each other")), "{:?}", import.warnings);
+    let a = import.project.tracks.iter().find(|t| t.name == "A").unwrap();
+    assert_eq!(a.parent, None);
+    assert_eq!(import.project.channels.iter().find(|c| c.name == "A").unwrap().output, None);
+
+    // Groups deeper than Suhina nests them: the deepest is taken out.
+    let ids: Vec<String> = (0..=suhina_model::MAX_GROUP_DEPTH + 1).map(|i| (100 + i).to_string()).collect();
+    let names: Vec<String> = (0..ids.len()).map(|i| format!("G{i}")).collect();
+    let tracks: Vec<(&str, &str, &str, &str)> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| ("GroupTrack", id.as_str(), names[i].as_str(), if i == 0 { "-1" } else { ids[i - 1].as_str() }))
+        .collect();
+    let import = read_xml(&grouped_set(&tracks)).unwrap();
+    assert_eq!(import.project.validate(), Ok(()));
+    assert!(import.warnings.iter().any(|w| w.contains("nest more than")), "{:?}", import.warnings);
+    let last = import.project.tracks.last().unwrap();
+    assert_eq!(last.parent, None);
+    assert_eq!(
+        import.project.group_depth(import.project.tracks[ids.len() - 2].id),
+        Some(suhina_model::MAX_GROUP_DEPTH)
+    );
+}
