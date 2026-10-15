@@ -98,7 +98,6 @@ fn project() -> Project {
                     fade_out_curve: Default::default(),
                     follow_action: Default::default(),
                     extensions: Extensions::default(),
-                    follow_action: Default::default(),
                 }],
             }],
         },
