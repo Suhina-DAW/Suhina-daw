@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -82,6 +82,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   without a path, to the project file it came from (a `.locr` from before October 2026 stays `.locr`); `copy: true` writes a copy (a template) and the
   project keeps its own file. `project.info` reports `unsaved_changes`. `project_open` opens
   `.suhina` (and older `.locr`) files as well as Live Sets.
+- **Backups.** `project.autosave { now?, interval?, clean_up? }` reports where the active
+  project's backups go, its last one and whether one is due ([spec](spec/backups.md));
+  `now: true` writes one into `.backup` beside the project's file, which must be below the write
+  root. Agents cannot choose `interval: "critical"`, which would write there unasked; the server
+  writes no timed backups.
 
 - **Clips.** `project.clips` lists each arrangement clip with its start, length and fades
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,

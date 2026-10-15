@@ -2,8 +2,8 @@
 //! template, or a project to open, typed as a path or picked from the recent ones. And the save
 //! prompt, which asks for a name and a folder when a project is saved for the first time, saved
 //! under another name, or saved as a template. And the question asked before a project with
-//! unsaved changes is closed, replaced or the app quits. All are drawn over the window; Escape
-//! closes them.
+//! unsaved changes is closed, replaced or the app quits. And the offer, on start, of a backup a
+//! crash left (`docs/spec/backups.md`). All are drawn over the window; Escape closes them.
 
 use std::path::{Path, PathBuf};
 
@@ -271,6 +271,69 @@ fn draw_unsaved(ui: &mut Ui, area: Rect, name: &str, doing: &str) -> Option<Unsa
     closed
 }
 
+/// What the user chose for a backup offered on start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryChoice {
+    /// Open it as an unsaved project tied to its project file.
+    Open,
+    /// Show it in the file manager; the offer stays.
+    ShowFolder,
+    /// Leave it in its folder and do not offer it again.
+    Ignore,
+}
+
+const RECOVERY_WIDTH: f32 = 520.0;
+const RECOVERY_BUTTON: Vec2 = Vec2::new(120.0, 18.0);
+
+/// Offers the backup of `name` written at `written` (local time) that is newer than its project
+/// file, over `area`; `saved` says whether the project has a file at all.
+pub fn show_recovery(ui: &Ui, area: Rect, name: &str, written: &str, saved: bool) -> Option<RecoveryChoice> {
+    egui::Area::new(Id::new("recovery-prompt"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(area.min)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_size(area.size());
+            draw_recovery(ui, area, name, written, saved)
+        })
+        .inner
+}
+
+fn draw_recovery(ui: &mut Ui, area: Rect, name: &str, written: &str, saved: bool) -> Option<RecoveryChoice> {
+    let mut closed: Option<RecoveryChoice> = None;
+    let size = Vec2::new(RECOVERY_WIDTH, ROW + 3.0 * LINE + RECOVERY_BUTTON.y + 3.0 * PAD);
+    let panel = panel(ui, area, size, "Backup found", &mut closed);
+    let painter = ui.painter_at(area);
+    let lines = [
+        format!("Suhina closed before {name} was saved."),
+        if saved {
+            format!("A backup from {written} is newer than the project file.")
+        } else {
+            format!("A backup from {written} is all there is of it.")
+        },
+    ];
+    for (n, line) in lines.iter().enumerate() {
+        let text = Rect::from_min_size(
+            Pos2::new(panel.left() + PAD, panel.top() + ROW + PAD + n as f32 * LINE),
+            Vec2::new(panel.width() - 2.0 * PAD, LINE),
+        );
+        widgets::text_in(&painter, text, Align2::LEFT_CENTER, line, theme::ui_font(theme::TEXT), theme::text_primary());
+    }
+    let bottom = panel.bottom() - PAD - RECOVERY_BUTTON.y;
+    let open = Rect::from_min_size(Pos2::new(panel.right() - PAD - RECOVERY_BUTTON.x, bottom), RECOVERY_BUTTON);
+    let folder = Rect::from_min_size(Pos2::new(open.left() - 4.0 - RECOVERY_BUTTON.x, bottom), RECOVERY_BUTTON);
+    let ignore = Rect::from_min_size(Pos2::new(folder.left() - 4.0 - RECOVERY_BUTTON.x, bottom), RECOVERY_BUTTON);
+    if button(ui, &painter, open, "Open the backup", "Open the backup") || ui.input(|i| i.key_pressed(Key::Enter)) {
+        return Some(RecoveryChoice::Open);
+    }
+    if button(ui, &painter, folder, "Show the folder", "Show the backup's folder") {
+        return Some(RecoveryChoice::ShowFolder);
+    }
+    if button(ui, &painter, ignore, "Ignore", "Ignore the backup") || ui.input(|i| i.key_pressed(Key::Escape)) {
+        return Some(RecoveryChoice::Ignore);
+    }
+    closed
+}
+
 /// A panel in the middle of `area` with a title row and a Close button, the area behind dimmed
 /// and its clicks swallowed. Returns the panel; `closed` is set when Close is clicked.
 fn panel<T: CloseChoice>(ui: &Ui, area: Rect, size: Vec2, title: &str, closed: &mut Option<T>) -> Rect {
@@ -319,6 +382,12 @@ impl CloseChoice for Choice {
 impl CloseChoice for SaveChoice {
     fn close() -> Self {
         SaveChoice::Cancel
+    }
+}
+
+impl CloseChoice for RecoveryChoice {
+    fn close() -> Self {
+        RecoveryChoice::Ignore
     }
 }
 
@@ -470,5 +539,29 @@ mod tests {
         harness.get_by_label("Cancel saving").click();
         harness.run();
         assert_eq!(harness.state().1, Some(SaveChoice::Cancel));
+    }
+
+    #[test]
+    fn the_offer_of_a_backup_opens_shows_or_ignores_it() {
+        for (label, choice) in [
+            ("Open the backup", RecoveryChoice::Open),
+            ("Show the backup's folder", RecoveryChoice::ShowFolder),
+            ("Ignore the backup", RecoveryChoice::Ignore),
+            ("Close Backup found", RecoveryChoice::Ignore),
+        ] {
+            let mut harness = Harness::builder().with_size(egui::vec2(900.0, 600.0)).build_ui_state(
+                |ui, chosen: &mut Option<RecoveryChoice>| {
+                    let area = ui.max_rect();
+                    if let Some(choice) = show_recovery(ui, area, "Song", "2026-10-15 14:05", true) {
+                        *chosen = Some(choice);
+                    }
+                },
+                None,
+            );
+            harness.run();
+            harness.get_by_label(label).click();
+            harness.run();
+            assert_eq!(*harness.state(), Some(choice), "{label}");
+        }
     }
 }

@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 93
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -47,9 +47,10 @@ CHAPTERS = [
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
      "engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
-    (5, "Managing Files and Sets", 43, 0.35, "partial",
+    (5, "Managing Files and Sets", 43, 0.38, "partial",
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
-     "relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
+     "relink, backups on an interval or before critical operations with the offer after a crash. "
+     "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
     (6, "Arrangement View", 22, 0.35, "partial",
      "Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and "

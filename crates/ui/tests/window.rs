@@ -1578,3 +1578,108 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
 }
+
+/// A project saved in `dir` as `Song.suhina`, then changed and backed up by a run that never
+/// ends normally (a crash), its backups and journal in `dir/settings`. Returns the project file
+/// and the backup.
+#[allow(clippy::unwrap_used)] // a test helper outside #[test] functions
+fn crashed_run(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let file = dir.join("Song.suhina");
+    Session::new(demo_project()).save(&file, false).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let mut projects = suhina_session::Projects::new();
+    projects.set_backup_folder(Some(dir.join("settings")));
+    projects.add(Session::open(&file).unwrap().0, None).unwrap();
+    projects.execute("transport.setTempo", &json!({ "bpm": 97 })).unwrap();
+    let written = projects.execute("project.autosave", &json!({ "now": true })).unwrap();
+    (file, std::path::PathBuf::from(written["written"].as_str().unwrap()))
+}
+
+#[test]
+fn a_backup_a_crash_left_is_offered_on_start_and_opens_tied_to_its_file() {
+    let dir = std::env::temp_dir().join(format!("suhina-ui-recovery-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let (file, backup) = crashed_run(&dir);
+
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.projects_mut().set_backup_folder(Some(dir.join("settings")));
+    app.offer_recovery();
+    let mut harness = window(app);
+    assert!(harness.query_by_label("Open the backup").is_some());
+    // Show the folder hands the backup to the app and keeps asking.
+    harness.get_by_label("Show the backup's folder").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_reveal_request(), Some(backup.clone()));
+    assert!(harness.query_by_label("Open the backup").is_some());
+    harness.get_by_label("Open the backup").click();
+    harness.run();
+    assert!(harness.query_by_label("Open the backup").is_none());
+    let offer = harness.state_mut().take_recovery_request().expect("the backup to open");
+    assert_eq!((offer.backup.clone(), offer.file.clone()), (backup.clone(), Some(file.clone())));
+    // What the app does with it.
+    let (session, _) = Session::recover(&offer.backup, offer.file.as_deref()).unwrap();
+    harness.state_mut().open_project(session, &[], OpenAs::NewTab);
+    harness.run();
+    let session = harness.state().session().unwrap();
+    assert!(session.has_unsaved_changes());
+    assert_eq!((session.source(), session.project().transport.tempo_bpm), (Some(file.as_path()), 97.0));
+
+    // Offered once: the next start finds nothing.
+    assert!(harness.state_mut().finish_backups());
+    let mut next = App::new();
+    next.projects_mut().set_backup_folder(Some(dir.join("settings")));
+    next.offer_recovery();
+    let harness = window(next);
+    assert!(harness.query_by_label("Open the backup").is_none());
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ignoring_an_offered_backup_leaves_it_and_asks_no_more() {
+    let dir = std::env::temp_dir().join(format!("suhina-ui-recovery-ignore-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let (_file, backup) = crashed_run(&dir);
+    let mut app = App::new();
+    app.projects_mut().set_backup_folder(Some(dir.join("settings")));
+    app.offer_recovery();
+    let mut harness = window(app);
+    harness.get_by_label("Ignore the backup").click();
+    harness.run();
+    assert!(harness.query_by_label("Open the backup").is_none());
+    assert!(harness.state_mut().take_recovery_request().is_none());
+    assert!(harness.state().projects().is_empty());
+    assert!(harness.state_mut().finish_backups());
+    assert!(backup.is_file(), "the backup stays in its folder");
+    let mut next = App::new();
+    next.projects_mut().set_backup_folder(Some(dir.join("settings")));
+    next.offer_recovery();
+    assert!(window(next).query_by_label("Open the backup").is_none());
+    let _clean = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_critical_command_from_the_window_is_backed_up_first() {
+    let dir = std::env::temp_dir().join(format!("suhina-ui-critical-{}", std::process::id()));
+    let _fresh = std::fs::remove_dir_all(&dir);
+    let file = dir.join("Song.suhina");
+    Session::new(demo_project()).save(&file, false).unwrap();
+    let mut app = App::new();
+    app.projects_mut().set_backup_folder(Some(dir.join("settings")));
+    app.projects_mut().set_backup_settings(suhina_session::backup::Interval::Critical, true);
+    app.set_session(Session::open(&file).unwrap().0, &[]);
+    app.run(&Action::new("transport.setTempo", json!({ "bpm": 101 })));
+    assert!(!dir.join(".backup").exists(), "an ordinary edit is not critical");
+    let track = app.session().unwrap().project().tracks.first().unwrap().id.0;
+    app.run(&Action::new("track.delete", json!({ "track": track })));
+    let tracks = app.session().unwrap().project().tracks.len();
+    // The backup thread finishes, and quitting is critical too: a second backup has the delete.
+    assert!(app.finish_backups());
+    let mut kept: Vec<usize> = std::fs::read_dir(dir.join(".backup"))
+        .unwrap()
+        .map(|e| Session::open(&e.unwrap().path()).unwrap().0.project().tracks.len())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, [tracks, tracks + 1]);
+    let _clean = std::fs::remove_dir_all(&dir);
+}

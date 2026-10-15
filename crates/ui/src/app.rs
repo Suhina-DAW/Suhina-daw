@@ -20,7 +20,7 @@ use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
-use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
+use crate::project_dialog::{self, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
@@ -214,6 +214,11 @@ pub struct App {
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
+    /// Backups a crash left, offered one at a time (`docs/spec/backups.md` › The offer on
+    /// start); the one chosen to open, and a backup to show in the file manager, for the app.
+    recovery: Vec<suhina_session::backup::Leftover>,
+    recovery_open: Option<suhina_session::backup::Leftover>,
+    reveal: Option<PathBuf>,
 }
 
 impl Default for App {
@@ -276,6 +281,9 @@ impl App {
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
+            recovery: Vec::new(),
+            recovery_open: None,
+            reveal: None,
         }
     }
 
@@ -564,8 +572,44 @@ impl App {
         motion::set_enabled(ctx, on);
     }
 
+    /// Looks for backups a crash left (in the backup folder the projects were given) and offers
+    /// them, one at a time.
+    pub fn offer_recovery(&mut self) {
+        self.recovery = self.projects.leftover_backups();
+    }
+
+    /// A backup the user chose to open, for the app to open as an unsaved project tied to its
+    /// project file (`Session::recover`).
+    pub fn take_recovery_request(&mut self) -> Option<suhina_session::backup::Leftover> {
+        self.recovery_open.take()
+    }
+
+    /// A backup to show in the file manager.
+    pub fn take_reveal_request(&mut self) -> Option<PathBuf> {
+        self.reveal.take()
+    }
+
+    /// Before the app closes: backs up what quitting needs and waits a little for the backups to
+    /// be written. Returns whether they were.
+    pub fn finish_backups(&mut self) -> bool {
+        self.projects.finish_backups(std::time::Duration::from_secs(5))
+    }
+
+    /// Takes in finished backups and writes the timed ones that are due; a failed one is shown in
+    /// the status bar. The window looks again when the next one will be due.
+    fn tick_backups(&mut self, ctx: &egui::Context) {
+        let tick = self.projects.tick_backups();
+        if let Some(failed) = tick.notices.last() {
+            self.status = Status::Error(failed.clone());
+        }
+        if let Some(next) = tick.next {
+            ctx.request_repaint_after(next + std::time::Duration::from_millis(50));
+        }
+    }
+
     /// Uses `settings` from now on, as loaded from the settings file.
     pub fn set_settings(&mut self, ctx: &egui::Context, settings: Settings) {
+        self.projects.set_backup_settings(settings.backup, settings.backup_clean_up);
         motion::set_enabled(ctx, settings.animations);
         self.arrangement.headers_left = settings.track_headers == Side::Left;
         if settings.map_window {
@@ -730,6 +774,24 @@ impl App {
                 None => self.save_prompt = Some(prompt),
             }
         }
+        let other_dialog = self.unsaved_prompt.is_some() || self.save_prompt.is_some() || self.project_dialog.is_some();
+        if !other_dialog && let Some(offer) = self.recovery.first().cloned() {
+            let written = suhina_session::backup::date_time(offer.written);
+            let written = written.get(..16).unwrap_or(&written);
+            match project_dialog::show_recovery(ui, window, &offer.name(), written, offer.file.is_some()) {
+                Some(RecoveryChoice::Open) => {
+                    self.projects.forget_backup(&offer.backup);
+                    self.recovery.remove(0);
+                    self.recovery_open = Some(offer);
+                }
+                Some(RecoveryChoice::ShowFolder) => self.reveal = Some(offer.backup),
+                Some(RecoveryChoice::Ignore) => {
+                    self.projects.forget_backup(&offer.backup);
+                    self.recovery.remove(0);
+                }
+                None => {}
+            }
+        }
         if let Some(leaving) = self.unsaved_prompt.take() {
             let name = self.projects.name(leaving.project).unwrap_or("Untitled").to_string();
             let doing = match leaving.then {
@@ -832,6 +894,8 @@ impl App {
             }
             return;
         }
+        // A critical operation is backed up first, when the settings say so.
+        self.projects.back_up_before(action.id);
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
             Ok(_) => {
@@ -897,6 +961,7 @@ impl App {
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
+        self.tick_backups(ui.ctx());
         // The sample map's analysis goes on in the background; take in what it finished.
         self.projects.poll_sound_map();
         self.dropped_files(ui);
@@ -1388,6 +1453,12 @@ impl App {
         let themes = self.themes.view(&self.settings.theme);
         self.about.projects_default = self.default_folders.0.display().to_string();
         self.about.templates_default = self.default_folders.1.display().to_string();
+        self.about.last_backup = match self.session().and_then(Session::last_backup) {
+            Some(backup) => {
+                format!("{} to {}", suhina_session::backup::date_time(backup.written), backup.path.display())
+            }
+            None => "None written for this project yet".into(),
+        };
         let tag_limit = self.projects.file_library_mut().tag_limit();
         self.about.audio_live = self.session().and_then(Session::player).and_then(suhina_session::Player::output_info);
         if self.page.page == settings_view::Page::Audio {
@@ -1427,6 +1498,7 @@ impl App {
             self.choose_output(&choice);
         }
         if outcome.changed {
+            self.projects.set_backup_settings(self.settings.backup, self.settings.backup_clean_up);
             motion::set_enabled(ui.ctx(), self.settings.animations);
             self.arrangement.headers_left = self.settings.track_headers == Side::Left;
             self.settings_changed = true;
@@ -2447,11 +2519,19 @@ impl App {
             Status::Done(t) => (t.as_str(), theme::text_secondary()),
             Status::Error(t) => (t.as_str(), theme::recording()),
         };
+        let backed_up = self
+            .session()
+            .and_then(Session::last_backup)
+            .map(|b| format!(" · backed up {}", suhina_session::backup::clock_time(b.written)));
         let right = grid.map(|g| {
             let tracks = g.columns.iter().filter(|c| c.kind != crate::grid::ColumnKind::Return).count();
-            format!("{tracks} tracks · {} scenes", g.scenes.len())
+            format!("{tracks} tracks · {} scenes{}", g.scenes.len(), backed_up.as_deref().unwrap_or(""))
         });
-        let right_width = if right.is_some() { 140.0 } else { 0.0 };
+        let right_width = match (&right, &backed_up) {
+            (None, _) => 0.0,
+            (Some(_), None) => 140.0,
+            (Some(_), Some(_)) => 240.0,
+        };
         let left =
             Rect::from_min_max(bar.min + Vec2::new(PAD, 0.0), Pos2::new(bar.right() - right_width - PAD, bar.bottom()));
         widgets::text_in(&painter, left, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), color);

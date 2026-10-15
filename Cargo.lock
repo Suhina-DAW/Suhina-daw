@@ -4267,6 +4267,7 @@ dependencies = [
 name = "suhina-session"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "hound",
  "serde_json",
  "suhina-als",

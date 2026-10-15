@@ -1,12 +1,13 @@
 ---
 description: Suhina's own project file (.suhina; .locr from before October 2026 still read): versioned JSON of the model, written by its own crate; saving, templates and new projects
-read_when: project file, save, open, .suhina, .locr, file extension, native format, project.save, templates, new project, blank project, unsaved changes, recent projects
+read_when: project file, save, open, backup, autosave, recovery, .suhina, .locr, file extension, native format, project.save, templates, new project, blank project, unsaved changes, recent projects
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/project-file
   - crates/session/src/lib.rs
+  - crates/session/src/backup.rs
   - crates/session/src/blank.rs
   - apps/suhina/src/recent.rs
 ---
@@ -14,7 +15,7 @@ covers:
 # 0010: Suhina's own project files (.suhina)
 
 - **Status:** accepted
-- **Date:** 2026-10-12; extension changed 2026-10-13 (decision 10)
+- **Date:** 2026-10-12; extension changed 2026-10-13 (decision 10); backups 2026-10-15 (decision 11)
 
 ## Context
 
@@ -74,6 +75,19 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
     `project.save` without a path, or a path that ends in `.locr`), so no file is renamed
     behind the user's back. Save as offers `.suhina`; the file saved then names the format
     `"suhina"`, which a Suhina from before the change does not read.
+11. **Backups** (2026-10-15, [#202](https://github.com/suhina-daw/suhina-daw/issues/202)): a
+    setting writes a backup of each project with unsaved changes before every critical operation,
+    every 1, 5 (the default), 10, 15, 30 or 60 minutes, every 4 hours, or never; a timed backup is
+    written only when the project changed since the last one. Backups go to `.backup/` beside the
+    project file, one file each named with the project's name and the local date and time; a
+    project never saved backs up to the settings folder until it is saved. They are taken as
+    `project.save` takes the project (the one-second wait for plug-ins of decision 7) and written
+    on a background thread to a temporary file that is then renamed. A clean-up setting (on by
+    default) keeps the newest 20 backups of each project. A journal in the settings folder names
+    each open project's newest backup; on start, a backup it still lists that is newer than its
+    project file is offered: open it as an unsaved project tied to the original file, show the
+    folder, or ignore. `project.autosave` writes and reports backups. The list of critical
+    operations, the clean-up rule and the journal are in [the spec](../spec/backups.md).
 
 ## Consequences
 
@@ -84,9 +98,10 @@ Suhina (October 2026) the extension followed: files are `.suhina` from 2026-10-1
 - Every new field in the model needs its line in `suhina-project-file` and in the round-trip test; a
   field that changes meaning needs a new version.
 - Large note-heavy projects are bigger than a binary format would make them.
+- A crash loses at most the work since the last backup (decision 11). A project's `.backup`
+  folder grows by one file per backup; with clean-up on it holds at most 20 per project.
 
 ## Not decided yet
 
-- Backups and autosave ([#202](https://github.com/suhina-daw/suhina-daw/issues/202)).
 - A packaged format that carries its audio, and "collect and save".
 - A system file dialog for Open and Save as.

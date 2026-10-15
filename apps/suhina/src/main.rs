@@ -105,6 +105,11 @@ fn main() -> ExitCode {
     window.app.projects_mut().start_sound_map();
     let (projects, templates) = default_folders();
     window.app.set_default_folders(projects, templates);
+    // Backups of projects never saved, and the journal of the newest backups, beside the
+    // settings; what a crash left there is offered (`docs/spec/backups.md`).
+    let backups = eframe::storage_dir(app_id()).map(|d| d.join(suhina_session::backup::SETTINGS_SUBFOLDER));
+    window.app.projects_mut().set_backup_folder(backups);
+    window.app.offer_recovery();
     match args.source {
         Source::Nothing => {}
         Source::Demo => {
@@ -207,6 +212,17 @@ impl eframe::App for Window {
         if let Some(new) = self.app.take_new_request() {
             self.new_project(new);
         }
+        if let Some(offer) = self.app.take_recovery_request() {
+            match Session::recover(&offer.backup, offer.file.as_deref()) {
+                Ok((session, warnings)) => self.show_session(session, warnings, OpenAs::NewTab),
+                Err(e) => self.app.set_status(Status::Error(e.0)),
+            }
+        }
+        if let Some(backup) = self.app.take_reveal_request()
+            && let Err(e) = theme_files::reveal(&backup, true)
+        {
+            self.app.set_status(Status::Error(e));
+        }
         if let Some(path) = self.app.take_saved_path() {
             self.remember(&path);
         }
@@ -246,6 +262,12 @@ impl eframe::App for Window {
             self.app.set_status(Status::Error(e));
         }
         self.sync_themes(ui.ctx());
+    }
+
+    /// Quitting: backups that quitting calls for are written, and the journal says nothing is
+    /// left to offer next time.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _finished_in_time = self.app.finish_backups();
     }
 }
 

@@ -3,6 +3,7 @@
 //! later the UI all drive the project the same way.
 
 pub mod audio;
+pub mod backup;
 mod blank;
 mod commands;
 mod devices;
@@ -195,6 +196,8 @@ pub struct Session {
     audio_changed: bool,
     /// Files decoded ahead of a command that uses them (`provide_audio`), newest last.
     decoded: Vec<(String, std::sync::Arc<suhina_engine::AudioData>)>,
+    /// When the project was last backed up and where (`backup.rs`).
+    pub(crate) backup: backup::SessionBackups,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -217,6 +220,7 @@ impl Session {
             audio: suhina_engine::AudioPool::new(),
             audio_changed: false,
             decoded: Vec::new(),
+            backup: backup::SessionBackups::default(),
         }
     }
 
@@ -465,6 +469,27 @@ impl Session {
         Ok((session, warnings))
     }
 
+    /// Opens a backup (`docs/spec/backups.md` › The offer on start) as an unsaved project tied
+    /// to `file`, the project file it is a backup of: saving writes `file`, and the backup is
+    /// left as it is. Without `file` (a project never saved) it opens untitled.
+    pub fn recover(backup: &Path, file: Option<&Path>) -> Result<(Self, Vec<String>), CommandError> {
+        if !suhina_project_file::is_project_file(backup) {
+            return Err(format!("{} is not a Suhina project", backup.display()).into());
+        }
+        let (mut session, warnings) = Self::open(backup)?;
+        session.source = file.map(Path::to_path_buf);
+        // The changes since the project file was saved are in the backup only.
+        session.changes = 1;
+        // ...and the backup holds them, so it is not written again until something changes.
+        session.backup.backed_at = 1;
+        Ok((session, warnings))
+    }
+
+    /// The newest backup of the project written in this run.
+    pub fn last_backup(&self) -> Option<&backup::Backup> {
+        self.backup.last.as_ref()
+    }
+
     /// The folder the project's relative audio paths start from, as the audio is loaded.
     pub fn audio_folder(&self) -> Option<&Path> {
         self.audio_folder.as_deref()
@@ -491,6 +516,19 @@ impl Session {
             name.push(suhina_project_file::EXTENSION);
             path.set_file_name(name);
         }
+        let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+        let project = self.snapshot(&to);
+        suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
+        if !copy {
+            self.source = Some(path.clone());
+            self.saved_at = self.changes;
+        }
+        Ok(path)
+    }
+
+    /// The project as it would be saved into `folder`: with the running plug-ins' state as it
+    /// is now (each asked, waiting at most a second) and audio paths relative to `folder`.
+    pub(crate) fn snapshot(&mut self, folder: &Path) -> Project {
         let mut project = self.project.clone();
         let states = self.plugins.current_states();
         for device in suhina_engine::plugin_devices(&project) {
@@ -516,14 +554,8 @@ impl Session {
             Some(folder) => folder.clone(),
             None => std::env::current_dir().unwrap_or_default(),
         };
-        let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-        suhina_project_file::rebase_audio(&mut project, &from, &to);
-        suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
-        if !copy {
-            self.source = Some(path.clone());
-            self.saved_at = self.changes;
-        }
-        Ok(path)
+        suhina_project_file::rebase_audio(&mut project, &from, folder);
+        project
     }
 
     pub fn project(&self) -> &Project {

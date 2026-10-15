@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **92**, every one reachable from the UI, the CLI and MCP |
+| Commands | **93**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -125,7 +125,7 @@ documented behaviour that exists today.
 | 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 50 % | partial | Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 45 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
-| 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
+| 5 | Managing Files and Sets | 43 | 38 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink, backups on an interval or before critical operations with the offer after a crash. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
 | 6 | Arrangement View | 22 | 35 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
 | 7 | Session View | 13 | 50 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. Missing scene view/editing depth, select-on-launch options, follow actions. |
 | 8 | Clip View | 34 | 8 % | started | Detail area shows clip properties; the MIDI clip editor is a spec only (docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels. |
@@ -172,7 +172,7 @@ documented behaviour that exists today.
 | Area | Manual pages | Covered |
 |---|---|---|
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
-| Browser, files, project (ch 4, 5) | 103 | 41 % |
+| Browser, files, project (ch 4, 5) | 103 | 42 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
@@ -344,7 +344,7 @@ or does something Live does not:
 | Gap | Manual pages | Today | What closing it means |
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 14 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
-| Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
+| Browser and file management depth | 103 (ch 4, 5) | 42 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
 | Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |

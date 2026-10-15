@@ -70,6 +70,17 @@ impl Workspace {
             _ => Ok(target),
         }
     }
+
+    /// An existing folder below the write root, resolved as [`Workspace::readable`] resolves
+    /// files, for something to write into it.
+    pub fn writable_folder(&self, path: &Path) -> Result<PathBuf, String> {
+        let root = self.write_root.as_ref().ok_or("no write root was granted (start the server with --write-root)")?;
+        let real = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
+        if !real.starts_with(root) || !real.is_dir() {
+            return Err(format!("{} is not a folder below the write root", path.display()));
+        }
+        Ok(real)
+    }
 }
 
 /// A path for people to read: Windows' verbatim prefix (`\\?\`), which canonicalising adds, is
