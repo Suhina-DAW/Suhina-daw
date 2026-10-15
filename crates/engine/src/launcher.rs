@@ -96,6 +96,91 @@ pub enum LaunchCommand {
     },
 }
 
+/// The time signature playing and where its bars start, as [`LauncherMonitor::meter`] reports
+/// it: the project's from beat 0, or a launched scene's from its launch beat.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Meter {
+    pub time_signature: TimeSignature,
+    /// The beat this time signature's bars are counted from.
+    pub origin: f64,
+    /// Bars played before `origin`, a bar cut short by the change counted as a whole one.
+    pub bars_before: f64,
+}
+
+impl Default for Meter {
+    /// 4/4 from beat 0.
+    fn default() -> Self {
+        Self { time_signature: TimeSignature { numerator: 4, denominator: 4 }, origin: 0.0, bars_before: 0.0 }
+    }
+}
+
+impl Meter {
+    /// Beats in one bar: a 4/4 bar has 4, a 6/8 bar 3.
+    pub fn bar_beats(&self) -> f64 {
+        bar_beats(self.time_signature)
+    }
+
+    /// The bar `beat` is in, counted from 1, and the beats into that bar.
+    pub fn locate(&self, beat: f64) -> (u64, f64) {
+        let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
+        let origin = if self.origin.is_finite() { self.origin.clamp(0.0, beat) } else { 0.0 };
+        let bars_before = if self.bars_before.is_finite() { self.bars_before.max(0.0) } else { 0.0 };
+        let bar_beats = self.bar_beats();
+        let into = beat - origin;
+        ((bars_before + (into / bar_beats).floor()) as u64 + 1, into % bar_beats)
+    }
+}
+
+/// How the scenes of a new graph line up with the playing graph's when one scene was inserted
+/// or removed, so that what each column plays and has queued stays with its clip across the
+/// swap (ADR 0005). Without one, slots carry over by index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneShift {
+    /// A scene was inserted at this index: the slots from it on moved one row down.
+    Inserted(usize),
+    /// The scene at this index was removed with its slots: later slots moved one row up.
+    Removed(usize),
+}
+
+impl SceneShift {
+    /// Where the slot at `slot` before the shift is after it; `None` for a removed slot.
+    fn map(self, slot: usize) -> Option<usize> {
+        match self {
+            Self::Inserted(at) if slot >= at => slot.checked_add(1),
+            Self::Removed(at) if slot == at => None,
+            Self::Removed(at) if slot > at => Some(slot - 1),
+            _ => Some(slot),
+        }
+    }
+
+    /// The shift that turns launcher `before` into `after`, when they differ by exactly one
+    /// inserted or removed scene (its row in every column) and nothing else. Where neighbouring
+    /// rows are equal, the later index is taken, so rows above an inserted duplicate keep theirs.
+    pub fn between(before: &suhina_model::Launcher, after: &suhina_model::Launcher) -> Option<Self> {
+        let (short, long, inserted) = match after.scenes.len().checked_sub(before.scenes.len()) {
+            Some(1) => (before, after, true),
+            _ if before.scenes.len().checked_sub(after.scenes.len()) == Some(1) => (after, before, false),
+            _ => return None,
+        };
+        if short.columns.len() != long.columns.len()
+            || short.columns.iter().zip(&long.columns).any(|(a, b)| a.track != b.track)
+        {
+            return None;
+        }
+        let same_row = |i: usize, j: usize| {
+            short.scenes.get(i) == long.scenes.get(j)
+                && short.columns.iter().zip(&long.columns).all(|(a, b)| a.slots.get(i) == b.slots.get(j))
+        };
+        let rows = short.scenes.len();
+        let prefix = (0..rows).take_while(|&i| same_row(i, i)).count();
+        let suffix = (0..rows).take_while(|&k| same_row(rows - 1 - k, rows - k)).count();
+        if prefix + suffix < rows {
+            return None;
+        }
+        Some(if inserted { Self::Inserted(prefix) } else { Self::Removed(prefix) })
+    }
+}
+
 /// What a column is waiting to do, as reported by [`LauncherMonitor::column`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Queued {
@@ -134,10 +219,16 @@ pub struct LauncherMonitor {
     metronome: AtomicBool,
     /// The play start marker, in beats (f64 bits).
     pub(crate) start_beat: AtomicU64,
+    /// The time signature playing, as `numerator << 8 | denominator`.
+    signature: AtomicU32,
+    /// The beat bars are counted from (f64 bits): where the time signature last changed.
+    bar_origin: AtomicU64,
+    /// Bars played before `bar_origin` (f64 bits).
+    bars_before: AtomicU64,
 }
 
 impl LauncherMonitor {
-    fn new(columns: usize, tempo: f64) -> Self {
+    fn new(columns: usize, tempo: f64, signature: TimeSignature) -> Self {
         let room = columns.max(MONITOR_COLUMNS);
         Self {
             running: AtomicBool::new(false),
@@ -153,6 +244,9 @@ impl LauncherMonitor {
             frames_per_beat: AtomicU64::new(0),
             metronome: AtomicBool::new(false),
             start_beat: AtomicU64::new(0f64.to_bits()),
+            signature: AtomicU32::new(pack(signature)),
+            bar_origin: AtomicU64::new(0f64.to_bits()),
+            bars_before: AtomicU64::new(0f64.to_bits()),
         }
     }
 
@@ -174,6 +268,17 @@ impl LauncherMonitor {
 
     pub fn tempo_bpm(&self) -> f64 {
         f64::from_bits(self.tempo.load(Ordering::Relaxed))
+    }
+
+    /// The time signature playing (the project's, or the last launched scene's) and where its
+    /// bars start.
+    pub fn meter(&self) -> Meter {
+        let packed = self.signature.load(Ordering::Relaxed);
+        Meter {
+            time_signature: TimeSignature { numerator: (packed >> 8) as u8, denominator: packed as u8 },
+            origin: f64::from_bits(self.bar_origin.load(Ordering::Relaxed)),
+            bars_before: f64::from_bits(self.bars_before.load(Ordering::Relaxed)),
+        }
     }
 
     /// Whether the metronome clicks while the transport runs.
@@ -333,8 +438,19 @@ struct Column {
 pub(crate) struct Launcher {
     columns: Vec<Column>,
     scene_tempos: Vec<Option<f64>>,
+    scene_signatures: Vec<Option<TimeSignature>>,
     quantization: Quantization,
+    /// The time signature playing, and the project's, which the playing one follows when it is
+    /// edited.
+    time_signature: TimeSignature,
+    project_signature: TimeSignature,
     bar_beats: f64,
+    /// The beat bars are counted from: where a scene last changed the time signature.
+    bar_origin: f64,
+    /// Bars played before `bar_origin`.
+    bars_before: f64,
+    /// A scene's time signature waiting for its launch beat.
+    pending_signature: Option<(f64, TimeSignature)>,
     beat: f64,
     tempo_bpm: f64,
     /// The project tempo, which stretch voices are prepared for.
@@ -373,7 +489,7 @@ impl Launcher {
             })
             .collect();
         Self {
-            monitor: Arc::new(LauncherMonitor::new(columns.len(), tempo)),
+            monitor: Arc::new(LauncherMonitor::new(columns.len(), tempo, project.transport.time_signature)),
             columns,
             scene_tempos: project
                 .launcher
@@ -381,8 +497,19 @@ impl Launcher {
                 .iter()
                 .map(|s| s.tempo_bpm.filter(|bpm| bpm.is_finite() && (1.0..=999.0).contains(bpm)))
                 .collect(),
+            scene_signatures: project
+                .launcher
+                .scenes
+                .iter()
+                .map(|s| s.time_signature.filter(|ts| ts.numerator > 0 && ts.denominator > 0))
+                .collect(),
             quantization: Quantization::Bars(1),
+            time_signature: project.transport.time_signature,
+            project_signature: project.transport.time_signature,
             bar_beats: bar_beats(project.transport.time_signature),
+            bar_origin: 0.0,
+            bars_before: 0.0,
+            pending_signature: None,
             beat: 0.0,
             tempo_bpm: tempo,
             project_tempo_bpm: tempo,
@@ -397,8 +524,9 @@ impl Launcher {
     /// and has queued, the beat, tempo and quantisation, and the control queue and monitor (the
     /// new graph's own go back with the old graph). A playing clip whose stretched audio has not
     /// changed keeps its stretch voice; any other playing stretch voice is moved to where its clip
-    /// is. A column or slot that no longer exists is dropped. Never allocates.
-    pub(crate) fn adopt(&mut self, old: &mut Launcher) {
+    /// is. Slots carry over by index, or along `shift` when a scene was inserted or removed. A
+    /// column or slot that no longer exists is dropped. Never allocates.
+    pub(crate) fn adopt(&mut self, old: &mut Launcher, shift: Option<SceneShift>) {
         std::mem::swap(&mut self.monitor, &mut old.monitor);
         std::mem::swap(&mut self.control, &mut old.control);
         self.quantization = old.quantization;
@@ -407,15 +535,26 @@ impl Launcher {
         // An edited project tempo replaces the running one; otherwise a scene's tempo stays.
         self.tempo_bpm =
             if self.project_tempo_bpm == old.project_tempo_bpm { old.tempo_bpm } else { self.project_tempo_bpm };
+        // The same for the time signature: an edited project one restarts the bar count.
+        self.pending_signature = old.pending_signature;
+        if self.project_signature == old.project_signature {
+            self.time_signature = old.time_signature;
+            self.bar_beats = old.bar_beats;
+            self.bar_origin = old.bar_origin;
+            self.bars_before = old.bars_before;
+        }
         let frames_per_beat = self.frames_per_beat_at_build;
+        let map = |slot: usize| shift.map_or(Some(slot), |s| s.map(slot));
         for (new, old) in self.columns.iter_mut().zip(old.columns.iter_mut()) {
             new.overrides_since = old.overrides_since;
-            new.pending = old.pending.filter(|p| match p.action {
-                Queued::Launch(slot) => new.slots.get(slot).is_some_and(|s| s.clip.is_some()),
-                Queued::Stop => true,
+            new.pending = old.pending.and_then(|p| match p.action {
+                Queued::Launch(slot) => map(slot)
+                    .filter(|&slot| new.slots.get(slot).is_some_and(|s| s.clip.is_some()))
+                    .map(|slot| Pending { action: Queued::Launch(slot), ..p }),
+                Queued::Stop => Some(p),
             });
-            new.playing = carry(&mut new.slots, &mut old.slots, old.playing, frames_per_beat);
-            new.fading = carry(&mut new.slots, &mut old.slots, old.fading, frames_per_beat);
+            new.playing = carry(&mut new.slots, &mut old.slots, old.playing, map, frames_per_beat);
+            new.fading = carry(&mut new.slots, &mut old.slots, old.fading, map, frames_per_beat);
         }
         // The monitor is the old graph's: report this graph's columns, added ones included.
         self.publish();
@@ -436,20 +575,23 @@ impl Launcher {
         self.tempo_bpm
     }
 
-    /// The beat playing now and the beats in a bar, for the metronome.
-    pub(crate) fn beat_and_bar(&self) -> (f64, f64) {
-        (self.beat, self.bar_beats)
+    /// The beat playing now, the beats in a bar and the beat bars are counted from, for the
+    /// metronome.
+    pub(crate) fn beat_and_bar(&self) -> (f64, f64, f64) {
+        (self.beat, self.bar_beats, self.bar_origin)
     }
 
-    /// The beat a launch issued now happens at.
+    /// The beat a launch issued now happens at. Bars are counted from where the time signature
+    /// last changed; note values from beat 0.
     fn launch_beat(&self) -> f64 {
         let step = self.quantization.step(self.bar_beats);
         if step == 0.0 {
             return self.beat;
         }
+        let origin = if matches!(self.quantization, Quantization::Bars(_)) { self.bar_origin } else { 0.0 };
         // A launch exactly on a boundary (within rounding) happens there.
-        let index = ((self.beat - 1e-9) / step).ceil().max(0.0);
-        index * step
+        let index = ((self.beat - origin - 1e-9) / step).ceil();
+        (origin + index * step).max(0.0)
     }
 
     fn queue(&mut self, column: usize, action: Queued) {
@@ -459,10 +601,18 @@ impl Launcher {
         }
     }
 
+    fn publish_meter(&self) {
+        let m = &self.monitor;
+        m.signature.store(pack(self.time_signature), Ordering::Relaxed);
+        m.bar_origin.store(self.bar_origin.to_bits(), Ordering::Relaxed);
+        m.bars_before.store(self.bars_before.to_bits(), Ordering::Relaxed);
+    }
+
     fn publish(&self) {
         let m = &self.monitor;
         m.beat.store(self.beat.to_bits(), Ordering::Relaxed);
         m.tempo.store(self.tempo_bpm.to_bits(), Ordering::Relaxed);
+        self.publish_meter();
         for (i, column) in self.columns.iter().enumerate() {
             let playing = column.playing.map_or(NONE, |p| u32::try_from(p.slot).unwrap_or(NONE));
             let queued = match column.pending.map(|p| p.action) {
@@ -484,17 +634,20 @@ impl Launcher {
     }
 }
 
-/// A playing or fading clip carried from `old_slots` to the same slot in `new_slots`, or `None`
-/// if that slot has no clip now.
+/// A playing or fading clip carried from its slot in `old_slots` to the slot `map` gives in
+/// `new_slots`, or `None` if that slot is gone or has no clip now.
 fn carry(
     new_slots: &mut [SlotPlan],
     old_slots: &mut [SlotPlan],
     state: Option<Playing>,
+    map: impl Fn(usize) -> Option<usize>,
     frames_per_beat: f64,
 ) -> Option<Playing> {
     let mut playing = state?;
+    let old_slot = playing.slot;
+    playing.slot = map(old_slot)?;
     let new_plan = new_slots.get_mut(playing.slot)?.clip.as_mut()?;
-    let old_plan = old_slots.get_mut(playing.slot).and_then(|s| s.clip.as_mut());
+    let old_plan = old_slots.get_mut(old_slot).and_then(|s| s.clip.as_mut());
     // Notes: the same place in the new list. Notes at exactly the last beat may have played.
     let last = playing.last_clip_beat;
     let played_at_last =
@@ -521,6 +674,11 @@ fn carry(
         _ => {}
     }
     Some(playing)
+}
+
+/// A time signature in one atomic word, for the monitor.
+fn pack(ts: TimeSignature) -> u32 {
+    u32::from(ts.numerator) << 8 | u32::from(ts.denominator)
 }
 
 /// Beats in one bar: a 4/4 bar has 4, a 6/8 bar 3.
@@ -694,8 +852,12 @@ impl Renderer {
                     };
                     self.graph.launcher.queue(column, action);
                 }
-                if let Some(Some(bpm)) = self.graph.launcher.scene_tempos.get(scene) {
-                    self.graph.launcher.pending_tempo = Some((self.graph.launcher.launch_beat(), *bpm));
+                let launcher = &mut self.graph.launcher;
+                if let Some(Some(bpm)) = launcher.scene_tempos.get(scene) {
+                    launcher.pending_tempo = Some((launcher.launch_beat(), *bpm));
+                }
+                if let Some(Some(signature)) = launcher.scene_signatures.get(scene) {
+                    launcher.pending_signature = Some((launcher.launch_beat(), *signature));
                 }
             }
             LaunchCommand::StopColumn { column } => {
@@ -820,6 +982,10 @@ impl Renderer {
             }
         }
         launcher.pending_tempo = None;
+        launcher.pending_signature = None;
+        // A scene's time signature stays, with its bars counted from the start again.
+        launcher.bar_origin = 0.0;
+        launcher.bars_before = 0.0;
         launcher.beat = self.start_beat;
         launcher.monitor.running.store(false, Ordering::Relaxed);
     }
@@ -852,6 +1018,9 @@ impl Renderer {
         if let Some((at, _)) = launcher.pending_tempo.as_mut() {
             *at = at_beat;
         }
+        if let Some((at, _)) = launcher.pending_signature.as_mut() {
+            *at = at_beat;
+        }
     }
 
     /// Applies commands queued by a [`Controller`]. Called at the start of each block.
@@ -865,6 +1034,7 @@ impl Renderer {
         let monitor = &self.graph.launcher.monitor;
         monitor.beat.store(self.graph.launcher.beat.to_bits(), Ordering::Relaxed);
         monitor.tempo.store(self.graph.launcher.tempo_bpm.to_bits(), Ordering::Relaxed);
+        self.graph.launcher.publish_meter();
     }
 
     /// Advances the launcher by one frame: applies launches that are due, starts notes, mixes
@@ -953,6 +1123,17 @@ impl Renderer {
         {
             self.graph.launcher.tempo_bpm = bpm;
             self.graph.launcher.pending_tempo = None;
+        }
+        let launcher = &mut self.graph.launcher;
+        if let Some((at, signature)) = launcher.pending_signature
+            && at <= beat
+        {
+            let bars = ((at - launcher.bar_origin) / launcher.bar_beats - 1e-9).ceil().max(0.0);
+            launcher.bars_before += bars;
+            launcher.time_signature = signature;
+            launcher.bar_beats = bar_beats(signature);
+            launcher.bar_origin = at;
+            launcher.pending_signature = None;
         }
         let mut changed = false;
         for index in 0..self.graph.launcher.columns.len() {
@@ -1638,5 +1819,77 @@ mod tests {
         let out = render(&p, &commands, 0.5);
         assert_eq!(onsets(&out).len(), 1);
         assert!(render_launches(&p, &AudioPool::new(), SR, &[], f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn a_scene_time_signature_changes_the_bar_at_the_launch() {
+        let mut p = two_loops();
+        p.launcher.scenes[1].time_signature = Some(TimeSignature { numerator: 3, denominator: 4 });
+        // Scene 2 waits for bar 2 (beat 4) and switches to 3/4 there, so the launch of scene 1
+        // at beat 4.4 waits for beat 7, one 3/4 bar later, not for beat 8.
+        let commands = [
+            (0.0, LaunchCommand::LaunchScene { scene: 0 }),
+            (0.3, LaunchCommand::LaunchScene { scene: 1 }),
+            (2.2, LaunchCommand::LaunchScene { scene: 0 }),
+        ];
+        let out = render(&p, &commands, 4.5);
+        let off = BEAT / 2;
+        assert_onsets(
+            &out,
+            &[0, BEAT, 2 * BEAT, 3 * BEAT, BAR + off, BAR + BEAT + off, BAR + 2 * BEAT + off, 7 * BEAT, 8 * BEAT],
+        );
+    }
+
+    #[test]
+    fn the_meter_counts_bars_across_a_scene_time_signature() {
+        let mut p = two_loops();
+        p.launcher.scenes[1].time_signature = Some(TimeSignature { numerator: 3, denominator: 4 });
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        let monitor = renderer.monitor();
+        assert_eq!(monitor.meter(), Meter::default());
+        renderer.handle(LaunchCommand::LaunchScene { scene: 1 });
+        let mut out = vec![0.0f32; 2 * 5 * BEAT];
+        renderer.process(&mut out);
+        let meter = monitor.meter();
+        assert_eq!(meter.time_signature, TimeSignature { numerator: 3, denominator: 4 });
+        assert_eq!((meter.origin, meter.bars_before), (0.0, 0.0));
+        // Beat 5 is the second beat of bar 2 in 3/4.
+        assert_eq!(meter.locate(5.0), (2, 2.0));
+        // A meter that changed at beat 6, after one 4/4 bar and half of another, counts both.
+        let changed = Meter { origin: 6.0, bars_before: 2.0, ..meter };
+        assert_eq!(changed.locate(6.0), (3, 0.0));
+        assert_eq!(changed.locate(10.0), (4, 1.0));
+        // Stopping keeps the time signature and counts bars from the start again.
+        renderer.handle(LaunchCommand::Stop);
+        assert_eq!(monitor.meter().time_signature, TimeSignature { numerator: 3, denominator: 4 });
+    }
+
+    #[test]
+    fn a_scene_shift_is_found_between_two_launchers() {
+        let p = two_loops();
+        let before = &p.launcher;
+        let mut inserted = before.clone();
+        inserted.scenes.insert(1, Scene { name: "New".into(), ..Scene::default() });
+        for column in &mut inserted.columns {
+            column.slots.insert(1, Slot { clip: None, has_stop: true });
+        }
+        assert_eq!(SceneShift::between(before, &inserted), Some(SceneShift::Inserted(1)));
+        assert_eq!(SceneShift::between(&inserted, before), Some(SceneShift::Removed(1)));
+        // A duplicate below its scene: the scene above keeps its index.
+        let mut duplicated = before.clone();
+        duplicated.scenes.insert(1, duplicated.scenes[0].clone());
+        for column in &mut duplicated.columns {
+            column.slots.insert(1, column.slots[0].clone());
+        }
+        assert_eq!(SceneShift::between(before, &duplicated), Some(SceneShift::Inserted(1)));
+        // Anything else changed, or no scene count change: no shift.
+        assert_eq!(SceneShift::between(before, before), None);
+        let mut renamed = inserted.clone();
+        renamed.scenes[0].name = "Other".into();
+        assert_eq!(SceneShift::between(before, &renamed), None);
+        assert_eq!(SceneShift::Removed(1).map(1), None);
+        assert_eq!(SceneShift::Removed(1).map(2), Some(1));
+        assert_eq!(SceneShift::Inserted(1).map(0), Some(0));
+        assert_eq!(SceneShift::Inserted(1).map(usize::MAX), None);
     }
 }

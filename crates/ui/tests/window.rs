@@ -90,6 +90,23 @@ fn scenes_and_stop_buttons_send_their_commands() {
 }
 
 #[test]
+fn a_scene_menu_inserts_duplicates_and_deletes_scenes() {
+    let mut harness = view();
+    for (entry, action) in [
+        ("Insert scene below", Action::new("scene.insert", json!({ "scene": 4 }))),
+        ("Duplicate scene", Action::new("scene.duplicate", json!({ "scene": 3 }))),
+        ("Delete scene", Action::new("scene.delete", json!({ "scene": 3 }))),
+    ] {
+        harness.state_mut().actions.clear();
+        harness.get_by_label("Launch scene 3 Build").click_secondary();
+        harness.run();
+        harness.get_by_label(entry).click();
+        harness.run();
+        assert_eq!(harness.state().actions, [action], "{entry}");
+    }
+}
+
+#[test]
 fn return_tracks_have_a_mixer_but_no_slots() {
     let harness = view();
     assert!(harness.query_by_label("Turn A Reverb off").is_some());

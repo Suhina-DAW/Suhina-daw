@@ -159,8 +159,12 @@ fn everything() -> Project {
         },
         launcher: Launcher {
             scenes: vec![
-                Scene { name: "Intro".into(), tempo_bpm: Some(100.0) },
-                Scene { name: String::new(), tempo_bpm: None },
+                Scene {
+                    name: "Intro".into(),
+                    tempo_bpm: Some(100.0),
+                    time_signature: Some(TimeSignature { numerator: 7, denominator: 8 }),
+                },
+                Scene::default(),
             ],
             columns: vec![LauncherColumn {
                 track: TrackId(2),
@@ -257,6 +261,8 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "transport": { "tempo_bpm": 0 } }"#,
         r#"{ "transport": { "time_signature": [0, 4] } }"#,
         r#"{ "transport": { "time_signature": [300, 4] } }"#,
+        r#"{ "launcher": { "scenes": [ { "name": "A", "time_signature": [4, 0] } ], "columns": [] } }"#,
+        r#"{ "launcher": { "scenes": [ { "name": "A", "time_signature": "4/4" } ], "columns": [] } }"#,
         r#"{ "channels": [ { "id": 1, "role": "boss" } ] }"#,
         r#"{ "channels": [ { "id": 1, "pan": 3 } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst9" } } ] } ] }"#,
@@ -271,6 +277,16 @@ fn hostile_values_are_errors_not_crashes() {
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
+}
+
+/// A scene written before scenes had a time signature has none, so it keeps the one playing.
+#[test]
+fn a_scene_without_a_time_signature_has_none() {
+    let project = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "launcher": { "scenes": [ { "name": "A" } ], "columns": [] } } }"#,
+    )
+    .unwrap();
+    assert_eq!(project.launcher.scenes[0].time_signature, None);
 }
 
 /// A clip written before fade shapes existed has linear, unbent fades, so it sounds the same.

@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -99,6 +99,14 @@ column has **stop all clips** for the whole set.
 One launch control per scene with its number or name. Launching a scene launches every clip in
 its row and stops tracks whose slot in that row is empty with a stop button. Scenes can carry a
 tempo and time signature that apply when launched.
+
+**Suhina:** the launch button shows the scene's name, then its tempo and time signature when it
+has them (`Drop 128 3/4`), with the number on the right. Right-clicking it opens the scene menu:
+fields for the name, the tempo (empty for none) and the time signature (`3/4`, empty for none),
+each applied with Enter, then **Insert scene below**, **Duplicate scene** and **Delete scene**
+(greyed out for the only scene). Every entry is a `scene.*` command, undone with Ctrl+Z. While
+playing, the control bar's position counts bars in the time signature playing, which a launched
+scene can change.
 
 ### I/O section (below the grid, per track, toggleable)
 

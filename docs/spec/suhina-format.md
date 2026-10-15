@@ -3,7 +3,7 @@ description: The layout of Suhina's own project file (.suhina; .locr from before
 read_when: .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/project-file/src/lib.rs
 ---
@@ -55,7 +55,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 | audio | `file` (relative to the project file, `/` between folders); `absolute_file`; `sample_rate`, `channels`, `duration_seconds` (if known); `warped`; `stretch` `repitch`, `rhythmic`, `tonal`, `texture`, `smooth` or `high_quality`; `warp_markers` `[{ time, audio_time }]`; `gain` (linear); `transpose` (semitones); `stream`: which audio track of a file with several plays (a Stems file: 0 the master, 1 and up the stems; missing or `null` for an ordinary file) |
 | arrangement lane | `name`; `track` or `null`; `clips` |
 | clip | `content`; `start`, `length`, `offset` (beats); `loop` `[start, end]` or `null`; `enabled`; `fade_in`, `fade_out` (beats); `fade_in_shape`, `fade_out_shape` (`linear`, `equal_power`, `fast`, `slow` or `s_curve`; default `linear`) and `fade_in_curve`, `fade_out_curve` (−1 to 1, default 0), see [arrangement-editing](arrangement-editing.md#fades) |
-| scene | `name`; `tempo_bpm` or `null` |
+| scene | `name`; `tempo_bpm` or `null`; `time_signature` `[numerator, denominator]` (left out when the scene has none; both whole numbers from 1) |
 | launcher column | `track`; `slots` `[{ clip, has_stop }]`, one per scene |
 
 ## Audio paths

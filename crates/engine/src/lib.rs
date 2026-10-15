@@ -36,7 +36,9 @@ use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
 use launcher::Launcher;
-pub use launcher::{ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Quantization, Queued};
+pub use launcher::{
+    ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
+};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
     OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
@@ -449,8 +451,8 @@ impl Renderer {
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
-            let (beat, bar_beats) = self.graph.launcher.beat_and_bar();
-            let click = self.metronome.frame(self.running, beat, bar_beats);
+            let (beat, bar_beats, bar_origin) = self.graph.launcher.beat_and_bar();
+            let click = self.metronome.frame(self.running, beat, bar_beats, bar_origin);
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running

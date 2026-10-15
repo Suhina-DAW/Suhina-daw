@@ -439,6 +439,8 @@ impl Reader {
                 } else {
                     None
                 },
+                // The scene's time signature element is not recorded in the spec yet.
+                time_signature: None,
             })
             .collect()
     }

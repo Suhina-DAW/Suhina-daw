@@ -70,8 +70,8 @@ fn project() -> Project {
         contents: vec![content(1, "Beat", 36), content(2, "Line", 40), content(3, "Off", 50)],
         launcher: Launcher {
             scenes: vec![
-                Scene { name: "Intro".into(), tempo_bpm: None },
-                Scene { name: "Drop".into(), tempo_bpm: Some(128.0) },
+                Scene { name: "Intro".into(), ..Scene::default() },
+                Scene { name: "Drop".into(), tempo_bpm: Some(128.0), time_signature: None },
             ],
             columns: vec![
                 LauncherColumn {

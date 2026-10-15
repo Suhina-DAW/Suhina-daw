@@ -196,6 +196,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
 - A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- Scenes are edited with commands and from the scene button's right-click menu: insert,
+  duplicate (with copies of its clips), delete, rename, and a tempo and time signature that
+  apply when the scene launches (bars and the metronome count in the new time signature from
+  there). Playing clips stay with their row when scenes are inserted or deleted while playing
+  ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.

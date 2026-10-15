@@ -468,6 +468,8 @@ pub struct Scene {
     pub name: String,
     /// Tempo the scene switches to when launched, if any.
     pub tempo_bpm: Option<f64>,
+    /// Time signature the scene switches to when launched, if any.
+    pub time_signature: Option<TimeSignature>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -55,7 +55,11 @@ clip; devices (ADR 0004) will add many more parameters.
    chain keeps its running devices when the new graph has the same devices on the same track,
    with the new parameter values, so instrument notes and effect tails carry on (ADR 0004
    decision 9). The launcher's runtime is copied column by column (a
-   column or slot that no longer exists is dropped). A playing launched clip whose prepared
+   column or slot that no longer exists is dropped). Slots carry over by index, except when the
+   edit (or its undo) inserted or removed one scene: the session finds that with
+   `SceneShift::between` and sends it with the graph (`Controller::update_with_scenes`), so a
+   playing or queued clip moves with its row and a removed row's clips stop. A time signature a
+   launched scene set stays across the swap, like its tempo, unless the project's own changed. A playing launched clip whose prepared
    audio is unchanged keeps its stretch voice (moved from the old graph to the new); otherwise
    the new voice is moved to the clip's position.
 5. **Nothing is freed on the audio thread.** The old graph goes back to the controller through

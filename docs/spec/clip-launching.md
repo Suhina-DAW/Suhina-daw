@@ -3,10 +3,12 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
+  - crates/session/tests/scenes.rs
+  - crates/ui/src/menus.rs
 ---
 
 # Clip launching
@@ -54,7 +56,13 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    a clip is launched; an empty slot with a stop button stops the column; an empty slot without
    one leaves the column as it is. If the scene has a tempo, the project tempo changes to it at
    the launch moment. **(hypothesis:** at the quantised launch moment, not when the scene is
-   triggered.**)**
+   triggered.**)** A scene's time signature changes the time signature at the same moment.
+   **Suhina:** the new time signature's first bar starts at the launch moment, so bar
+   quantisation and the metronome's bar click count from there; note-value quantisation stays on
+   the beat grid from beat 0. The bar number keeps rising across the change (a bar cut short by
+   it counts as one). Stopping the transport keeps the tempo and time signature a scene set and
+   counts bars from the start again; editing the project's own tempo or time signature replaces
+   them.
 6. **Stopping.** Stopping a column (its stop button, or an empty slot with a stop button) is
    quantised like a launch. "Stop all clips" stops every column, quantised. Stopping the
    transport stops everything at once, and clears queued launches. A jump of the playhead
@@ -67,6 +75,25 @@ decides something the sources do not settle, the text says so (**Suhina:**).
    track to the arrangement. **(hypothesis** for the "even after that column stops" part.**)**
    **Suhina:** back to arrangement stops the launched clips of those tracks (with the stop
    fade) and drops their queued launches, so a track never plays both at once.
+
+## Editing scenes
+
+- **Insert** (`scene.insert`) adds an empty scene at a position (after the last one if none is
+  given): a row of empty slots, each with a stop button, in every track.
+- **Duplicate** (`scene.duplicate`) copies a scene to a new one right below it: name, tempo, time
+  signature and every slot. **Suhina:** each copied clip plays a copy of its content, so editing
+  one clip does not change the other (as `clip.paste` does).
+- **Delete** (`scene.delete`) removes a scene and the clips in its row. **Suhina:** the last
+  scene left cannot be deleted, so the launcher always has a row to put clips in.
+- **Rename** (`scene.rename`); an empty name clears it, and the button shows the number only.
+- **Tempo** (`scene.setTempo`, 20 to 999 bpm) and **time signature** (`scene.setTimeSignature`,
+  numerator 1 to 99, denominator 1, 2, 4, 8 or 16); leaving the value out clears it, and the
+  scene then keeps what is playing.
+- Every one of these is an edit with one undo step. **While playing**, a clip that plays or is
+  queued stays with its row when a scene is inserted or deleted above it (and when that is
+  undone), so the same clip keeps playing under its new scene number; deleting the playing
+  scene stops its clips (with the stop fade). Edits to a scene's tempo or time signature apply
+  at its next launch.
 
 ## Suhina decisions
 
@@ -91,7 +118,8 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`,
   `transport.play`, `transport.stop`, `transport.setPosition`, `transport.setMetronome`,
   `launcher.state`), sent to the audio thread through a lock-free queue and applied at the start
-  of the next audio block. **Suhina:**
+  of the next audio block. `launcher.state` reports the time signature playing and the position
+  counted in it. **Suhina:**
   `launcher.state` also reports the browser's preview (`preview`: playing, seconds), which plays
   beside the launcher and never changes it ([ADR 0011](../decisions/0011-preview-and-added-audio.md)),
   and the engine's CPU load (`cpu`: percent), which the control bar shows. `transport.stop`
@@ -115,4 +143,7 @@ with a screen recording or notes, no audio from Live needed):
 
 - Follow actions, launch modes, per-clip launch quantisation, legato.
 - Reading the global launch quantisation from a Live Set (needs a corpus series).
+- Reading a scene's time signature from a Live Set: [als-format](als-format.md#scenes) notes it
+  is there, but not its elements yet.
+- Capturing the playing clips into a new scene.
 - Recording into slots.

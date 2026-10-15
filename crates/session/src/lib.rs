@@ -111,6 +111,16 @@ impl Player {
         self.controller.update(project).map_err(CommandError)
     }
 
+    /// Like [`Player::update`], for a project with one scene inserted or removed since the last
+    /// update: what plays and what is queued move with their slots.
+    pub fn update_with_scenes(
+        &mut self,
+        project: &Project,
+        scenes: Option<suhina_engine::SceneShift>,
+    ) -> Result<(), CommandError> {
+        self.controller.update_with_scenes(project, scenes).map_err(CommandError)
+    }
+
     /// Sets one parameter of a device on a track from the next audio block, without building a
     /// new graph (ADR 0005, amendment).
     pub fn set_device_param(&mut self, change: ParamEdit) -> Result<(), CommandError> {
@@ -565,8 +575,10 @@ impl Session {
             | CommandKind::Audio
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
+                let scenes = self.project.launcher.clone();
                 let value = (spec.run)(self, params)?;
-                self.update_player()?;
+                let shift = suhina_engine::SceneShift::between(&scenes, &self.project.launcher);
+                self.update_player(shift)?;
                 Ok(value)
             }
             CommandKind::Edit => {
@@ -579,6 +591,7 @@ impl Session {
                 match result {
                     Ok(value) => {
                         if self.project != before {
+                            let shift = suhina_engine::SceneShift::between(&before.launcher, &self.project.launcher);
                             self.push_undo(before);
                             // A parameter change goes to the engine as a message; anything else,
                             // or a message that cannot be sent, as a new graph.
@@ -587,7 +600,7 @@ impl Session {
                                 _ => false,
                             };
                             if !sent {
-                                self.update_player()?;
+                                self.update_player(shift)?;
                             }
                         }
                         Ok(value)
@@ -603,13 +616,14 @@ impl Session {
 
     /// Lets a playing engine hear the project as it is now, with any audio added to the pool.
     /// The edit stays made if this fails.
-    fn update_player(&mut self) -> Result<(), CommandError> {
+    /// `scenes` is the scene inserted or removed since the last update, if that is what changed.
+    fn update_player(&mut self, scenes: Option<suhina_engine::SceneShift>) -> Result<(), CommandError> {
         let Some(player) = self.player.as_mut() else { return Ok(()) };
         if self.audio_changed {
             player.set_audio(std::sync::Arc::new(self.audio.clone()));
             self.audio_changed = false;
         }
-        player.update(&self.project).map_err(|e| {
+        player.update_with_scenes(&self.project, scenes).map_err(|e| {
             CommandError(format!("the edit was made, but the playing engine could not follow it: {}", e.0))
         })
     }
