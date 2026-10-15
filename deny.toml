@@ -1,0 +1,97 @@
+# cargo-deny: checks every dependency's licence, source and security advisories.
+# CI runs `cargo deny check` on every pull request (.github/workflows/deny.yml); run the same
+# locally after installing the version pinned there (CONTRIBUTING.md › Dependencies).
+
+[graph]
+# Feature-gated dependencies count too: `asio` (cpal's ASIO host, asio-sys) and any later feature.
+# The ASIO SDK source in third_party/asiosdk is not a crate, so cargo-deny cannot see it; it is
+# vendored under GPL-3.0 (third_party/asiosdk/VENDORED.md). No `targets` list: the dependencies
+# of every platform (Windows, macOS, Linux) are checked.
+all-features = true
+
+[licenses]
+# AGENTS.md rule 9, exactly: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0.
+# Not GPL-2.0-only, not proprietary or "non-commercial" licences. Anything else needs an
+# exception below, for the one crate that needs it, with the reason.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "LGPL-2.1",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0",
+    "LGPL-3.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-or-later",
+]
+# A licence on the list that no dependency uses today is not an error.
+unused-allowed-license = "allow"
+# How sure cargo-deny must be when it recognises a licence from the text of a licence file.
+confidence-threshold = 0.93
+
+# Licences outside rule 9's list, each GPLv3-compatible, each for named crates only.
+exceptions = [
+    # Unicode License v3: a permissive licence for Unicode data tables, GPL-compatible. The ICU4X
+    # crates (pulled in through url/idna) and unicode-ident (whose other part is MIT OR Apache-2.0)
+    # carry it.
+    { crate = "icu_collections", allow = ["Unicode-3.0"] },
+    { crate = "icu_locale_core", allow = ["Unicode-3.0"] },
+    { crate = "icu_normalizer", allow = ["Unicode-3.0"] },
+    { crate = "icu_normalizer_data", allow = ["Unicode-3.0"] },
+    { crate = "icu_properties", allow = ["Unicode-3.0"] },
+    { crate = "icu_properties_data", allow = ["Unicode-3.0"] },
+    { crate = "icu_provider", allow = ["Unicode-3.0"] },
+    { crate = "litemap", allow = ["Unicode-3.0"] },
+    { crate = "potential_utf", allow = ["Unicode-3.0"] },
+    { crate = "tinystr", allow = ["Unicode-3.0"] },
+    { crate = "unicode-ident", allow = ["Unicode-3.0"] },
+    { crate = "writeable", allow = ["Unicode-3.0"] },
+    { crate = "yoke", allow = ["Unicode-3.0"] },
+    { crate = "yoke-derive", allow = ["Unicode-3.0"] },
+    { crate = "zerofrom", allow = ["Unicode-3.0"] },
+    { crate = "zerofrom-derive", allow = ["Unicode-3.0"] },
+    { crate = "zerotrie", allow = ["Unicode-3.0"] },
+    { crate = "zerovec", allow = ["Unicode-3.0"] },
+    { crate = "zerovec-derive", allow = ["Unicode-3.0"] },
+    # Boost Software License 1.0: permissive, GPL-compatible (FSF). The Windows clipboard, used by
+    # egui through arboard.
+    { crate = "clipboard-win", allow = ["BSL-1.0"] },
+    { crate = "error-code", allow = ["BSL-1.0"] },
+    # CC0-1.0: a public-domain dedication, GPL-compatible. The file watcher behind the library
+    # (Cargo.toml says so next to notify-debouncer-full).
+    { crate = "notify", allow = ["CC0-1.0"] },
+    # Zero-clause BSD: public-domain-equivalent, GPL-compatible. Through the interprocess crate
+    # (plug-in hosting).
+    { crate = "doctest-file", allow = ["0BSD"] },
+    { crate = "recvmsg", allow = ["0BSD"] },
+    # egui's built-in fonts: the code is MIT OR Apache-2.0, the font files inside it are under the
+    # SIL Open Font License 1.1 and the Ubuntu Font Licence 1.0. Both let the fonts be bundled with
+    # any software; they apply to the font data only, which the program uses and does not
+    # derive from, so they do not restrict how Suhina's code is licensed.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+]
+
+[bans]
+# Two versions of one crate cost build time, not correctness: reported, never failing.
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+# crates.io only. A git or other registry dependency fails until it is added here, with a reason.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+# RustSec advisory database: vulnerabilities, unsound and yanked crates, unmaintained crates.
+ignore = [
+    # ttf-parser is unmaintained and has no maintained release to move to. It is not a
+    # vulnerability: it reaches Suhina only through winit's Wayland window decorations
+    # (winit > sctk-adwaita > ab_glyph > owned_ttf_parser), which draw the title bar text.
+    # Remove this when winit moves off it.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, no replacement upstream; only winit's Wayland title bar uses it" },
+]

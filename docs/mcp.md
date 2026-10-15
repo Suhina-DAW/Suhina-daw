@@ -34,7 +34,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
   `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
   (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` (`item`, a folder `place`) and
-  `soundmap.info` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  `soundmap.info` (`item`); `soundmap.setKind` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
   `to` file).
 - **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
   find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
@@ -53,7 +53,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
   launched clips playing on
-  ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
+  ([ADR 0005](decisions/0005-edits-while-playing.md)). To sweep a track's volume or pan by
+  ear as one undo step, send `track.setVolume` or `track.setPan` repeatedly with
+  `continue: true` after the first ([ADR 0002](decisions/0002-commands.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 - **Choosing the output.** `audio.devices` lists the audio hosts (WASAPI, and ASIO in a build
@@ -71,7 +73,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `failed`. Without `--audio`, `audio.devices` returns an error.
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
-  `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the
+  `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`
+  moves the marker to that arrangement clip's start and plays from there. `transport.stop` returns the playhead to the
   marker; with `return: "here"` the marker moves to where it stopped; stopping while stopped
   moves the marker to beat 0. `launcher.state` reports `start_beat`. In a `project_render`
   launch script, `transport.setPosition` then `transport.play` renders from that beat
@@ -124,11 +127,13 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **The sample map.** The server also analyses the library's samples in the background, as the
   desktop app does ([sample map spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)).
   `soundmap.status` tells how far it is per folder; `soundmap.layout {place?, text?, tags?,
-  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
-  such as kick, snare or hat and whether it was guessed, whether it matches `text` and `tags`,
+  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound and their kind
+  (position 0–1, kind such as kick, snare or hat, whether it was guessed from the sound and whether it
+  was set by hand, whether it matches `text` and `tags`,
   and with `grid` a cell in a grid shaped close to `aspect`, width over height); `soundmap.similar {item, count?, place?}` gives the samples that sound
-  most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
-  `soundmap.analyse {folder?}` analyses again.
+  most like one; `soundmap.info {item}` its kind, where the kind comes from (`hand`, `name`,
+  `guess` or `none`) and its features; `soundmap.setKind {item, kind}` sets a sample's kind by
+  hand (`auto` gives it back to its name and sound); `soundmap.analyse {folder?}` analyses again.
 
 - **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;

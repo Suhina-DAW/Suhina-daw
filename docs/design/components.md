@@ -199,7 +199,8 @@ a lane between 20 and 26 px shows the first row clipped.
 ### Value field (slider)
 
 A number field that is its own slider: drag vertically to change (Shift for fine steps),
-double-click to reset (typing a value is planned).
+double-click to reset (typing a value is planned). A track's volume and pan are heard while
+dragging, and a drag is one undo step.
 
 | Part | Volume | Pan | Send |
 |---|---|---|---|
@@ -254,6 +255,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
 | General › Dropping files | Several files | One track (default), One each; Ctrl while dropping does the other ([browser spec](../spec/browser.md) › Files) |
 | General › Dropping files | Warp mode | Rhythmic (default), Tonal, Texture, Smooth, High quality, Re-pitch: how a dropped sample with a known tempo is stretched |
+| General › Transport | Play from | Marker (default): Play and Space start from the play start marker; Selected clip: from the start of the clip selected in the Arrangement view, the marker moving there ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | Interface | Animations | On (default), Off |
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |

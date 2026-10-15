@@ -104,6 +104,13 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 }
 
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
+/// Lets the calls of one drag make one undo step.
+const CONTINUE: Param = optional(
+    "continue",
+    ParamType::Bool,
+    "true adds the change to the undo step of the previous call of this command on this track, \
+     when no other edit came between (one drag, one step)",
+);
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
@@ -228,6 +235,7 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[
             TRACK,
             param("db", ParamType::Decibels, "level in dB, at most +6; \"-inf\" or below -150 is silence"),
+            CONTINUE,
         ],
         kind: CommandKind::Edit,
         run: set_volume,
@@ -235,7 +243,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "track.setPan",
         label: "Set a track's pan",
-        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right")],
+        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right"), CONTINUE],
         kind: CommandKind::Edit,
         run: set_pan,
     },
@@ -428,8 +436,16 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "transport.play",
-        label: "Start the transport from the play start marker (beat 0 unless moved): the arrangement plays, launches follow the beat",
-        params: &[],
+        label: "Start the transport from the play start marker (beat 0 unless moved), or from an arrangement clip's start: the arrangement plays, launches follow the beat",
+        params: &[
+            optional(
+                "from",
+                ParamType::Text,
+                "marker (default): from the play start marker; clip: the marker moves to the start of the clip track and index name, and playback starts there",
+            ),
+            optional("track", ParamType::Track, "with from: clip, the clip's track (id or name)"),
+            optional("index", ParamType::Integer, "with from: clip, the clip's index on the track, from project.clips"),
+        ],
         kind: CommandKind::Transport,
         run: play,
     },
@@ -1589,9 +1605,36 @@ fn send(session: &mut Session, command: LaunchCommand) -> Result<(), CommandErro
     session.player_mut()?.send(command)
 }
 
-fn play(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+fn play(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    session.player_mut()?;
+    let start = match params.get("from") {
+        None => None,
+        Some(Value::String(s)) if s == "marker" => None,
+        Some(Value::String(s)) if s == "clip" => Some(clip_start(&session.project, params)?),
+        Some(other) => return Err(format!("from must be \"marker\" or \"clip\", got {other}").into()),
+    };
+    if start.is_none() && (params.get("track").is_some() || params.get("index").is_some()) {
+        return Err("track and index go with from: \"clip\"".into());
+    }
+    // The marker moves first, so playback starts there; while playing, that is a jump.
+    if let Some(beat) = start {
+        send(session, LaunchCommand::SetPosition { beat })?;
+    }
     send(session, LaunchCommand::Play)?;
-    Ok(json!({ "transport": "playing" }))
+    Ok(match start {
+        Some(beat) => json!({ "transport": "playing", "start_beat": beat }),
+        None => json!({ "transport": "playing" }),
+    })
+}
+
+/// Where the arrangement clip `track` and `index` name starts, in beats, as a play start marker.
+fn clip_start(p: &Project, params: &Value) -> Result<f64, CommandError> {
+    let (lane, index) = lane_and_index(p, params)?;
+    let start = p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).ok_or("the clip is missing")?.start;
+    if !(0.0..=MAX_START_BEAT).contains(&start) {
+        return Err(format!("the clip starts at beat {start}, outside 0 … {MAX_START_BEAT}").into());
+    }
+    Ok(start)
 }
 
 fn stop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

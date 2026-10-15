@@ -103,7 +103,8 @@ command with undo. Behaviour, detectors and tests: [`docs/spec/audio-to-midi.md`
   one that writes every note of a mix; snap results to the project's tempo, warp grid and key.
 - **Stem separation** before detecting is the largest single gain in quality, and is also offered
   on its own, as separating stems to new audio tracks
-  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
+  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146), [spec](docs/spec/stem-separation.md);
+  the pipeline around a model and a test backend exist in `crates/separation`).
 - **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass,
   melody and chords, then stem separation. An ADR comes before the detectors.
 
@@ -281,10 +282,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- A track's pan and volume (the mixer strip in the Session view, the track headers in the
+  Arrangement view) are heard while they are dragged, and one drag is one undo step
+  (`track.setPan`, `track.setVolume` with `continue`;
+  [#313](https://github.com/suhina-daw/suhina-daw/issues/313)).
 - A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
+- **Play from the selected clip:** Shift+Space plays from the start of the clip selected in the
+  Arrangement view, and the setting Settings › General › Play from (**Marker** or **Selected
+  clip**) makes Play and Space do the same; the marker moves to the clip's start, so Stop returns
+  there (`transport.play {from: "clip", track, index}`, `play <track> <i>` in
+  `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
@@ -325,8 +335,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/missing-files.md)).
 - The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
-  toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
-  samples), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
+  toms, cymbals, percussion, bass, tonal, vocal, effect), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
   takes `aspect`), with the kinds' names over their regions and a
   legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
   arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
@@ -334,6 +343,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   It stays readable with up to 200 000 samples: a density view when points crowd, and labels per
   cluster that never overlap. Samples are analysed in the background once and kept
   ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
+- The sample map **recognises kinds by sound**: features read from the sample's onset, with
+  its attack apart from its body, energy in five bands and the fall of a kick's pitch; a
+  classifier learned from the library's own named samples gives each sample its kind before the
+  layout, and the layout keeps each kind in regions of its own, so a tambourine in a folder of
+  kicks lands among the percussion. Right-click a point › **Kind ▸** sets a kind by hand
+  (`soundmap.setKind`); it wins over the name and the sound and is kept
+  ([spec](docs/spec/sample-map.md) › Kinds and colours, #325).
 - A menu bar and a **Settings** dialog over the window (Options › Settings, Ctrl+,; Escape closes
   it) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
