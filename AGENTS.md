@@ -80,6 +80,8 @@ crates/
   library  L2 the browser's library: added folders, an index kept on disk and watched, search, pins,
            recent items, colour tags (ADR 0012)
   soundmap L2 the sample map: features of samples, layouts by how they sound (t-SNE), grids, kinds, the feature cache
+  separation L2 stem separation: chunking, weighted overlap-add and resampling around an inference backend
+             trait, and a deterministic test backend (a band splitter); no model or commands yet (#146)
   session  L2 open projects (tabs, ADR 0007), undo history, the command registry (ADR 0002), the
            attached player, each project's decoded audio and previews (ADR 0011)
   automation L3 MCP server (rmcp) over a session, file roots, WAV rendering (docs/mcp.md)

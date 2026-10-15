@@ -34,7 +34,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
   `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
   (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` (`item`, a folder `place`) and
-  `soundmap.info` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  `soundmap.info` (`item`); `soundmap.setKind` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
   `to` file).
 - **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
   find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
@@ -126,11 +126,13 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **The sample map.** The server also analyses the library's samples in the background, as the
   desktop app does ([sample map spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)).
   `soundmap.status` tells how far it is per folder; `soundmap.layout {place?, text?, tags?,
-  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
-  such as kick, snare or hat and whether it was guessed, whether it matches `text` and `tags`,
+  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound and their kind
+  (position 0–1, kind such as kick, snare or hat, whether it was guessed from the sound and whether it
+  was set by hand, whether it matches `text` and `tags`,
   and with `grid` a cell in a grid shaped close to `aspect`, width over height); `soundmap.similar {item, count?, place?}` gives the samples that sound
-  most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
-  `soundmap.analyse {folder?}` analyses again.
+  most like one; `soundmap.info {item}` its kind, where the kind comes from (`hand`, `name`,
+  `guess` or `none`) and its features; `soundmap.setKind {item, kind}` sets a sample's kind by
+  hand (`auto` gives it back to its name and sound); `soundmap.analyse {folder?}` analyses again.
 
 - **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;

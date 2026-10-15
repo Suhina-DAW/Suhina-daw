@@ -19,6 +19,8 @@ const FILE_VERSION: u32 = 1;
 pub const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// What is known of one file.
+// Nearly every entry is analysed, so boxing the features would only add an allocation to each.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Analysis {
     /// The features and the file's whole length in seconds.
