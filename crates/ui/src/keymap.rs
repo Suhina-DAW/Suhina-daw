@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -105,6 +105,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
     ("selection.duplicate", "Duplicate the selected clip", "Edit"),
     ("selection.delete", "Delete the selected clip", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("pianoRoll.quantize", "Quantise the piano roll's selected notes, or all its notes", "Edit"),
 ];
 
 /// Every action a key can be bound to: the window's, then each command that needs no
@@ -132,7 +133,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 25] = [
+const DEFAULTS: [(&str, &[&str]); 26] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -156,6 +157,7 @@ const DEFAULTS: [(&str, &[&str]); 25] = [
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
     ("selection.group", &["Ctrl+G"]),
+    ("pianoRoll.quantize", &["Ctrl+U"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
 ];

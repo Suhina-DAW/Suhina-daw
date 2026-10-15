@@ -121,6 +121,27 @@ pub fn grid_step(quantization: Quantization, bar_beats: f64) -> f64 {
     if step.is_finite() && step > 0.0 { step } else { 0.0 }
 }
 
+/// The grids quantise offers, as `note.quantize` takes them.
+pub const QUANTIZE_GRIDS: [&str; 13] =
+    ["1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "2 bars", "4 bars", "8 bars"];
+
+/// What Ctrl+U and the Quantise panel quantise with; kept until changed, for the whole session.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QuantizeSettings {
+    /// One of [`QUANTIZE_GRIDS`].
+    pub grid: &'static str,
+    /// How far towards the grid, 0 to 100 percent.
+    pub amount: f64,
+    /// Whether the notes' ends move to the grid too.
+    pub ends: bool,
+}
+
+impl Default for QuantizeSettings {
+    fn default() -> Self {
+        Self { grid: "1/16", amount: 100.0, ends: false }
+    }
+}
+
 /// A drag in progress, from where it started.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Gesture {
@@ -149,6 +170,9 @@ pub struct PianoRollState {
     pub focused: bool,
     gesture: Option<Gesture>,
     panning: bool,
+    /// The settings quantise uses, and whether the Quantise panel is open.
+    pub quantize: QuantizeSettings,
+    pub quantize_open: bool,
 }
 
 impl Default for PianoRollState {
@@ -162,6 +186,8 @@ impl Default for PianoRollState {
             focused: false,
             gesture: None,
             panning: false,
+            quantize: QuantizeSettings::default(),
+            quantize_open: false,
         }
     }
 }
@@ -179,12 +205,26 @@ impl PianoRollState {
         Some(Action::new("note.delete", params))
     }
 
+    /// `note.quantize` for the selected notes, or every note when none is selected, with the
+    /// last settings; `None` when no clip is shown.
+    pub fn quantize_selected(&self) -> Option<Action> {
+        let mut params = self.shown.clone()?;
+        if !self.selected.is_empty() {
+            params["notes"] = json!(self.selected.iter().collect::<Vec<_>>());
+        }
+        params["grid"] = json!(self.quantize.grid);
+        params["amount"] = json!(self.quantize.amount);
+        params["ends"] = json!(self.quantize.ends);
+        Some(Action::new("note.quantize", params))
+    }
+
     /// Forgets the clip, so the next one shown is fitted to the view again.
     pub fn hide(&mut self) {
         self.shown = None;
         self.selected.clear();
         self.gesture = None;
         self.focused = false;
+        self.quantize_open = false;
     }
 }
 
@@ -472,6 +512,66 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
 
     draw(ui, &layout, clip, state, grid, preview);
     for_readers(ui, &layout, clip, state);
+    quantize_panel(ui, Rect::from_min_max(area.min, Pos2::new(keys.right(), ruler.bottom())), state, actions);
+}
+
+/// The Quantise button in the corner over the keys, and the panel it opens: the grid, the amount
+/// and whether ends move, kept for Ctrl+U, and a button that quantises now.
+fn quantize_panel(ui: &mut Ui, corner: Rect, state: &mut PianoRollState, actions: &mut Vec<Action>) {
+    let response = widgets::button_area(ui, corner, Id::new("piano-roll-quantize"), "Quantise");
+    if response.clicked() {
+        state.quantize_open = !state.quantize_open;
+    }
+    let painter = ui.painter_at(corner);
+    let hover = widgets::hover(ui, &response);
+    let fill = if state.quantize_open { theme::control_hover() } else { theme::control_background() };
+    painter.rect_filled(corner, 0.0, crate::motion::mix(fill, theme::control_hover(), hover));
+    widgets::text_in(
+        &painter,
+        corner,
+        Align2::CENTER_CENTER,
+        "Q",
+        theme::mono_font(theme::TEXT_TINY),
+        theme::text_value(),
+    );
+    if !state.quantize_open {
+        return;
+    }
+    let mut settings = state.quantize;
+    let mut apply = false;
+    let area = egui::Area::new(Id::new("piano-roll-quantize-panel"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(corner.left_bottom() + Vec2::new(0.0, 2.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.label("Quantise");
+                egui::ComboBox::from_label("Grid").selected_text(settings.grid).show_ui(ui, |ui| {
+                    for grid in QUANTIZE_GRIDS {
+                        ui.selectable_value(&mut settings.grid, grid, grid);
+                    }
+                });
+                ui.add(egui::Slider::new(&mut settings.amount, 0.0..=100.0).suffix(" %").integer().text("Amount"));
+                ui.checkbox(&mut settings.ends, "Move ends too");
+                ui.horizontal(|ui| {
+                    apply = ui.button("Quantise notes").clicked();
+                    if ui.button("Close").clicked() {
+                        state.quantize_open = false;
+                    }
+                });
+            });
+        });
+    state.quantize = settings;
+    if apply && let Some(action) = state.quantize_selected() {
+        actions.push(action);
+    }
+    // A press outside the panel and its button, or Escape, closes it.
+    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let outside = ui.input(|i| i.pointer.any_pressed())
+        && ui.ctx().pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !corner.contains(p))
+        && !egui::Popup::is_any_open(ui.ctx());
+    if escape || outside {
+        state.quantize_open = false;
+    }
 }
 
 /// What a gesture does with the pointer at `now`.
