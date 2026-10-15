@@ -1,6 +1,6 @@
 ---
 description: How the claim bot moves an issue's card on the project board, holds work, and is set up
-read_when: claim, /claim, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed, project sync, board out of date, cards missing from the board
+read_when: claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed, project sync, board out of date, cards missing from the board
 type: howto
 status: current
 last_verified: 2026-10-15
@@ -17,11 +17,13 @@ covers:
 [`.github/workflows/claim.yml`](../.github/workflows/claim.yml) moves an issue's card on the
 [Suhina project board](https://github.com/orgs/suhina-daw/projects/1) when someone comments one of
 four commands, so that taking a task works the way [`CONTRIBUTING.md`](../CONTRIBUTING.md) ›
-*Working on an issue* describes, without a maintainer moving cards by hand.
+*Working on an issue* describes, without a maintainer moving cards by hand. The first line of the
+comment carries the command; the rest is the plan.
 
 | Comment on an issue | What happens |
 |---|---|
 | `/claim` | Refused when the card is held, when an open pull request closes the issue, when the issue is an `epic`, when it is a feature (`enhancement`) still in `Backlog` and the commenter is not a maintainer, or when the status says someone is already on it. A claim `In progress` with no pull request 48 hours after the bot wrote *Claimed by* has lapsed: the claimer is unassigned and the new claim goes ahead. Otherwise the issue is added to the board if it is not there, Status becomes `In progress`, and the commenter is assigned. When the commenter has the claim already, the answer names the open pull request to continue in |
+| `/claim @login` | A maintainer only: the same claim, made for `@login` instead of the commenter. Every refusal above applies to that person, the card becomes `In progress`, `@login` is assigned, and the answer reads *Claimed by @login, on behalf of a maintainer*. Someone already assigned by hand keeps the assignment and the card moves; a feature in `Backlog` may be claimed, as with a maintainer's own claim. Anyone else naming another person is refused (they may claim only for themselves; naming yourself is an ordinary claim), and a name that is not a GitHub login (letters, digits and single hyphens, up to 39 characters) is refused without being quoted. When GitHub will not assign the person (no access, and never commented on the issue), the claim stands on the card and the answer says so |
 | `/unclaim` | By the assigned person, who is unassigned, or a maintainer, who unassigns whoever claimed it. A card `In progress` goes back to `Ready`; a held card or one `In review` keeps its status |
 | `/hold <why>` | A maintainer only, and the reason is required: Status becomes `Do not start yet` |
 | `/ready` | A maintainer only: Status goes back to `Ready`, so the card can be claimed again |
@@ -134,9 +136,10 @@ python -m unittest discover -s scripts -p 'test_project_sync.py'
 The first runs the workflow's script against mocked API clients, because a wrong branch would write
 to the board instead of failing a test: every command is answered for each state a card can be in
 (free, without a status, held, taken, in review, absent from the board), for `/unclaim` by the
-claimer and by a maintainer, and for the mistakes the bot is meant to catch (an open pull request, an
+claimer and by a maintainer, for `/claim @login` by a maintainer (for someone new, for someone
+already assigned, on a held or taken card) and by a contributor, and for the mistakes the bot is meant to catch (an open pull request, an
 `epic`, a status the field does not have, a missing token, a `/hold` written by someone who may not
-hold, assignees newer than the event). It needs Node.js on the
+hold, a name that is not a GitHub login, assignees newer than the event). It needs Node.js on the
 PATH — the CI `docs` job runs it on every change — writes its two files under `target/claim-bot-test/`
 and removes them again.
 
