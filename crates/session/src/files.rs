@@ -22,7 +22,7 @@ pub const MAX_FILES: usize = 256;
 /// Scenes a drop may add up to.
 const MAX_SCENES: usize = 1024;
 /// Tracks a project may have before adding refuses.
-const MAX_TRACKS: usize = 1024;
+pub(crate) const MAX_TRACKS: usize = 1024;
 
 /// What a new track plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
