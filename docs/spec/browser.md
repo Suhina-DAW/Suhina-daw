@@ -136,7 +136,9 @@ selected or under the pointer; clicking it previews the sample (a second click s
 window does (Settings › General › When opening a project).
 
 **Right-click menu:** Pin or Unpin; Tag ▸ (each tag, ticked when set; a *New tag…* field that
-makes a tag in the next default colour and sets it); Show in folder (a file: selects its folder
+makes a tag in the next default colour and sets it at once — clicks inside the menu, in the
+field included, do not close it; a click outside does, and every button closes it by its
+action); Show in folder (a file: selects its folder
 as the place); Refresh (a folder: lists it again from disk).
 
 ## Search field keys
@@ -277,7 +279,8 @@ the empty area.
 ## Colour tags
 
 Tags have a name and a colour. There are seven at first: Red, Orange, Yellow, Green, Blue,
-Purple and Grey; a right-click on a tag's dot in the footer renames it (a field, Enter),
+Purple and Grey; a right-click on a tag's dot in the footer renames it (a field, Enter; clicks
+inside that menu do not close it),
 recolours it (a colour button) or removes it; new ones are added from a row's Tag menu, up to 64
 (Settings › Interface › Browser › Tag limit raises it, at most 1024). Any item can carry any
 number of tags; a tag is a 6 px dot after the name. Clicking a tag's dot in the footer shows

@@ -663,7 +663,11 @@ fn results_view(
             state.handled_press = None;
         }
         let item = row.item.clone();
-        response.context_menu(|ui| row_menu(ui, &item, &tags, state, projects, out));
+        // Clicks inside the menu do not close it: its Tag submenu holds the field a new tag
+        // is typed into (egui's default closes a menu on a click inside it too).
+        egui::Popup::context_menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| row_menu(ui, &item, &tags, state, projects, out));
     }
     // A row is selected (and previews) when the button goes down, not when it comes up, so a
     // preview starts at once. A row already in a selection of several waits for the release, so
@@ -1214,8 +1218,11 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
                 state.tag_filter.push(tag.name.clone());
             }
         }
-        // Right-click: rename, recolour or remove the tag.
-        response.context_menu(|ui| {
+        // Right-click: rename, recolour or remove the tag. Clicks inside do not close it: a
+        // tag's new name is typed here (egui's default closes a menu on a click inside it).
+        egui::Popup::context_menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
             let id = Id::new(("browser-rename-tag", &tag.name));
             let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| tag.name.clone());
             let field = ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0));
