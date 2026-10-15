@@ -48,10 +48,15 @@ lane, the grid and zoom, and the `note.*` commands.
 - **Velocity** is shown and edited as 1 to 127 (MIDI). The model keeps 0.0 to 1.0; a command's
   velocity v is stored as v / 127, and shown as the stored value × 127, rounded. 0 is not a
   velocity (it means a note-off in MIDI).
-- A clip shares its content with every clip that plays the same content (a duplicated clip, a
-  shared pattern, ADR 0001). Editing the notes edits the content, so every clip that plays it
-  changes. **Later ([#352](https://github.com/suhina-daw/suhina-daw/issues/352)):** a duplicated clip gets its own content when its notes are first
-  edited, so it behaves like an independent copy, unless the user asked for a linked copy.
+- A clip may share its content with other clips (a duplicated clip, a Live Set's clips that
+  point at one content, ADR 0001). The first note edit that changes such
+  a clip's notes gives that clip its own copy of the content, with the edit, in the same command
+  and so the same undo step; the other clips keep the content as it was
+  ([#352](https://github.com/suhina-daw/suhina-daw/issues/352)). The copy keeps the content's
+  name. An edit that changes nothing, or fails, copies nothing. A shared pattern (a content
+  with lanes for named tracks) stays one content: editing it through one placement changes every
+  placement, as it is meant to. **Later:** a linked copy the user asks for (a clip that stays
+  shared on purpose), shown on the clip.
 
 ## Layout
 

@@ -296,3 +296,139 @@ fn huge_inputs_are_capped() {
     let over = run(&mut session, "note.add", json!({ "track": 1, "index": 1, "notes": [full[0]] }));
     assert!(over.unwrap_err().contains("at most"));
 }
+
+/// The content each clip on the Keys lane plays, in order.
+fn arranged(session: &Session) -> Vec<u32> {
+    session.project().arrangement.lanes[0].clips.iter().map(|c| c.content.0).collect()
+}
+
+#[test]
+fn editing_a_duplicate_leaves_the_original_alone_and_undoes_both() {
+    let mut session = Session::new(project());
+    let original = notes(&session, 1);
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    assert_eq!(arranged(&session)[copy], 1, "a duplicate plays the same content until it is edited");
+    let before_edit = session.project().clone();
+
+    run(&mut session, "note.move", json!({ "track": 1, "index": copy, "notes": [0], "semitones": 12 })).unwrap();
+    // The duplicate now plays a content of its own with the edit; the original keeps its notes.
+    let own = arranged(&session)[copy];
+    assert_ne!(own, 1);
+    assert_eq!(arranged(&session)[0], 1);
+    assert_eq!(notes(&session, 1), original);
+    assert_eq!(notes(&session, own)[0].key, 72);
+    assert_eq!(&notes(&session, own)[1..], &original[1..]);
+    assert_eq!(session.project().content(ContentId(own)).map(|c| c.name.as_str()), Some("C1"));
+
+    // A second edit goes to the copy, which no other clip plays: no further copy.
+    let contents = session.project().contents.len();
+    run(&mut session, "note.delete", json!({ "track": 1, "index": copy, "notes": [2] })).unwrap();
+    assert_eq!(session.project().contents.len(), contents);
+    assert_eq!(notes(&session, own).len(), 2);
+    assert_eq!(notes(&session, 1), original);
+
+    // One undo per edit: the copy and the edit go back together.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(*session.project(), before_edit);
+    run(&mut session, "edit.redo", json!({})).unwrap();
+    assert_eq!(arranged(&session)[copy], own);
+    assert_eq!(notes(&session, 1), original);
+}
+
+#[test]
+fn editing_the_original_of_a_duplicate_leaves_the_duplicate_alone() {
+    let mut session = Session::new(project());
+    let original = notes(&session, 1);
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    run(&mut session, "note.setVelocity", json!({ "track": 1, "index": 0, "notes": [0, 1, 2], "velocity": 20 }))
+        .unwrap();
+    assert_eq!(arranged(&session)[copy], 1);
+    assert_eq!(notes(&session, 1), original);
+    let own = arranged(&session)[0];
+    assert!(notes(&session, own).iter().all(|n| suhina_session::midi_velocity(n.velocity) == 20));
+}
+
+#[test]
+fn a_launcher_clip_sharing_an_arrangement_clips_content_is_copied_when_edited() {
+    let mut p = project();
+    p.launcher.columns[0].slots[1].clip = Some(clip(1, 0.0));
+    let mut session = Session::new(p);
+    let original = notes(&session, 1);
+    run(
+        &mut session,
+        "note.add",
+        json!({ "track": 1, "scene": 2, "notes": [{ "time": 3.0, "length": 1.0, "key": 50 }] }),
+    )
+    .unwrap();
+    assert_eq!(notes(&session, 1), original);
+    let own = session.project().launcher.columns[0].slots[1].clip.as_ref().unwrap().content.0;
+    assert_ne!(own, 1);
+    assert_eq!(notes(&session, own).len(), 4);
+    assert_eq!(arranged(&session)[0], 1);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(session.project().launcher.columns[0].slots[1].clip.as_ref().unwrap().content.0, 1);
+}
+
+#[test]
+fn an_edit_that_changes_nothing_or_fails_makes_no_copy() {
+    let mut session = Session::new(project());
+    run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let before = session.project().clone();
+    // A move by nothing changes no note, and so adds no undo step.
+    run(&mut session, "note.move", json!({ "track": 1, "index": 0, "notes": [0], "beats": 0.0 })).unwrap();
+    assert_eq!(*session.project(), before);
+    // A refused edit leaves the project as it was.
+    assert!(run(&mut session, "note.move", json!({ "track": 1, "index": 0, "notes": [0], "semitones": 100 })).is_err());
+    assert_eq!(*session.project(), before);
+    // The one undo step there is takes back the duplicate.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(*session.project(), project());
+}
+
+#[test]
+fn an_empty_duplicate_gets_its_own_content_when_notes_are_added() {
+    let mut session = Session::new(project());
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 1, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    run(
+        &mut session,
+        "note.add",
+        json!({ "track": 1, "index": copy, "notes": [{ "time": 0.0, "length": 1.0, "key": 60 }] }),
+    )
+    .unwrap();
+    assert!(session.project().content(ContentId(2)).unwrap().lanes.is_empty());
+    assert_eq!(notes(&session, arranged(&session)[copy]).len(), 1);
+}
+
+#[test]
+fn a_shared_pattern_stays_shared_when_edited() {
+    // One pattern with a lane for each track, placed twice on the Keys lane.
+    let mut p = project();
+    p.contents.push(content(
+        6,
+        vec![
+            ContentLane { target: Some(TrackId(1)), data: LaneData::Notes(vec![note(0.0, 60)]) },
+            ContentLane { target: Some(TrackId(2)), data: LaneData::Notes(vec![note(1.0, 36)]) },
+        ],
+    ));
+    p.arrangement.lanes[0].clips.extend([clip(6, 16.0), clip(6, 20.0)]);
+    let mut session = Session::new(p);
+    run(&mut session, "note.move", json!({ "track": 1, "index": 5, "notes": [0], "semitones": 2 })).unwrap();
+    // Both placements still play the one pattern, now with the edit; the other track's lane is
+    // untouched.
+    assert_eq!(&arranged(&session)[4..], &[6, 6]);
+    assert_eq!(session.project().contents.len(), 6);
+    let pattern = session.project().content(ContentId(6)).unwrap();
+    let keys: Vec<u8> = pattern
+        .lanes
+        .iter()
+        .filter_map(|l| match &l.data {
+            LaneData::Notes(n) => n.first().map(|n| n.key),
+            LaneData::Audio(_) => None,
+        })
+        .collect();
+    assert_eq!(keys, [62, 36]);
+}

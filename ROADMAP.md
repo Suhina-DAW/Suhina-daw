@@ -388,6 +388,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the wheel scrolls and Ctrl (with Shift for key height) zooms. Every edit is a `note.*` command
   (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
   the CLI and MCP run too.
+- Editing the notes of a **duplicated clip** changes that clip only: its first note edit gives
+  it its own copy of the notes, in the same undo step
+  ([#352](https://github.com/suhina-daw/suhina-daw/issues/352)). A shared pattern stays shared.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
