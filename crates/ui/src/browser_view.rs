@@ -1220,9 +1220,7 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
         }
         // Right-click: rename, recolour or remove the tag. Clicks inside do not close it: a
         // tag's new name is typed here (egui's default closes a menu on a click inside it).
-        egui::Popup::context_menu(&response)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| {
+        egui::Popup::context_menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             let id = Id::new(("browser-rename-tag", &tag.name));
             let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| tag.name.clone());
             let field = ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0));
