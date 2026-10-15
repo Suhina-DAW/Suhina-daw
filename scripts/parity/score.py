@@ -164,9 +164,11 @@ CHAPTERS = [
     (36, "Using Push 2", 59, 0.00, "absent", "No control-surface support."),
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",
      "No Link, no Tempo Follower, no MIDI clock sync."),
-    (38, "Computer Audio Resources and Strategies", 7, 0.35, "partial",
+    (38, "Computer Audio Resources and Strategies", 7, 0.40, "partial",
      "CPU-load meter, the program's RAM in the control bar, buffer-size choice, render-ahead "
-     "engine, plug-in deadline reporting, an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter."),
+     "engine, plug-in deadline reporting, real-time scheduling without setup (MMCSS Pro Audio, "
+     "SCHED_FIFO or rtkit), an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, "
+     "disk-load meter."),
     (39, "Audio Fact Sheet", 8, None, "n/a",
      "Not a feature list. Suhina renders 32-bit float and does not dither; no neutrality test suite."),
     (40, "MIDI Fact Sheet", 6, None, "n/a",

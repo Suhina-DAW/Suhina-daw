@@ -215,7 +215,7 @@ fn run(
         let _ = client.stop_stream();
         return;
     }
-    let _realtime = crate::RealTime::join(frames, sample_rate);
+    let _realtime = suhina_realtime::RealTime::join(frames, sample_rate);
     let period = Duration::from_secs_f64(frames as f64 / f64::from(sample_rate.max(1)));
     while !stop.load(Ordering::Acquire) {
         if event.wait_for_event(WAIT_MS).is_err() {

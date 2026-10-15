@@ -296,10 +296,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   which playback and renders follow to the frame (a value every 64 frames while it moves)
   ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)). Their lanes are set by command;
   the Arrangement's lanes show built-in parameters only so far.
+- The render thread and the plug-in hosts' audio threads get real-time scheduling on Linux
+  without setup: `SCHED_FIFO` where the user has real-time rights, otherwise through rtkit, the
+  desktop's own service for it; on Windows they join MMCSS "Pro Audio". Where the system refuses,
+  Suhina plays on and says once that the sound may drop out under load.
 - Still to do: plug-ins of one process in one round trip
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)), waiting for each chain's
-  plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), real-time
-  priority through MMCSS and rtkit ([#150](https://github.com/suhina-daw/suhina-daw/issues/150)),
+  plug-in as it answers ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)),
   checking an imported Live Set with real plug-ins
   ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and macOS editors, VST2
   hosting (not decided).

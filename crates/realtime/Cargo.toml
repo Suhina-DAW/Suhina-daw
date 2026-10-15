@@ -1,0 +1,24 @@
+[package]
+name = "suhina-realtime"
+description = "Raises an audio thread to real-time priority: MMCSS Pro Audio on Windows, SCHED_FIFO or rtkit on Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The highest priority where nothing better is had, and SCHED_FIFO on Linux.
+thread-priority = "3.1.1"  # MIT
+
+[target.'cfg(windows)'.dependencies]
+# MMCSS "Pro Audio" (AvSetMmThreadCharacteristics).
+audio_thread_priority = { version = "0.38", default-features = false }  # MPL-2.0
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# rtkit over the system D-Bus, in pure Rust: no libdbus to build or ship.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }  # MIT
+# The thread's id and RLIMIT_RTTIME, which rtkit asks for, without `unsafe`.
+rustix = { version = "1", features = ["process", "thread"] }  # Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+
+[lints]
+workspace = true

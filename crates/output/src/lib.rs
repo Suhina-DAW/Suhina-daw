@@ -21,12 +21,14 @@ mod exclusive;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 use suhina_engine::model::Project;
 use suhina_engine::{AudioPool, Controller, Plugins, Renderer};
+pub use suhina_realtime::Priority;
+use suhina_realtime::RealTime;
 use suhina_session::Player;
 use suhina_session::audio::{
     AudioSystem, HostInfo, LiveOutput, MAX_BUFFER_FRAMES, MIN_BUFFER_FRAMES, Opened, OutputChoice, OutputInfo,
@@ -43,10 +45,17 @@ const MAX_DEVICE_FRAMES: usize = 8192;
 const RENDER_WAIT: Duration = Duration::from_millis(1);
 /// How long closing a stream may take before its plug-ins are given up.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long starting a stream waits for the render thread to say what priority it got: longer
+/// than asking rtkit may take ([`suhina_realtime`]). The thread plays on whatever it got.
+const PRIORITY_WAIT: Duration = Duration::from_secs(3);
 
 /// Whether an ASIO stream is open: only one ASIO driver can be loaded, so listing ASIO devices
 /// meanwhile shows the ones listed before.
 static ASIO_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the user has been told that the render thread could not have real-time priority:
+/// once per process, not at every stream.
+static PRIORITY_TOLD: AtomicBool = AtomicBool::new(false);
 
 /// The device's end of the ring.
 pub(crate) type Ring = rtrb::Consumer<f32>;
@@ -113,40 +122,6 @@ impl Progress {
     pub(crate) fn wake_render(&self) {
         if let Some(render) = self.render.get() {
             render.unpark();
-        }
-    }
-}
-
-/// Keeps the calling thread at real-time priority while it lives: on Windows it joins MMCSS
-/// "Pro Audio" (time-critical scheduling and a fine timer), elsewhere the highest priority the
-/// system gives. `SUHINA_NO_REALTIME=1` leaves it at its normal priority, to compare.
-pub(crate) struct RealTime {
-    #[cfg(windows)]
-    _mmcss: Option<audio_thread_priority::RtPriorityHandle>,
-}
-
-impl RealTime {
-    pub(crate) fn join(buffer_frames: usize, sample_rate: u32) -> Self {
-        if std::env::var_os("SUHINA_NO_REALTIME").is_some_and(|v| v == "1") {
-            return Self {
-                #[cfg(windows)]
-                _mmcss: None,
-            };
-        }
-        #[cfg(windows)]
-        {
-            let frames = u32::try_from(buffer_frames).unwrap_or(u32::MAX);
-            let mmcss = audio_thread_priority::promote_current_thread_to_real_time(frames, sample_rate).ok();
-            if mmcss.is_none() {
-                let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
-            }
-            Self { _mmcss: mmcss }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = (buffer_frames, sample_rate);
-            let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
-            Self {}
         }
     }
 }
@@ -237,9 +212,24 @@ pub struct Stream {
     stop: Arc<AtomicBool>,
     render: Option<std::thread::JoinHandle<Renderer>>,
     asio: bool,
+    /// The render thread's priority; `None` when it did not say in time.
+    priority: Option<Priority>,
+    /// Why the render thread could not have real-time priority, the first time in this process.
+    priority_notice: Option<String>,
 }
 
 impl Stream {
+    /// The priority the render thread got; `None` when it did not say in time.
+    pub fn priority(&self) -> Option<Priority> {
+        self.priority
+    }
+
+    /// Why the render thread could not have real-time priority, for the user: given by the
+    /// first stream in a process only, so it is told once.
+    pub fn priority_notice(&self) -> Option<&str> {
+        self.priority_notice.as_deref()
+    }
+
     /// Stops the device, then the render thread, and gives back the renderer, so its plug-ins
     /// can move to the next one ([`Renderer::into_plugins`]).
     pub fn close(mut self) -> Option<Renderer> {
@@ -472,16 +462,21 @@ impl Output {
         }
         let stop = Arc::new(AtomicBool::new(false));
         let (stopping, watching, block) = (Arc::clone(&stop), Arc::clone(progress), self.block);
+        let (joined, priority) = mpsc::sync_channel(1);
         let render = std::thread::Builder::new()
             .name("suhina-render".into())
-            .spawn(move || render_ahead(renderer, producer, block, &stopping, &watching))
+            .spawn(move || render_ahead(renderer, producer, block, &stopping, &watching, &joined))
             .map_err(|e| format!("could not start the render thread: {e}"))?;
         let _set = progress.render.set(render.thread().clone());
         let asio = self.host == "ASIO";
         if asio {
             ASIO_OPEN.store(true, Ordering::Release);
         }
-        let stream = Stream { device: Some(device), stop, render: Some(render), asio };
+        // Before the device starts: the render thread has its priority, and the user hears of a
+        // refusal, before anything plays.
+        let (priority, notice) = priority.recv_timeout(PRIORITY_WAIT).map_or((None, None), |(p, n)| (Some(p), n));
+        let priority_notice = tell_once(&PRIORITY_TOLD, notice);
+        let stream = Stream { device: Some(device), stop, render: Some(render), asio, priority, priority_notice };
         stream
             .device
             .as_ref()
@@ -498,15 +493,18 @@ fn ring(block: usize) -> (rtrb::Producer<f32>, Ring) {
 
 /// The render thread: runs the engine a block at a time whenever the ring holds less than its
 /// target, until told to stop; then gives the renderer back. Real-time: at the highest priority
-/// the system allows, and never allocating after its scratch block.
+/// the system allows ([`RealTime`]), which it says through `joined` before it renders, and never
+/// allocating after its scratch block.
 fn render_ahead(
     mut renderer: Renderer,
     mut ring: rtrb::Producer<f32>,
     frames: usize,
     stop: &AtomicBool,
     progress: &Progress,
+    joined: &mpsc::SyncSender<(Priority, Option<String>)>,
 ) -> Renderer {
-    let _realtime = RealTime::join(frames, renderer.sample_rate());
+    let mut realtime = RealTime::join(frames, renderer.sample_rate());
+    let _unheard = joined.try_send((realtime.priority(), realtime.notice()));
     let mut block = vec![0.0f32; frames * 2];
     let capacity = ring.buffer().capacity();
     while !stop.load(Ordering::Acquire) {
@@ -514,9 +512,14 @@ fn render_ahead(
         let target = ring_target(frames, progress.callback_frames());
         if queued >= target || ring.slots() < block.len() {
             std::thread::park_timeout(RENDER_WAIT);
+            realtime.waited();
             continue;
         }
+        let started = Instant::now();
         renderer.process(&mut block);
+        // A device that takes faster than it plays, or a project too heavy to render in time,
+        // keeps the thread from waiting: it rests rather than outlive its real-time limit.
+        realtime.worked(started.elapsed());
         if let Ok(chunk) = ring.write_chunk_uninit(block.len()) {
             chunk.fill_from_iter(block.iter().copied());
         }
@@ -530,6 +533,12 @@ pub struct Stopped {
     pub output: Output,
     pub progress: Arc<Progress>,
     pub stream: Stream,
+}
+
+/// `notice` the first time one is given with `told` not yet set, `None` after: what is told once
+/// per process.
+fn tell_once(told: &AtomicBool, notice: Option<String>) -> Option<String> {
+    notice.filter(|_| !told.swap(true, Ordering::Relaxed))
 }
 
 /// Opens the default output and plays `project` on it with the transport stopped.
@@ -667,7 +676,7 @@ pub fn open_chosen(
         .name("suhina-audio".into())
         .spawn(move || {
             let started = (|| {
-                let (output, device, producer, progress) = open_fitting(&choice)?;
+                let (mut output, device, producer, progress) = open_fitting(&choice)?;
                 let (plugins, kept) = match carried {
                     Some((rate, plugins)) if rate == output.sample_rate => (plugins, true),
                     _ => (Plugins::new(), false),
@@ -679,6 +688,7 @@ pub fn open_chosen(
                     .run_stretch_worker(&mut renderer)
                     .map_err(|e| format!("could not start the stretch worker: {e}"))?;
                 let stream = output.play(device, renderer, producer, &progress)?;
+                output.notices.extend(stream.priority_notice().map(str::to_owned));
                 Ok::<_, String>((output, controller, progress, stream, kept))
             })();
             match started {

@@ -424,7 +424,7 @@ impl ClapPlugin {
         let audio = thread::Builder::new()
             .name("plug-in audio".into())
             .spawn(move || {
-                crate::real_time_thread();
+                let _realtime = crate::real_time_thread();
                 serve(stopped, served, ports, audio_pending, &audio_stop)
             })
             .map_err(|e| e.to_string())?;

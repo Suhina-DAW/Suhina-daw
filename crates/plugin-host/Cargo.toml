@@ -20,11 +20,9 @@ clack-extensions = { version = "0.2", features = ["clack-host", "clack-plugin", 
 vst3 = "0.3"  # MIT OR Apache-2.0; bindings generated from the VST 3 SDK (MIT)
 libloading = "0.8"  # ISC
 # Real-time priority for the audio threads.
-thread-priority = "3.1.1"  # MIT
+suhina-realtime.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-# Audio threads join MMCSS "Pro Audio" (time-critical scheduling, a fine timer).
-audio_thread_priority = { version = "0.38", default-features = false }  # MPL-2.0
 # The window a plug-in's editor is attached to.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }  # MIT OR Apache-2.0
 
