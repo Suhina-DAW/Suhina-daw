@@ -209,6 +209,7 @@ pub struct Controller {
     pub(crate) preview: crate::preview::PreviewSender,
     pub(crate) preview_monitor: Arc<crate::preview::PreviewMonitor>,
     pub(crate) cpu_monitor: Arc<crate::cpu::CpuMonitor>,
+    pub(crate) meter_monitor: Arc<crate::meters::MeterMonitor>,
 }
 
 impl Controller {
@@ -227,6 +228,11 @@ impl Controller {
     pub fn cpu_monitor(&self) -> &crate::cpu::CpuMonitor {
         &self.cpu_monitor
     }
+
+    /// The level meters of the main output and every track.
+    pub fn meter_monitor(&self) -> &crate::meters::MeterMonitor {
+        &self.meter_monitor
+    }
 }
 
 /// A note of a launch clip, in content beats, with its mix resolved.
@@ -242,6 +248,8 @@ struct PlanNote {
     gain_right: f32,
     /// 0 for the output, or 1 + the index of the track's chain.
     bus: u32,
+    /// The track's meter slot.
+    meter: u32,
 }
 
 struct PlanAudio {
@@ -260,6 +268,8 @@ struct PlanAudio {
     fingerprint: u64,
     /// 0 for the output, or 1 + the index of the track's chain.
     bus: u32,
+    /// The track's meter slot.
+    meter: u32,
 }
 
 /// A slot's clip, ready to play.
@@ -555,6 +565,7 @@ fn plan_clip(
         let Some((bus, (gain_left, gain_right))) = route(project, chains, lane_track) else {
             continue;
         };
+        let meter = crate::meters::meter_slot(project, lane_track);
         match &lane.data {
             LaneData::Notes(lane_notes) => {
                 for note in lane_notes.iter().filter(|n| n.time.is_finite() && n.duration.is_finite()) {
@@ -569,6 +580,7 @@ fn plan_clip(
                         gain_left: gain_left * velocity,
                         gain_right: gain_right * velocity,
                         bus,
+                        meter,
                     });
                 }
             }
@@ -611,6 +623,7 @@ fn plan_clip(
                     stretch_gains: (gains.0 * region_gain, gains.1 * region_gain),
                     fingerprint,
                     bus,
+                    meter,
                 });
             }
         }
@@ -638,6 +651,7 @@ impl Renderer {
             preview: self.preview.sender(),
             preview_monitor: Arc::clone(&self.preview.monitor),
             cpu_monitor: Arc::clone(&self.cpu.monitor),
+            meter_monitor: Arc::clone(&self.meters.monitor),
         }
     }
 
@@ -649,6 +663,11 @@ impl Renderer {
     /// The audio thread's CPU load, as other threads see it.
     pub fn cpu_monitor(&self) -> Arc<crate::cpu::CpuMonitor> {
         Arc::clone(&self.cpu.monitor)
+    }
+
+    /// The level meters, as other threads see them.
+    pub fn meter_monitor(&self) -> Arc<crate::meters::MeterMonitor> {
+        Arc::clone(&self.meters.monitor)
     }
 
     /// Applies one launch command now. Never allocates.
@@ -882,6 +901,7 @@ impl Renderer {
             }
             let launcher = &mut self.graph.launcher;
             let chains = &mut self.graph.chains;
+            let levels = &mut self.graph.levels;
             let fpb = launcher.frames_per_beat_at_build;
             let fade_total = launcher.stop_fade_frames;
             let (tempo, project_tempo) = (launcher.tempo_bpm, launcher.project_tempo_bpm);
@@ -915,6 +935,7 @@ impl Renderer {
                     match bus_chain(chains, a.bus) {
                         Some(chain) => chain.add(frame, l * gain, r * gain),
                         None => {
+                            levels.add(a.meter, frame, l * gain, r * gain);
                             out.0 += l * gain;
                             out.1 += r * gain;
                         }
@@ -1032,6 +1053,7 @@ impl Renderer {
                 gains: (note.gain_left, note.gain_right),
                 column: column_id,
                 bus: note.bus,
+                meter: note.meter,
             };
             start_note(voices, chains, frame, *position, *sample_rate, end, start);
         };
