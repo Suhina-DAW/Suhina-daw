@@ -7,6 +7,12 @@ name: Test build links
 #
 # test-build.yml from a fork runs as the fork has it, so a build is linked only when a maintainer
 # started its run: their own push, or the label they added. See docs/releasing.md › Test builds.
+#
+# Each linked build is also posted to the Discord testing forum (scripts/discord_test_build.py):
+# the bot (secret DISCORD_BOT_TOKEN, variables DISCORD_GUILD_ID and DISCORD_TESTING_FORUM_ID) finds
+# the pull request's thread, `#<number> …`, and the webhook (secret DISCORD_WEBHOOK_TESTING) posts
+# into it, or opens it when there is none. Without them nothing is posted, and a failed post fails
+# nothing else. See docs/releasing.md › Discord.
 
 on:
   workflow_run:
@@ -24,10 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
       issues: write
       pull-requests: write
     steps:
       - uses: actions/github-script@v7
+        id: link
         with:
           script: |
             // The maintainers are listed here and in test-build.yml.
@@ -75,6 +83,8 @@ jobs:
               ['macos-universal', 'macOS 11+, Apple silicon and Intel', 'unzip, then `tar -xzf` the `.tar.gz`'],
               ['linux-x86_64', 'Linux x86-64, needs libasound2', 'unzip, then `tar -xzf` the `.tar.gz`'],
             ];
+            // The same rows for the Discord post.
+            const posted = [];
             const rows = PLATFORMS.map(([platform, label, how]) => {
               const job = builds.find((j) => j.name === `test build (${platform})`);
               const artifact = artifacts.find(
@@ -83,9 +93,11 @@ jobs:
               if (job && job.conclusion === 'success' && artifact) {
                 const url = `https://github.com/${owner}/${repo}/actions/runs/${run.id}/artifacts/${artifact.id}`;
                 const size = (artifact.size_in_bytes / 1048576).toFixed(0);
+                posted.push({ label, artifact: { name: artifact.name, url, size_mb: size } });
                 return `| ${label} | [${artifact.name}](${url}) (${size} MB) | ${how} |`;
               }
               const state = job ? (job.conclusion || job.status) : 'not built';
+              posted.push({ label, state, log: job ? job.html_url : null });
               return `| ${label} | ${state}${job ? ` ([log](${job.html_url}))` : ''} | |`;
             });
             const expires = artifacts.length
@@ -116,16 +128,41 @@ jobs:
             const previous = comments.find(
               (c) => c.user.type === 'Bot' && c.body.startsWith(MARKER),
             );
+            let comment;
             if (previous) {
-              await github.rest.issues.updateComment({
+              ({ data: comment } = await github.rest.issues.updateComment({
                 owner, repo, comment_id: previous.id, body: body.join('\n'),
-              });
+              }));
             } else {
-              await github.rest.issues.createComment({
+              ({ data: comment } = await github.rest.issues.createComment({
                 owner, repo, issue_number: number, body: body.join('\n'),
-              });
+              }));
             }
             core.info(`Linked run ${run.id} from #${number}.`);
+
+            // For the Discord post: data in a file, never in a shell command.
+            const file = `${process.env.RUNNER_TEMP}/test-build.json`;
+            require('fs').writeFileSync(file, JSON.stringify({
+              number, title: pr.title, pr_url: pr.html_url, comment_url: comment.html_url,
+              run_url: run.html_url, commit, contributor: !MAINTAINERS.includes(pr.user.login),
+              rows: posted,
+            }));
+            core.setOutput('build', file);
+
+      # main, for the script; never the pull request's code.
+      - uses: actions/checkout@v4
+        if: steps.link.outputs.build != ''
+        with:
+          persist-credentials: false
+      - name: Post the build to Discord
+        if: steps.link.outputs.build != ''
+        env:
+          BUILD: ${{ steps.link.outputs.build }}
+          DISCORD_WEBHOOK_TESTING: ${{ secrets.DISCORD_WEBHOOK_TESTING }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
+        run: python3 scripts/discord_test_build.py "$BUILD"
 
   unlabel:
     name: take the label off new commits

@@ -12,6 +12,8 @@ covers:
   - scripts/release_notes.py
   - scripts/discord_post.py
   - scripts/discord_merged.py
+  - scripts/discord_test_build.py
+  - scripts/discord_api.py
 ---
 
 # Releasing
@@ -120,6 +122,9 @@ The build has a read-only token and no secrets, and for a fork GitHub runs `test
 fork has it; so `test-build-links.yml`, which runs from `main` and never runs pull request code,
 links only runs a maintainer started. The maintainers are listed in both workflows.
 
+Each linked build is also posted to the pull request's thread in the Discord testing forum
+(see [Discord](#discord)).
+
 ## Release notes
 
 [`scripts/release_notes.py`](../scripts/release_notes.py) writes the notes from git alone (no
@@ -139,7 +144,7 @@ Its tests run in CI: `python3 -m unittest discover -s scripts -p 'test_*.py'`.
 
 ## Discord
 
-Two channels get posts from GitHub Actions, each through a webhook (Discord: channel settings ›
+Three channels get posts from GitHub Actions, each through a webhook (Discord: channel settings ›
 Integrations › Webhooks) whose URL is a repository secret (GitHub: Settings › Secrets and
 variables › Actions). A channel without its secret gets nothing, and a failed post fails nothing
 else. No mention in a post pings anyone.
@@ -148,6 +153,7 @@ else. No mention in a post pings anyone.
 |---|---|---|
 | releases | `DISCORD_WEBHOOK_RELEASES` | each nightly (`release.yml`); each release when a person publishes it, with its *New and changed* section (`discord.yml`) |
 | events | `DISCORD_WEBHOOK_EVENTS` | pull requests opened, merged, closed and reopened; issues opened, closed and reopened (`discord.yml`) |
+| testing (a forum) | `DISCORD_WEBHOOK_TESTING` | each linked test build, in its pull request's thread (`test-build-links.yml`) |
 
 [`scripts/discord_post.py`](../scripts/discord_post.py) writes the posts of `discord.yml` from
 the event. The nightly never reaches `discord.yml`: it is created with the workflow's own token,
@@ -155,13 +161,26 @@ which starts no other workflow. `discord.yml` runs on `pull_request_target`, so 
 forks are posted too; it checks out the base branch and never runs the pull request's code. No
 repository webhook (Settings › Webhooks) posts to Discord; one would post the nightly twice.
 
+The testing forum has a thread per pull request, named `#<number> <title>`; the number always
+comes first, because the bot *Suhina GitHub* finds a pull request's thread by it, among the
+server's active threads and then the forum's archived ones
+([`scripts/discord_api.py`](../scripts/discord_api.py)). The bot only finds and marks threads; the
+webhook posts. Both need the secret `DISCORD_BOT_TOKEN` and the variables `DISCORD_GUILD_ID` and
+`DISCORD_TESTING_FORUM_ID`, and the bot may manage posts and add reactions in that forum only.
+
+Each test build that `test-build-links.yml` links is posted there
+([`scripts/discord_test_build.py`](../scripts/discord_test_build.py)), from the same data as the
+pull request comment: the commit, each platform's download and size or its state and log, a link
+to the comment, and that downloading needs a GitHub sign-in. The first build opens the thread
+(only if some platform built); later builds post *New build is available for testing* in it,
+which unarchives it. An existing thread is never renamed. Discord refuses a post in a locked
+thread; that is logged.
+
 When a pull request is merged, its thread in the testing forum is marked by the bot
 *Suhina GitHub* (`discord.yml`, [`scripts/discord_merged.py`](../scripts/discord_merged.py)). The
-bot finds the thread whose name starts with `#<number> `, among the server's active threads and then
-the forum's archived ones, adds ✅ to its first post, renames it `#<number> [Merged] <title>` (the
-number stays first) and archives it. A thread already marked is not renamed again. It needs the
-secret `DISCORD_BOT_TOKEN` and the variables `DISCORD_GUILD_ID` and `DISCORD_TESTING_FORUM_ID`; the
-bot may manage posts and add reactions in that forum only. No thread, a missing setting or a
+bot finds the thread, adds ✅ to its first post, renames it `#<number> [Merged] <title>` (the
+number stays first) and archives it. A thread already marked is not renamed again. A merged pull request
+cannot be reopened, so a marked thread gets no more builds. No thread, a missing setting or a
 Discord error is logged and fails nothing. Discord allows two renames of a thread in ten minutes,
 so a rate limit is waited out.
 
