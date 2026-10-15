@@ -36,11 +36,28 @@ pub struct Project {
 pub struct Transport {
     pub tempo_bpm: f64,
     pub time_signature: TimeSignature,
+    /// The arrangement's loop region, in beats from the start: kept while looping is off, so
+    /// turning it on again repeats the same span ([`Transport::looping`]).
+    pub loop_range: Option<LoopRange>,
+    /// Whether playback repeats the loop region.
+    pub loop_enabled: bool,
 }
 
 impl Default for Transport {
     fn default() -> Self {
-        Self { tempo_bpm: 120.0, time_signature: TimeSignature { numerator: 4, denominator: 4 } }
+        Self {
+            tempo_bpm: 120.0,
+            time_signature: TimeSignature { numerator: 4, denominator: 4 },
+            loop_range: None,
+            loop_enabled: false,
+        }
+    }
+}
+
+impl Transport {
+    /// The span playback repeats: the loop region while looping is on and the region is valid.
+    pub fn looping(&self) -> Option<LoopRange> {
+        self.loop_range.filter(|r| self.loop_enabled && r.is_valid_region())
     }
 }
 
@@ -442,6 +459,14 @@ pub struct LoopRange {
     pub end: f64,
 }
 
+impl LoopRange {
+    /// Whether it can be the arrangement's loop region: finite, starting at 0 or later and
+    /// ending after it starts.
+    pub fn is_valid_region(&self) -> bool {
+        self.start.is_finite() && self.end.is_finite() && self.start >= 0.0 && self.end > self.start
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Arrangement {
     pub lanes: Vec<ArrangementLane>,
@@ -550,6 +575,8 @@ pub enum ValidationError {
     },
     /// The arrangement marker at this index has a beat that is negative or not finite.
     BadMarker(usize),
+    /// The transport's loop region is not finite, starts before 0 or does not end after it starts.
+    BadLoop,
 }
 
 impl fmt::Display for ValidationError {
@@ -569,6 +596,7 @@ impl fmt::Display for ValidationError {
                 )
             }
             Self::BadMarker(index) => write!(f, "arrangement marker {index} is not at a beat from 0 on"),
+            Self::BadLoop => write!(f, "the loop region does not start at a beat from 0 on and end after it starts"),
         }
     }
 }
@@ -639,6 +667,9 @@ impl Project {
             if !marker.is_valid() {
                 errors.push(ValidationError::BadMarker(index));
             }
+        }
+        if self.transport.loop_range.is_some_and(|r| !r.is_valid_region()) {
+            errors.push(ValidationError::BadLoop);
         }
         for column in &self.launcher.columns {
             track_ref(column.track, &mut errors);
@@ -931,6 +962,26 @@ mod tests {
         let mut c = Clip { fade_in: 1.0, fade_out: 0.5, ..clip(1, 0.0) };
         c.fit_fades();
         assert_eq!((c.fade_in, c.fade_out), (1.0, 0.5), "fades that fit are kept");
+    }
+
+    #[test]
+    fn the_loop_region_repeats_only_while_on_and_must_end_after_it_starts() {
+        let mut transport = Transport { loop_range: Some(LoopRange { start: 4.0, end: 8.0 }), ..Transport::default() };
+        assert_eq!(transport.looping(), None, "off: kept, not repeated");
+        transport.loop_enabled = true;
+        assert_eq!(transport.looping(), Some(LoopRange { start: 4.0, end: 8.0 }));
+
+        for bad in [(4.0, 4.0), (8.0, 4.0), (-1.0, 4.0), (0.0, f64::INFINITY), (f64::NAN, 1.0)] {
+            let project = Project {
+                transport: Transport {
+                    loop_range: Some(LoopRange { start: bad.0, end: bad.1 }),
+                    ..Transport::default()
+                },
+                ..Project::default()
+            };
+            assert_eq!(project.validate(), Err(vec![ValidationError::BadLoop]), "{bad:?}");
+            assert_eq!(Transport { loop_enabled: true, ..project.transport }.looping(), None);
+        }
     }
 
     #[test]

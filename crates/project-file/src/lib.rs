@@ -196,13 +196,16 @@ fn slashes(path: &Path) -> String {
 
 fn project_value(p: &Project) -> Value {
     let mut out = Map::new();
-    out.insert(
-        "transport".into(),
-        json!({
-            "tempo_bpm": number(p.transport.tempo_bpm),
-            "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
-        }),
-    );
+    let mut transport = json!({
+        "tempo_bpm": number(p.transport.tempo_bpm),
+        "time_signature": [p.transport.time_signature.numerator, p.transport.time_signature.denominator],
+    });
+    // Left out when there is no loop region, so such a project is written as before.
+    if let Some(range) = p.transport.loop_range {
+        transport["loop"] =
+            json!({ "start": number(range.start), "end": number(range.end), "enabled": p.transport.loop_enabled });
+    }
+    out.insert("transport".into(), transport);
     out.insert("tracks".into(), p.tracks.iter().map(track_value).collect());
     out.insert("channels".into(), p.channels.iter().map(channel_value).collect());
     out.insert("contents".into(), p.contents.iter().map(content_value).collect());
@@ -510,7 +513,19 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
             if !(1.0..=999.0).contains(&tempo) {
                 return Err(format!("project.transport.tempo_bpm: {tempo} is not a tempo").into());
             }
-            Transport { tempo_bpm: tempo, time_signature: signature }
+            let (loop_range, loop_enabled) = match t.get("loop") {
+                None | Some(Value::Null) => (None, false),
+                Some(l) => {
+                    let at = "project.transport.loop";
+                    let l = object(l, at)?;
+                    let range = LoopRange { start: float(l, "start", at)?, end: float(l, "end", at)? };
+                    if !range.is_valid_region() {
+                        return Err(format!("{at}: expected a start from 0 on and an end after it").into());
+                    }
+                    (Some(range), flag(l, "enabled", false, at)?)
+                }
+            };
+            Transport { tempo_bpm: tempo, time_signature: signature, loop_range, loop_enabled }
         }
     };
     let tracks = list(p, "tracks", "project")?

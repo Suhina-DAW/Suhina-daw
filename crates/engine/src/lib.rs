@@ -14,6 +14,8 @@ mod cpu;
 #[cfg(test)]
 mod fade_tests;
 mod launcher;
+#[cfg(test)]
+mod loop_tests;
 mod metronome;
 mod plugin;
 #[cfg(test)]
@@ -176,6 +178,9 @@ pub(crate) struct Graph {
     length: u64,
     launcher: Launcher,
     frames_per_beat: f64,
+    /// The span playback repeats, in beats (`Transport::looping`): the transport turns them
+    /// into frames as it plays, so the loop follows the tempo.
+    loop_beats: Option<(f64, f64)>,
     /// Device chains of the tracks that have devices (ADR 0004).
     chains: Vec<Chain>,
     /// Every track's bus and the gains its sources are mixed at (muted tracks at zero), so
@@ -226,6 +231,8 @@ pub struct Renderer {
     preview: preview::Preview,
     /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
     cpu: cpu::CpuMeter,
+    /// Playback repeats the project's loop region; off for a render of the whole arrangement.
+    follow_loop: bool,
 }
 
 impl Renderer {
@@ -277,6 +284,7 @@ impl Renderer {
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
             cpu: cpu::CpuMeter::new(),
+            follow_loop: true,
         })
     }
 
@@ -307,6 +315,12 @@ impl Renderer {
     /// [`OFFLINE_TIMEOUT`] a block) instead of until the block's real-time deadline.
     pub fn set_offline(&mut self, offline: bool) {
         self.offline = offline;
+    }
+
+    /// Whether playback repeats the project's loop region when it is on (the default). A render
+    /// of the whole arrangement turns this off, so it plays from start to end once.
+    pub fn set_follow_loop(&mut self, follow: bool) {
+        self.follow_loop = follow;
     }
 
     /// Ends the renderer and gives back its plug-in devices' processors, with what is known
@@ -395,10 +409,19 @@ impl Renderer {
         }
     }
 
-    fn process_block(&mut self, out: &mut [f32]) {
-        // Device chains hold at most MAX_BLOCK frames; longer blocks are rendered in pieces.
-        for chunk in out.chunks_mut(MAX_BLOCK * 2) {
+    fn process_block(&mut self, mut out: &mut [f32]) {
+        // Device chains hold at most MAX_BLOCK frames; longer blocks are rendered in pieces. A
+        // piece also ends at the loop end, where the transport wraps to the loop start, so the
+        // wrap lands on its exact frame. Commands are applied first: they can start the
+        // transport or move it, which changes where the loop end falls.
+        while !out.is_empty() {
+            self.wrap_loop();
+            self.drain_commands();
+            let frames = (out.len() / 2).min(MAX_BLOCK);
+            let frames = self.frames_to_loop_end().map_or(frames, |to_end| frames.min(to_end.max(1)));
+            let (chunk, rest) = std::mem::take(&mut out).split_at_mut(frames * 2);
             self.process_chunk(chunk);
+            out = rest;
         }
     }
 
@@ -427,7 +450,6 @@ impl Renderer {
         self.preview.begin(&self.graph.chains);
         self.preview.receive(&mut self.graph.chains);
         self.preview.begin(&self.graph.chains);
-        self.drain_commands();
         self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
         // ready again by the next start.
@@ -820,6 +842,7 @@ impl Graph {
             length,
             launcher: Launcher::new(project, audio, sample_rate, &chains),
             frames_per_beat,
+            loop_beats: project.transport.looping().map(|r| (r.start, r.end)),
             routes: project
                 .tracks
                 .iter()
@@ -862,6 +885,8 @@ pub fn render_offline_with_plugins(
 ) -> Result<Vec<f32>, RenderError> {
     let mut renderer = Renderer::with_plugins(project, audio, sample_rate, plugins)?;
     renderer.set_offline(true);
+    // The whole arrangement, once: a render does not repeat the loop region.
+    renderer.set_follow_loop(false);
     let total = usize::try_from(renderer.length())
         .ok()
         .and_then(|frames| frames.checked_mul(2))
@@ -1791,6 +1816,27 @@ mod tests {
     fn notes_around_beat_two() -> Project {
         let notes = vec![note(0.0, 0.25, 60), note(1.0, 0.25, 62), note(2.0, 0.5, 64), note(3.25, 0.5, 67)];
         project_with(untargeted(notes), vec![clip(0.0, 4.0)], 1)
+    }
+
+    /// A note sounding at the loop end is released there, and the notes of the loop region
+    /// start again from the loop start (`docs/spec/arrangement-editing.md` › Loop region).
+    #[test]
+    fn a_note_over_the_loop_end_is_released_and_the_loop_plays_its_notes_again() {
+        let beat = SR as usize / 2;
+        let notes = vec![note(0.0, 0.25, 60), note(1.0, 1.5, 62)];
+        let mut project = project_with(untargeted(notes), vec![clip(0.0, 4.0)], 1);
+        project.transport.loop_range = Some(LoopRange { start: 1.0, end: 2.0 });
+        project.transport.loop_enabled = true;
+        let mut renderer = Renderer::new(&project, SR).unwrap();
+        let out = frames(&mut renderer, 4 * beat);
+        // Once the cut note's release has faded, each pass is the first pass again.
+        let release = (RELEASE_SECONDS * f64::from(SR)) as usize + 1;
+        let first = &out[(beat + release) * 2..2 * beat * 2];
+        for pass in 1..3 {
+            let at = (beat + pass * beat + release) * 2;
+            assert!(max_diff(&out[at..at + first.len()], first) < 1e-6, "pass {pass}");
+        }
+        assert!(first.iter().any(|s| s.abs() > 0.1));
     }
 
     #[test]

@@ -435,3 +435,21 @@ fn launcher_state_reports_the_cpu_load() {
     advance(&mut renderer, 2);
     assert_eq!(session.player().unwrap().cpu_monitor().load_milli(), renderer.cpu_monitor().load_milli());
 }
+
+#[test]
+fn a_loop_turned_on_while_playing_repeats_its_span() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "transport.setLoop", json!({ "start": 1.0, "end": 2.0, "enabled": true })).unwrap();
+    run(&mut session, "transport.play", json!({})).unwrap();
+    // 3.5 beats in: past the loop end twice, so half a beat into the loop.
+    advance(&mut renderer, 7 * BEAT / 2);
+    advance(&mut renderer, 1);
+    let state = run(&mut session, "launcher.state", json!({})).unwrap();
+    assert_eq!((state["running"].as_bool(), state["position"].as_str()), (Some(true), Some("1.2")));
+
+    // Off: playback carries on past the loop end.
+    run(&mut session, "transport.setLoopEnabled", json!({ "enabled": false })).unwrap();
+    advance(&mut renderer, BEAT);
+    advance(&mut renderer, 1);
+    assert_eq!(run(&mut session, "launcher.state", json!({})).unwrap()["position"], "1.3");
+}

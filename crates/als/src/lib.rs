@@ -210,6 +210,7 @@ impl Reader {
 
     fn transport(&mut self, live_set: Node) -> Transport {
         let mut transport = Transport::default();
+        self.loop_region(live_set, &mut transport);
         let main = child(live_set, "MainTrack").or_else(|| child(live_set, "MasterTrack"));
         let Some((main, mixer)) = main.and_then(|m| path(m, &["DeviceChain", "Mixer"]).map(|mixer| (m, mixer))) else {
             self.warn("no main track found; using 120 bpm in 4/4");
@@ -227,6 +228,26 @@ impl Reader {
             },
         }
         transport
+    }
+
+    /// The arrangement's loop region and whether it is on (`docs/spec/als-format.md` ›
+    /// Arrangement loop). A region that is missing a value or does not end after it starts is
+    /// left out with a warning.
+    fn loop_region(&mut self, live_set: Node, transport: &mut Transport) {
+        let Some(node) = child(live_set, "Transport") else { return };
+        let start = number(node, &["LoopStart"]);
+        let length = number(node, &["LoopLength"]);
+        if start.is_none() && length.is_none() {
+            return;
+        }
+        let range = start.zip(length).map(|(start, length)| LoopRange { start, end: start + length });
+        match range.filter(LoopRange::is_valid_region) {
+            Some(range) => {
+                transport.loop_range = Some(range);
+                transport.loop_enabled = boolean(node, &["LoopOn"]).unwrap_or(false);
+            }
+            None => self.warn("skipped the arrangement loop: its start or length is missing or not usable"),
+        }
     }
 
     fn main_channel(&mut self, live_set: Node, id: ChannelId) -> Channel {
