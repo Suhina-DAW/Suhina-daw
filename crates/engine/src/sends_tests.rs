@@ -17,6 +17,7 @@ fn channel(id: u32, role: ChannelRole, devices: Vec<Device>) -> Channel {
         output: None,
         sends: Vec::new(),
         devices,
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }

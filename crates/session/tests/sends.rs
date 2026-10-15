@@ -28,6 +28,7 @@ fn project() -> Project {
         output: output.map(ChannelId),
         sends: Vec::new(),
         devices: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     let mut lead = track(2, "Lead", true);
