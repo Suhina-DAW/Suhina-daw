@@ -33,38 +33,60 @@
 ## Working on an issue
 
 A task's state lives in its issue and on the [Suhina project board](https://github.com/orgs/suhina-daw/projects/1),
-never in chat or in one person's window. Before you write code, three checks:
+never in chat or in one person's window. The rules below keep two people from doing the same work
+twice without making anyone wait on someone who has gone quiet.
 
-1. **No open pull request closes it.** The issue's *Linked pull requests* box, or
-   <https://github.com/suhina-daw/suhina-daw/pulls?q=is%3Apr+is%3Aopen>, must not show one. A pull
-   request that says `Closes #N` has taken it.
-2. **Its board item is in `Backlog` or `Ready`.** `In progress` means someone is already working on
-   it, and `Do not start yet` means the order is deliberate: the issue and its comments say what the
-   work waits for, so ask there instead of starting.
-3. **Claim it in a comment** on the issue, and set the item's Status to `In progress` if you can:
+**One issue per problem.** Before you open an issue, search the open ones; when one exists,
+comment there instead. A duplicate that slips through is closed with a link to the first one.
 
-   > I'd like to take this. Plan: … When: …
+**Free work** has no assignee and no open pull request that says `Closes #N` (the issue's
+*Linked pull requests* box shows it). On the board it is in `Backlog` or `Ready`, with one
+difference: a **feature request** (`enhancement`) in `Backlog` is not agreed yet. Write your idea or
+plan in the issue; a maintainer moves it to `Ready` when Suhina wants it, and only then is it open to
+claim. A bug in `Backlog` is free. `Do not start yet` means the order is deliberate: the issue and
+its comments say what the work waits for, so ask there instead of starting.
 
-   A claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) does the same two things for a
-   comment that starts with `/claim`, and refuses the claim when an open pull request closes the
-   issue; `/unclaim` puts the card back, and a maintainer holds work with `/hold <why>` and opens it
-   again with `/ready`. Either way the comment is the claim: a bot that is down never means the
-   issue is free.
+**Claim it** in a comment on the issue before you write code:
 
-The first comment wins. If someone was faster, take another issue; if their pull request has
-stalled, offer in that pull request to take the work over rather than opening a second one. If you
-stop, say so in the issue and set the item back to `Ready`: an issue that looks taken but is not
-costs more than an honestly free one.
+> /claim Plan: … When: …
+
+The claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) moves the card to `In progress` and
+assigns you, and refuses the claim when the work is not free. Without the bot, a plain comment
+("I'd like to take this. Plan: …") is the claim, and the first one wins: a bot that is down never
+means the issue is free.
+
+**Show the work within 48 hours.** Open a draft pull request that says `Closes #N` as soon as you
+have a first commit. A claim with no pull request after 48 hours lapses, and the next `/claim`
+takes it over. If you stop, comment `/unclaim`, so the card goes back to `Ready`.
+
+**One pull request per issue.** If a pull request for the issue is already open, continue there
+(push to it, or offer your change in its thread) instead of opening a second one; that holds for
+a new session of your own as well. When that pull request has stalled, ask its author in it; with
+no answer in three days, you may take the work over in that pull request, or in one that replaces
+it, names it and is linked from it.
+
+**Keep at most three pull requests open at a time**, unless you are a maintainer. Review time is
+what limits how fast Suhina moves, and a stack of open pull requests goes stale as `main` changes.
 
 `good first issue` marks work that needs no knowledge of the engine, `help wanted` work the
 maintainers would like a hand with. An `epic` is a container for other issues: claim one of its
 issues, not the epic.
 
 **An agent claims and reports like a person does.** An issue is the only context an agent gets
-apart from `AGENTS.md` and the documents those point at, so write it to stand on its own — goal,
-acceptance criteria, where the code goes — and keep the plan in the issue and the result in the
-pull request. The rules in [AI-assisted contributions](#ai-assisted-contributions) apply to what
-the agent wrote.
+apart from `AGENTS.md` and the documents those point at, so write it to stand on its own: goal,
+acceptance criteria, where the code goes. Keep the plan in the issue and the result in the pull
+request. An agent searches for an existing issue before it opens one, and for an open pull request
+before it opens one; it continues work that is open rather than starting it again. The rules in
+[AI-assisted contributions](#ai-assisted-contributions) apply to what the agent wrote.
+
+## Trying a pull request
+
+A pull request can be tried without building it: GitHub Actions builds packages of it for
+Windows, macOS and Linux ([`docs/releasing.md` › Test builds](docs/releasing.md#test-builds)) and
+links the downloads from the pull request in a comment, updated with every new build. A maintainer's own pull requests are
+built on every push. A contributor's pull request is built once a maintainer has read the diff and
+added the `test-build` label; a later push takes the label off, and the new commits are built when
+the label is added again.
 
 ## Clean-room
 
@@ -159,6 +181,12 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
+- **Steps anyone can follow.** A change in what Suhina does, in the app, its sound, the files it
+  reads and writes, the CLI or MCP, comes with a *How to check it* section in the pull request:
+  numbered steps from opening Suhina with nothing loaded, every control named as it reads on
+  screen and where it is, every command ready to copy, and what should happen after each step,
+  written so that someone who has never used a music program can check it from the test build.
+  [`docs/how-to-check.md`](docs/how-to-check.md) shows how to write them.
 - **You are responsible for what you submit.** Before you open a pull request, run the tests and
   try every change by hand to see that it works as intended; you answer review questions, not
   the agent.

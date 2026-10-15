@@ -150,8 +150,22 @@ area labels (`CONTRIBUTING.md` › Issues lists them); a larger piece split into
 `epic`, and repository, build and release work is a `chore`. Items imported from the earlier
 board keep their old key in the title (`(LOOP-27)`); a pull request for one names that key.
 Before starting, claim the item the way [`CONTRIBUTING.md`](CONTRIBUTING.md) › *Working on an issue*
-describes — no open pull request for it, `Backlog` or `Ready` on the board, a comment with the plan —
-for a person and for an agent alike.
+describes, for a person and for an agent alike: no assignee and no open pull request for it,
+`Backlog` or `Ready` on the board (`Ready` for a feature), and a `/claim` comment with the plan.
+
+Several agents often run at once, so an agent never starts work that exists already:
+
+- **Before opening an issue**, search the open issues for the same problem; when one exists,
+  comment there instead.
+- **Before writing code**, comment `/claim` with the plan and read the bot's answer. When it says
+  the work is taken, or that it is already yours and names a pull request, do not start a second
+  one: continue in that pull request, or stop and tell the user.
+- **Before opening a pull request**, check the issue's linked pull requests; when one is open,
+  push to it rather than opening another.
+
+Continuing open work is always allowed, in a new session too. A second, competing pull request for
+the same issue is opened only when the user asks for one, and its description says
+`Alternative to #N`.
 
 ## 4. Before you finish a task
 
@@ -162,6 +176,34 @@ cargo test --workspace
 ```
 
 Keep the tree building at every step.
+
+**A change in what Suhina does comes with steps to check it.** When a pull request changes
+anything a user sees, hears or does, in the app or outside it (a view, a menu, a dialog, a
+shortcut, a setting, drag and drop, playback and sound, a file it opens, imports or writes, a
+`suhina-cli` command, an MCP tool), its description has a **How to check it** section: numbered
+steps that someone who has never used Suhina or any other music program can follow from a test
+build ([CONTRIBUTING.md › Trying a pull request](CONTRIBUTING.md#trying-a-pull-request)) and
+finish in a few minutes. [`docs/how-to-check.md`](docs/how-to-check.md) is the guide to writing
+them, for any agent or person. The steps
+
+- start from opening Suhina with nothing loaded, and say how to get everything the check needs:
+  which menu creates the project, track or clip, or which file to use and where it comes from (a
+  file in the repository, one the steps make, or a short way to make one); never "open a project
+  with some clips";
+- name every control as it reads on screen and say where it is ("the **+** button at the bottom
+  of the track list", "right-click the empty slot under the track name"), with the shortcut as
+  well as the click; give every command whole, ready to copy, run from the unzipped test build's
+  folder; explain a music term the first time it is used ("a slot, one of the boxes in a track's
+  column that holds a clip");
+- say after each step what should happen, seen or heard ("the slot turns green and the clip
+  plays from its start"), and what a failure looks like when it is not obvious;
+- end with the edge cases the change handles (undo, an empty project, a second click), each as
+  its own step;
+- say the platform when only one is affected.
+
+Write them by doing them in the build, not from the code. A change with nothing a user can notice
+(a refactor, tests, CI, documentation) says so in one line instead; an engine change a user can
+hear or measure is not one of them.
 
 **Documentation is part of the change.** A pull request that changes how something works updates,
 in the same pull request, every document that describes it, so the docs never describe code

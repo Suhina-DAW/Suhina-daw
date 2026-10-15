@@ -11,6 +11,10 @@ name: Discord
 # pull_request_target, so pull requests from forks are posted too: it runs the workflow and the
 # script from the base branch with the secrets, and never checks out or runs the pull request's
 # code. The event's text reaches the script only as JSON data.
+#
+# A merged pull request's thread in the testing forum is marked "[Merged]" and archived by the
+# bot "Suhina GitHub" (scripts/discord_merged.py): secret DISCORD_BOT_TOKEN, variables
+# DISCORD_GUILD_ID and DISCORD_TESTING_FORUM_ID. Without them nothing is done.
 on:
   pull_request_target:
     types: [opened, closed, reopened]
@@ -52,3 +56,19 @@ jobs:
           fi
           echo "${post#* }"
           echo "${post#* }" | curl -fsS -H "Content-Type: application/json" -d @- "$webhook"
+
+  merged-thread:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    # Two renames of a thread in ten minutes; the script waits out a rate limit.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mark the testing thread merged
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_TESTING_FORUM_ID: ${{ vars.DISCORD_TESTING_FORUM_ID }}
+        run: python3 scripts/discord_merged.py "$GITHUB_EVENT_PATH"
