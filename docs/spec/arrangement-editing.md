@@ -272,9 +272,9 @@ playback goes on from the playhead: the engine jumps there without moving the ma
 (`LaunchCommand::Locate`), so a later Stop still returns to the marker.
 
 **Launcher over arrangement.** A track whose column launched a clip plays it instead of its
-arrangement clips; in the Arrangement view its lane dims, and the ruler shows **Back to
-arrangement** while any lane is dimmed — clicking it runs `launcher.backToArrangement`
-([clip launching](clip-launching.md) › 8).
+arrangement clips; in the Arrangement view its lane dims, and the ruler shows a
+**Back to arrangement** icon at its right end while any lane is dimmed — clicking it runs
+`launcher.backToArrangement` ([clip launching](clip-launching.md) › 8).
 
 **Starting inside the arrangement.** From the marker's frame on, the arrangement plays exactly as
 it would at that frame of a render from the beginning, with two exceptions: a note that started

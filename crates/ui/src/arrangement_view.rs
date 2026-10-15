@@ -789,15 +789,15 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     marker_flags(ui, timeline, state, actions, marker_row, &x_of);
     // Back to arrangement, while tracks play launched clips instead of their arrangement
     // clips: it returns every track to its arrangement clips and the lanes light up again.
+    // Its icon sits at the ruler's right end, above the tracks it sends back.
     if timeline.overrides {
-        let small = theme::ui_font(theme::TEXT_SMALL);
         let label = "Back to arrangement";
-        let width = widgets::text_width(ui, label, small.clone()) + PAD * 2.0;
+        let side = ruler.height() - 6.0;
         let back = Rect::from_min_size(
-            Pos2::new(time.left() + 8.0, ruler.center().y - (ruler.height() - 6.0) / 2.0),
-            Vec2::new(width, ruler.height() - 6.0),
+            Pos2::new(ruler.right() - 8.0 - side, ruler.center().y - side / 2.0),
+            Vec2::splat(side),
         );
-        let response = widgets::button_area(ui, back, Id::new("back-to-arrangement"), label.to_string());
+        let response = widgets::button_area(ui, back, Id::new("back-to-arrangement"), label).on_hover_text(label);
         if response.clicked() {
             actions.push(Action::new("launcher.backToArrangement", json!({})));
         }
@@ -811,7 +811,7 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
                 motion::toward(ui.ctx(), response.id.with("on"), false, motion::VALUE),
             ),
         );
-        widgets::text_in(&painter, back, Align2::CENTER_CENTER, label, small, theme::text_primary());
+        back_glyph(&painter, back, theme::text_primary());
     }
     // The marker: a small triangle hanging from the ruler's lower edge.
     let marker_x = x_of(timeline.start_beat).round() + 0.5;
@@ -1361,6 +1361,24 @@ fn loop_brace(
     };
     painter.rect_filled(bar, 0.0, fill);
     painter.rect_stroke(bar, 0.0, theme::hairline(edge), StrokeKind::Inside);
+}
+
+/// The Back to arrangement glyph: an arrow curving over the top from the right to the left, its
+/// head pointing down the way the curve arrives — the launch returns to the arrangement it left.
+fn back_glyph(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let stroke = egui::Stroke::new(1.1, color);
+    let r = rect.height() * 0.42;
+    let cx = rect.center().x;
+    let cy = rect.top() + (rect.height() + r) / 2.0;
+    let mut points = Vec::with_capacity(9);
+    for step in 0u32..=8 {
+        let angle = std::f32::consts::PI * (1.0 - step as f32 / 8.0);
+        points.push(Pos2::new(cx + r * angle.cos(), cy - r * angle.sin()));
+    }
+    painter.add(egui::Shape::line(points, stroke));
+    // The head at the left end, opening against the curve's arrival: pointing down.
+    let tip = Pos2::new(cx - r, cy);
+    painter.add(egui::Shape::line(vec![tip + Vec2::new(-2.6, -3.2), tip, tip + Vec2::new(2.6, -3.2)], stroke));
 }
 
 /// The part of a lane a clip in sub-row `row` of `rows` is drawn in.
