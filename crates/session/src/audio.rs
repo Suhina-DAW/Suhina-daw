@@ -272,8 +272,15 @@ impl OutputInfo {
     /// One line for the window: device, host, rate and buffer.
     pub fn describe(&self) -> String {
         let mode = if self.exclusive && self.host == "WASAPI" { ", exclusive" } else { "" };
+        let cue = match self.cue_pair {
+            Some(pair) => {
+                let (first, second) = cue_channels(pair);
+                format!(", cue on {first}/{second}")
+            }
+            None => String::new(),
+        };
         format!(
-            "{} ({}{mode}, {} Hz, {} frames)",
+            "{} ({}{mode}, {} Hz, {} frames{cue})",
             self.device,
             self.host,
             self.sample_rate,
@@ -555,6 +562,8 @@ mod tests {
             ..OutputInfo::default()
         };
         assert_eq!(info.describe(), "Speakers (WASAPI, exclusive, 44100 Hz, 512 frames)");
+        let cued = OutputInfo { cue_pair: Some(1), ..info.clone() };
+        assert_eq!(cued.describe(), "Speakers (WASAPI, exclusive, 44100 Hz, 512 frames, cue on 3/4)");
         assert_eq!(info.to_json()["latency_ms"], json!(23.46));
     }
 }
