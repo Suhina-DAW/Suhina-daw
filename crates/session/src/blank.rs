@@ -27,6 +27,7 @@ pub fn blank_project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let mut project = Project { transport: Transport::default(), ..Project::default() };
     let mut lanes = Vec::new();
@@ -62,7 +63,7 @@ pub fn blank_project() -> Project {
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.arrangement = Arrangement { lanes };
     project.launcher =
-        Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), tempo_bpm: None }).collect(), columns };
+        Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), ..Scene::default() }).collect(), columns };
     project
 }
 

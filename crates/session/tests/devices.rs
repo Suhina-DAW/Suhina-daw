@@ -26,6 +26,7 @@ fn project() -> Project {
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         ..Project::default()
     }

@@ -8,7 +8,7 @@ use crate::{Renderer, render_offline};
 /// Tracks 1 and 2 each play an A4 for a beat into group track 3 (channel 3), whose channel
 /// holds `group_devices`; track 4 plays the same note straight to the output, unless `outside`
 /// is false.
-fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
+pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
     let channel = |id: u32, output: Option<u32>, devices: Vec<Device>| Channel {
         id: ChannelId(id),
         name: format!("C{id}"),
@@ -22,6 +22,7 @@ fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         sends: Vec::new(),
         devices,
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let track = |id: u32, parent: Option<u32>| Track {
         id: TrackId(id),

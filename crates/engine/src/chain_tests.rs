@@ -20,6 +20,7 @@ pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
         enabled: true,
         state: None,
         params: params.iter().map(|(p, v)| DeviceParam::new(*p, *v)).collect(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     }
 }
@@ -64,6 +65,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),

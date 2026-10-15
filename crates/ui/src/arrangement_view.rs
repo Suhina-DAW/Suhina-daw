@@ -8,9 +8,11 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::{FadeCurve, FadeShape, TrackId};
 
+use crate::automation_lanes::{self as automation, LanesState};
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
+use crate::meter::{self, Meters};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::timeline::{ClipBox, Lane, Timeline};
@@ -169,6 +171,13 @@ pub struct ArrangementViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// The engine's levels this frame, for the headers' meters.
+    pub meters: Meters,
+    /// The piano roll is pulled to the top: the view shows only this track, highlighted, and
+    /// no return tracks or main track (`docs/spec/ui-clip-editor.md` › Pulled to the top).
+    pub focus: Option<TrackId>,
+    /// Automation lanes under the tracks: which are shown, selected points, a drag.
+    pub automation: LanesState,
 }
 
 impl Default for ArrangementViewState {
@@ -192,6 +201,9 @@ impl Default for ArrangementViewState {
             track_drop: None,
             panning: false,
             drop: None,
+            meters: Meters::default(),
+            focus: None,
+            automation: LanesState::default(),
         }
     }
 }
@@ -261,7 +273,17 @@ impl ArrangementViewState {
     }
 
     fn height(&self, lane: &Lane) -> f32 {
-        self.heights.get(&lane.track).copied().unwrap_or(DEFAULT_LANE)
+        self.lane_height(lane.track)
+    }
+
+    /// How tall `track`'s lane is.
+    pub fn lane_height(&self, track: TrackId) -> f32 {
+        self.heights.get(&track).copied().unwrap_or(DEFAULT_LANE)
+    }
+
+    /// How tall the view is when it shows only `track` ([`Self::focus`]): the ruler and its lane.
+    pub fn focus_height(&self, track: TrackId) -> f32 {
+        RULER + 1.0 + self.lane_height(track) + 1.0
     }
 }
 
@@ -277,7 +299,7 @@ fn ruler_beat(raw: f64, bar_beats: f64, beat_width: f32, free: bool) -> f64 {
 
 /// The grid clips snap to at a zoom level: a sixteenth, a beat or a bar, whichever is at least
 /// a few points wide.
-fn snap(beat_width: f32, bar_beats: f64) -> f64 {
+pub(crate) fn snap(beat_width: f32, bar_beats: f64) -> f64 {
     if beat_width >= 48.0 {
         0.25
     } else if beat_width >= 12.0 {
@@ -288,17 +310,25 @@ fn snap(beat_width: f32, bar_beats: f64) -> f64 {
 }
 
 /// A fade's length after a drag of `raw` beats: its end on the grid (unless `grid` is `None`,
-/// Alt held), and no longer than the clip leaves beside the other fade.
+/// Alt held), and no longer than the clip leaves beside the other fade. No fade and all the room
+/// there is snap too, so a clip that does not start or end on the grid can still be faded over
+/// its whole length.
 fn fade_length(raw: f64, edge: FadeEdge, clip: &ClipBox, other: f64, grid: Option<f64>) -> f64 {
+    if !raw.is_finite() {
+        return 0.0;
+    }
     let end = clip.start + clip.length;
+    let room = (clip.length - other).max(0.0);
     let snapped = match grid.filter(|g| *g > 0.0) {
-        Some(g) => match edge {
-            FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
-            FadeEdge::Out => end - ((end - raw) / g).round() * g,
-        },
+        Some(g) => {
+            let on_grid = match edge {
+                FadeEdge::In => ((clip.start + raw) / g).round() * g - clip.start,
+                FadeEdge::Out => end - ((end - raw) / g).round() * g,
+            };
+            [0.0, room].into_iter().fold(on_grid, |best, v| if (v - raw).abs() < (best - raw).abs() { v } else { best })
+        }
         None => raw,
     };
-    let room = (clip.length - other).max(0.0);
     if snapped.is_finite() { snapped.clamp(0.0, room) } else { 0.0 }
 }
 
@@ -380,6 +410,21 @@ fn rgb(color: suhina_engine::model::Rgb) -> Color32 {
 /// Draws the Arrangement view in the space left in `ui` and adds what the user asked for to
 /// `actions`.
 pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, actions: &mut Vec<Action>) {
+    // Showing one track, the view is not scrolled down; where it was is kept for later.
+    let scrolled = state.scroll.y;
+    if state.focus.is_some() {
+        state.scroll.y = 0.0;
+    }
+    show_lanes(ui, timeline, state, actions);
+    if state.focus.is_some() {
+        state.scroll.y = scrolled;
+    }
+}
+
+fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, actions: &mut Vec<Action>) {
+    // The track lanes shown: every one but the return tracks, or only the focused one.
+    let focus = state.focus;
+    let in_view = |l: &&Lane| l.kind != ColumnKind::Return && focus.is_none_or(|f| f == l.track);
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
@@ -398,8 +443,10 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let time = Rect::from_x_y_ranges(time_x, area.y_range());
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
     // Return tracks and the main track are fixed rows along the bottom.
-    let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
-    let fixed_rows = returns.len() + usize::from(timeline.main_volume_db.is_some());
+    let returns: Vec<&Lane> =
+        timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return && focus.is_none()).collect();
+    let main_volume_db = timeline.main_volume_db.filter(|_| focus.is_none());
+    let fixed_rows = returns.len() + usize::from(main_volume_db.is_some());
     let fixed_height = fixed_rows as f32 * (ROW + 1.0);
     let fixed_top = (area.bottom() - fixed_height).max(ruler.bottom() + 1.0);
     let fixed = Rect::from_min_max(Pos2::new(area.left(), fixed_top), area.max);
@@ -446,8 +493,12 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     let content_width = ((timeline.end + TAIL_BARS * bar_beats) as f32) * state.beat_width;
-    let content_height: f32 =
-        timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).map(|l| state.height(l) + 1.0).sum();
+    let content_height: f32 = timeline
+        .lanes
+        .iter()
+        .filter(in_view)
+        .map(|l| state.height(l) + 1.0 + state.automation.height(l.track, &timeline.automation))
+        .sum();
     state.scroll.x = state.scroll.x.clamp(0.0, (content_width - time.width()).max(0.0));
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - lanes_area.height()).max(0.0));
 
@@ -540,11 +591,11 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     // Where every lane is this frame, so a dragged clip can find the lane under the pointer.
     let mut rows = Vec::new();
     let mut y = lanes_area.top() - state.scroll.y;
-    for lane in timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return) {
+    for lane in timeline.lanes.iter().filter(in_view) {
         let height = state.height(lane);
         let lane_time = Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(y, y + height));
         rows.push(Row { track: lane.track, time: lane_time, clip: lane_time.intersect(lanes_area) });
-        y += height + 1.0;
+        y += height + 1.0 + state.automation.height(lane.track, &timeline.automation);
     }
     let mut y = fixed.top();
     for lane in &returns {
@@ -560,6 +611,15 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Group).map(|l| (l.track, l.name.clone())).collect();
 
     // Lanes.
+    state.automation.follow_clip(state.selected);
+    let geometry = automation::Geometry {
+        time: time.x_range(),
+        headers,
+        visible: lanes_area,
+        scroll_x: state.scroll.x,
+        beat_width: state.beat_width,
+        grid: snap(state.beat_width, bar_beats),
+    };
     let lanes_painter = painter.with_clip_rect(lanes_area);
     let mut track_number = 0;
     let mut ghost = None;
@@ -567,8 +627,15 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         track_number += 1;
         let Some(row) = row_of(lane.track) else { continue };
         let lane_rect = Rect::from_x_y_ranges(area.x_range(), row.time.y_range());
-        if lane_rect.bottom() < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
+        let below = state.automation.height(lane.track, &timeline.automation);
+        if lane_rect.bottom() + below < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
+        }
+        // The track the piano roll edits, alone in the view: lit, so it is clear which it is.
+        if focus == Some(lane.track) {
+            lanes_painter.rect_filled(row.time, 0.0, theme::panel_hover());
+            let edge = Rect::from_min_size(row.time.min, Vec2::new(2.0, row.time.height()));
+            lanes_painter.rect_filled(edge, 0.0, theme::accent());
         }
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
@@ -589,13 +656,24 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
             }
         }
         let header = Rect::from_x_y_ranges(headers, row.time.y_range());
-        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &groups, state, actions);
+        track_header(ui, &lanes_painter, header, lanes_area, lane, track_number, &groups, timeline, state, actions);
         lanes_painter.hline(area.x_range(), lane_rect.bottom() + 0.5, theme::hairline(theme::border_strong()));
+        // The track's automation lanes, under it.
+        let lanes = automation::TrackLanes {
+            track: lane.track,
+            name: &lane.name,
+            color: lane.color,
+            top: lane_rect.bottom() + 1.0,
+        };
+        automation::show(ui, &lanes_painter, &geometry, &lanes, &timeline.automation, &mut state.automation, actions);
+    }
+    if state.automation.selected_points().is_some() {
+        state.selected = None;
     }
 
     // A track header let go over a lane moves the track (and a group's tracks) there: above the
     // lane under the pointer, or below it from its lower half.
-    let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+    let tracks: Vec<&Lane> = timeline.lanes.iter().filter(in_view).collect();
     let target_of = |y: f32| {
         let lane = tracks.iter().find(|l| row_of(l.track).is_some_and(|r| r.time.y_range().contains(y)))?;
         let row = row_of(lane.track)?;
@@ -655,7 +733,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         fixed_row(ui, &fixed_painter, header, fixed, lane, state, actions);
         fixed_painter.hline(area.x_range(), row.time.bottom() + 0.5, theme::hairline(theme::border()));
     }
-    if let Some(db) = timeline.main_volume_db {
+    if let Some(db) = main_volume_db {
         let y = fixed.bottom() - ROW;
         let header = Rect::from_x_y_ranges(headers, egui::Rangef::new(y, y + ROW));
         fixed_painter.rect_filled(header, 0.0, theme::panel_background());
@@ -664,6 +742,9 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::text_primary());
         let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
         volume_text(&fixed_painter, field, db, 0.0);
+        let at = lying_meter(field.left() - PAD, inner.center().y);
+        let level = state.meters.main;
+        meter::show(ui, &fixed_painter, at, "Main", meter::Source::Main, &level, actions);
     }
 
     // A clip dragged onto another lane is drawn there, over everything in that lane.
@@ -1271,7 +1352,15 @@ fn routing(
     }
 }
 
-/// A return track's row: its name and its volume.
+/// Width of the meter lying in a return or main row, left of its volume.
+const LYING_METER: f32 = 48.0;
+
+/// Where a return or main row shows its meter: lying down, ending at `right`, centred on `y`.
+fn lying_meter(right: f32, y: f32) -> Rect {
+    Rect::from_min_max(Pos2::new(right - LYING_METER, y - meter::WIDTH / 2.0), Pos2::new(right, y + meter::WIDTH / 2.0))
+}
+
+/// A return track's row: its name, its meter and its volume.
 fn fixed_row(
     ui: &Ui,
     painter: &egui::Painter,
@@ -1284,7 +1373,10 @@ fn fixed_row(
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let inner = rect.shrink2(Vec2::new(PAD, 2.0));
     let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
-    let name = Rect::from_min_max(inner.min, Pos2::new(field.left() - PAD, inner.bottom()));
+    let level = state.meters.track(lane.track);
+    let at = lying_meter(field.left() - PAD, inner.center().y);
+    meter::show(ui, painter, at.intersect(clip), &lane.name, meter::Source::Track(lane.track), &level, actions);
+    let name = Rect::from_min_max(inner.min, Pos2::new(at.left() - PAD, inner.bottom()));
     let color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), color);
     let id = Id::new(("arrangement-header", lane.track.0));
@@ -1300,6 +1392,7 @@ fn track_header(
     lane: &Lane,
     track_number: usize,
     groups: &[(TrackId, String)],
+    timeline: &Timeline,
     state: &mut ArrangementViewState,
     actions: &mut Vec<Action>,
 ) {
@@ -1340,12 +1433,22 @@ fn track_header(
         };
         menus::track_menu(ui, &menu, actions);
     });
-    let selected = state.selected_tracks.contains(&lane.track);
+    let selected = state.selected_tracks.contains(&lane.track) || state.focus == Some(lane.track);
     painter.rect_filled(rect, 0.0, if selected { theme::control_background() } else { theme::panel_background() });
+    // The meter stands at the right edge; the rows keep clear of it.
+    let meter_x = rect.right() - PAD - meter::WIDTH;
     let inner = Rect::from_min_max(
         Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
-        Pos2::new(rect.right() - PAD, rect.bottom() - HEADER_PAD_Y),
+        Pos2::new(meter_x - PAD, rect.bottom() - HEADER_PAD_Y),
     );
+    let meter_bottom =
+        if rect.height() >= SHOWS_MIXER { inner.top() + HEADER_ROW + PAD + FIELD } else { inner.top() + HEADER_ROW };
+    let at = Rect::from_min_max(
+        Pos2::new(meter_x, inner.top()),
+        Pos2::new(meter_x + meter::WIDTH, meter_bottom.min(inner.bottom())),
+    );
+    let level = state.meters.track(lane.track);
+    meter::show(ui, painter, at.intersect(clip), &lane.name, meter::Source::Track(lane.track), &level, actions);
 
     // Row 1: track on, colour, name.
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
@@ -1354,7 +1457,23 @@ fn track_header(
     let cue = Rect::from_min_size(Pos2::new(solo.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
     let square = Rect::from_min_size(Pos2::new(cue.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     painter.rect_filled(square, 0.0, if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) });
-    let name = Rect::from_min_max(Pos2::new(square.right() + PAD, row.top()), row.max);
+    // The automation button at the end of the row shows and hides the track's lanes.
+    let lanes_button = Rect::from_min_size(Pos2::new(row.right() - SOLO, row.top()), Vec2::new(SOLO, HEADER_ROW));
+    if lane.kind != ColumnKind::Return && lanes_button.intersects(clip) {
+        automation::header_button(
+            ui,
+            painter,
+            lanes_button,
+            lane.track,
+            &lane.name,
+            &mut state.automation,
+            &timeline.automation,
+        );
+    }
+    let name = Rect::from_min_max(
+        Pos2::new(square.right() + PAD, row.top()),
+        Pos2::new(lanes_button.left() - 4.0, row.bottom()),
+    );
     let name_color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), name_color);
     if solo.intersects(clip)
@@ -1448,20 +1567,28 @@ fn value_control(
         };
         let response = widgets::value_area(ui, rect.intersect(clip), id.with(label.as_str()), &label, text);
         hover = widgets::hover(ui, &response);
+        // Every frame of a drag sets the value, so it is heard while dragging; all but the first
+        // continue its undo step, so the drag is one step.
+        let continued = preview.is_some();
+        let set = |v: f64| match control {
+            Control::Volume => {
+                let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+                Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+            }
+            Control::Pan => Action::new(
+                "track.setPan",
+                json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+            ),
+        };
         match widgets::drag_value(ui, &response, &mut preview, value, per_point, range, default) {
-            Drag::Moving(v) => state.value_drag = Some((track, control, v)),
+            Drag::Moving(v) => {
+                state.value_drag = Some((track, control, v));
+                actions.push(set(v));
+            }
             Drag::Done(v) => {
                 state.value_drag = None;
                 committed = Some(v);
-                actions.push(match control {
-                    Control::Volume => {
-                        let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-                        Action::new("track.setVolume", json!({ "track": track.0, "db": db }))
-                    }
-                    Control::Pan => {
-                        Action::new("track.setPan", json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0 }))
-                    }
-                });
+                actions.push(set(v));
             }
             Drag::None => {}
         }
@@ -1620,6 +1747,15 @@ mod tests {
         assert_eq!(fade_length(-5.0, FadeEdge::In, &clip, 0.0, None), 0.0);
         assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 3.0, None), 5.0);
         assert_eq!(fade_length(f64::NAN, FadeEdge::In, &clip, 0.0, None), 0.0);
+        // The clip's own ends snap too: from beat 10 back to beat 2.6, nearer the clip's start
+        // (beat 2) than the grid line at beat 4, the fade-out takes the whole clip, and the
+        // fade-in from beat 2 to 9.5 takes the room the fade-out leaves.
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 8.0);
+        assert_eq!(fade_length(7.4, FadeEdge::Out, &clip, 1.0, Some(4.0)), 7.0);
+        assert_eq!(fade_length(7.5, FadeEdge::In, &clip, 0.0, Some(4.0)), 8.0);
+        assert_eq!(fade_length(0.4, FadeEdge::Out, &clip, 0.0, Some(4.0)), 0.0);
+        // Nearer the grid line, the grid wins.
+        assert_eq!(fade_length(6.5, FadeEdge::Out, &clip, 0.0, Some(4.0)), 6.0);
     }
 
     #[test]

@@ -63,6 +63,7 @@ fn project() -> Project {
             key: CONTROLLER.into(),
             data: b"controller".to_vec(),
         }]),
+        automation: Vec::new(),
     };
     let missing = Device {
         name: "Gone".into(),
@@ -71,6 +72,7 @@ fn project() -> Project {
         state: Some(vec![1, 2, 3]),
         params: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     Project {
         tracks: vec![Track {
@@ -95,6 +97,7 @@ fn project() -> Project {
             sends: Vec::new(),
             devices: vec![plugin, missing],
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         ..Project::default()
     }

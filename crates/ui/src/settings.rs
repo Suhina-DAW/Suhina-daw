@@ -41,6 +41,36 @@ impl StopReturn {
     }
 }
 
+/// What stays above the piano roll when its splitter is pulled to the top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PianoRollTop {
+    /// The Arrangement view's ruler and the track whose clip is edited.
+    #[default]
+    Track,
+    /// Nothing: the piano roll fills the area under the control bar.
+    Window,
+}
+
+/// Where Play and the play/stop key start the transport (`transport.play`'s `from`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlayFrom {
+    /// From the play start marker.
+    #[default]
+    Marker,
+    /// From the start of the clip selected in the Arrangement view; from the marker when none is.
+    Clip,
+}
+
+impl PlayFrom {
+    /// The value `transport.play` takes for it, and the settings file keeps.
+    pub fn param(self) -> &'static str {
+        match self {
+            Self::Marker => "marker",
+            Self::Clip => "clip",
+        }
+    }
+}
+
 /// How the detail area lays out a device chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceLayout {
@@ -147,7 +177,14 @@ pub struct Settings {
     pub on_open: OnOpen,
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
+    /// Where Play starts.
+    pub play_from: PlayFrom,
     pub device_layout: DeviceLayout,
+    /// What stays above the piano roll pulled to the top.
+    pub piano_roll_top: PianoRollTop,
+    /// The control bar's grid value sets the piano roll's too; otherwise the piano roll keeps
+    /// its own.
+    pub piano_grid_follows: bool,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
@@ -208,7 +245,10 @@ impl Default for Settings {
             midi_stacking: false,
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
+            play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
+            piano_roll_top: PianoRollTop::Track,
+            piano_grid_follows: false,
             plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
@@ -320,7 +360,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_cue_pair = {}\naudio_cue_volume = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_cue_pair = {}\naudio_cue_volume = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -347,11 +387,17 @@ impl Settings {
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
+            play_from = self.play_from.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
                 Side::Right => "right",
             },
             drop = if self.drop_separate { "separate" } else { "one_track" },
+            piano_top = match self.piano_roll_top {
+                PianoRollTop::Track => "track",
+                PianoRollTop::Window => "window",
+            },
+            piano_grid = if self.piano_grid_follows { "control_bar" } else { "own" },
         )
     }
 
@@ -387,6 +433,8 @@ impl Settings {
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
                 ("stop", "marker") => settings.stop = StopReturn::Marker,
                 ("stop", "here") => settings.stop = StopReturn::Here,
+                ("play_from", "marker") => settings.play_from = PlayFrom::Marker,
+                ("play_from", "clip") => settings.play_from = PlayFrom::Clip,
                 ("renderer", "wgpu") => settings.graphics = Graphics::Gpu,
                 ("renderer", "glow") => settings.graphics = Graphics::OpenGl,
                 ("theme", id) if is_theme_id(id) => settings.theme = id.to_string(),
@@ -443,6 +491,9 @@ impl Settings {
                 ("audio_cue_volume", db) if db.parse::<i32>().is_ok() => {
                     settings.audio_cue_volume = db.parse::<i32>().unwrap_or(0).clamp(CUE_VOLUMES.0, CUE_VOLUMES.1);
                 }
+                ("piano_roll_top", "track") => settings.piano_roll_top = PianoRollTop::Track,
+                ("piano_roll_top", "window") => settings.piano_roll_top = PianoRollTop::Window,
+                ("piano_roll_grid", "own" | "control_bar") => settings.piano_grid_follows = value == "control_bar",
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -488,7 +539,10 @@ mod tests {
             midi_stacking: false,
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
+            play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
+            piano_roll_top: PianoRollTop::Window,
+            piano_grid_follows: true,
             plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),
@@ -609,6 +663,16 @@ map_window_rect = 10, 20, 800, 600
 ",
         );
         assert_eq!((settings.zoom, warnings.len()), (ZOOM, 1));
+    }
+
+    #[test]
+    fn play_from_reads_marker_or_clip_and_nothing_else() {
+        assert_eq!(Settings::default().play_from, PlayFrom::Marker);
+        assert_eq!(Settings::from_text("play_from = clip\n").0.play_from, PlayFrom::Clip);
+        assert_eq!(Settings::from_text("play_from = marker\n").0.play_from, PlayFrom::Marker);
+        let (settings, warnings) = Settings::from_text("play_from = selection\n");
+        assert_eq!((settings.play_from, warnings.len()), (PlayFrom::Marker, 1));
+        assert!(Settings::default().to_text().contains("play_from = marker\n"));
     }
 
     #[test]

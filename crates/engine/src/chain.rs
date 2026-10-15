@@ -22,7 +22,10 @@ use std::time::Instant;
 use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
 use suhina_model::{DeviceKind, Project, TrackId};
 
+use crate::automation::{DeviceLanes, MixLanes};
 use crate::plugin::{Delay, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
+use crate::plugin_params::SlotParams;
+use crate::sends::SendOut;
 
 /// The most frames one block of a chain holds; the renderer splits longer blocks.
 pub(crate) const MAX_BLOCK: usize = 1024;
@@ -61,6 +64,10 @@ pub(crate) struct Chain {
     pub(crate) delay: Delay,
     /// The track's gains after the chain.
     post: (f32, f32),
+    /// The lanes of its built-in devices' parameters.
+    device_lanes: DeviceLanes,
+    /// The lanes of the track's mixer, which scale `post` frame by frame (#395).
+    pub(crate) mix: Option<MixLanes>,
     /// The index of the bus chain this chain's output goes into, or `None` for the output. Bus
     /// chains come after the chains that feed them, so they run after them in a block.
     pub(crate) target: Option<usize>,
@@ -70,7 +77,11 @@ pub(crate) struct Chain {
     /// The track's cue is on: its output after the chain is also added to the cue bus, at
     /// these gains (its own channel's volume and pan, divided by `CHAIN_INPUT_GAIN`).
     pub(crate) cue: Option<(f32, f32)>,
-    buffer: Vec<f32>,
+    /// The returns this chain sends to (see `sends`), each after its devices.
+    pub(crate) sends: Vec<SendOut>,
+    /// What a send reads through its delay line; empty without sends.
+    pub(crate) scratch: Vec<f32>,
+    pub(crate) buffer: Vec<f32>,
     pending: Vec<(usize, NoteEvent)>,
     /// The pending events with their frames counted from the start of the span a plug-in runs.
     span_events: Vec<(usize, NoteEvent)>,
@@ -106,11 +117,13 @@ impl Chain {
         let channel = project.tracks.iter().find(|t| t.id == track)?.channel?;
         let channel = project.channels.iter().find(|c| c.id == channel)?;
         let keys = plugin_devices(project);
+        let frames_per_beat = 60.0 / project.transport.tempo_bpm * f64::from(sample_rate);
         let mut slots: Vec<Slot> = Vec::new();
         let mut positions = Vec::new();
         let mut ids = Vec::new();
         let mut params = Vec::new();
         let mut latency = 0u32;
+        let mut device_lanes = DeviceLanes::none();
         for (position, stored) in channel.devices.iter().enumerate() {
             let id = match &stored.kind {
                 DeviceKind::Builtin(id) if stored.enabled => id,
@@ -131,6 +144,7 @@ impl Chain {
                         latency: info.latency,
                         enabled: stored.enabled,
                         missed: 0,
+                        params: SlotParams::new(stored, frames_per_beat),
                     }));
                     positions.push(position);
                     ids.push(format!("plugin:{key:016x}"));
@@ -150,8 +164,10 @@ impl Chain {
                     *slot = p.value;
                 }
             }
+            device_lanes.add(slots.len(), device.as_ref(), &stored.automation, frames_per_beat);
             for (index, &value) in values.iter().enumerate() {
-                device.set_param(index, value);
+                // A parameter that follows a lane starts where the lane starts.
+                device.set_param(index, device_lanes.initial(slots.len(), index).unwrap_or(value));
             }
             device.reset();
             latency = latency.saturating_add(device.latency());
@@ -176,9 +192,13 @@ impl Chain {
             latency,
             delay: Delay::new(0),
             post: (post.0 / CHAIN_INPUT_GAIN, post.1 / CHAIN_INPUT_GAIN),
+            device_lanes,
+            mix: None,
             target: None,
             is_bus: false,
             cue: None,
+            sends: Vec::new(),
+            scratch: Vec::new(),
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::with_capacity(MAX_PENDING),
             span_events: Vec::with_capacity(MAX_PENDING),
@@ -206,9 +226,13 @@ impl Chain {
             latency: 0,
             delay: Delay::new(0),
             post: (1.0, 1.0),
+            device_lanes: DeviceLanes::none(),
+            mix: None,
             target: None,
             is_bus: false,
             cue: None,
+            sends: Vec::new(),
+            scratch: Vec::new(),
             buffer: vec![0.0; MAX_BLOCK * 2],
             pending: Vec::new(),
             span_events: Vec::new(),
@@ -257,6 +281,26 @@ impl Chain {
         self.deadline = deadline;
     }
 
+    /// Plans the parameter events of its plug-ins for a block of `frames` frames starting at
+    /// arrangement frame `time` (`None` while the transport is stopped): call it after
+    /// [`Chain::begin`], before any of the block runs. Never allocates.
+    pub(crate) fn automate(&mut self, time: Option<u64>, frames: usize) {
+        let frames = frames.min(MAX_BLOCK);
+        for slot in self.plugin_slots() {
+            slot.params.plan(time, frames);
+        }
+        self.device_lanes.plan(time, frames);
+    }
+
+    /// Fills the track's mixer gains for a block of `frames` frames whose first frame is at
+    /// arrangement frame `time` (the play start marker while stopped, with `running` false).
+    /// Never allocates.
+    pub(crate) fn automate_mix(&mut self, time: u64, frames: usize, running: bool) {
+        if let Some(mix) = self.mix.as_mut() {
+            mix.plan(time, frames.min(MAX_BLOCK), running);
+        }
+    }
+
     /// Runs the devices over the rest of the block one stage further, for chains that run
     /// their plug-ins at the same time: built-in effects and instruments run here, with the block's `context`;
     /// at the next plug-in that takes the block without waiting, the block is handed over and
@@ -269,24 +313,17 @@ impl Chain {
             return true;
         }
         let to = frames.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, .. } = self;
+        let Self { slots, buffer, pending, span_events, done, deadline, context, stage, waiting, device_lanes, .. } =
+            self;
         let from = (*done).min(to);
         while let Some(slot) = slots.get_mut(*stage) {
             match slot {
-                Slot::Device(device) => {
-                    let mut at_done = from;
-                    for &(at, event) in pending.iter() {
-                        let at = at.clamp(at_done, to);
-                        process(device, buffer, at_done, at, context);
-                        at_done = at;
-                        device.event(event);
-                    }
-                    process(device, buffer, at_done, to, context);
-                }
+                Slot::Device(device) => run_device(device, *stage, buffer, from, to, pending, device_lanes, context),
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    plugin.automate(from, to);
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
                         match plugin.send(span, span_events, *deadline) {
                             Sent::Out => {
@@ -370,6 +407,15 @@ impl Chain {
         self.next_off = next;
     }
 
+    /// Holds `key`, started by [`Chain::note_on`] or about to start, until it is released by
+    /// hand: the piano roll's key column (`preview.noteOn`). `end` is the frame the note would
+    /// otherwise end at; `u64::MAX` holds it for good.
+    pub(crate) fn hold_key(&mut self, key: u8, end: u64) {
+        if let Some(held) = self.held.get_mut(usize::from(key)) {
+            *held = end;
+        }
+    }
+
     /// Releases `key` now, at `frame` of the block, if it is held.
     pub(crate) fn release_key(&mut self, frame: usize, key: u8) {
         if let Some(held) = self.held.get_mut(usize::from(key))
@@ -411,24 +457,16 @@ impl Chain {
     /// event over at its frame.
     fn run(&mut self, frame: usize) {
         let to = frame.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, done, deadline, context, .. } = self;
+        let Self { slots, buffer, pending, span_events, done, deadline, context, device_lanes, .. } = self;
         let from = (*done).min(to);
-        for slot in slots.iter_mut() {
+        for (index, slot) in slots.iter_mut().enumerate() {
             match slot {
-                Slot::Device(device) => {
-                    let mut at_done = from;
-                    for &(at, event) in pending.iter() {
-                        let at = at.clamp(at_done, to);
-                        process(device, buffer, at_done, at, context);
-                        at_done = at;
-                        device.event(event);
-                    }
-                    process(device, buffer, at_done, to, context);
-                }
+                Slot::Device(device) => run_device(device, index, buffer, from, to, pending, device_lanes, context),
                 Slot::Plugin(plugin) => {
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
+                    plugin.automate(from, to);
                     if let Some(span) = buffer.get_mut(from * 2..to * 2) {
                         plugin.run(span, span_events, *deadline);
                     }
@@ -439,17 +477,35 @@ impl Chain {
         *done = to;
     }
 
-    /// Runs the devices over the rest of a block of `frames` frames and adds the result, at
-    /// the track's gains, to `out`, and, when its cue is on, at its cue gains to `cue`.
-    pub(crate) fn finish(&mut self, out: &mut [f32], cue: &mut [f32], frames: usize, context: &ProcessContext) {
+    /// Runs the devices over the rest of a block of `frames` frames; [`Chain::mix`] then adds
+    /// the result to where the track plays into, and the sends read it before that.
+    pub(crate) fn complete(&mut self, frames: usize, context: &ProcessContext) {
+>>>>>>> merge-419
         self.context = *context;
         self.run(frames);
+    }
+
+    /// Adds what the devices made of the block, through the latency compensation and at the
+    /// track's gains, to `out`, and, when its cue is on, at its cue gains to `cue`.
+    pub(crate) fn mix(&mut self, out: &mut [f32], cue: &mut [f32], frames: usize) {
         let (gain_left, gain_right) = self.post;
         let Some(buffer) = self.buffer.get_mut(..frames.min(MAX_BLOCK) * 2) else { return };
         self.delay.run(buffer);
-        for ([l, r], [cl, cr]) in out.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
-            *l += cl * gain_left;
-            *r += cr * gain_right;
+        let pairs = out.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0);
+        match &self.mix {
+            None => {
+                for ([l, r], [cl, cr]) in pairs {
+                    *l += cl * gain_left;
+                    *r += cr * gain_right;
+                }
+            }
+            Some(mix) => {
+                for (frame, ([l, r], [cl, cr])) in pairs.enumerate() {
+                    let (left, right) = mix.gains(frame);
+                    *l += cl * gain_left * left;
+                    *r += cr * gain_right * right;
+                }
+            }
         }
         if let Some((cue_left, cue_right)) = self.cue {
             for ([l, r], [cl, cr]) in cue.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
@@ -459,15 +515,32 @@ impl Chain {
         }
     }
 
+    /// The first `frames` frames of the block's output, before the track's gains, once
+    /// [`Chain::complete`] has run.
+    pub(crate) fn output(&self, frames: usize) -> &[f32] {
+        let end = (frames.min(MAX_BLOCK) * 2).min(self.buffer.len());
+        self.buffer.get(..end).unwrap_or_default()
+    }
+
     /// Sets parameter `param` of the device at `position` among the channel's devices, as a
     /// parameter message does (ADR 0005, amendment). Never allocates.
+    /// For a plug-in, `param` is its parameter id, and the value goes at the start of the next
+    /// block.
     pub(crate) fn set_param(&mut self, position: usize, param: usize, value: f64) {
         let Some(index) = self.positions.iter().position(|&p| p == position) else { return };
-        if let Some(Slot::Device(device)) = self.slots.get_mut(index) {
-            device.set_param(param, value);
-            if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
-                *slot = device.param(param).unwrap_or(value);
+        match self.slots.get_mut(index) {
+            Some(Slot::Device(device)) => {
+                device.set_param(param, value);
+                if let Some(slot) = self.params.get_mut(index).and_then(|values| values.get_mut(param)) {
+                    *slot = device.param(param).unwrap_or(value);
+                }
             }
+            Some(Slot::Plugin(plugin)) => {
+                if let Ok(id) = u32::try_from(param) {
+                    plugin.params.set(id, value);
+                }
+            }
+            None => {}
         }
     }
 
@@ -479,10 +552,17 @@ impl Chain {
             return false;
         }
         std::mem::swap(&mut self.slots, &mut old.slots);
-        for ((slot, values), fresh) in self.slots.iter_mut().zip(&self.params).zip(old.slots.iter_mut()) {
+        let lanes = &self.device_lanes;
+        for (position, ((slot, values), fresh)) in
+            self.slots.iter_mut().zip(&self.params).zip(old.slots.iter_mut()).enumerate()
+        {
             match (slot, fresh) {
                 (Slot::Device(device), _) => {
-                    for (index, &value) in values.iter().enumerate() {
+                    // A parameter that follows a lane keeps its running value until the lane
+                    // sets it in the next block.
+                    for (index, &value) in
+                        values.iter().enumerate().filter(|&(index, _)| !lanes.covers(position, index))
+                    {
                         device.set_param(index, value);
                     }
                 }
@@ -490,9 +570,12 @@ impl Chain {
                     running.enabled = fresh.enabled;
                     running.instrument = fresh.instrument;
                     running.latency = fresh.latency;
-                    // A processor that reached the new graph's slot (a restart) wins.
+                    running.params.adopt(&mut fresh.params);
+                    // A processor that reached the new graph's slot (a restart) wins, and gets
+                    // the set values again.
                     if fresh.processor.is_some() {
                         std::mem::swap(&mut running.processor, &mut fresh.processor);
+                        running.params.restart();
                     }
                 }
                 (Slot::Plugin(_), Slot::Device(_)) => {}
@@ -501,6 +584,7 @@ impl Chain {
         self.held = old.held;
         self.next_off = old.next_off;
         self.delay.adopt(&mut old.delay);
+        self.adopt_sends(old);
         true
     }
 
@@ -516,7 +600,10 @@ impl Chain {
     /// one it replaces; gives `processor` back when there is no such slot. Never allocates.
     pub(crate) fn place(&mut self, key: u64, processor: Box<dyn PluginProcessor>) -> Placed {
         match self.plugin_slots().find(|slot| slot.key == key) {
-            Some(slot) => Placed::Replaced(slot.processor.replace(processor)),
+            Some(slot) => {
+                slot.params.restart();
+                Placed::Replaced(slot.processor.replace(processor))
+            }
             None => Placed::NoSlot(processor),
         }
     }
@@ -534,6 +621,41 @@ pub(crate) enum Placed {
     Replaced(Option<Box<dyn PluginProcessor>>),
     /// The chain has no slot for it; here it is back.
     NoSlot(Box<dyn PluginProcessor>),
+}
+
+/// Runs a built-in device (slot `slot` of its chain) over the block's frames `from..to`,
+/// split where a note event or a change of a parameter that follows a lane falls; at one frame
+/// the parameter changes before the note.
+#[allow(clippy::too_many_arguments)]
+fn run_device(
+    device: &mut Box<dyn Device>,
+    slot: usize,
+    buffer: &mut [f32],
+    from: usize,
+    to: usize,
+    pending: &[(usize, NoteEvent)],
+    lanes: &DeviceLanes,
+    context: &ProcessContext,
+) {
+    let mut at_done = from;
+    let mut changes = lanes.changes(slot, from, to).peekable();
+    for &(at, event) in pending {
+        let at = at.clamp(at_done, to);
+        while let Some(change) = changes.next_if(|c| c.frame <= at) {
+            process(device, buffer, at_done, change.frame.max(at_done), context);
+            at_done = change.frame.max(at_done);
+            device.set_param(change.param, change.value);
+        }
+        process(device, buffer, at_done, at, context);
+        at_done = at;
+        device.event(event);
+    }
+    for change in changes {
+        process(device, buffer, at_done, change.frame.max(at_done), context);
+        at_done = change.frame.max(at_done);
+        device.set_param(change.param, change.value);
+    }
+    process(device, buffer, at_done, to, context);
 }
 
 fn process(device: &mut Box<dyn Device>, buffer: &mut [f32], from: usize, to: usize, context: &ProcessContext) {

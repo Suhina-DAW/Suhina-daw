@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
+read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
 type: system
 status: current
 last_verified: 2026-10-15
@@ -34,7 +34,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `library.list` (`folder`), `library.search` (a folder `place`), and a file `item` of
   `library.info`, `library.pin`, `library.unpin` and `library.tag`; `soundmap.analyse`
   (`folder`), `soundmap.layout` (a folder `place`), and `soundmap.similar` (`item`, a folder `place`) and
-  `soundmap.info` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
+  `soundmap.info` (`item`); `soundmap.setKind` (`item`); `library.findFiles` (`folder`) and `project.relinkFiles` (every
   `to` file).
 - **Missing files.** `project.missingFiles` lists the audio files a project names but cannot
   find; `library.findFiles {names, folder?}` finds candidates by name (the browser's index and
@@ -53,7 +53,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
   launched clips playing on
-  ([ADR 0005](decisions/0005-edits-while-playing.md)). Only the active project plays: switching
+  ([ADR 0005](decisions/0005-edits-while-playing.md)). To sweep a track's volume or pan by
+  ear as one undo step, send `track.setVolume` or `track.setPan` repeatedly with
+  `continue: true` after the first ([ADR 0002](decisions/0002-commands.md)). Only the active project plays: switching
   closes the previous project's output and starts the new one (its result has `audio_output`),
   so transport commands aimed at another project fail.
 - **Choosing the output.** `audio.devices` lists the audio hosts (WASAPI, and ASIO in a build
@@ -78,7 +80,8 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([spec](spec/cue-output.md)).
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
-  `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the
+  `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`
+  moves the marker to that arrangement clip's start and plays from there. `transport.stop` returns the playhead to the
   marker; with `return: "here"` the marker moves to where it stopped; stopping while stopped
   moves the marker to beat 0. `launcher.state` reports `start_beat`. In a `project_render`
   launch script, `transport.setPosition` then `transport.play` renders from that beat
@@ -96,6 +99,30 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
+  in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
+  velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
+  semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
+  `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
+  deleted stay valid; each is one undo step and fails as a whole on a bad value
+  ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
+  other clips also play (a duplicate) first gives that clip its own copy of the content, so the
+  others do not change; the result's indices are the same.
+- **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
+  starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
+  `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
+  onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
+  outside 0 to 100 or a note that does not exist fails and changes nothing.
+- **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
+  changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
+  adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
+  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
+- **Splitting notes.** `note.split {track, index | scene, notes, at}` splits each named note that
+  spans the beat `at` into two at `at` (the first keeps the start, the second the end); a note
+  that starts or ends exactly at `at` is left alone, so a second split at the same beat changes
+  nothing. One undo step; it returns the indices of the notes it made, and `at` is a beat from 0
+  to 120 000.
 - **Follow actions.** `clip.setFollowAction {track, scene, enabled?, time?, linked?, actionA?,
   actionB?, chanceA?, chanceB?}` sets what a slot clip does after its follow time (one undo
   step); `project.launcher` lists each slot clip's `follow_action`. A `project_render` script
@@ -113,11 +140,20 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`.
+  `preview.stop` stops it; `launcher.state` reports `preview`. `preview.noteOn {track, key,
+  velocity?}` plays one key through the track's instrument and holds it, as the piano roll's key
+  column does, until `preview.noteOff {track, key?}` lets that key go, or every held preview note
+  when `key` is left out. Both are transport commands: the project, its undo history and the
+  transport are untouched.
 
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.
+
+- **Level meters.** With `--audio`, `mixer.levels` reads the main output's and every track's
+  peak and RMS level per side in dB (`null` for silence) and whether it clipped;
+  `mixer.resetClip {track?, main?}` turns clip indicators off
+  ([spec](spec/level-meters.md)). An agent can play a project and check its levels this way.
 
 - **The browser's library.** The server opens the user's browser library (`browser.json` and the
   folder indexes in Suhina's settings folder) and keeps it up to date while it runs
@@ -131,16 +167,34 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **The sample map.** The server also analyses the library's samples in the background, as the
   desktop app does ([sample map spec](spec/sample-map.md), [ADR 0013](decisions/0013-sample-map-analysis.md)).
   `soundmap.status` tells how far it is per folder; `soundmap.layout {place?, text?, tags?,
-  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound (position 0–1, kind
-  such as kick, snare or hat and whether it was guessed, whether it matches `text` and `tags`,
+  grid?, aspect?, maxSeconds?}` lays a place's analysed samples out by how they sound and their kind
+  (position 0–1, kind such as kick, snare or hat, whether it was guessed from the sound and whether it
+  was set by hand, whether it matches `text` and `tags`,
   and with `grid` a cell in a grid shaped close to `aspect`, width over height); `soundmap.similar {item, count?, place?}` gives the samples that sound
-  most like one; `soundmap.info {item}` its kind, where the kind comes from and its features;
-  `soundmap.analyse {folder?}` analyses again.
+  most like one; `soundmap.info {item}` its kind, where the kind comes from (`hand`, `name`,
+  `guess` or `none`) and its features; `soundmap.setKind {item, kind}` sets a sample's kind by
+  hand (`auto` gives it back to its name and sound); `soundmap.analyse {folder?}` analyses again.
 
 - **Devices.** `devices.list` lists the built-in effects and instruments with every parameter (id, range,
   default, unit, options); `track.devices` lists a track's devices with their values;
   `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
+  `device.setParam` sets a plug-in device's parameter too, by the id `device.pluginParams` lists
+  (a running plug-in's parameters with their ranges, default, value and the plug-in's own
+  text), heard from the next block; `device.setAutomation {param, points}` automates one over the
+  arrangement, `points` a flat list of beat and value (`[0, 0.2, 4, 0.8]`), `[]` removing it.
+  Values are kept in the parameter's range once `device.pluginParams` has listed them.
+  `track.devices` gives a plug-in's set values and any device's lanes (`automation`).
+
+- **Automation.** `automation.addPoint`, `automation.movePoint`, `automation.deletePoint`,
+  `automation.movePoints`, `automation.deletePoints` (several points of one lane in one undo
+  step), `automation.clear`, `automation.setEnabled` and `automation.list` (through `command_run`) edit
+  the envelopes of a track's `volume`, `pan` and `mute` (no `device`) and of any device
+  parameter (`device` and its `param` id), point by point, each one undo step; values in the
+  set command's unit (the volume in dB). `device.setAutomation` replaces a whole device lane, for
+  built-in devices too. Setting an automated parameter by hand turns its lane off (the answer
+  says `"automation": "off"`) until `automation.setEnabled` turns it on again
+  ([automation spec](spec/automation.md)).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
   follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file. Renders and
   the playing engine run the chains.

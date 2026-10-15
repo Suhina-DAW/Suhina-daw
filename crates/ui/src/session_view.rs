@@ -9,6 +9,7 @@ use suhina_engine::model::TrackId;
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
 use crate::menus::{self, TrackMenu};
+use crate::meter::{self, Meters};
 use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action, Drag};
@@ -22,6 +23,8 @@ const EMPTY_MARK: f32 = 3.0;
 const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
 const VOLUME_RANGE: (f64, f64) = (-70.0, 6.0);
+/// Space between the knobs of a mixer strip.
+const SEND_GAP: f32 = 4.0;
 
 /// What the view keeps between frames: scrolling, the selection, and a value being dragged.
 #[derive(Debug, Default)]
@@ -40,6 +43,8 @@ pub struct SessionViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// The engine's levels this frame, for the mixer's meters.
+    pub meters: Meters,
 }
 
 impl SessionViewState {
@@ -54,6 +59,8 @@ impl SessionViewState {
 enum Control {
     Volume,
     Pan,
+    /// The send to this return track.
+    Send(TrackId),
 }
 
 fn column_width(column: &Column) -> f32 {
@@ -235,6 +242,18 @@ pub fn show(
     );
     let main_mixer = Rect::from_x_y_ranges(scene_span, mixer.y_range());
     painter.rect_filled(main_mixer, 0.0, theme::panel_background());
+    let level = state.meters.main;
+    let at = strip_meter(main_mixer.left()).translate(Vec2::new(0.0, main_mixer.top() + PAD));
+    meter::show(ui, &painter.with_clip_rect(main_mixer), at, "Main", meter::Source::Main, &level, actions);
+}
+
+/// Where a mixer strip starting at `left` shows its meter: right of the pan knob, from the top
+/// of the knob row to the bottom of the values row (`docs/design/components.md` › Meter).
+fn strip_meter(left: f32) -> Rect {
+    Rect::from_min_size(
+        Pos2::new(left + PAD + theme::KNOB + PAD, 0.0),
+        Vec2::new(meter::WIDTH, theme::KNOB + 4.0 + 12.0),
+    )
 }
 
 /// The two buttons that add an empty track, at the top of the empty space after the tracks;
@@ -313,6 +332,9 @@ fn draw_column(
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
     let mixer_painter = painter.with_clip_rect(bands.mixer.intersect(clip));
     mixer_strip(ui, &mixer_painter, mixer_rect, column, track_number, state, id, actions);
+    let level = state.meters.track(column.track);
+    let at = strip_meter(span.min).translate(Vec2::new(0.0, mixer_rect.top() + PAD));
+    meter::show(ui, &mixer_painter, at, &column.name, meter::Source::Track(column.track), &level, actions);
     // Column separator through header, grid and mixer.
     let full = egui::Rangef::new(bands.header.top(), bands.mixer.bottom());
     painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::border_strong()));
@@ -541,12 +563,24 @@ fn mixer_strip(
         Some((t, Control::Pan, v)) if t == track => Some(v),
         _ => None,
     };
+    // Every frame of a drag sets the value, so it is heard while dragging; all but the first
+    // continue its undo step, so the drag is one step.
+    let continued = preview.is_some();
+    let set_pan = |v: f64| {
+        Action::new(
+            "track.setPan",
+            json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+        )
+    };
     match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, (-1.0, 1.0), 0.0) {
-        Drag::Moving(v) => state.drag = Some((track, Control::Pan, v)),
+        Drag::Moving(v) => {
+            state.drag = Some((track, Control::Pan, v));
+            actions.push(set_pan(v));
+        }
         Drag::Done(v) => {
             state.drag = None;
             committed_pan = Some(v);
-            actions.push(Action::new("track.setPan", json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0 })));
+            actions.push(set_pan(v));
         }
         Drag::None => {}
     }
@@ -556,6 +590,8 @@ fn mixer_strip(
         _ => committed_pan.unwrap_or(column.pan),
     };
     widgets::knob(painter, knob_rect.center(), theme::KNOB, ((pan_shown + 1.0) / 2.0) as f32, theme::text_primary());
+    // Sends: one knob per return, beside the pan knob, as many as the row holds.
+    let sending = send_knobs(ui, painter, knob_rect, inner, column, state, id, actions);
 
     // Values row: pan left, volume right (the volume is the draggable value).
     let label_volume = match state.drag {
@@ -564,16 +600,15 @@ fn mixer_strip(
     };
     let values = Rect::from_min_size(Pos2::new(inner.left(), knob_rect.bottom() + 4.0), Vec2::new(inner.width(), 12.0));
     let mono = theme::mono_font(theme::TEXT_SMALL);
-    widgets::text_in(
-        painter,
-        values,
-        Align2::LEFT_CENTER,
-        &widgets::format_pan(pan_shown),
-        mono.clone(),
-        theme::text_secondary(),
-    );
+    // While a send is dragged, its level stands where the pan is shown.
+    let left_value = sending
+        .map_or_else(|| widgets::format_pan(pan_shown), |(letter, db)| format!("{letter} {}", widgets::format_db(db)));
+    widgets::text_in(painter, values, Align2::LEFT_CENTER, &left_value, mono.clone(), theme::text_secondary());
+    // The volume is dragged from the right half of the strip, or from its value alone when
+    // send knobs take the row above.
+    let volume_top = if column.sends.is_empty() { inner.top() } else { values.top() };
     let volume_rect =
-        Rect::from_min_max(Pos2::new(inner.center().x, inner.top()), Pos2::new(inner.right(), values.bottom()));
+        Rect::from_min_max(Pos2::new(inner.center().x, volume_top), Pos2::new(inner.right(), values.bottom()));
     let volume_response = widgets::value_area(
         ui,
         volume_rect,
@@ -586,13 +621,20 @@ fn mixer_strip(
         Some((t, Control::Volume, v)) if t == track => Some(v),
         _ => None,
     };
+    let continued = preview.is_some();
+    let set_volume = |v: f64| {
+        let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+        Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+    };
     match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, VOLUME_RANGE, 0.0) {
-        Drag::Moving(v) => state.drag = Some((track, Control::Volume, v)),
+        Drag::Moving(v) => {
+            state.drag = Some((track, Control::Volume, v));
+            actions.push(set_volume(v));
+        }
         Drag::Done(v) => {
             state.drag = None;
             committed_volume = Some(v);
-            let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-            actions.push(Action::new("track.setVolume", json!({ "track": track.0, "db": db })));
+            actions.push(set_volume(v));
         }
         Drag::None => {}
     }
@@ -637,6 +679,87 @@ fn mixer_strip(
     widgets::text_in(painter, toggle, Align2::CENTER_CENTER, &number, theme::mono_font(theme::TEXT_SMALL), text);
 }
 
+/// The send knobs of a mixer strip, right of the pan knob at `pan`: dragged up or down for the
+/// level (`track.setSend`), double-click for none, right-click for before or after the fader
+/// (`track.setSendMode`). Returns the return's letter and the level while one is dragged.
+#[allow(clippy::too_many_arguments)]
+fn send_knobs(
+    ui: &Ui,
+    painter: &egui::Painter,
+    pan: Rect,
+    inner: Rect,
+    column: &Column,
+    state: &mut SessionViewState,
+    id: Id,
+    actions: &mut Vec<Action>,
+) -> Option<(String, f64)> {
+    let track = column.track;
+    let step = theme::KNOB + SEND_GAP;
+    let fit = ((inner.right() - pan.right()) / step).floor().max(0.0) as usize;
+    let mut sending = None;
+    for (index, send) in column.sends.iter().take(fit).enumerate() {
+        let rect = pan.translate(Vec2::new(step * (index + 1) as f32, 0.0));
+        let letter = send.name.chars().next().map(String::from).unwrap_or_default();
+        let control = Control::Send(send.target);
+        let mode = if send.pre_fader { "pre" } else { "post" };
+        let response = widgets::value_area(
+            ui,
+            rect,
+            id.with(("send", send.target.0)),
+            format!("{} send to {}", column.name, send.name),
+            format!("{} {mode}", widgets::format_db(send.level_db)),
+        );
+        let mut preview = match state.drag {
+            Some((t, c, v)) if t == track && c == control => Some(v),
+            _ => None,
+        };
+        let level = if send.level_db.is_finite() { send.level_db } else { VOLUME_RANGE.0 };
+        let mut committed = None;
+        match widgets::drag_value(ui, &response, &mut preview, level, 0.25, VOLUME_RANGE, VOLUME_RANGE.0) {
+            Drag::Moving(v) => state.drag = Some((track, control, v)),
+            Drag::Done(v) => {
+                state.drag = None;
+                committed = Some(v);
+                let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+                actions.push(Action::new(
+                    "track.setSend",
+                    json!({ "track": track.0, "return": send.target.0, "level": db }),
+                ));
+            }
+            Drag::None => {}
+        }
+        response.context_menu(|ui| {
+            for (pre, label) in [(true, "Before the fader (pre)"), (false, "After the fader (post)")] {
+                if ui.radio(send.pre_fader == pre, label).clicked() {
+                    let mode = if pre { "pre" } else { "post" };
+                    actions.push(Action::new(
+                        "track.setSendMode",
+                        json!({ "track": track.0, "return": send.target.0, "mode": mode }),
+                    ));
+                    ui.close();
+                }
+            }
+        });
+        let shown = match state.drag {
+            Some((t, c, v)) if t == track && c == control => {
+                sending = Some((letter.clone(), v));
+                v
+            }
+            _ => committed.unwrap_or(level),
+        };
+        let position = ((shown - VOLUME_RANGE.0) / (VOLUME_RANGE.1 - VOLUME_RANGE.0)) as f32;
+        let pointer = motion::mix(theme::text_value(), theme::text_primary(), widgets::hover(ui, &response));
+        widgets::knob(painter, rect.center(), theme::KNOB, position, pointer);
+        // The return's letter in the knob, and a dot under it when the send is before the fader.
+        let font = theme::mono_font(theme::TEXT_SMALL - 2.0);
+        widgets::text_in(painter, rect, Align2::CENTER_CENTER, &letter, font, theme::text_hint());
+        if send.pre_fader {
+            painter.circle_filled(Pos2::new(rect.center().x, rect.bottom() + 1.5), 1.5, theme::text_value());
+        }
+    }
+    sending
+}
+
 fn scene_column(
     ui: &Ui,
     painter: &egui::Painter,
@@ -661,6 +784,10 @@ fn scene_column(
         if response.clicked() {
             actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
         }
+        // A click in the menu's text fields keeps it open; its buttons close it.
+        egui::Popup::context_menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| menus::scene_menu(ui, &scene.menu(grid.scenes.len() == 1), actions));
         let hover = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
         let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
         let fill = motion::mix(hover, theme::control_playing(), playing);
@@ -669,6 +796,9 @@ fn scene_column(
         let mut name = scene.name.clone();
         if let Some(tempo) = scene.tempo_bpm {
             name = format!("{name} {tempo:.0}").trim().to_string();
+        }
+        if let Some(ts) = scene.time_signature {
+            name = format!("{name} {}/{}", ts.numerator, ts.denominator).trim().to_string();
         }
         let number = scene.number.to_string();
         widgets::text_in(
