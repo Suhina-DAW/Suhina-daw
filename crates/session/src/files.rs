@@ -603,7 +603,9 @@ fn read_sources(
                 name,
                 length: beats,
                 lane: LaneData::Audio(region),
-                loops: warped,
+                // A slot loops a sample over the whole file whether or not its tempo is known
+                // (`docs/spec/browser.md` › Warping); `clip.setLoop` turns it off.
+                loops: true,
             }])
         }
         Some(FileKind::Midi) => {
@@ -735,7 +737,7 @@ fn place_stems(
                 name: clip_name,
                 length: beats,
                 lane: LaneData::Audio(region),
-                loops: warped,
+                loops: true,
             },
         ));
     }

@@ -185,6 +185,7 @@ Change this code, and check these documents.
 | `crates/session/src/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
 | `crates/session/src/soundmap.rs` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/session/tests/automation.rs` | [Automation](spec/automation.md) |
+| `crates/session/tests/files.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/meters.rs` | [Level meters](spec/level-meters.md) |

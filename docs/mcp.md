@@ -93,6 +93,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
+  it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`
+  loops, a sample with no known tempo too ([clip launching](spec/clip-launching.md) › Suhina
+  decisions).
+
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
   in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
   velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,

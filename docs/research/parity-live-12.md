@@ -71,7 +71,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **134**, every one reachable from the UI, the CLI and MCP |
+| Commands | **133**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -137,7 +137,7 @@ documented behaviour that exists today.
 | 13 | Converting Audio to MIDI | 5 | 5 % | planned | Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap. |
 | 14 | Using Grooves | 6 | 0 % | absent | No groove pool, extraction or commit. |
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
-| 16 | Launching Clips | 12 | 51 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area). Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier and scene follow actions. |
+| 16 | Launching Clips | 12 | 52 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area), samples looping in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop). Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier and scene follow actions. |
 | 17 | Routing and I/O | 22 | 10 % | absent | Only track output to main or a group (track.setOutput); track input is a model field read from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral. |
 | 18 | Mixing | 18 | 50 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement headers. |
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |

@@ -221,6 +221,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   apply when the scene launches (bars and the metronome count in the new time signature from
   there). Playing clips stay with their row when scenes are inserted or deleted while playing
   ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
+- A sample dropped into a slot loops over the whole file even when its tempo is not known (it
+  plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.
