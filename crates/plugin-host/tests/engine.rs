@@ -95,6 +95,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),

@@ -24,6 +24,7 @@ fn project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let clip = |start: f64| Clip {
         content: ContentId(1),

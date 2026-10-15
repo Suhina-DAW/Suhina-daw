@@ -846,6 +846,7 @@ fn demo_project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let content = |id: u32, name: &str, notes: Vec<Note>| ClipContent {
         id: ContentId(id),

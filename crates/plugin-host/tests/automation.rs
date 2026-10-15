@@ -47,7 +47,8 @@ fn gain(id: &str, points: &[(f64, f64)]) -> Device {
         params: Vec::new(),
         automation: vec![AutomationLane {
             param: "0".into(),
-            points: points.iter().map(|&(beat, value)| AutomationPoint { beat, value }).collect(),
+            points: points.iter().map(|&(beat, value)| AutomationPoint { beat, value, curve: 0.0 }).collect(),
+            enabled: true,
         }],
         extensions: Extensions::default(),
     }
@@ -78,6 +79,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),

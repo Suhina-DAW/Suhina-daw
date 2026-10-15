@@ -968,6 +968,7 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Default::default(),
+        automation: Vec::new(),
     });
     // The group takes the place of its first track; its tracks (with theirs) follow it.
     let family: Vec<TrackId> = members.iter().flat_map(|m| with_descendants(p, *m)).collect();

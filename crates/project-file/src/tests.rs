@@ -34,6 +34,7 @@ fn everything() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let mut keys = channel(2, ChannelRole::Regular, Some(4));
     keys.sends.push(Send { target: ChannelId(3), level: 0.7, pre_fader: true });
@@ -74,10 +75,11 @@ fn everything() -> Project {
             automation: vec![AutomationLane {
                 param: "3".into(),
                 points: vec![
-                    AutomationPoint { beat: 0.0, value: 0.0 },
-                    AutomationPoint { beat: 4.0, value: 1.0 },
-                    AutomationPoint { beat: 4.0, value: 0.5 },
+                    AutomationPoint { beat: 0.0, value: 0.0, curve: 0.0 },
+                    AutomationPoint { beat: 4.0, value: 1.0, curve: 0.0 },
+                    AutomationPoint { beat: 4.0, value: 0.5, curve: 0.0 },
                 ],
+                enabled: true,
             }],
             extensions: Extensions::default(),
         },

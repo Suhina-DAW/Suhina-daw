@@ -341,7 +341,7 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
             return Err(format!("a point's beat must be from 0 to {}", suhina_engine::MAX_START_BEAT).into());
         }
         let value = plugin_value(session, track, index, id, value)?;
-        points.push(AutomationPoint { beat, value });
+        points.push(AutomationPoint { beat, value, curve: 0.0 });
     }
     // In beat order; points given at one beat keep their order (a jump).
     points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
@@ -350,7 +350,7 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
     device.automation.retain(|lane| param_id(&lane.param) != Some(id));
     if !points.is_empty() {
-        device.automation.push(AutomationLane { param: id.to_string(), points });
+        device.automation.push(AutomationLane { param: id.to_string(), points, enabled: true });
     }
     Ok(json!({ "device": index, "param": id, "points": count }))
 }

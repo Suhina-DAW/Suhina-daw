@@ -123,6 +123,7 @@ pub(crate) fn insert_track(
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Default::default(),
+        automation: Vec::new(),
     });
     let track = Track {
         id,

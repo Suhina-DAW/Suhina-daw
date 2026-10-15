@@ -19,6 +19,8 @@
 
 use suhina_model::{Device, DeviceParam};
 
+use crate::automation::Envelope;
+
 /// A parameter value for a plug-in at a frame of the block it goes with, in the plug-in's own
 /// range (a VST3 plug-in's normalized, a CLAP plug-in's plain): automation, or a value set.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,14 +43,10 @@ const MAX_QUEUED: usize = 256;
 /// Most lanes and set values a slot keeps (a project's numbers are not trusted).
 const MAX_LANES: usize = 256;
 const MAX_BASE: usize = 4096;
-/// Most points a lane keeps.
-const MAX_POINTS: usize = 65_536;
-
 /// One automation lane, in arrangement frames.
 struct Lane {
     id: u32,
-    /// (frame, value), in frame order.
-    points: Vec<(u64, f64)>,
+    envelope: Envelope,
 }
 
 /// The parameter values a plug-in slot sends: what the project sets, what is set while it
@@ -90,17 +88,9 @@ impl SlotParams {
             if lanes.len() >= MAX_LANES || lanes.iter().any(|l| l.id == id) {
                 continue;
             }
-            let mut points: Vec<(u64, f64)> = lane
-                .points
-                .iter()
-                .filter(|p| p.beat.is_finite() && p.value.is_finite())
-                .take(MAX_POINTS)
-                .map(|p| ((p.beat.max(0.0) * frames_per_beat).round() as u64, p.value))
-                .collect();
-            // Stable, so two points at one beat keep their order (a jump).
-            points.sort_by_key(|p| p.0);
-            if !points.is_empty() {
-                lanes.push(Lane { id, points });
+            // A lane that is off (#395) or has no points is left out.
+            if let Some(envelope) = Envelope::new(lane, frames_per_beat, false) {
+                lanes.push(Lane { id, envelope });
             }
         }
         // Room for every value set while playing, so setting one never allocates.
@@ -184,7 +174,9 @@ impl SlotParams {
         }
         if let Some(time) = time {
             for lane in lanes.iter() {
-                lane_events(&lane.points, time, frames, |frame, value| push(ParamEvent { frame, id: lane.id, value }));
+                lane_events(&lane.envelope, time, frames, |frame, value| {
+                    push(ParamEvent { frame, id: lane.id, value })
+                });
             }
         }
         // In frame order, keeping the order of events at one frame (a lane after a set value).
@@ -227,33 +219,23 @@ fn set_in(list: &mut Vec<(u32, f64)>, id: u32, value: f64) {
 
 /// A lane's value at arrangement frame `time`: a straight line between the points around it,
 /// the first point's before it and the last's after.
+#[cfg(test)]
 pub(crate) fn value_at(points: &[(u64, f64)], time: u64) -> Option<f64> {
-    let after = points.partition_point(|p| p.0 <= time);
-    let before = after.checked_sub(1).and_then(|i| points.get(i));
-    match (before, points.get(after)) {
-        (None, next) => next.map(|p| p.1),
-        (Some(a), None) => Some(a.1),
-        (Some(a), Some(b)) => {
-            // b.0 > time >= a.0.
-            let span = (b.0 - a.0) as f64;
-            let t = (time - a.0) as f64 / span;
-            Some(a.1 + (b.1 - a.1) * t)
-        }
-    }
+    Envelope::linear(points).map(|e| e.value_at(time))
 }
 
 /// The values a lane sends in a block of `frames` frames from arrangement frame `time`: its
 /// value at the first frame, then at each point inside the block and every [`RAMP_STEP`]
 /// frames, where it changed.
-fn lane_events(points: &[(u64, f64)], time: u64, frames: usize, mut emit: impl FnMut(usize, f64)) {
-    let Some(first) = value_at(points, time) else { return };
+fn lane_events(envelope: &Envelope, time: u64, frames: usize, mut emit: impl FnMut(usize, f64)) {
+    let first = envelope.value_at(time);
     emit(0, first);
     let mut last = first;
     let mut sent = 1;
     let mut grid = RAMP_STEP;
-    let mut next_point = points.partition_point(|p| p.0 <= time);
+    let mut next_point = envelope.first_after(time);
     while sent < MAX_LANE_EVENTS {
-        let point = points.get(next_point).map_or(usize::MAX, |p| usize::try_from(p.0 - time).unwrap_or(usize::MAX));
+        let point = envelope.frame(next_point).map_or(usize::MAX, |f| usize::try_from(f - time).unwrap_or(usize::MAX));
         let frame = grid.min(point);
         if frame >= frames {
             break;
@@ -261,10 +243,10 @@ fn lane_events(points: &[(u64, f64)], time: u64, frames: usize, mut emit: impl F
         if grid == frame {
             grid += RAMP_STEP;
         }
-        while points.get(next_point).is_some_and(|p| p.0 - time <= frame as u64) {
+        while envelope.frame(next_point).is_some_and(|f| f - time <= frame as u64) {
             next_point += 1;
         }
-        let Some(value) = value_at(points, time.saturating_add(frame as u64)) else { break };
+        let value = envelope.value_at(time.saturating_add(frame as u64));
         if value != last {
             emit(frame, value);
             last = value;
@@ -289,7 +271,8 @@ mod tests {
                 .iter()
                 .map(|(param, points)| AutomationLane {
                     param: (*param).into(),
-                    points: points.iter().map(|&(beat, value)| AutomationPoint { beat, value }).collect(),
+                    points: points.iter().map(|&(beat, value)| AutomationPoint { beat, value, curve: 0.0 }).collect(),
+                    enabled: true,
                 })
                 .collect(),
             extensions: Extensions::default(),

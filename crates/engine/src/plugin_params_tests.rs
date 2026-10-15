@@ -71,7 +71,8 @@ fn automated(beats: f64, params: &[(&str, f64)], lane: &[(f64, f64)]) -> Project
     if !lane.is_empty() {
         plug.automation = vec![AutomationLane {
             param: "0".into(),
-            points: lane.iter().map(|&(beat, value)| AutomationPoint { beat, value }).collect(),
+            points: lane.iter().map(|&(beat, value)| AutomationPoint { beat, value, curve: 0.0 }).collect(),
+            enabled: true,
         }];
     }
     project(vec![note(0.0, beats, 69)], beats, vec![plug])

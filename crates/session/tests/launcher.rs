@@ -32,6 +32,7 @@ fn project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let content = |id: u32, name: &str, key: u8| ClipContent {
         id: ContentId(id),

@@ -130,6 +130,7 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
             device("Utility", DeviceKind::Builtin("utility".into())),
         ],
         extensions: Extensions::default(),
+        automation: Vec::new(),
     });
     assert!(run(&mut p, "plugins.check", json!({})).unwrap_err().contains("no project"));
     let id = p.add(Session::new(project), None).unwrap();

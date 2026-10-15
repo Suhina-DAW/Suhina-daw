@@ -717,6 +717,7 @@ fn empty_channel(id: ChannelId, name: &str, role: ChannelRole) -> Channel {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     }
 }
 

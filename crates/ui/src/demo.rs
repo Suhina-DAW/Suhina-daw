@@ -112,6 +112,7 @@ fn channel(id: ChannelId, name: &str, role: ChannelRole, output: Option<ChannelI
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     }
 }
 

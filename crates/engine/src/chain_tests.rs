@@ -63,6 +63,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             sends: Vec::new(),
             devices,
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: vec![ClipContent {
             id: ContentId(1),
