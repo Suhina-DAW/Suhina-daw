@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -34,10 +34,13 @@ From top to bottom:
      stop returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
-      (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`
+      (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
       reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM
       (its resident memory, in MB or GB), shown always
-    - view switches (Session / Arrangement)
+    - view switches (Session / Arrangement). **Suhina:** the last control at the right end
+      of the bar, with the CPU load and the RAM left of it. In a window too narrow for all
+      of them the RAM, then the CPU load, is left out rather than overlap the position
+      readout; the order stays
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
      collections (user colour tags), library categories and places (user folders); a results
