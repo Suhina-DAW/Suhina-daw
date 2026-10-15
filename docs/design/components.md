@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -15,6 +15,7 @@ covers:
   - crates/ui/src/themes.rs
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/follow_view.rs
   - crates/ui/src/project_dialog.rs
   - crates/ui/src/start_panel.rs
   - crates/ui/src/pick.rs
@@ -83,9 +84,9 @@ the view with the detail area, status bar.
 
 | Region | Size |
 |---|---|
-| Menu bar | 20 px, `panel.background`, items 14 px apart in `text.secondary`: File (New or open…, Open…, Save, Save as…, Save as template…, Quit), Edit, View, Projects, Options; Create, Playback, Navigate and Help (planned) |
+| Menu bar | 20 px, `panel.background`, items 14 px apart in `text.secondary`: File (New or open…, Open…, Save, Save as…, Save as template…, Quit), Edit, View, Projects, Options, Help (About Suhina, [spec](../spec/about.md)); Create, Playback and Navigate (planned) |
 | Tab row | 22 px, `window.background`, shown while two or more projects are open (ADR 0007): one tab per project, name (with " •" while it has unsaved changes, as the window title has) and a 12 px × to close; the active tab `panel.background` with `text.primary`, others `text.secondary`; Ctrl+Tab and Ctrl+Shift+Tab move between them |
-| Control bar | 28 px, `panel.background`, a 1 px `border` under it. Left, 6 px apart: tempo (56 × 20 value field, `control.background`, 11 px mono right-aligned, dragged up or down), time signature (40 px, 11 px mono `text.secondary`, "4 / 4"), launch quantisation (64 px dropdown, 11 px mono). Centre: play and stop (28 × 20 each, 1 px apart), the position (64 × 20 on `window.background`, 11 px mono, "bar.beat.sixteenth"). Right, left to right: the CPU load (56 × 20 on `window.background`, only while an engine plays: "CPU" in 9 px `text.hint` left and the smoothed percentage in 10 px mono `text.secondary` right, over a 2 px-tall bar of the load, `meter.normal` fill, `meter.hot` from 80 %, in a `control.background` track; the audio thread's share of wall time inside the engine's render call, per mille smoothed over 0.2 s windows, published as an atomic), then the view switch. (planned): metronome, record, loop |
+| Control bar | 28 px, `panel.background`, a 1 px `border` under it. Left, 6 px apart: tempo (56 × 20 value field, `control.background`, 11 px mono right-aligned, dragged up or down), time signature (40 px, 11 px mono `text.secondary`, "4 / 4"), launch quantisation (64 px dropdown, 11 px mono). Centre: play and stop (28 × 20 each, 1 px apart), the position (64 × 20 on `window.background`, 11 px mono, "bar.beat.sixteenth"). Right: the CPU load (56 × 20 on `window.background`, only while an engine plays: "CPU" in 9 px `text.hint` left and the smoothed percentage in 10 px mono `text.secondary` right, over a 2 px-tall bar of the load, `meter.normal` fill, `meter.hot` from 80 %, in a `control.background` track; the audio thread's share of wall time inside the engine's render call, per mille smoothed over 0.2 s windows, published as an atomic), then the view switch at the right edge, 6 px from it. Left of the CPU load, 6 px apart, the RAM (76 × 20 on `window.background`, always shown: "RAM" in 9 px `text.hint` left, the program's resident memory in 10 px mono `text.secondary` right, "512 MB", "2.3 GB"). Right, left to right: RAM, CPU load, view switch; a block that would come within 6 px of the position is left out, the RAM first. (planned): metronome, record, loop |
 | Transport button | 28 × 20, `control.background`; play shows `control.activeBackground` while playing, its glyph in `accent`; stop is an 8 × 8 square in `text.primary`; record (planned) a 1.5 px red ring |
 | View switch | Text only, 11 px, right-aligned, 12 px apart: "Session", "Arrangement"; the current one `text.primary` with a 1 px underline, the other `text.secondary` |
 | Open prompt | When a project is dropped while another is open and the setting says Ask: a 32 px row on `panel.background` above the view: "Open x:" In a new tab, In place of y, Cancel, Remember (which sets the setting) |
@@ -412,6 +413,21 @@ The detail area for a selected arrangement clip: a 196 px `panel.background` col
 "-" for none) for an audio clip, or Notes for a MIDI clip; a value keeps 52 px clear of its label, so a long track name is shortened
 rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
 the column is then as tall as its rows). Editing them, and the clip editor beside them, are planned.
+
+## Follow action
+
+**(proposed)** The detail area for a selected slot clip starts with its follow action
+([Session view spec](../spec/ui-session-view.md) › Detail area: follow action): a 196 px
+`panel.background` column in a row, or 140 px at the top of the stacked column.
+
+| Part | Spec |
+|---|---|
+| Title | 20 px, "Follow action" 11 px `text.primary`, 6 px padding; the on switch at its right |
+| On switch | 32 × 15, "On" / "Off" 10 px; on: `accent` with `window.background` text, off: `control.background` with `text.secondary` |
+| Rows | From 6 px under the title, 18 px apart: a 10 px `text.secondary` label (`text.hint` while off) in 64 px, the 15 px control in the rest |
+| Time, chances | Value fields: `control.background`, value right-aligned 10 px mono `#C9C4BB`; a chance's share fills from the left in `control.playingBackground`; a linked time, or a chance of 0, in `text.hint` |
+| Linked | 32 × 15 toggle as Track on: `#C9C4BB` with `window.background` text on, `control.background` with `text.hint` off |
+| Actions | Dropdowns (above); the menu lists the actions, then "Jump to scene N" |
 
 ## Clip editor (MIDI, planned)
 
