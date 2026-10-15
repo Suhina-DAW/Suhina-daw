@@ -90,6 +90,10 @@ The editor, top to bottom:
    part of the content the clip plays: to the loop's end when the clip loops, else to its offset
    plus its length; the grid past that is shaded. Notes are drawn in the track colour, their opacity rising
    with velocity; a selected note has a light outline; a note wide enough shows its name.
+   **Playhead** (built): while the transport runs, a 1 px line in the accent colour over the
+   ruler, the grid and the velocity lane shows where playback is in the clip's content, mapped
+   through the clip's start, offset and loop (a looping clip shows it going round its loop), in
+   step with the Arrangement view's playhead. Outside the clip, or while stopped, there is none.
 4. **Velocity lane** (built): under the grid, sharing its time axis, 72 px tall (less in a short
    detail area: at most 30 % of its height). One stem per note at the
    note's start, its height the velocity; a selected stem is brighter. **Later:** the lane's
@@ -149,9 +153,11 @@ pull up.
   so its notes are in view (the middle of its lowest and highest note; C3 for an empty clip) and
   zoomed so the whole clip fits the width.
 - **Built:** while the **right** mouse button is held down over the grid, each wheel step chooses
-  the next tool, or with the wheel turned the other way the previous one, wrapping Select → Draw →
-  Paint → Erase → Slice → Select (› Drawing notes for the tools). That wheel step does not scroll
-  or zoom: the pointer is over the grid with the right button held, so the tool changes instead.
+  the next tool, or with the wheel turned the other way the previous one, in the order Select →
+  Draw → Paint → Erase → Slice, stopping at the first and the last tool (no wrapping round)
+  (› Drawing notes for the tools). The wheel never scrolls or zooms while the right button is
+  held, nor afterwards with what is left of the wheel's smoothed movement: scrolling comes back
+  once the button is up and the wheel has stopped.
   The toolbar's highlight moves to the new tool at once and the pointer takes the new tool's
   cursor. Letting the right button go opens no menu, adds no note and changes no selection.
 - **Built:** key rows are 6 to 32 px tall (default 12 px); time is 4 to 400 px per beat.
@@ -286,6 +292,12 @@ pull up.
   **Select-first**, the default (› Keymap presets); it can be changed like any other key.
   With no note
   selected (or, for Ctrl+V, no notes copied) the keys act on the selected clip, as elsewhere.
+- The keys are Ctrl on Windows and Linux and Cmd on macOS. The window reports them (and the other
+  system keys for the same thing: Shift+Delete, Ctrl+Insert and Shift+Insert on Windows, and the
+  Cut, Copy and Paste keys some keyboards have) as cut, copy and paste rather than as keys; the
+  keymap reads them as Ctrl+X, Ctrl+C and Ctrl+V. The window reports a paste only while the
+  system clipboard holds text, so copying or cutting notes or a clip in Suhina also puts a short
+  line ("Suhina: notes copied") on the system clipboard.
 - The toolbar's Cut, Copy, Paste and Duplicate icon buttons (› Layout) run these same commands on
   the selected notes, greyed out when there are none; Ctrl+X and Ctrl+C keep working whichever
   preset is chosen.
@@ -299,9 +311,12 @@ pull up.
 
 ## Velocity
 
-- **Built:** in the velocity lane, dragging a stem up or down changes its velocity, and with
-  several notes selected (and the dragged one among them), all of them change by the same amount,
-  each kept within 1 to 127. The lane shows the value while dragging; it is one undo step.
+- **Built:** in the velocity lane, a note's bar is grabbed anywhere over the note's width (and a
+  few pixels before its start, where its stem is drawn); dragging it sets the note's velocity to
+  the height of the pointer in the lane (the top is 127, the bottom 1). With several notes
+  selected and the dragged one among them, the others change by the same amount, each kept within
+  1 to 127. The lane shows the values while dragging; letting go is one `note.setVelocity`, one
+  undo step.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a note's velocity changed by dragging on the note itself with a modifier (Alt+drag up
   and down); drawing a line across the lane to set many stems at once; release velocity and a
   note's probability and velocity range (a per-note chance to play and a random variation), shown
@@ -399,7 +414,7 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Drag a note | Moves the selection (time snapped by grid steps, pitch by semitones) |
 | Drag a note's right edge | Changes the selection's length |
 | Alt while drawing or dragging | No snapping |
-| Drag a stem in the velocity lane | Changes the selection's velocity |
+| Drag a bar in the velocity lane | Sets its note's velocity to the pointer's height (the selection by the same amount) |
 | Delete, Backspace | Deletes the selected notes (after a click in the piano roll) |
 | Ctrl+U | Quantises the selected notes, or every note, with the last settings |
 | Ctrl+A, Escape | Selects every note, clears the selection |
@@ -411,7 +426,7 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo (as everywhere) |
 | Wheel, Shift+wheel | Scroll keys, scroll time |
 | Ctrl+wheel; Ctrl+Shift+wheel or Alt+wheel | Zoom time; zoom key height |
-| Right button held + wheel | Chooses the next or previous tool |
+| Right button held + wheel | Chooses the next or previous tool, stopping at the first and last |
 | Shift+drag with Draw | Draws notes back to back, the last note's length each |
 | 1, 2, 3, 4, 5 | Chooses Select, Draw, Paint, Erase, Slice (after a click in the piano roll) |
 | B | Switches between the Select and Draw tools (after a click in the piano roll) |

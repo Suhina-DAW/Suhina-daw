@@ -100,6 +100,13 @@ keys. Unknown actions, keys and presets are skipped with a warning in the status
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
 | Show which version of Suhina this is (`help.about`, Help › About Suhina, [spec](spec/about.md)) | none |
 
+Copy, cut and paste are Ctrl+C, Ctrl+X and Ctrl+V on Windows and Linux and Cmd+C, Cmd+X and
+Cmd+V on macOS. The window reports them, and the other system keys for the same thing (Shift+Delete,
+Ctrl+Insert and Shift+Insert on Windows, and the Cut, Copy and Paste keys some keyboards have), as
+cut, copy and paste rather than as keys; the keymap reads them as Ctrl+X, Ctrl+C and Ctrl+V, so
+rebinding `selection.copy` and the others still works. A paste arrives only while the system
+clipboard holds text, so copying a clip or notes in Suhina also puts a short line there.
+
 Paste places the copy right after the selected clip, or at the playhead on the selected track; like a
 moved clip, it replaces what it covers unless the stacking setting for its kind is on
 ([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.

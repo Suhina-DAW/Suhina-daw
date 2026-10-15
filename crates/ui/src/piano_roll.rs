@@ -268,6 +268,9 @@ pub struct PianoRollState {
     selecting_new: bool,
     gesture: Option<Gesture>,
     panning: bool,
+    /// The right button and the wheel are choosing tools: the wheel scrolls nothing until the
+    /// button is up and the wheel's smoothing has run out.
+    wheel_tools: bool,
     /// The settings quantise uses, and whether the quantise block in the clip column is open.
     pub quantize: QuantizeSettings,
     pub quantize_open: bool,
@@ -300,6 +303,7 @@ impl Default for PianoRollState {
             selecting_new: false,
             gesture: None,
             panning: false,
+            wheel_tools: false,
             quantize: QuantizeSettings::default(),
             quantize_open: false,
             tool: Tool::Select,
@@ -579,6 +583,9 @@ pub struct Context<'a> {
     pub options: Options,
     pub keymap: &'a crate::keymap::Keymap,
     pub copied: Option<usize>,
+    /// The arrangement beat being played while the transport runs, for the playhead; `None`
+    /// while it is stopped.
+    pub playhead: Option<f64>,
 }
 
 /// The toolbar's buttons: one shape each, drawn in code with our own strokes, as
@@ -841,16 +848,26 @@ fn note_at(layout: &Layout, notes: &[Note], pos: Pos2) -> Option<(usize, bool)> 
     })
 }
 
-/// The velocity stem nearest to `pos` within reach, a selected one first.
+/// The velocity bar under `pos`: a note's bar can be grabbed anywhere over the note's width in
+/// the lane (and a little before its start, where the stem is drawn), the nearest start first,
+/// a selected note before the others.
 fn stem_at(layout: &Layout, notes: &[Note], selected: &BTreeSet<usize>, pos: Pos2) -> Option<usize> {
     let near = |(i, n): &(usize, &Note)| {
-        let dx = (layout.x_of(n.time) - pos.x).abs();
-        (dx <= STEM_REACH).then_some((*i, dx))
+        let start = layout.x_of(n.time);
+        let end = layout.x_of(n.time + n.duration.max(0.0)).max(start + STEM_REACH);
+        (pos.x >= start - STEM_REACH && pos.x <= end).then_some((*i, (start - pos.x).abs()))
     };
     let candidates: Vec<(usize, f32)> = notes.iter().enumerate().filter_map(|e| near(&e)).collect();
     let best = |list: &mut dyn Iterator<Item = (usize, f32)>| list.min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| c.0);
     best(&mut candidates.iter().copied().filter(|(i, _)| selected.contains(i)))
         .or_else(|| best(&mut candidates.iter().copied()))
+}
+
+/// The velocity, 1 to 127, at height `y` in the velocity lane: the inverse of [`velocity_height`].
+fn velocity_at(lane: Rect, y: f32) -> f64 {
+    let height = (lane.height() - 4.0).max(1.0);
+    let from_bottom = lane.bottom() - 2.0 - y;
+    (f64::from(from_bottom / height) * 127.0).round().clamp(1.0, 127.0)
 }
 
 fn velocity_height(velocity: f32, lane: Rect) -> f32 {
@@ -990,7 +1007,7 @@ pub fn show(
     cx: Context<'_>,
     actions: &mut Vec<Action>,
 ) {
-    let Context { options, keymap, copied } = cx;
+    let Context { options, keymap, copied, playhead } = cx;
     if state.shown.as_ref() != Some(&clip.address) {
         state.shown = Some(clip.address.clone());
         state.selected.clear();
@@ -1227,7 +1244,29 @@ pub fn show(
     }
 
     draw(ui, &layout, clip, state, grid, preview);
+    // The playhead: where playback is in the clip's content (through its start, offset and loop),
+    // over the ruler, the grid and the velocity lane, as the other views show it.
+    if let Some(beat) = playhead.and_then(|at| clip.placement.content_beat(at)) {
+        draw_playhead(ui, &layout, beat);
+    }
     for_readers(ui, &layout, clip, state);
+}
+
+fn draw_playhead(ui: &Ui, layout: &Layout, beat: f64) {
+    let x = layout.x_of(beat).round() + 0.5;
+    let area = layout.ruler.union(layout.grid).union(layout.lane);
+    if !(layout.grid.left()..=layout.grid.right()).contains(&x) {
+        return;
+    }
+    let painter = ui.painter_at(area);
+    painter.vline(x, area.y_range(), Stroke::new(1.0, theme::accent()));
+    let response = ui.interact(
+        Rect::from_center_size(Pos2::new(x, area.center().y), Vec2::new(3.0, area.height())),
+        Id::new("piano-roll-playhead"),
+        Sense::hover(),
+    );
+    let label = format!("Playhead at beat {}", round_beat(beat));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &label));
 }
 
 /// The toolbar along the top of the piano roll: the tools, the note clipboard and the quantise
@@ -1403,9 +1442,13 @@ fn effect(
                 .map_or(Effect::Resize(0.0), |g| Effect::Resize(resize_by(raw, g, chosen, grid, free)))
         }
         Gesture::Select { from, .. } => Effect::Select(Rect::from_two_pos(*from, now)),
-        Gesture::Velocity { from, .. } => {
-            let per_point = 127.0 / (layout.lane.height() - 4.0).max(1.0);
-            Effect::Velocity(f64::from(-(now.y - from.y) * per_point).round())
+        Gesture::Velocity { grabbed, .. } => {
+            // The grabbed bar follows the pointer's height; the other selected notes change by
+            // the same amount (each kept within 1 to 127 by the command).
+            let target = velocity_at(layout.lane, now.y);
+            let current =
+                clip.notes.get(*grabbed).map_or(target, |n| f64::from(suhina_session::midi_velocity(n.velocity)));
+            Effect::Velocity(target - current)
         }
         Gesture::Slice { .. } => match slice_at(clip, layout, grid, now.x, free) {
             Some((at, cut)) => Effect::Slice(at, cut),
@@ -1560,12 +1603,13 @@ fn commit(
     }
 }
 
-/// The tool `step` places on from `tool`, wrapping: what the right button and the wheel choose.
+/// The tool `step` places on from `tool`, stopping at the first and the last tool: what the
+/// right button and the wheel choose.
 fn step_tool(tool: Tool, step: i32) -> Tool {
-    let count = Tool::ALL.len() as i32;
+    let last = Tool::ALL.len().saturating_sub(1) as i32;
     let index = Tool::ALL.iter().position(|(t, _)| *t == tool).unwrap_or(0) as i32;
-    let next = (index + step).rem_euclid(count) as usize;
-    Tool::ALL.get(next).map(|(tool, _)| *tool).unwrap_or(Tool::Select)
+    let next = (index + step).clamp(0, last) as usize;
+    Tool::ALL.get(next).map_or(tool, |(tool, _)| *tool)
 }
 
 /// The cursor a tool shows over the grid.
@@ -1603,19 +1647,34 @@ fn scroll_and_zoom(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, 
     let (zoom, wheel) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta()));
     // The right button and the wheel: the next tool for a step one way, the previous for the
     // other. Held over the grid only, and the step scrolls and zooms nothing.
-    let wheel_event = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. })));
-    if inputs.right
-        && wheel_event
-        && let Some(_pointer) = pointer.filter(|p| grid.contains(*p))
-    {
-        let steps = if wheel.y == 0.0 { wheel.x } else { wheel.y };
-        if steps != 0.0 {
-            state.tool = step_tool(state.tool, if steps > 0.0 { 1 } else { -1 });
+    // One step per wheel event, its own direction, not the smoothed delta: that goes on for a few
+    // frames after the wheel stops and would scroll once the button is up.
+    let wheel_steps: Vec<f32> = ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::MouseWheel { delta, .. } => Some(if delta.y == 0.0 { delta.x } else { delta.y }),
+                _ => None,
+            })
+            .filter(|step| *step != 0.0)
+            .collect()
+    });
+    if inputs.right && (state.wheel_tools || pointer.is_some_and(|p| grid.contains(p))) {
+        state.wheel_tools = true;
+        for step in wheel_steps {
+            state.tool = step_tool(state.tool, if step > 0.0 { 1 } else { -1 });
         }
         if let Some(cursor) = cursor_for(state.tool) {
             ui.ctx().set_cursor_icon(cursor);
         }
         return;
+    }
+    if state.wheel_tools {
+        // The button is up: the wheel scrolls again once its smoothing has run out.
+        if wheel != Vec2::ZERO || zoom != 1.0 {
+            return;
+        }
+        state.wheel_tools = false;
     }
     if let Some(pointer) = pointer {
         let zoom_keys = |state: &mut PianoRollState, factor: f32| {

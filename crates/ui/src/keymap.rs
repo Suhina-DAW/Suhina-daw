@@ -391,6 +391,7 @@ impl Keymap {
     /// their key presses so nothing else sees them; the keys of the other actions are left alone.
     /// Longer combinations are tried first, so Ctrl+Shift+Z is not read as Ctrl+Z.
     pub fn pressed(&self, input: &mut egui::InputState, wanted: impl Fn(&str) -> bool) -> Vec<String> {
+        clipboard_keys(input);
         let mut all: Vec<(&String, &Shortcut)> = self
             .bindings
             .iter()
@@ -411,6 +412,28 @@ impl Keymap {
             }
         }
         fired
+    }
+}
+
+/// The window reports Ctrl+X, Ctrl+C and Ctrl+V (Cmd on macOS) as cut, copy and paste events
+/// rather than as keys (and Ctrl+V only when the system clipboard holds text). They become their
+/// keys again here, so the keymap's actions for them fire (`selection.cut`, `.copy`, `.paste`).
+fn clipboard_keys(input: &mut egui::InputState) {
+    let modifiers = input.modifiers;
+    for event in &mut input.events {
+        let key = match event {
+            egui::Event::Cut => Key::X,
+            egui::Event::Copy => Key::C,
+            egui::Event::Paste(_) => Key::V,
+            _ => continue,
+        };
+        *event = egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: modifiers.plus(Modifiers::COMMAND),
+        };
     }
 }
 

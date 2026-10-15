@@ -1089,6 +1089,15 @@ impl App {
                 continue;
             }
             self.run(action);
+            // The window gets Ctrl+V only as a paste of the system clipboard's text, which it
+            // does not send while the clipboard holds no text: copying puts a line there, so
+            // Ctrl+V reaches the keymap after a copy in Suhina (`Keymap::pressed`).
+            if matches!(action.id, "note.copy" | "note.cut" | "clip.copy" | "clip.cut")
+                && !matches!(self.status, Status::Error(_))
+            {
+                let what = if action.id.starts_with("note.") { "notes" } else { "a clip" };
+                ui.ctx().copy_text(format!("Suhina: {what} copied"));
+            }
         }
         self.guard_quit(ui.ctx());
         if grid.is_some_and(|g| {
@@ -1213,11 +1222,14 @@ impl App {
         // visible on the button.
         let keymap = self.keymap.clone();
         let copied = self.session().and_then(Session::copied_notes);
+        // While the transport runs, the piano roll shows where playback is.
+        let playhead =
+            self.session().and_then(|s| s.player()).map(|p| p.monitor()).filter(|m| m.running()).map(|m| m.beat());
         let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
                 let rest = detail_view::show_clip_column(ui, info, stacked, piano_roll, actions);
-                let cx = piano_roll::Context { options, keymap: &keymap, copied };
+                let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
             } else if stacked {
                 detail_view::show_stack(ui, &shown, actions, &mut places);
