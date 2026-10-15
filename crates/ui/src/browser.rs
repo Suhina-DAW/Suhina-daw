@@ -215,6 +215,12 @@ pub struct BrowserState {
     pub anchor: Option<usize>,
     /// Only items carrying any of these tags.
     pub tag_filter: Vec<String>,
+    /// The tag editor is open (the browser footer's Edit tags button toggles it).
+    pub tag_editor: bool,
+    /// The tag whose Remove is armed in the editor: the second click removes it.
+    pub(crate) tag_editor_confirm: Option<String>,
+    /// How many items carry each tag, as last counted (the editor opened, or a tag changed).
+    pub(crate) tag_counts: Option<HashMap<String, usize>>,
     /// The plug-ins' flat list sorts by this column (0 name, 1 vendor, 2 type, 3 format,
     /// 4 modified), `true` descending. The window's own, not kept between runs.
     pub plugin_sort: (u8, bool),
@@ -261,6 +267,9 @@ impl Default for BrowserState {
             selected: Vec::new(),
             anchor: None,
             tag_filter: Vec::new(),
+            tag_editor: false,
+            tag_editor_confirm: None,
+            tag_counts: None,
             plugin_sort: (0, false),
             focus_search: false,
             search_focused: false,

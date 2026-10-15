@@ -427,6 +427,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- The browser's **tag editor** (the footer's Edit tags button): every tag in a list — its
+  colour, its name (typed to rename), how many items carry it and Remove (asking first), and a
+  row that adds one; a click on a row filters by it, as the footer's dots do.
 - Samples, Stems files and MIDI files dragged from the system's file manager land like a drag
   from the browser: on the slot, lane or empty space under the pointer, outlined while they hover
   (`clip.addFiles`). Where the system reports no pointer position during the drag, they go where

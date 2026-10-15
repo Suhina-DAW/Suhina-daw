@@ -4,6 +4,7 @@
 //! their commands (`library.*`, `preview.*`); adding to the project is left to the window,
 //! which knows the selected track.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use egui::{Align2, Color32, CursorIcon, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2};
@@ -37,6 +38,8 @@ const DOT: f32 = 6.0;
 const PLAY: f32 = 22.0;
 /// The List | Map switch above the results.
 const MODE_SWITCH: f32 = 22.0;
+/// A row of the tag editor.
+const EDITOR_ROW: f32 = 26.0;
 
 /// What the window has to do for the browser.
 #[derive(Debug, Default)]
@@ -232,11 +235,31 @@ pub fn show(ui: &mut Ui, area: Rect, state: &mut BrowserState, cx: Context<'_>) 
         (crate::browser::ResultsMode::Other, Some(draw)) => draw(ui, results, state, projects),
         _ => results_view(ui, results, state, projects, settings, selected_track, &mut out),
     }
-
     let strip = Rect::from_min_max(Pos2::new(area.left(), bottom), Pos2::new(area.right(), bottom + PREVIEW));
     preview_strip(ui, strip, state, projects, settings, selected_track, &mut out);
     let footer = Rect::from_min_max(Pos2::new(area.left(), strip.bottom()), area.max);
-    footer_view(ui, footer, state, projects, &mut out);
+    let edit_rect = footer_view(ui, footer, state, projects, &mut out);
+    // The tag editor's popup right above the Edit tags button, drawn last so the strip and
+    // the footer it floats over do not paint over it. A click outside the popup, on the
+    // list or anywhere else in the window, closes it.
+    let editor_popup = state.tag_editor.then(|| {
+        let rows = projects.file_library_mut().tags().len() + 1; // + the row that adds one
+        let width = 260.0_f32.min((results.width() - 8.0).max(150.0));
+        let height = (rows as f32 * (EDITOR_ROW + 2.0) + PAD).min(results.height() - 4.0);
+        Rect::from_min_max(
+            Pos2::new(edit_rect.right() - width, footer.top() - height),
+            Pos2::new(edit_rect.right(), footer.top()),
+        )
+    });
+    if let Some(popup) = editor_popup {
+        tag_editor(ui, popup, state, projects, &mut out);
+        if ui.input(|i| i.pointer.any_click())
+            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !popup.contains(p) && !edit_rect.contains(p))
+        {
+            state.tag_editor = false;
+            state.tag_editor_confirm = None;
+        }
+    }
 
     // A selection that changed previews with auto-play.
     if std::mem::take(&mut state.selection_changed) {
@@ -1219,15 +1242,276 @@ fn preview_strip(
     }
 }
 
-fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut Projects, out: &mut BrowserOut) {
+/// The browser's tag editor, over the results' bottom, opened by the footer's Edit tags
+/// button: every tag in a list — its colour, its name (typed to rename), how many items
+/// carry it and Remove, with a confirm; the last row adds one. A click on a row filters
+/// by it, as the footer's dots do ([browser](browser.md) › Colour tags).
+/// The browser's tag editor, the popup right above the footer's Edit tags button: every tag
+/// in a list — its colour, its name (typed to rename), how many
+/// items carry it and Remove, with a confirm; the last row adds one. A click on a row filters
+/// by it, as the footer's dots do ([browser](browser.md) › Colour tags).
+/// The browser's tag editor, the popup right above the footer's Edit tags button: every tag
+/// in a list — its colour, its name (typed to rename), how many
+/// items carry it and Remove, with a confirm; the last row adds one. Its checkbox filters by
+/// the tag, as the footer's dots do ([browser](browser.md) › Colour tags).
+fn tag_editor(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut Projects, out: &mut BrowserOut) {
+    let painter = ui.painter_at(area);
+    painter.rect_filled(area, 0.0, theme::window_background());
+    painter.rect_stroke(area, 1.0, theme::hairline(theme::border()), egui::StrokeKind::Inside);
+    // How many items carry each tag, counted when the editor opened and after every change
+    // made in it.
+    if state.tag_counts.is_none() {
+        let mut counts = HashMap::new();
+        for (_, names) in projects.file_library_mut().tagged() {
+            for name in names {
+                *counts.entry(name).or_default() += 1;
+            }
+        }
+        state.tag_counts = Some(counts);
+    }
+    let counts = state.tag_counts.clone().unwrap_or_default();
+    let tags = projects.file_library_mut().tags();
+    let mut y = area.top() + 2.0;
+    for tag in &tags {
+        let rect = Rect::from_min_size(Pos2::new(area.left(), y), Vec2::new(area.width(), EDITOR_ROW));
+        if rect.bottom() > area.bottom() - 2.0 {
+            break; // more tags than the popup's room; the footer's dots hold the rest
+        }
+        y = rect.bottom() + 2.0;
+        let row = ui.interact(rect, Id::new(("tag-editor-row", &tag.name)), Sense::hover());
+        row.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("Tag row {} ({} items)", tag.name, counts.get(&tag.name).copied().unwrap_or(0)),
+            )
+        });
+        let on = state.tag_filter.contains(&tag.name);
+        let fill = if on {
+            theme::control_active()
+        } else {
+            motion::mix(theme::window_background(), theme::panel_hover(), widgets::hover(ui, &row))
+        };
+        painter.rect_filled(rect, 0.0, fill);
+        // Its checkbox: with items selected, it tags them (ticked while every selected item
+        // carries the tag); with none, it filters the results by the tag, as the footer's
+        // dots do.
+        let selection: Vec<String> = state
+            .selected
+            .iter()
+            .filter(|s| s.kind != ItemKind::Heading && s.kind != ItemKind::Folder)
+            .map(|s| s.key.clone())
+            .collect();
+        let on = if selection.is_empty() {
+            state.tag_filter.contains(&tag.name)
+        } else {
+            selection.iter().all(|key| projects.file_library_mut().item_tags(key).contains(&tag.name))
+        };
+        let box_rect = Rect::from_min_size(Pos2::new(rect.left() + 4.0, rect.center().y - 7.0), Vec2::splat(14.0));
+        let check = ui.interact(box_rect, Id::new(("tag-editor-filter", &tag.name)), Sense::click());
+        check.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Checkbox,
+                true,
+                if selection.is_empty() {
+                    format!("Filter tag {}", tag.name)
+                } else {
+                    format!("Apply tag {}", tag.name)
+                },
+            )
+        });
+        painter.rect_filled(box_rect, 3.0, if on { theme::text_value() } else { theme::control_background() });
+        if on {
+            painter.rect_filled(box_rect.shrink(4.0), 0.0, theme::window_background());
+        }
+        if check.clicked() {
+            if selection.is_empty() {
+                if on {
+                    state.tag_filter.retain(|t| *t != tag.name);
+                } else {
+                    state.tag_filter.push(tag.name.clone());
+                }
+            } else {
+                for key in &selection {
+                    if let Err(e) = projects.file_library_mut().tag(key, &tag.name, !on) {
+                        out.status = Some(Status::Error(e));
+                    }
+                }
+                state.tag_counts = None;
+                state.relist();
+            }
+        }
+        // Its colour.
+        let mut color = tag_color(&tag.color);
+        let pick_rect =
+            Rect::from_min_size(Pos2::new(box_rect.right() + 4.0, rect.center().y - FILTER / 2.0), Vec2::splat(FILTER));
+        let picked = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(pick_rect).id_salt(("tag-editor-color", &tag.name)), |ui| {
+                egui::color_picker::color_edit_button_srgba(ui, &mut color, egui::color_picker::Alpha::Opaque)
+            })
+            .inner;
+        if picked.changed() {
+            let hex = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
+            run(projects, "library.setTag", json!({ "name": tag.name, "color": hex }), out);
+            state.tag_counts = None;
+        }
+        // Its name, typed to rename: the field takes the room between the colour and the
+        // fixed right side, at least enough to type in.
+        let armed = state.tag_editor_confirm.as_deref() == Some(tag.name.as_str());
+        let remove_width = 58.0;
+        let keep_width = if armed { 44.0 } else { 0.0 };
+        let count_width = if area.width() >= 240.0 { 46.0 } else { 0.0 };
+        let field_left = pick_rect.right() + 4.0;
+        let field_right = (rect.right() - remove_width - keep_width - count_width - 10.0).max(field_left + 48.0);
+        let field_rect = Rect::from_min_max(Pos2::new(field_left, rect.top()), Pos2::new(field_right, rect.bottom()));
+        let id = Id::new(("tag-editor-name", &tag.name));
+        let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| tag.name.clone());
+        let field = ui.put(
+            field_rect,
+            egui::TextEdit::singleline(&mut name)
+                .id(id)
+                .desired_width(field_rect.width())
+                .font(theme::ui_font(theme::TEXT_SMALL)),
+        );
+        ui.ctx().data_mut(|d| d.insert_temp(id, name.clone()));
+        field.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, format!("Tag name {}", tag.name))
+        });
+        if field.lost_focus()
+            && ui.input(|i| i.key_pressed(Key::Enter))
+            && !name.trim().is_empty()
+            && name.trim() != tag.name
+            && run(projects, "library.setTag", json!({ "name": tag.name, "rename": name.trim() }), out)
+        {
+            for filter in state.tag_filter.iter_mut().filter(|f| **f == tag.name) {
+                *filter = name.trim().to_string();
+            }
+            if state.tag_editor_confirm.as_deref() == Some(tag.name.as_str()) {
+                state.tag_editor_confirm = None;
+            }
+            state.tag_counts = None;
+            state.relist();
+            ui.ctx().data_mut(|d| d.remove::<String>(id));
+        }
+        // How many items carry it.
+        if count_width > 0.0 {
+            let count_rect = Rect::from_min_max(
+                Pos2::new(field_rect.right() + 5.0, rect.top()),
+                Pos2::new(field_rect.right() + 5.0 + count_width, rect.bottom()),
+            );
+            widgets::text_in(
+                &painter,
+                count_rect,
+                Align2::RIGHT_CENTER,
+                &format!("{} items", counts.get(&tag.name).copied().unwrap_or(0)),
+                theme::mono_font(theme::TEXT_TINY),
+                theme::text_hint(),
+            );
+        }
+        // Remove, armed by the first click and done by the second; Keep stands it down.
+        let remove_rect = Rect::from_min_size(
+            Pos2::new(field_rect.right() + 5.0 + count_width, rect.center().y - FILTER / 2.0),
+            Vec2::new(remove_width, FILTER),
+        );
+        let remove_label = if armed { format!("Remove {}?", tag.name) } else { "Remove".to_string() };
+        let remove = widgets::button_area(
+            ui,
+            remove_rect,
+            Id::new(("tag-editor-remove", &tag.name)),
+            format!("Remove tag {}", tag.name),
+        );
+        widgets::text_in(
+            &painter,
+            remove_rect,
+            Align2::CENTER_CENTER,
+            &remove_label,
+            theme::ui_font(theme::TEXT_SMALL),
+            if armed { theme::recording() } else { theme::text_secondary() },
+        );
+        if remove.clicked() {
+            if armed {
+                if run(projects, "library.removeTag", json!({ "name": tag.name }), out) {
+                    state.tag_filter.retain(|t| *t != tag.name);
+                }
+                state.tag_editor_confirm = None;
+                state.tag_counts = None;
+                state.relist();
+            } else {
+                state.tag_editor_confirm = Some(tag.name.clone());
+            }
+        }
+        if armed {
+            let keep_rect = Rect::from_min_size(
+                Pos2::new(remove_rect.right() + 4.0, rect.center().y - FILTER / 2.0),
+                Vec2::new(keep_width, FILTER),
+            );
+            let keep = widgets::button_area(ui, keep_rect, Id::new(("tag-editor-keep", &tag.name)), "Keep");
+            widgets::text_in(
+                &painter,
+                keep_rect,
+                Align2::CENTER_CENTER,
+                "Keep",
+                theme::ui_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
+            if keep.clicked() {
+                state.tag_editor_confirm = None;
+            }
+        }
+    }
+    // The last row adds a tag: a name and the next default colour, the field the popup wide.
+    if y + EDITOR_ROW <= area.bottom() - 2.0 {
+        let rect = Rect::from_min_size(Pos2::new(area.left(), y), Vec2::new(area.width(), EDITOR_ROW));
+        let id = Id::new("tag-editor-new");
+        let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+        let field_rect =
+            Rect::from_min_max(Pos2::new(area.left() + PAD, rect.top()), Pos2::new(area.right() - PAD, rect.bottom()));
+        let field = ui.put(
+            field_rect,
+            egui::TextEdit::singleline(&mut name)
+                .id(id)
+                .hint_text("New tag…")
+                .desired_width(field_rect.width())
+                .font(theme::ui_font(theme::TEXT_SMALL)),
+        );
+        ui.ctx().data_mut(|d| d.insert_temp(id, name.clone()));
+        field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "New tag name".to_string()));
+        if field.lost_focus()
+            && ui.input(|i| i.key_pressed(Key::Enter))
+            && !name.trim().is_empty()
+            && tags.iter().all(|t| t.name != name.trim())
+            && {
+                let palette = suhina_library::store::default_tags();
+                let color =
+                    palette.get(tags.len() % palette.len().max(1)).map_or("#8C8A85".to_string(), |t| t.color.clone());
+                run(projects, "library.setTag", json!({ "name": name.trim(), "color": color }), out)
+            }
+        {
+            ui.ctx().data_mut(|d| d.remove::<String>(id));
+            state.tag_counts = None;
+            state.relist();
+        }
+    }
+}
+fn footer_view(
+    ui: &mut Ui,
+    area: Rect,
+    state: &mut BrowserState,
+    projects: &mut Projects,
+    out: &mut BrowserOut,
+) -> Rect {
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::panel_background());
     painter.hline(area.x_range(), area.top() + 0.5, theme::hairline(theme::border()));
+    // The Edit tags button's room, so the dots stop before it.
+    let edit_width = widgets::text_width(ui, "Edit tags", theme::ui_font(theme::TEXT_SMALL)) + FILTER_PAD * 2.0;
     let mut x = area.left() + PAD;
-    for tag in projects.file_library_mut().tags() {
+    // With the editor open, its rows are the tag list: the dots would say it twice.
+    let tags = if !state.tag_editor { projects.file_library_mut().tags() } else { Vec::new() };
+    for tag in tags {
         let rect = Rect::from_center_size(Pos2::new(x + DOT / 2.0 + 2.0, area.center().y), Vec2::splat(DOT + 4.0));
         x = rect.right() + 2.0;
-        if x > area.right() - 90.0 {
+        if x > area.right() - 90.0 - edit_width - 8.0 {
             break;
         }
         let response = widgets::button_area(ui, rect, Id::new(("browser-tag", &tag.name)), format!("Tag {}", tag.name))
@@ -1280,6 +1564,27 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
         0 | 1 => format!("{} items", state.rows().iter().filter(|r| r.item.kind != ItemKind::Heading).count()),
         n => format!("{n} selected"),
     };
+    // Left of the count: the button that opens and closes the tag editor; the popup anchors
+    // to this rect, and a click outside the two closes the editor.
+    let edit_rect = Rect::from_min_size(
+        Pos2::new(area.right() - 96.0 - edit_width - 6.0, area.center().y - FILTER / 2.0),
+        Vec2::new(edit_width, FILTER),
+    );
+    {
+        let small = theme::ui_font(theme::TEXT_SMALL);
+        let rect = edit_rect;
+        let response = widgets::button_area(ui, rect, Id::new("browser-edit-tags"), "Edit tags");
+        if response.clicked() {
+            state.tag_editor = !state.tag_editor;
+            state.tag_counts = None;
+            state.tag_editor_confirm = None;
+        }
+        let lit = motion::toward(ui.ctx(), response.id.with("on"), state.tag_editor, motion::VALUE);
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, motion::mix(idle, theme::text_value(), lit));
+        let text = motion::mix(theme::text_secondary(), theme::window_background(), lit);
+        widgets::text_in(&painter, rect, Align2::CENTER_CENTER, "Edit tags", small.clone(), text);
+    }
     widgets::text_in(
         &painter,
         area.shrink2(Vec2::new(PAD, 0.0)),
@@ -1288,6 +1593,7 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
         theme::mono_font(theme::TEXT_TINY),
         theme::text_hint(),
     );
+    edit_rect
 }
 
 /// The browser's resize handle at its inner edge; returns the new width while dragged.

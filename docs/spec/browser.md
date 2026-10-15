@@ -324,6 +324,22 @@ recolours it (a colour button) or removes it; new ones are added from a row's Ta
 number of tags; a tag is a 6 px dot after the name. Clicking a tag's dot in the footer shows
 only items with that tag (several: items with any of them); clicking it again stops.
 
+The **tag editor** is all of that in one place: the footer's **Edit tags** button opens a
+popup right above itself (its bottom at the footer's top, its right edge at the button's),
+floating over the preview strip and the list's bottom. One row per tag: its
+checkbox — with items selected, ticking it tags the selection and unticking takes the tag
+off every selected item (ticked while every one of them carries it); with nothing selected,
+it filters the results by the tag —, its colour button, its name (typed in
+the field, Enter renames it), how many items carry it (hidden when the popup is narrow), and
+**Remove** (the first click arms it —
+the button asks "Remove Red?" with a **Keep** beside it; the second click removes the tag from
+the list and from every item carrying it). The last row adds a tag: a name and Enter, with the
+next default colour. With
+the editor open the footer's dots make way for it — its rows are the tag list; a click
+anywhere outside the popup (the list, the sidebar) closes it, as does the Edit tags button.
+The
+editor's open state is the window's own and is not kept between runs.
+
 ## Where it is kept
 
 `browser.json` in Suhina's settings folder (beside `settings.txt`): the folders, the pins,
