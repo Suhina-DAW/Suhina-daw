@@ -2303,9 +2303,10 @@ impl App {
             theme::text_primary(),
         );
         x = tempo_rect.right() + PAD;
-        let session = self.session();
-        let signature = session.map(|s| s.project().transport.time_signature);
-        let signature = signature.map_or_else(String::new, |ts| format!("{} / {}", ts.numerator, ts.denominator));
+        // The time signature playing, like the tempo: a launched scene may have changed it.
+        let ts = grid.meter.time_signature;
+        let signature =
+            if self.session().is_some() { format!("{} / {}", ts.numerator, ts.denominator) } else { String::new() };
         let ts_rect = row(x, 40.0);
         widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::text_secondary());
         x = ts_rect.right() + PAD;
