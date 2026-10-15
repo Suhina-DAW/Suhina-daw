@@ -104,13 +104,22 @@ impl TempoMap {
             .filter(|p| p.beat.is_finite() && p.beat > 0.0 && p.beat <= MAX_CHANGE_BEAT && valid_bpm(p.bpm))
             .copied()
             .collect();
-        // Stable, so the later of two points on one beat stays last; then keep the last.
+        // Stable, so points on one beat keep their order. Of two on one beat the later wins,
+        // except a ramp followed by a step: the ramp arrives, then the tempo jumps.
         points.sort_by(|a, b| a.beat.total_cmp(&b.beat));
         let mut kept: Vec<TempoPoint> = Vec::with_capacity(points.len());
         for point in points {
-            match kept.last_mut() {
-                Some(last) if last.beat == point.beat => *last = point,
-                _ => kept.push(point),
+            let len = kept.len();
+            let same = |p: Option<&TempoPoint>| p.is_some_and(|p| p.beat == point.beat);
+            if !same(kept.last()) {
+                kept.push(point);
+                continue;
+            }
+            let ramp_then_step = kept.last().is_some_and(|l| l.ramp) && !point.ramp;
+            if ramp_then_step && !same(len.checked_sub(2).and_then(|i| kept.get(i))) {
+                kept.push(point);
+            } else if let Some(last) = kept.last_mut() {
+                *last = point;
             }
         }
         let per_beat = |bpm: f64| 60.0 / bpm * units_per_second;
@@ -118,7 +127,7 @@ impl TempoMap {
         let mut current = Segment { beat: 0.0, at: 0.0, bpm: start_bpm, per_beat: per_beat(start_bpm), slope: 0.0 };
         for point in &kept {
             // A ramp into `point` makes the segment before it a ramp.
-            if point.ramp && point.bpm != current.bpm {
+            if point.ramp && point.bpm != current.bpm && point.beat > current.beat {
                 current.slope = (point.bpm - current.bpm) / (point.beat - current.beat);
             }
             let at = current.at + current.units_after(point.beat - current.beat, units_per_second);
@@ -423,6 +432,21 @@ mod tests {
             assert!((map.beat_at(time) - beat).abs() < 1e-9);
             last = time;
         }
+    }
+
+    #[test]
+    fn a_ramp_can_end_in_a_jump() {
+        // A glide from 120 to 180 over 8 beats that then jumps to 60.
+        let map = TempoMap::new(120.0, &[point(8.0, 180.0, true), point(8.0, 60.0, false)], 1.0);
+        let glide = 60.0 / 7.5 * 1.5f64.ln();
+        assert!((map.time_at(8.0) - glide).abs() < 1e-12);
+        assert!((map.time_at(9.0) - (glide + 1.0)).abs() < 1e-12);
+        assert!((map.bpm_at(7.999) - 180.0).abs() < 0.01);
+        assert_eq!(map.bpm_at(8.0), 60.0);
+        assert!((map.beat_at(glide + 0.5) - 8.5).abs() < 1e-9);
+        // A step then a ramp on one beat: the later wins, as for any other pair.
+        let map = TempoMap::new(120.0, &[point(8.0, 60.0, false), point(8.0, 180.0, true)], 1.0);
+        assert_eq!(map.breaks().count(), 1);
     }
 
     #[test]

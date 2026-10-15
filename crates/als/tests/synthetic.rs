@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use suhina_als::{AlsError, read_gzip, read_xml};
-use suhina_model::{ChannelRole, LaneData};
+use suhina_model::{ChannelRole, LaneData, TempoPoint, TimeSignature, TimeSignatureChange};
 
 fn mixer(volume: &str, pan: &str, on: &str, sends: &[&str]) -> String {
     let sends: String = sends
@@ -257,4 +257,81 @@ fn reads_plugins_and_placeholders() {
 
     assert_eq!(eq.kind, DeviceKind::Foreign { format: "als".into(), id: "Eq8".into() });
     assert!(!eq.enabled);
+}
+
+/// The live set with tempo and time-signature envelopes on its main track holding `tempo` and
+/// `signature` events after their default events (`docs/spec/als-format.md` › Tempo and
+/// time-signature changes).
+fn with_envelopes(tempo: &str, signature: &str) -> String {
+    live_set().replace(
+        r#"<Tempo><Manual Value="128"/></Tempo><TimeSignature><Manual Value="201"/></TimeSignature>
+      </Mixer></DeviceChain>"#,
+        &format!(
+            r#"<Tempo><Manual Value="128"/><AutomationTarget Id="8"/></Tempo>
+        <TimeSignature><Manual Value="201"/><AutomationTarget Id="9"/></TimeSignature>
+      </Mixer></DeviceChain>
+      <AutomationEnvelopes><Envelopes>
+        <AutomationEnvelope Id="0"><EnvelopeTarget><PointeeId Value="8"/></EnvelopeTarget><Automation><Events>
+          <FloatEvent Id="1" Time="-63072000" Value="128"/>{tempo}
+        </Events></Automation></AutomationEnvelope>
+        <AutomationEnvelope Id="1"><EnvelopeTarget><PointeeId Value="9"/></EnvelopeTarget><Automation><Events>
+          <EnumEvent Id="2" Time="-63072000" Value="201"/>{signature}
+        </Events></Automation></AutomationEnvelope>
+      </Envelopes></AutomationEnvelopes>"#
+        ),
+    )
+}
+
+#[test]
+fn reads_tempo_and_time_signature_changes() {
+    // 120 at bar 1, a glide to 140 at bar 3, a jump to 90 at bar 5; 3/4 from bar 2, 7/8 from
+    // beat 10 (bar 4 in 3/4).
+    let xml = with_envelopes(
+        r#"<FloatEvent Id="3" Time="0" Value="120"/><FloatEvent Id="4" Time="8" Value="140"/>
+           <FloatEvent Id="5" Time="16" Value="140"/><FloatEvent Id="6" Time="16" Value="90"/>"#,
+        r#"<EnumEvent Id="7" Time="4" Value="200"/><EnumEvent Id="8" Time="10" Value="303"/>"#,
+    );
+    let import = read_xml(&xml).unwrap();
+    let t = &import.project.transport;
+    assert_eq!(t.tempo_bpm, 120.0);
+    assert_eq!(
+        t.tempo_changes,
+        [
+            TempoPoint { beat: 8.0, bpm: 140.0, ramp: true },
+            TempoPoint { beat: 16.0, bpm: 140.0, ramp: true },
+            TempoPoint { beat: 16.0, bpm: 90.0, ramp: false },
+        ]
+    );
+    let ts = |numerator, denominator| TimeSignature { numerator, denominator };
+    assert_eq!(
+        t.time_signature_changes,
+        [
+            TimeSignatureChange { bar: 1, time_signature: ts(3, 4) },
+            TimeSignatureChange { bar: 3, time_signature: ts(7, 8) },
+        ]
+    );
+    assert!(
+        !import.warnings.iter().any(|w| w.contains("tempo") || w.contains("time signature")),
+        "{:?}",
+        import.warnings
+    );
+}
+
+#[test]
+fn malformed_tempo_and_time_signature_events_are_left_out() {
+    let xml = with_envelopes(
+        r#"<FloatEvent Id="3" Time="4" Value="NaN"/><FloatEvent Id="4" Time="8" Value="5000"/>
+           <FloatEvent Id="5" Time="1e300" Value="100"/><FloatEvent Id="6" Time="x" Value="100"/>
+           <FloatEvent Id="7" Time="12" Value="100"/>"#,
+        r#"<EnumEvent Id="8" Time="6" Value="200"/><EnumEvent Id="9" Time="8" Value="99999"/>
+           <EnumEvent Id="10" Time="16" Value="200"/>"#,
+    );
+    let import = read_xml(&xml).unwrap();
+    let t = &import.project.transport;
+    // The one good tempo point is a step: nothing before it is a breakpoint to glide from.
+    assert_eq!(t.tempo_changes, [TempoPoint { beat: 12.0, bpm: 100.0, ramp: false }]);
+    assert_eq!(t.time_signature_changes.len(), 1);
+    assert_eq!(t.time_signature_changes[0].bar, 4);
+    assert!(import.warnings.iter().any(|w| w.contains("not on a bar line")), "{:?}", import.warnings);
+    assert!(import.warnings.iter().any(|w| w.contains("out of range")), "{:?}", import.warnings);
 }

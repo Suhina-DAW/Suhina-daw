@@ -17,8 +17,9 @@ use roxmltree::Node;
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
     ContentKinds, ContentLane, Device, DeviceKind, Extension, Extensions, LaneData, Launcher, LauncherColumn,
-    LoopRange, Note, Project, Scene, Send, Slot, StretchMode, TimeSignature, Track, TrackId, Transport,
-    ValidationError, WarpMarker,
+    LoopRange, MAX_CHANGE_BEAT, MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, Note, Project, Scene, Send, Slot,
+    StretchMode, TempoPoint, TimeSignature, TimeSignatureChange, Track, TrackId, Transport, ValidationError,
+    WarpMarker, valid_bpm,
 };
 
 /// Upper bound for the decompressed XML, so a malicious file cannot exhaust memory.
@@ -226,7 +227,64 @@ impl Reader {
                 None => self.warn(format!("time signature code {code} is not understood; using 4/4")),
             },
         }
+        self.tempo_changes(main, mixer, &mut transport);
+        self.time_signature_changes(main, mixer, &mut transport);
         transport
+    }
+
+    /// The tempo envelope's breakpoints (`docs/spec/als-format.md` › Tempo and time-signature
+    /// changes): one at or before beat 0 sets the start tempo; each later one is a change, a
+    /// step when it shares its time with the breakpoint before, otherwise a ramp from it.
+    fn tempo_changes(&mut self, main: Node, mixer: Node, transport: &mut Transport) {
+        let mut previous: Option<f64> = None;
+        for (time, text) in parameter_events(main, mixer, "Tempo") {
+            let Some(bpm) = parse_number(text).filter(|bpm| valid_bpm(*bpm)) else {
+                self.warn(format!("tempo {text} at beat {time} is out of range; left out"));
+                continue;
+            };
+            if time <= 0.0 {
+                transport.tempo_bpm = bpm;
+            } else if time > MAX_CHANGE_BEAT || transport.tempo_changes.len() >= MAX_TEMPO_CHANGES {
+                self.warn(format!("tempo change at beat {time} is past what a project keeps; left out"));
+                continue;
+            } else {
+                // A breakpoint on the time of the one before is a jump. After a glide it is kept
+                // beside it (the glide arrives, then the tempo jumps); after a jump it replaces it.
+                let ramp = previous.is_some_and(|p| p < time);
+                match transport.tempo_changes.last_mut().filter(|p| p.beat == time) {
+                    Some(last) if !last.ramp => *last = TempoPoint { beat: time, bpm, ramp: false },
+                    _ => transport.tempo_changes.push(TempoPoint { beat: time, bpm, ramp }),
+                }
+            }
+            previous = Some(time.max(0.0));
+        }
+    }
+
+    /// The time-signature envelope's breakpoints: one at or before beat 0 sets the start
+    /// signature; a later one on a bar line changes it from that bar. One inside a bar is left
+    /// out, since a change in Suhina starts a bar.
+    fn time_signature_changes(&mut self, main: Node, mixer: Node, transport: &mut Transport) {
+        for (time, text) in parameter_events(main, mixer, "TimeSignature") {
+            let Some(signature) = text.parse::<u32>().ok().and_then(time_signature).filter(|t| t.is_valid()) else {
+                self.warn(format!("time signature code {text} at beat {time} is not understood; left out"));
+                continue;
+            };
+            if time <= 0.0 {
+                transport.time_signature = signature;
+                continue;
+            }
+            let here = transport.meter().position(time + 1e-6);
+            if (here.bar_start - time).abs() > 1e-6 || here.bar == 0 {
+                self.warn(format!("time signature change at beat {time} is not on a bar line; left out"));
+                continue;
+            }
+            if transport.time_signature_changes.len() >= MAX_TIME_SIGNATURE_CHANGES {
+                self.warn("more time signature changes than a project keeps; the rest are left out");
+                break;
+            }
+            transport.time_signature_changes.retain(|c| c.bar != here.bar);
+            transport.time_signature_changes.push(TimeSignatureChange { bar: here.bar, time_signature: signature });
+        }
     }
 
     fn main_channel(&mut self, live_set: Node, id: ChannelId) -> Channel {
@@ -693,6 +751,40 @@ fn parameter_value<'a>(main: Node<'a, '_>, mixer: Node<'a, '_>, name: &str) -> O
         .and_then(|event| event.attribute("Value"));
     from_envelope.or_else(|| value(parameter, &["Manual"]))
 }
+
+/// The breakpoints of a main-track parameter's automation envelope, after the default event: each
+/// as its time in beats and its `Value`, in time order (breakpoints on one time keep the file's
+/// order). Events that are not finite are left out; at most [`MAX_ENVELOPE_EVENTS`] are read.
+fn parameter_events<'a>(main: Node<'a, '_>, mixer: Node<'a, '_>, name: &str) -> Vec<(f64, &'a str)> {
+    let Some(target) = child(mixer, name)
+        .and_then(|p| p.children().find(|n| n.has_tag_name("AutomationTarget")))
+        .and_then(|t| t.attribute("Id"))
+    else {
+        return Vec::new();
+    };
+    let events = path(main, &["AutomationEnvelopes", "Envelopes"])
+        .into_iter()
+        .flat_map(|envs| envs.children())
+        .filter(|n| n.has_tag_name("AutomationEnvelope"))
+        .find(|env| value(*env, &["EnvelopeTarget", "PointeeId"]) == Some(target))
+        .and_then(|env| path(env, &["Automation", "Events"]));
+    let Some(events) = events else { return Vec::new() };
+    let mut found: Vec<(f64, &str)> = events
+        .children()
+        .filter(|e| e.is_element() && e.attribute("Time") != Some("-63072000"))
+        .take(MAX_ENVELOPE_EVENTS)
+        .filter_map(|e| {
+            let time = e.attribute("Time").and_then(parse_number)?;
+            Some((time, e.attribute("Value")?))
+        })
+        .filter(|(time, _)| time.is_finite() && *time > -63_072_000.0)
+        .collect();
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found
+}
+
+/// Most breakpoints read from one envelope, so a hostile file cannot make the import unbounded.
+const MAX_ENVELOPE_EVENTS: usize = 100_000;
 
 /// Live's time-signature code: `99 * log2(denominator) + numerator - 1` (4/4 is 201, 7/8 is 303).
 fn time_signature(code: u32) -> Option<TimeSignature> {

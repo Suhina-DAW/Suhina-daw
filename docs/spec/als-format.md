@@ -1,9 +1,9 @@
 ---
 description: The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices
-read_when: reading .als, importer, XML element, warp markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters
+read_when: reading .als, importer, XML element, warp markers, time signature, tempo envelope, tempo changes, devices, plug-in state, Utility, StereoGain, device parameters
 type: spec
 status: current
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/als/src/lib.rs
   - crates/als/src/devices.rs
@@ -55,6 +55,26 @@ equals `MainTrack/AutomationEnvelopes/Envelopes/AutomationEnvelope/EnvelopeTarge
 For the tempo, `Manual` and the default event change together (a `FloatEvent`). For the time
 signature only the default event changes (an `EnumEvent`); `TimeSignature/Manual` stayed `201`
 through files `50`–`53`. **Read the envelope first and fall back to `Manual`.**
+
+### Tempo and time-signature changes
+
+**(hypothesis, until corpus file [`311-tempo.als`](als-corpus.md#arrangement-automation-300314)
+is recorded.)** A tempo or time-signature change over the song is more events in the same
+envelope, after the default event: `FloatEvent` (tempo) or `EnumEvent` (time-signature code), each
+with `Time` in beats and `Value`. Breakpoints are joined by straight lines (the public manual's
+description of automation); **Suhina:** two on one time are read as a jump. Suhina reads them into
+the [tempo map](tempo-map.md):
+
+| Events | Becomes |
+|---|---|
+| A tempo breakpoint at or before beat 0 | the start tempo |
+| A later tempo breakpoint | a tempo change at its time: a ramp from the breakpoint before it, a step when there is none (only the default event) or it shares its time |
+| A jump after a glide (two breakpoints on one time) | both: the ramp arrives, then the tempo steps |
+| A time-signature breakpoint at or before beat 0 | the start signature |
+| A later one on a bar line (counted through the signatures before it) | a signature change from that bar |
+| One inside a bar, a tempo outside 1–999, a code that is not a signature, a time that is not a number | left out, with a warning |
+
+At most 100 000 events are read from one envelope.
 
 ## Tracks
 
@@ -294,7 +314,8 @@ These change without any musical edit:
   and curves `Clip::fade_in_curve`, `Clip::fade_out_curve`); the importer leaves them at 0
   (linear, unbent) until [corpus series 9](als-corpus.md#series-9-audio-fades) shows the format.
 - Return tracks added or removed; sends routed pre-fader; track output to another track.
-- Tempo and time-signature changes over time (automation with more than the default event).
+- Tempo and time-signature changes over time: the reading above is a hypothesis until corpus
+  file `311-tempo.als` and a time-signature change are recorded.
 - CLAP plug-ins, Audio Units, racks.
 - Max for Live devices: how the set refers to the `.amxd` file, what Collect All and Save does
   with it, where parameter values are stored ([corpus series 8](als-corpus.md#series-8-max-devices)).

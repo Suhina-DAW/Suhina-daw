@@ -16,7 +16,7 @@ covers:
 
 - **Sources:** general music practice (a song's tempo and metre can change; a tempo can jump or
   glide), the public Live 12 manual's description of tempo automation in the Arrangement
-  (breakpoints joined by lines; two breakpoints on one time make a jump), and the Live Set fields
+  (breakpoints joined by straight lines), and the Live Set fields
   in [`als-format.md`](als-format.md) (*Tempo and time-signature changes*).
 - **Observed with:** nothing yet. The reading of a Live Set's tempo and time-signature envelopes is
   written from the envelope structure the corpus showed for their default events; corpus file
@@ -65,7 +65,8 @@ or frames at the sample rate. Nothing converts with the start tempo alone.
   rate`), bit for bit, so a project without changes renders exactly as before.
 - Malformed changes are ignored, not refused: a beat that is not finite, not after beat 0 or past
   beat 120 000, a tempo outside 1 to 999 bpm, more than 10 000 changes. Of two changes on one beat
-  the later in the list wins. The same for signature changes at bar 0, with an invalid signature
+  the later in the list wins, except a ramp followed by a step: the ramp arrives at its tempo,
+  then the tempo jumps (a Live Set's glide that ends in a jump reads this way). The same for signature changes at bar 0, with an invalid signature
   (a numerator outside 1 to 99, a denominator that is not 1, 2, 4, 8, 16, 32 or 64) or more than
   10 000. (The project file refuses these, so they come only from an importer or a hand-edited
   model.)
