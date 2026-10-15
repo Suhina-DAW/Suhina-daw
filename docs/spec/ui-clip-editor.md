@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, chords, shortcuts, and the note.* commands
-read_when: piano roll, clip editor, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list
+read_when: piano roll, clip editor, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -129,8 +129,11 @@ of keys grows and shrinks.
   (with Shift, added to the selection).
 - **Built:** the selection lives in the window only; it is not part of the project and is not an
   undo step. It is cleared when another clip is shown.
-- **Later ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** Ctrl+A selects every note; a click on the ruler selects a time range, and every note
-  starting in it; Shift+arrows extend; a lasso; "select all notes of the same key"; Escape clears.
+- **Built ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** while the piano roll has
+  the keyboard (after a click in it), **Ctrl+A** selects every note of the clip and **Escape** clears
+  the selection. Elsewhere Escape keeps its other uses.
+- **Later:** a click on the ruler selects a time range, and every note starting in it; a lasso;
+  "select all notes of the same key".
 
 ## Moving
 
@@ -140,8 +143,13 @@ of keys grows and shrinks.
   one command, one undo step, when the mouse is let go. A move that would put a note before the
   content's start or outside keys 0 to 127 stops at that limit, for the whole selection, so the
   selection keeps its shape.
-- **Later ([#344](https://github.com/suhina-daw/suhina-daw/issues/344), [#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** the arrow keys move the selection by one grid step (left and right) or a semitone
-  (up and down); Shift+up and down by an octave. Ctrl+drag copies the notes
+- **Built ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** while the piano roll has
+  the keyboard, **Left** and **Right** move the selection one grid step earlier or later (the grid
+  as drawn; a beat with `none`), **Up** and **Down** a semitone, **Shift+Up** and **Shift+Down** an
+  octave. Each press is one `note.move`, one undo step. A step in time that would cross the
+  content's start stops at it; a pitch move that does not fit for every selected note does nothing,
+  so no note changes its name.
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** Ctrl+drag copies the notes
   instead of moving them. Whether moving notes past the clip's end extends the clip is
   **(to decide)**.
 
@@ -151,18 +159,36 @@ of keys grows and shrinks.
   changes the length of every selected note by the same amount, the dragged note's end snapping to
   the grid (Alt: freely). Dragged onto or before its own start, the dragged note's end goes to the
   first grid line after its start; no selected note gets shorter than a hundredth of a beat.
-- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351), [#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** dragging a note's left edge moves its start and keeps its end; Shift+left and right
-  arrows change the selection's length by one grid step; a modifier while resizing stretches the
-  selection in time around its start (scale the positions as well as the lengths).
+- **Built ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** **Shift+Right** and
+  **Shift+Left** make every selected note one grid step longer or shorter (`note.resize` with `by`).
+  The keys never make a note shorter than one step: Shift+Left shortens by less, or not at all,
+  when the shortest selected note would get shorter than that.
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** dragging a note's left edge
+  moves its start and keeps its end; a modifier while resizing stretches the selection in time
+  around its start (scale the positions as well as the lengths).
 
 ## Deleting
 
 - **Built:** **Delete** or **Backspace** while the piano roll has the keyboard (after a click in
   it) deletes the selected notes, one undo step. Without a note selected, those keys keep doing
   what they do elsewhere (delete the selected clip). A double-click on a note deletes it.
-- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351), [#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** right-click on a note (or a drag with the right button) deletes notes, as an
-  option in Settings; cut, copy, paste and duplicate of notes (Ctrl+X, C, V, D),
-  pasting at the playhead or after the selection.
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** right-click on a note (or a
+  drag with the right button) deletes notes, as an option in Settings.
+
+## Copy, cut, paste and duplicate
+
+- **Built ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):** while the piano roll has
+  the keyboard, **Ctrl+C** copies the selected notes (`note.copy`), **Ctrl+X** cuts them
+  (`note.cut`: copies and deletes, one undo step), **Ctrl+V** pastes the copied notes
+  (`note.paste`) and **Ctrl+D** duplicates the selected notes (`note.duplicate`). With no note
+  selected (or, for Ctrl+V, no notes copied) the keys act on the selected clip, as elsewhere.
+- Copied notes keep their spacing, their keys, lengths and velocities. Paste puts the first of them
+  right after the end of the selected notes; with none selected, at the playhead when it is inside
+  the clip (a looping clip maps it into its loop); else right after where they were copied from.
+  Duplicate puts the copy right after the selection's end (the selection spans from its earliest
+  start to its latest end). Pasted and duplicated notes are selected; the notes they land on stay.
+- The note clipboard belongs to the open project's session, apart from the clip clipboard; notes
+  copied in one MIDI clip paste into any other. It is not saved with the project.
 
 ## Velocity
 
@@ -221,7 +247,7 @@ of keys grows and shrinks.
 
 ## Shortcuts
 
-Built in the first version:
+Built (the first version, and keyboard editing from [#344](https://github.com/suhina-daw/suhina-daw/issues/344)):
 
 | Keys | Does |
 |---|---|
@@ -234,14 +260,23 @@ Built in the first version:
 | Alt while drawing or dragging | No snapping |
 | Drag a stem in the velocity lane | Changes the selection's velocity |
 | Delete, Backspace | Deletes the selected notes (after a click in the piano roll) |
+| Ctrl+A, Escape | Selects every note, clears the selection |
+| Left, Right | Moves the selection one grid step earlier, later |
+| Up, Down; Shift+Up, Shift+Down | Moves the selection a semitone; an octave |
+| Shift+Left, Shift+Right | Makes the selection a grid step shorter, longer |
+| Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D | Copies, cuts, pastes, duplicates notes |
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo (as everywhere) |
 | Wheel, Shift+wheel | Scroll keys, scroll time |
 | Ctrl+wheel, Ctrl+Shift+wheel | Zoom time, zoom key height |
 | Middle-button drag | Pan |
 
-Later: arrow keys, Ctrl+A, Ctrl+D, copy and paste, B (draw mode), Ctrl+U (quantise), Ctrl+J (glue),
-Ctrl+1 to Ctrl+4 (grid), Z (zoom to selection). They are added to the keymap
-([`docs/shortcuts.md`](../shortcuts.md)) when built, so they can be changed like the rest.
+The keys after a click in the piano roll are keymap actions ([`docs/shortcuts.md`](../shortcuts.md)):
+the `selection.*` ones the window has anyway, and `pianoRoll.selectAll`, `.deselect`, `.earlier`,
+`.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter` and `.longer`, which are read only
+while the piano roll has the keyboard, so they can be changed like the rest.
+
+Later: B (draw mode), Ctrl+U (quantise), Ctrl+J (glue), Ctrl+1 to Ctrl+4 (grid), Z (zoom to
+selection), added to the keymap when built.
 
 ## Commands
 
@@ -262,6 +297,10 @@ nothing when it fails.
 | `note.move` | clip, `notes`, `beats?`, `semitones?` | Moves them in time and in pitch |
 | `note.resize` | clip, `notes`, `length?` or `by?` | Sets their length, or changes it by `by` beats |
 | `note.setVelocity` | clip, `notes`, `velocity?` or `by?` | Sets their velocity, or changes it by `by` (each kept within 1 to 127) |
+| `note.copy` | clip, `notes` | Copies them to the note clipboard; changes nothing and is no undo step |
+| `note.cut` | clip, `notes` | Copies them and deletes them |
+| `note.paste` | clip, `time?` | Adds the copied notes, the first at `time` (default: right after the copied notes); returns their indices |
+| `note.duplicate` | clip, `notes` | Adds a copy right after the notes' end; returns its indices |
 
 Limits, so a hostile input cannot break the project or exhaust memory: time from 0 to 120 000 beats
 (the engine's furthest start), length above 0 and at most 120 000 beats, keys 0 to 127, velocity 1

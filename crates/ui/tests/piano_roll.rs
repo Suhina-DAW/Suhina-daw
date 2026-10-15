@@ -382,7 +382,7 @@ fn shift_left_and_right_change_the_selections_length_by_a_grid_step() {
     }
     h.run();
     let length = notes(&h)[0].duration;
-    assert!(length >= 0.5 - 1e-9 && length < 1.0, "{length}");
+    assert!((0.5 - 1e-9..1.0).contains(&length), "{length}");
 }
 
 #[test]

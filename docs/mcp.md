@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -96,6 +96,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
   deleted stay valid; each is one undo step and fails as a whole on a bad value
   ([clip editor spec](spec/ui-clip-editor.md) › Commands).
+- **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
+  changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
+  adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
+  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |

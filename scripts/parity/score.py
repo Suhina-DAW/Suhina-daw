@@ -69,11 +69,11 @@ CHAPTERS = [
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
      "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
      "of long samples, warp-marker editing, quantise audio, tempo automation."),
-    (10, "Editing MIDI", 41, 0.20, "started",
-     "A first piano roll draws, selects (click, rectangle), moves, resizes and deletes notes on the "
-     "grid (Alt off-grid) and edits velocity in a lane, through note.* commands with undo. No "
-     "copy/paste of notes, quantise, transpose tools, fold, scales, chords, deactivated notes, "
-     "probability or MPE lanes."),
+    (10, "Editing MIDI", 41, 0.25, "started",
+     "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
+     "on the grid (Alt off-grid), by mouse or by arrow keys, copies, cuts, pastes and duplicates them, "
+     "and edits velocity in a lane, through note.* commands with undo. No quantise, transpose tools, "
+     "fold, scales, chords, deactivated notes, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
     (13, "Converting Audio to MIDI", 5, 0.05, "planned",

@@ -388,6 +388,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the wheel scrolls and Ctrl (with Shift for key height) zooms. Every edit is a `note.*` command
   (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
   the CLI and MCP run too.
+- **Keyboard editing in the piano roll** ([#344](https://github.com/suhina-daw/suhina-daw/issues/344)):
+  after a click in it, the arrows move the selected notes by a grid step or a semitone
+  (Shift+Up and Down by an octave), Shift+Left and Right change their length, Ctrl+A selects every
+  note and Escape clears; Ctrl+C, X, V and D copy, cut, paste and duplicate notes (`note.copy`,
+  `.cut`, `.paste`, `.duplicate`), pasting after the selection or at the playhead.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
