@@ -145,8 +145,24 @@ impl Chain {
                             Slot::Sd(effect)
                         }
                         suhina_device_sdk::DeviceRole::MidiEffect => {
-                            let Ok(effect) = graph.compile_midi() else { continue };
-                            params.push(Vec::new());
+                            let Ok(mut effect) = graph.compile_midi() else { continue };
+                            let values: Vec<f64> = graph
+                                .parameters
+                                .iter()
+                                .map(|parameter| {
+                                    stored
+                                        .params
+                                        .iter()
+                                        .find(|value| value.id == parameter.id)
+                                        .map_or(parameter.default, |value| {
+                                            value.value.clamp(parameter.min, parameter.max)
+                                        })
+                                })
+                                .collect();
+                            for (index, value) in values.iter().copied().enumerate() {
+                                effect.set_parameter(index, value);
+                            }
+                            params.push(values);
                             Slot::MidiSd(effect)
                         }
                         suhina_device_sdk::DeviceRole::Instrument => {
