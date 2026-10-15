@@ -284,7 +284,7 @@ fn a_double_click_on_a_folders_chevron_opens_it_and_stays_open() {
 
 #[test]
 fn a_click_on_a_headings_chevron_opens_it_and_stays_open() {
-    let (settings, folder) = (temp("heading-chevron-settings"), temp("heading-chevron"));
+    let (settings, folder) = (temp("heading-chevron-stays-settings"), temp("heading-chevron-stays"));
     pack(&folder);
     let mut harness = window(&settings, &folder);
     let at = harness.get_by_label(&row("Instruments")).rect();

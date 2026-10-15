@@ -3,7 +3,7 @@ description: How the browser behaves: places, categories, search, the tree, prev
 read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -120,8 +120,10 @@ then by name. Each row shows the folder it is in after the name.
 on the right the duration of a sample (`0:04.2`, read when the row is first shown) or the kind
 of a device ("instrument", "effect", the plug-in's format). A folder or a heading opens and
 closes with a click on its chevron (every click toggles; the second click of a rapid pair is a
-double and is absorbed, so a double-click on the chevron opens it once), a folder also with a
-double-click on the row itself; a folder's contents are read from disk when it opens, sorted
+double and is absorbed, so a double-click on the chevron opens it once). A heading
+(*Instruments*, *Effects*, *Plug-ins*, a vendor) also opens and closes with a click on its
+name, by the same rule. A folder also opens with a double-click on the row itself; a click
+elsewhere on it only selects it. A folder's contents are read from disk when it opens, sorted
 folders first then by name (natural order: "Kick 2" before "Kick 10"). A preset bank opens
 into its 32 voices.
 
@@ -255,6 +257,23 @@ placed, and the status bar says which were skipped and why. When none can be pla
 changes.
 
 **One undo step:** everything one drop does (new tracks, new scenes, clips) is undone together.
+
+### Files from the system
+
+Samples, Stems files and MIDI files dragged from the system's file manager onto the window
+are a drag into the project like one from the browser, with the same targets, label, Ctrl and
+results (`clip.addFiles`, one undo step; files that cannot be read are `skipped`). While they
+hover the window, the target under the pointer is outlined and the label says what a drop does.
+
+Where the pointer is during the drag depends on the system: some report no pointer position
+while files are dragged over a window. Then nothing is outlined, and a drop goes where the
+pointer was when it was dropped; when that is not known either, the files go where Enter puts
+them (*Adding without dragging*). A drop outside the views (on the browser, the bars) says in
+the status bar where files can go. Without an open project nothing is added.
+
+Folders, projects (`.suhina`, `.als`) and themes (`.json`, `.zip`) dropped on the window are
+not a drag into the project: a folder joins the browser (*Sidebar*), a project opens and a theme
+is added. Other files are an error in the status bar.
 
 ### Built-in effects and instruments, presets and plug-ins
 
