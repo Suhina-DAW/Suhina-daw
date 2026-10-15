@@ -3,10 +3,15 @@ name: CI
 # Pull requests and main run on Linux only, which keeps every change's check fast. Windows and
 # macOS run when started by hand (Actions > CI > Run workflow, "all platforms"), and the release
 # workflow builds and checks all three for every tag and for the nightly.
+#
+# merge_group: the merge queue (CONTRIBUTING.md › Merging many pull requests) tests its
+# temporary branch, main with the queued pull requests merged onto it, with the same jobs, so the
+# `ci` check a ruleset requires reports there too. Jobs that need a pull request skip.
 on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
     inputs:
       all_platforms:
@@ -38,9 +43,13 @@ jobs:
         with:
           fetch-depth: 0
       # A pull request is checked out as a merge commit, so its first parent is the current base.
+      # A merge queue group is compared with the main it is built on.
       - id: diff
         env:
-          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+          BASE: >-
+            ${{ github.event_name == 'pull_request' && 'HEAD^1'
+              || github.event_name == 'merge_group' && github.event.merge_group.base_sha
+              || github.event.before }}
         run: |
           if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
@@ -176,6 +185,7 @@ jobs:
 
   # Pull requests from forks: every commit must carry a Signed-off-by line (Developer
   # Certificate of Origin, CONTRIBUTING.md). Branches of this repository are the maintainers'.
+  # Skipped in the merge queue: its pull requests were checked here before they were queued.
   dco:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
@@ -197,7 +207,8 @@ jobs:
           done
           exit $missing
 
-  # The one check main requires. Fails if any job it depends on failed or was cancelled.
+  # The one check main requires. Fails if any job it depends on failed or was cancelled. It runs
+  # on pull requests and in the merge queue alike, so the queue waits on the same check.
   ci:
     if: always()
     needs: [changes, docs, fmt, check, dco]
