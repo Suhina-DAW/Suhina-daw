@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -137,6 +137,7 @@ The engine runs them in chains on tracks, made through `device-registry`.
 | Audio | The device callback (cpal's thread; in WASAPI exclusive mode `suhina-wasapi`, an event loop on the device's buffer): copies from the ring (silence, counted as an underrun, for what is not there yet), sample conversion, setting atomics, measuring the latency from the frames queued and the device's own delay. | **no** (AGENTS.md rule 3) |
 | Stretch worker | One thread, owned by the `Controller`, running a `StretchWorker` per graph: renders the arrangement's stretched clips 0.5 s ahead into a lock-free ring per clip (ADR 0003). A new graph's worker joins it, an old one leaves once its graph is freed. | only when a graph's worker joins; never locks |
 | Audio owner | In the desktop app and over MCP, one thread per open project opens and holds the output stream (`output::open_chosen`) and closes it when the session drops its `Player`. When another output is chosen (`audio.setOutput`) it stops the device and the render thread and hands the renderer's plug-in processors (`Renderer::into_plugins`) to the next owner, which builds its renderer with them when the sample rate stays the same; otherwise the plug-ins start again. Streams are never opened or closed on the render or device thread. | yes, but does nothing while playing |
+| Device watch | While the output plays in place of a chosen device that was not there (`OutputInfo::fallback`), `Projects::check_output` asks every 3 s whether it is back (`AudioSystem::chosen_present`); `output` looks on a short-lived `suhina-device-watch` thread (the chosen host's output devices, names only) and keeps the answer for the next ask, so the frame never waits for the device list. When it is back the output is opened on it again, as `audio.setOutput` does. | yes |
 | Decode workers | Scoped threads in `media` while a project loads; in the window, a thread per drop (`suhina-drop`) that decodes its samples before `clip.addFiles` runs (ADR 0011). | yes |
 | Missing files and plug-in scans | In the window, `suhina-find-files` searches the index and folders for a project's missing files, and `suhina-plugin-scan` runs a plug-in scan, so the frame never waits. | yes |
 | Library | One thread in `library` (`suhina-library`): checks the browser's folders against their saved indexes, reads the ones that changed, and takes the file-system watcher's events (`notify`, its own threads) or polls (ADR 0012). Started by the desktop app and the MCP server only. | yes |

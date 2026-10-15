@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -155,6 +155,11 @@ setting, and a second Stop goes to the beginning.
 | `transport.stop {return?}` | Stops everything at once. `return: "marker"` (the default): the playhead goes back to the marker. `return: "here"`: the marker moves to where the playhead stopped, so the next start carries on from there. Either way, stopping while already stopped moves the marker to beat 0. |
 
 `launcher.state` reports `start_beat` (the marker) next to `beat` and `position` (the playhead).
+
+**A new audio output.** When the output is opened again (`audio.setOutput`, a device that
+reported an error, the chosen device back), the marker stays where it was and, while playing,
+playback goes on from the playhead: the engine jumps there without moving the marker
+(`LaunchCommand::Locate`), so a later Stop still returns to the marker.
 
 **Starting inside the arrangement.** From the marker's frame on, the arrangement plays exactly as
 it would at that frame of a render from the beginning, with two exceptions: a note that started

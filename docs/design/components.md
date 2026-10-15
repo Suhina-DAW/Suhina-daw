@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -272,7 +272,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Audio › Output | Sample rate | The device's own (default), then the rates the device offers |
 | Audio › Output | Buffer size | Default (1024 frames), then the device's sizes with their length in ms |
 | Audio › Output | Exclusive mode | On, Off (default): WASAPI only; the note says when the device does not allow it |
-| Audio › Now | Output, Latency | Read only: the device in use, and its measured latency and underruns; "List devices again" (120 px) on the Output row. Changes on this page run `audio.setOutput` |
+| Audio › Now | Output, Latency | Read only: the device in use (", until X is back" when it plays in place of the chosen device X, which it goes back to once connected again), and its measured latency and underruns; "List devices again" (120 px) on the Output row. Changes on this page run `audio.setOutput` |
 
 **Interface › Theme**: the themes as 20 px rows in a list that scrolls after eight, the user's
 own first and then those that come with Suhina, the name on the left and the file name or

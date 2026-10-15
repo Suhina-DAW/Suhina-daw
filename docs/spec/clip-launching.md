@@ -3,7 +3,7 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
@@ -97,6 +97,13 @@ decides something the sources do not settle, the text says so (**Suhina:**).
   and the engine's CPU load (`cpu`: percent), which the control bar shows. `transport.stop`
   with `return: "here"` stops and keeps the position where the transport stopped
   ([arrangement editing](arrangement-editing.md) › Play position).
+- **A new audio output.** When the output is opened again while playing (another device or
+  buffer size chosen, a device that reported an error, the chosen device back), the launcher
+  goes on as it was: each column's launched clip plays on from as far into it as it had played
+  (`LaunchCommand::ResumeColumn`), a column stopped over its arrangement stays silent, launches
+  and stops that were waiting wait for the next boundary again, and the launch quantisation and
+  a scene's tempo carry over (`LaunchCommand::SetLaunchTempo`). Only the moment the device needs
+  to open is lost.
 
 ## To observe
 

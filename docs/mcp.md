@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -62,13 +62,17 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   exclusive mode is possible, plus the output `chosen`. `audio.setOutput {host?, device?,
   sample_rate?, buffer_frames?, exclusive?}` changes the parts given (an empty text or 0 goes back
   to the default; a new host forgets the device) and reopens the active project's output there,
-  the transport where it was (while playing, the play start marker moves to the playhead) and the
+  the transport where it was (the play start marker stays; while playing, playback goes on from
+  the playhead with the launched clips playing on and the launches still waiting, at the launch
+  quantisation and scene tempo there were) and the
   plug-ins running on when the sample rate stays the same; a device that is not there plays the
-  default output and the result's `notice` says so. The engine renders in blocks of
+  default output and the result's `notice` says so. The choice is kept: while the default plays
+  in its place, Suhina looks every few seconds whether the chosen device is back and moves the
+  output there, the same way. The engine renders in blocks of
   `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
-  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns` and
-  `failed`. Without `--audio`, `audio.devices` returns an error.
+  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns`,
+  `failed` and `fallback` (it plays in place of a chosen host or device that is not there). Without `--audio`, `audio.devices` returns an error.
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.stop` returns the playhead to the

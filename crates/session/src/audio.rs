@@ -94,6 +94,22 @@ impl OutputChoice {
         }
         Ok(next)
     }
+
+    /// Whether `hosts` lists the host and device this choice names (the default host when it
+    /// names none; any device when it names none). Names compare as the output layer compares
+    /// them: without surrounding spaces, ignoring ASCII case.
+    pub fn found_in(&self, hosts: &[HostInfo]) -> bool {
+        let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+        let host = match &self.host {
+            Some(name) => hosts.iter().find(|h| same(&h.name, name)),
+            None => hosts.iter().find(|h| h.default),
+        };
+        match (host, &self.device) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(host), Some(device)) => host.devices.iter().any(|d| same(&d.name, device)),
+        }
+    }
 }
 
 /// An audio host on this system and its output devices.
@@ -142,6 +158,9 @@ pub struct OutputInfo {
     pub underruns: u64,
     /// The device reported an error (unplugged, taken by another program).
     pub failed: bool,
+    /// The chosen host or device was not there when the output opened, so another one (the
+    /// default) plays in its place until it is back.
+    pub fallback: bool,
 }
 
 impl OutputInfo {
@@ -156,6 +175,7 @@ impl OutputInfo {
             "latency_ms": (self.latency_ms * 100.0).round() / 100.0,
             "underruns": self.underruns,
             "failed": self.failed,
+            "fallback": self.fallback,
         })
     }
 
@@ -205,6 +225,14 @@ pub trait AudioSystem: Send + Sync {
         choice: &OutputChoice,
         previous: Option<Player>,
     ) -> Result<Opened, String>;
+
+    /// Whether the host and device `choice` names are there now, so an output playing in their
+    /// place can go back to them; `None` while that is not known yet. Asked every few seconds
+    /// from the thread that owns the projects, so it must answer at once: the output layer
+    /// looks in the background and gives the last answer. This one lists the hosts.
+    fn chosen_present(&self, choice: &OutputChoice) -> Option<bool> {
+        Some(choice.found_in(&self.hosts()))
+    }
 }
 
 static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
@@ -230,7 +258,7 @@ static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
     },
     CommandSpec {
         id: "audio.info",
-        label: "Say what the active project plays on now: host, device, sample rate, buffer frames, the engine's block, measured latency and underruns",
+        label: "Say what the active project plays on now: host, device, sample rate, buffer frames, the engine's block, measured latency and underruns, and whether it plays in place of a chosen device that is not there",
         params: &[],
         kind: CommandKind::Audio,
         run: info,
@@ -301,40 +329,91 @@ fn info(projects: &mut Projects, _: &Value) -> Result<Value, CommandError> {
     })
 }
 
-/// Where the transport was, to put it back on a new output.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Where the transport was, to put it back on a new output: the play start marker, the
+/// playhead, and what the launcher plays and has queued.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Transport {
     running: bool,
     beat: f64,
     marker: f64,
     metronome: bool,
+    tempo_bpm: f64,
+    quantization: Option<suhina_engine::Quantization>,
+    /// Columns that play launched clips or have a launch or stop queued.
+    columns: Vec<ColumnState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ColumnState {
+    column: usize,
+    status: suhina_engine::ColumnStatus,
+    elapsed_beats: f64,
 }
 
 impl Transport {
     pub(crate) fn of(player: &Player) -> Self {
         let monitor = player.monitor();
+        let running = monitor.running();
+        let columns = if running {
+            (0..monitor.columns())
+                .filter_map(|column| {
+                    let status = monitor.column(column)?;
+                    let elapsed_beats = monitor.elapsed_beats(column).unwrap_or(0.0);
+                    (status.overrides_arrangement || status.playing.is_some() || status.queued.is_some())
+                        .then_some(ColumnState { column, status, elapsed_beats })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         Self {
-            running: monitor.running(),
+            running,
             beat: monitor.beat(),
             marker: monitor.start_beat(),
             metronome: monitor.metronome(),
+            tempo_bpm: monitor.tempo_bpm(),
+            quantization: player.quantization(),
+            columns,
         }
     }
 
-    /// Sends `player` the commands that bring it to this state: the marker where it was, or,
-    /// while playing, the playhead (which then is where the next start carries on from, as
-    /// after "stop here"), and the metronome.
-    pub(crate) fn restore(self, player: &mut Player) -> Result<(), CommandError> {
-        use suhina_engine::LaunchCommand;
-        let beat = if self.running { self.beat } else { self.marker };
-        if beat.is_finite() && beat > 0.0 {
-            player.send(LaunchCommand::SetPosition { beat })?;
+    /// Sends `player` the commands that bring it to this state, all applied before its first
+    /// block: the quantisation, the metronome and the marker; while playing, the start, a jump
+    /// to the playhead that leaves the marker where it is, the launcher's tempo, each column's
+    /// launched clip as far into it as it was (or the column's arrangement kept silent), and the
+    /// launches and stops that were waiting, which wait for the next boundary again.
+    pub(crate) fn restore(&self, player: &mut Player) -> Result<(), CommandError> {
+        use suhina_engine::{LaunchCommand, Queued};
+        if let Some(quantization) = self.quantization {
+            player.send(LaunchCommand::SetQuantization(quantization))?;
         }
         if self.metronome {
             player.send(LaunchCommand::SetMetronome { on: true, gain: None })?;
         }
-        if self.running {
-            player.send(LaunchCommand::Play)?;
+        if self.marker.is_finite() && self.marker > 0.0 {
+            player.send(LaunchCommand::SetPosition { beat: self.marker })?;
+        }
+        if !self.running {
+            return Ok(());
+        }
+        player.send(LaunchCommand::Play)?;
+        if self.beat.is_finite() && self.beat != self.marker {
+            player.send(LaunchCommand::Locate { beat: self.beat })?;
+        }
+        if self.tempo_bpm.is_finite() && self.tempo_bpm != player.monitor().tempo_bpm() {
+            player.send(LaunchCommand::SetLaunchTempo { bpm: self.tempo_bpm })?;
+        }
+        for state in &self.columns {
+            let column = state.column;
+            if state.status.overrides_arrangement {
+                let slot = state.status.playing;
+                player.send(LaunchCommand::ResumeColumn { column, slot, elapsed_beats: state.elapsed_beats })?;
+            }
+            match state.status.queued {
+                Some(Queued::Launch(slot)) => player.send(LaunchCommand::LaunchClip { column, slot })?,
+                Some(Queued::Stop) => player.send(LaunchCommand::StopColumn { column })?,
+                None => {}
+            }
         }
         Ok(())
     }
