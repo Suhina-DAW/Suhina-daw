@@ -19,6 +19,9 @@ const TOOLBAR: f32 = 22.0;
 const KEYS: f32 = 36.0;
 const RULER: f32 = 16.0;
 const VELOCITY_LANE: f32 = 72.0;
+/// The toolbar's icon size and the space between its buttons, in points.
+const TOOL_ICON: f32 = 14.0;
+const TOOL_GAP: f32 = 3.0;
 /// Key row heights and points per beat: the default and the zoom ranges.
 const DEFAULT_KEY_HEIGHT: f32 = 12.0;
 const KEY_HEIGHT_RANGE: (f32, f32) = (6.0, 32.0);
@@ -29,6 +32,8 @@ const KEY_ZOOM_PER_POINT: f32 = 0.004;
 const MIN_LINE_SPACING: f32 = 6.0;
 /// The most grid lines drawn in a frame, so a bad zoom can never draw without end.
 const MAX_LINES: usize = 4000;
+/// The most notes one command takes, so a stroke never builds one it cannot run.
+const MAX_NOTES_PER_COMMAND: usize = suhina_session::MAX_NOTES_PER_COMMAND;
 /// How close to a note's right end, in points, the pointer resizes it instead of moving it.
 const EDGE: f32 = 5.0;
 /// How close to a velocity stem, in points, the pointer grabs it.
@@ -192,17 +197,25 @@ pub enum Tool {
     /// Selects, moves and resizes notes; a double-click adds or deletes one.
     #[default]
     Select,
-    /// A click adds a note; dragging sideways while holding sets its length.
+    /// A click adds a note; dragging sideways while holding sets its length. With Shift held,
+    /// dragging draws notes back to back, each the last note's length.
     Draw,
     /// Dragging paints notes one note length apart, each in the row under the pointer.
     Paint,
     /// A click deletes a note; dragging deletes every note the pointer passes over.
     Erase,
+    /// Dragging draws a cut line; the notes it crosses are split where it crosses them.
+    Slice,
 }
 
 impl Tool {
-    pub const ALL: [(Self, &'static str); 4] =
-        [(Self::Select, "Select"), (Self::Draw, "Draw"), (Self::Paint, "Paint"), (Self::Erase, "Erase")];
+    pub const ALL: [(Self, &'static str); 5] = [
+        (Self::Select, "Select"),
+        (Self::Draw, "Draw"),
+        (Self::Paint, "Paint"),
+        (Self::Erase, "Erase"),
+        (Self::Slice, "Slice"),
+    ];
 }
 
 /// The grid values the toolbar's menu offers, as `launcher.setQuantization` takes them.
@@ -211,7 +224,7 @@ pub const GRID_VALUES: [&str; 14] = [
 ];
 
 /// A drag in progress, from where it started.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Gesture {
     /// The selection follows the grabbed note.
     Move { from: Pos2, grabbed: usize },
@@ -227,6 +240,14 @@ enum Gesture {
     Paint,
     /// Notes the drag passes over are deleted ([`PianoRollState::erasing`]).
     Erase,
+    /// A cut line from where the press was; the notes it crosses are split when it is let go.
+    Slice { from: Pos2 },
+    /// Shift and Draw: notes back to back along the row the drag started in
+    /// ([`Gestures::draw_run`]).
+    DrawRun,
+    /// The selection follows the keys the drag passes over in the key column; `add` keeps the
+    /// rest of the selection, as it was when the click began.
+    KeySelect { add: bool },
 }
 
 /// What the piano roll keeps between frames.
@@ -247,7 +268,7 @@ pub struct PianoRollState {
     selecting_new: bool,
     gesture: Option<Gesture>,
     panning: bool,
-    /// The settings quantise uses, and whether the Quantise panel is open.
+    /// The settings quantise uses, and whether the quantise block in the clip column is open.
     pub quantize: QuantizeSettings,
     pub quantize_open: bool,
     /// The toolbar's tool.
@@ -261,6 +282,10 @@ pub struct PianoRollState {
     erasing: BTreeSet<usize>,
     /// A grid value picked in the toolbar this frame, for the window to keep.
     pub grid_picked: Option<&'static str>,
+    /// The key the key column is playing, if any, and where the pointer last was on it: the
+    /// window turns a change into `preview.noteOn` and `preview.noteOff`.
+    playing_key: Option<u8>,
+    hover_key: Option<u8>,
 }
 
 impl Default for PianoRollState {
@@ -283,11 +308,28 @@ impl Default for PianoRollState {
             stroke: Vec::new(),
             erasing: BTreeSet::new(),
             grid_picked: None,
+            playing_key: None,
+            hover_key: None,
         }
     }
 }
 
 impl PianoRollState {
+    /// What the toolbar's Cut, Copy, Paste and Duplicate buttons do: the same as Ctrl+X, Ctrl+C,
+    /// Ctrl+V and the duplicate key, on the selected notes (› Copy, cut, paste and duplicate).
+    /// `None` when there is nothing to act on: no note selected, or nothing copied for Paste.
+    fn clipboard_action(&mut self, button: IconButton, clip: &PianoClip, copied: Option<usize>) -> Option<Action> {
+        let action = match button {
+            IconButton::Cut if !self.selected.is_empty() => "selection.cut",
+            IconButton::Copy if !self.selected.is_empty() => "selection.copy",
+            IconButton::Paste if copied.is_some_and(|n| n > 0) => "selection.paste",
+            IconButton::Duplicate if !self.selected.is_empty() => "selection.duplicate",
+            _ => return None,
+        };
+        // What the keys run: the same command with the same params.
+        self.key_action(action, clip, 0.0, copied)
+    }
+
     /// `note.delete` for the selected notes, when the piano roll has the keyboard and notes are
     /// selected; the selection is then cleared.
     pub fn delete_selected(&mut self) -> Option<Action> {
@@ -357,6 +399,12 @@ impl PianoRollState {
                 self.tool = if self.tool == Tool::Draw { Tool::Select } else { Tool::Draw };
                 return None;
             }
+            "pianoRoll.tool1" | "pianoRoll.tool2" | "pianoRoll.tool3" | "pianoRoll.tool4" | "pianoRoll.tool5" => {
+                if let Some(tool) = tool_of(action) {
+                    self.tool = tool;
+                }
+                return None;
+            }
             _ if chosen.is_empty() => return None,
             _ => {}
         }
@@ -420,12 +468,59 @@ impl PianoRollState {
         self.erasing.clear();
     }
 
-    /// Keeps `note`'s length and velocity for the next note drawn.
+    /// Keeps `note`'s length and velocity for the next note drawn, and for the key column's
+    /// preview.
     fn remember(&mut self, note: &Note) {
         if note.duration.is_finite() && note.duration > 0.0 {
             self.last_length = note.duration;
         }
         self.last_velocity = suhina_session::midi_velocity(note.velocity);
+    }
+
+    /// Presses the key column's `key`: `preview.noteOn` through the clip's track. The key that
+    /// was sounding before goes off in the same call. `None` when that key already sounds.
+    pub fn key_press(&mut self, clip: &PianoClip, key: u8) -> Option<Action> {
+        if self.playing_key == Some(key) {
+            return None;
+        }
+        let track = clip.address.get("track").and_then(Value::as_u64)?;
+        self.playing_key = Some(key);
+        Some(Action::new("preview.noteOn", json!({ "track": track, "key": key, "velocity": self.last_velocity })))
+    }
+
+    /// Lets go of the key the key column is playing, `preview.noteOff`; `None` when none sounds.
+    pub fn key_release(&mut self, clip: &PianoClip) -> Option<Action> {
+        let key = self.playing_key.take()?;
+        let track = clip.address.get("track").and_then(Value::as_u64)?;
+        Some(Action::new("preview.noteOff", json!({ "track": track, "key": key })))
+    }
+
+    /// Every note of the keys in `pitches` is selected; `add` keeps the rest of the selection,
+    /// else it is replaced. Ctrl+click and Ctrl+drag on the key column use it.
+    pub fn select_pitches(&mut self, clip: &PianoClip, pitches: &[u8], add: bool) {
+        if !add {
+            self.selected.clear();
+        }
+        for (index, note) in clip.notes.iter().enumerate() {
+            if pitches.contains(&note.key) {
+                self.selected.insert(index);
+            }
+        }
+    }
+
+    /// The key the pointer is over, drawn lit.
+    pub fn hover_key(&self) -> Option<u8> {
+        self.hover_key
+    }
+
+    /// The key that is sounding, drawn lit.
+    pub fn playing_key(&self) -> Option<u8> {
+        self.playing_key
+    }
+
+    /// The length and velocity a new note takes, for the key column's preview.
+    pub fn set_preview_velocity(&mut self, midi: u8) {
+        self.last_velocity = midi.clamp(1, 127);
     }
 
     /// The note a press at `pos` would draw: its start on the grid line before the pointer
@@ -460,6 +555,175 @@ fn add_params(clip: &PianoClip, notes: &[Note]) -> Value {
         })
         .collect();
     params
+}
+
+/// The tool a `pianoRoll.tool*` action chooses, if it is one.
+fn tool_of(action: &str) -> Option<Tool> {
+    let index = action.strip_prefix("pianoRoll.tool")?;
+    let index: usize = index.parse().ok()?;
+    index.checked_sub(1).and_then(|i| Tool::ALL.get(i)).map(|(tool, _)| *tool)
+}
+
+/// What the window tells the piano roll about the settings that change what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Options {
+    /// A right-click on a note deletes it in the Draw and Paint tools: the Draw-first keymap
+    /// preset (› Keymap presets in `docs/spec/ui-clip-editor.md`).
+    pub right_click_deletes: bool,
+}
+
+/// What the piano roll needs from the window besides its own state, for one frame: the settings
+/// that change what it does, the keys its buttons and tooltips show, and how many notes a paste
+/// would add (the session's note clipboard).
+pub struct Context<'a> {
+    pub options: Options,
+    pub keymap: &'a crate::keymap::Keymap,
+    pub copied: Option<usize>,
+}
+
+/// The toolbar's buttons: one shape each, drawn in code with our own strokes, as
+/// [`crate::browser_view`]'s icons are. `active` marks the note clipboard's buttons while there
+/// is something to act on, and the quantise block while it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IconButton {
+    Select,
+    Draw,
+    Paint,
+    Erase,
+    Slice,
+    Cut,
+    Copy,
+    Paste,
+    Duplicate,
+    Quantise,
+}
+
+impl IconButton {
+    /// What the button is called, for its tooltip and its accessible label.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Select => "Select",
+            Self::Draw => "Draw",
+            Self::Paint => "Paint",
+            Self::Erase => "Erase",
+            Self::Slice => "Slice",
+            Self::Cut => "Cut",
+            Self::Copy => "Copy",
+            Self::Paste => "Paste",
+            Self::Duplicate => "Duplicate",
+            Self::Quantise => "Quantise",
+        }
+    }
+
+    /// The action id whose key the tooltip shows ("Draw (2)"), when the button has one.
+    fn action(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Select => "pianoRoll.tool1",
+            Self::Draw => "pianoRoll.tool2",
+            Self::Paint => "pianoRoll.tool3",
+            Self::Erase => "pianoRoll.tool4",
+            Self::Slice => "pianoRoll.tool5",
+            Self::Cut => "selection.cut",
+            Self::Copy => "selection.copy",
+            Self::Paste => "selection.paste",
+            Self::Duplicate => "selection.duplicate",
+            Self::Quantise => return None,
+        })
+    }
+
+    /// Our own strokes for the shape, in a 14 px box around `rect`'s centre.
+    fn draw(self, painter: &egui::Painter, rect: Rect, color: Color32) {
+        let c = rect.center();
+        let stroke = Stroke::new(1.1, color);
+        let at = |x: f32, y: f32| c + Vec2::new(x, y);
+        let line = |a: (f32, f32), b: (f32, f32)| painter.line_segment([at(a.0, a.1), at(b.0, b.1)], stroke);
+        match self {
+            // An arrow pointing up and to the left.
+            Self::Select => {
+                line((-1.5, 5.0), (-1.5, -5.0));
+                line((-1.5, -5.0), (5.0, 0.5));
+                line((5.0, 0.5), (-1.5, 1.5));
+                line((-1.5, 1.5), (-4.0, 5.5));
+            }
+            // A pencil, lying along the diagonal.
+            Self::Draw => {
+                line((-6.0, 6.0), (3.5, -3.5));
+                line((3.5, -3.5), (6.0, -1.0));
+                line((6.0, -1.0), (-3.5, 8.5));
+                line((-3.5, 8.5), (-6.0, 6.0));
+                line((-6.0, 6.0), (-3.0, 6.5));
+                line((-3.0, 6.5), (-3.5, 8.5));
+            }
+            // A brush: a short handle and a wide head.
+            Self::Paint => {
+                line((-6.5, 6.5), (-2.5, 2.5));
+                line((-2.5, 2.5), (1.5, 6.5));
+                line((1.5, 6.5), (6.5, 1.5));
+                line((6.5, 1.5), (2.5, -2.5));
+                line((2.5, -2.5), (-2.5, 2.5));
+                line((2.5, -2.5), (6.0, -6.0));
+            }
+            // An eraser, tilted.
+            Self::Erase => {
+                line((-6.0, 2.0), (2.0, -6.0));
+                line((2.0, -6.0), (6.0, -2.0));
+                line((6.0, -2.0), (-2.0, 6.0));
+                line((-2.0, 6.0), (-6.0, 2.0));
+                line((-3.0, 5.0), (5.0, -3.0));
+            }
+            // A blade: a handle with a straight edge under it.
+            Self::Slice => {
+                line((-5.5, -5.5), (1.5, 1.5));
+                line((1.5, 1.5), (5.5, 1.5));
+                line((5.5, 1.5), (5.5, 5.5));
+                line((5.5, 5.5), (-5.5, 5.5));
+                line((-5.5, 5.5), (-5.5, 1.5));
+            }
+            // A sheet with a tab: copy.
+            Self::Copy => {
+                let page = Rect::from_center_size(at(0.5, 1.0), Vec2::new(9.0, 11.0));
+                painter.rect_stroke(page, 0.0, stroke, StrokeKind::Inside);
+                painter.line_segment([at(-2.5, -6.0), at(-2.5, -4.5)], stroke);
+                painter.line_segment([at(-2.5, -6.0), at(3.5, -6.0)], stroke);
+                painter.line_segment([at(3.5, -6.0), at(3.5, -4.5)], stroke);
+            }
+            // Two sheets, one behind the other: duplicate.
+            Self::Duplicate => {
+                painter.rect_stroke(
+                    Rect::from_center_size(at(-1.5, -1.5), Vec2::splat(8.0)),
+                    0.0,
+                    stroke,
+                    StrokeKind::Inside,
+                );
+                let front = Rect::from_center_size(at(1.5, 1.5), Vec2::splat(8.0));
+                painter.rect_filled(front, 0.0, theme::panel_background());
+                painter.rect_stroke(front, 0.0, stroke, StrokeKind::Inside);
+            }
+            // Scissors: two rings and the blades crossing over them.
+            Self::Cut => {
+                painter.circle_stroke(at(-2.0, 4.0), 2.0, stroke);
+                painter.circle_stroke(at(2.0, 4.0), 2.0, stroke);
+                line((-3.0, 2.5), (4.0, -5.0));
+                line((3.0, 2.5), (-4.0, -5.0));
+            }
+            // A clipboard with a page being laid onto it: paste.
+            Self::Paste => {
+                let board = Rect::from_center_size(at(0.0, 1.0), Vec2::new(10.0, 12.0));
+                painter.rect_stroke(board, 0.0, stroke, StrokeKind::Inside);
+                painter.rect_filled(Rect::from_center_size(at(0.0, -5.5), Vec2::new(5.0, 2.5)), 0.0, color);
+                line((-3.0, 0.0), (3.0, 0.0));
+                line((-3.0, 3.0), (3.0, 3.0));
+            }
+            // Notes snapping onto a line: the quantise button.
+            Self::Quantise => {
+                line((-6.0, 5.5), (6.0, 5.5));
+                for (x, y) in [(-3.5, -1.0), (0.0, -4.0), (3.5, -1.5)] {
+                    painter.rect_filled(Rect::from_center_size(at(x, y), Vec2::new(4.0, 3.0)), 0.0, color);
+                    line((x, y + 1.5), (x, 5.5));
+                }
+            }
+        }
+    }
 }
 
 /// Where things are this frame.
@@ -518,6 +782,15 @@ impl NoteGrid {
             step *= 2.0;
         }
         Self { step, snaps }
+    }
+
+    /// The grid line nearest to `beat`: what a slice snaps its cut to.
+    pub fn nearest_line(&self, beat: f64) -> f64 {
+        if !beat.is_finite() {
+            return 0.0;
+        }
+        let snapped = self.place(beat.max(0.0), false, false);
+        snapped.clamp(0.0, f64::from(BEAT_LIMIT))
     }
 
     /// `beat` on the nearest line (or the line before it with `down`), unless `free` or there is
@@ -585,12 +858,144 @@ fn velocity_height(velocity: f32, lane: Rect) -> f32 {
     (lane.height() - 4.0).max(0.0) * v / 127.0
 }
 
-/// Draws the piano roll for `clip` in `area` and adds the edits made in it to `actions`.
-pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollState, actions: &mut Vec<Action>) {
+/// The modifiers and buttons this frame, read once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Inputs {
+    shift: bool,
+    alt: bool,
+    command: bool,
+    /// The right mouse button is held: with the wheel it chooses the tools.
+    right: bool,
+}
+
+/// What gestures in one clip work with: where things are, the clip and its grid.
+struct Gestures<'a> {
+    layout: &'a Layout,
+    clip: &'a PianoClip,
+    grid: NoteGrid,
+}
+
+impl Gestures<'_> {
+    /// `note.delete` for one note, clearing the selection as the erase click does.
+    fn delete_note(&self, state: &mut PianoRollState, actions: &mut Vec<Action>, index: usize) {
+        state.selected.clear();
+        let mut params = self.clip.address.clone();
+        params["notes"] = json!([index]);
+        actions.push(Action::new("note.delete", params));
+    }
+
+    /// Adds one note where `pos` is, `note.add` for it, and selects it.
+    fn add_note(&self, state: &mut PianoRollState, actions: &mut Vec<Action>, pos: Pos2, free: bool) {
+        if let Some(note) = state.new_note(self.layout, self.clip, self.grid, pos, free) {
+            actions.push(Action::new("note.add", add_params(self.clip, &[note])));
+            // `note.add` appends: the new note is the next index.
+            state.selected = BTreeSet::from([self.clip.notes.len()]);
+        }
+    }
+
+    /// The notes a Shift+Draw stroke has drawn so far, one step on from the last, up to where
+    /// the pointer is: the first starts where the press was, in the row it was in, and each is as
+    /// long as the note last drawn or clicked. A stroke adds at most as many notes as one command
+    /// takes, and never past the furthest beat.
+    fn draw_run(&self, state: &mut PianoRollState, now: Pos2, free: bool) {
+        let Some(first) = state.stroke.first().copied() else { return };
+        let length = if first.duration > 0.0 { first.duration } else { self.grid.step.max(MIN_LENGTH) };
+        let end =
+            if free { self.layout.beat_at(now.x).max(0.0) } else { self.grid.nearest_line(self.layout.beat_at(now.x)) };
+        let mut time = first.time;
+        while time + length <= end + EPSILON {
+            let taken = state.stroke.iter().any(|n| (n.time - time).abs() < EPSILON)
+                || self.clip.notes.iter().any(|n| n.key == first.key && (n.time - time).abs() < EPSILON);
+            if !taken && state.stroke.len() < MAX_NOTES_PER_COMMAND {
+                state.stroke.push(Note { time, ..first });
+            }
+            time += length;
+            if time > f64::from(BEAT_LIMIT) {
+                break;
+            }
+        }
+    }
+}
+
+/// The key column: the keys it draws, what a press plays and what Ctrl+click or Ctrl+drag
+/// selects. A plain press and drag up or down plays the keys the pointer passes over, one at a
+/// time; Ctrl+click selects every note of a pitch and Ctrl+drag the notes of every pitch the
+/// drag passes over, without playing anything.
+fn key_column(
+    ui: &mut Ui,
+    keys: &Rect,
+    layout: &Layout,
+    clip: &PianoClip,
+    state: &mut PianoRollState,
+    inputs: Inputs,
+    actions: &mut Vec<Action>,
+) {
+    if keys.height() <= 1.0 {
+        return;
+    }
+    let response = ui.interact(*keys, Id::new("piano-roll-keys"), Sense::click_and_drag());
+    let hovered = ui.ctx().pointer_hover_pos().and_then(|p| keys.contains(p).then(|| layout.key_at(p.y)).flatten());
+    let pressed = response.interact_pointer_pos().filter(|p| keys.contains(*p)).and_then(|p| layout.key_at(p.y));
+    let selecting = inputs.command || inputs.shift;
+    // The pointer is down in the column: the key under it plays, or is selected with Ctrl.
+    if let Some(key) = pressed
+        && ui.input(|i| i.pointer.primary_down())
+    {
+        state.focused = true;
+        match state.gesture {
+            // A Ctrl or Shift drag that began here keeps selecting the keys it passes over; the
+            // selection is only replaced once, when it began.
+            Some(Gesture::KeySelect { add }) => state.select_pitches(clip, &[key], add),
+            _ if selecting => {
+                let add = inputs.shift;
+                state.gesture = Some(Gesture::KeySelect { add });
+                state.select_pitches(clip, &[key], add);
+            }
+            _ => play_key(state, clip, actions, key),
+        }
+    }
+    // Let go, or the pointer off the column: the note goes off. A gesture that belongs to
+    // another part of the piano roll (the grid's) is left alone.
+    let ours = matches!(state.gesture, Some(Gesture::KeySelect { .. })) || state.playing_key().is_some();
+    if ours && (ui.input(|i| i.pointer.any_released()) || (state.playing_key().is_some() && hovered.is_none())) {
+        state.gesture = None;
+        if let Some(action) = state.key_release(clip) {
+            actions.push(action);
+        }
+    }
+    state.hover_key = hovered;
+}
+
+/// Plays `key`: the key that was sounding goes off and `key` goes on, so a drag up and down the
+/// column sounds one key at a time.
+fn play_key(state: &mut PianoRollState, clip: &PianoClip, actions: &mut Vec<Action>, key: u8) {
+    if state.playing_key() == Some(key) {
+        return;
+    }
+    if let Some(action) = state.key_release(clip) {
+        actions.push(action);
+    }
+    if let Some(action) = state.key_press(clip, key) {
+        actions.push(action);
+    }
+}
+
+/// Draws the piano roll for `clip` in `area` and adds the edits it makes, and the key column's
+/// `preview.*` notes, to `actions`.
+pub fn show(
+    ui: &mut Ui,
+    area: Rect,
+    clip: &PianoClip,
+    state: &mut PianoRollState,
+    cx: Context<'_>,
+    actions: &mut Vec<Action>,
+) {
+    let Context { options, keymap, copied } = cx;
     if state.shown.as_ref() != Some(&clip.address) {
         state.shown = Some(clip.address.clone());
         state.selected.clear();
         state.gesture = None;
+        state.playing_key = None;
         fit(state, area, clip);
     }
     // Keys run before the piano roll is drawn, and their commands after it: notes a paste or a
@@ -610,18 +1015,21 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
     let ruler = Rect::from_min_max(Pos2::new(keys.right(), area.top()), Pos2::new(area.right(), keys.top()));
     let grid_rect = Rect::from_min_max(Pos2::new(keys.right(), keys.top()), Pos2::new(area.right(), keys.bottom()));
     let lane = Rect::from_min_max(Pos2::new(keys.right(), keys.bottom()), area.max);
-    toolbar(ui, toolbar_rect, clip, state);
+    toolbar(ui, toolbar_rect, clip, state, keymap, copied, actions);
     if grid_rect.width() <= 1.0 || grid_rect.height() <= 1.0 {
         return;
     }
 
-    let (pressed, alt, shift, command) = ui.input(|i| {
-        (i.pointer.any_pressed(), i.modifiers.alt, i.modifiers.shift, i.modifiers.command || i.modifiers.ctrl)
-    });
-    if pressed {
+    let inputs = Inputs {
+        alt: ui.input(|i| i.modifiers.alt),
+        shift: ui.input(|i| i.modifiers.shift),
+        command: ui.input(|i| i.modifiers.command || i.modifiers.ctrl),
+        right: ui.input(|i| i.pointer.button_down(PointerButton::Secondary)),
+    };
+    if ui.input(|i| i.pointer.any_pressed()) {
         state.focused = widgets::pointer_over(ui, whole).is_some();
     }
-    scroll_and_zoom(ui, state, area, grid_rect, shift, alt);
+    scroll_and_zoom(ui, state, area, grid_rect, inputs);
     state.scroll.y = state.scroll.y.clamp(0.0, (128.0 * state.key_height - grid_rect.height()).max(0.0));
     let width = ((clip.length + clip.bar_beats * 4.0) as f32 * state.beat_width).max(grid_rect.width());
     state.scroll.x = state.scroll.x.clamp(0.0, (width - grid_rect.width()).max(0.0));
@@ -635,6 +1043,7 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         key_height: state.key_height,
     };
     let grid = NoteGrid::new(clip.grid, state.beat_width);
+    let gesture = Gestures { layout: &layout, clip, grid };
 
     // The grid's gestures: one widget for the whole grid, so a note under the pointer and the
     // empty grid around it are told apart by where the press was.
@@ -642,9 +1051,10 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
     let pointer = response.interact_pointer_pos().or_else(|| ui.ctx().pointer_hover_pos());
     if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| grid_rect.contains(*p)) {
         let over = note_at(&layout, &clip.notes, pos);
-        let cursor = match (state.gesture, over, state.tool) {
+        let cursor = match (&state.gesture, over, state.tool) {
             (Some(Gesture::Resize { .. }), _, _) => Some(CursorIcon::ResizeHorizontal),
             (Some(Gesture::Move { .. }), _, _) => Some(CursorIcon::Grabbing),
+            (Some(Gesture::Slice { .. }), _, _) | (None, _, Tool::Slice) => Some(CursorIcon::Text),
             (Some(Gesture::Erase), _, _) | (None, _, Tool::Erase) => Some(CursorIcon::NotAllowed),
             (None, Some((_, true)), _) => Some(CursorIcon::ResizeHorizontal),
             (Some(Gesture::Draw { .. } | Gesture::Paint), _, _) | (None, None, Tool::Draw | Tool::Paint) => {
@@ -655,6 +1065,16 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         if let Some(cursor) = cursor {
             ui.ctx().set_cursor_icon(cursor);
         }
+    }
+    if std::env::var("SUHINA_TRACE_CLICK").is_ok() {
+        eprintln!(
+            "click? {} dbl {} pos {pointer:?} over {:?} tool {:?} selected {:?}",
+            response.clicked(),
+            response.double_clicked(),
+            pointer.map(|p| note_at(&layout, &clip.notes, p)),
+            state.tool,
+            state.selected
+        );
     }
     if response.double_clicked()
         && state.tool == Tool::Select
@@ -667,31 +1087,15 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
                 params["notes"] = json!([index]);
                 actions.push(Action::new("note.delete", params));
             }
-            None => {
-                if let Some(key) = layout.key_at(pos.y) {
-                    let time = grid.place(layout.beat_at(pos.x).max(0.0), alt, true).max(0.0);
-                    let length = if grid.snaps && !alt { clip.grid.max(MIN_LENGTH) } else { FREE_LENGTH };
-                    let mut params = clip.address.clone();
-                    params["notes"] =
-                        json!([{ "time": round_beat(time), "length": length, "key": key, "velocity": NEW_VELOCITY }]);
-                    actions.push(Action::new("note.add", params));
-                    // `note.add` appends: the new note is the next index.
-                    state.selected = BTreeSet::from([clip.notes.len()]);
-                }
-            }
+            None => gesture.add_note(state, actions, pos, inputs.alt),
         }
     } else if response.clicked()
         && let Some(pos) = pointer
     {
         match (note_at(&layout, &clip.notes, pos), state.tool) {
-            (Some((index, _)), Tool::Erase) => {
-                state.selected.clear();
-                let mut params = clip.address.clone();
-                params["notes"] = json!([index]);
-                actions.push(Action::new("note.delete", params));
-            }
+            (Some((index, _)), Tool::Erase) => gesture.delete_note(state, actions, index),
             (None, Tool::Erase) => {}
-            (Some((index, _)), _) if shift || command => {
+            (Some((index, _)), _) if inputs.shift || inputs.command => {
                 if !state.selected.remove(&index) {
                     state.selected.insert(index);
                 }
@@ -702,15 +1106,18 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
                     state.remember(note);
                 }
             }
-            (None, Tool::Draw | Tool::Paint) => {
-                if let Some(note) = state.new_note(&layout, clip, grid, pos, alt) {
-                    actions.push(Action::new("note.add", add_params(clip, &[note])));
-                    // `note.add` appends: the new note is the next index.
-                    state.selected = BTreeSet::from([clip.notes.len()]);
-                }
-            }
+            (None, Tool::Draw | Tool::Paint) => gesture.add_note(state, actions, pos, inputs.alt),
+            (None, Tool::Slice) => {}
             (None, Tool::Select) => state.selected.clear(),
         }
+    }
+    if response.clicked_by(PointerButton::Secondary)
+        && options.right_click_deletes
+        && matches!(state.tool, Tool::Draw | Tool::Paint)
+        && let Some(pos) = pointer
+        && let Some((index, _)) = note_at(&layout, &clip.notes, pos)
+    {
+        gesture.delete_note(state, actions, index);
     }
     if response.drag_started_by(PointerButton::Primary) {
         let from = ui.input(|i| i.pointer.press_origin()).or(pointer).unwrap_or(grid_rect.center());
@@ -718,21 +1125,31 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         state.erasing.clear();
         state.gesture = Some(match (note_at(&layout, &clip.notes, from), state.tool) {
             (_, Tool::Erase) => Gesture::Erase,
+            (_, Tool::Slice) => Gesture::Slice { from },
+            // Shift and Draw repeat the last note's length along the row the drag started in:
+            // the first note now, the rest as the drag reaches ([`Gestures::draw_run`]); the
+            // whole stroke is one `note.add` when the drag ends.
+            (None, Tool::Draw) if inputs.shift => {
+                if let Some(note) = state.new_note(&layout, clip, grid, from, inputs.alt) {
+                    state.stroke.push(note);
+                }
+                Gesture::DrawRun
+            }
             (None, Tool::Draw) => Gesture::Draw { from },
             (_, Tool::Paint) => {
-                state.stroke.extend(state.new_note(&layout, clip, grid, from, alt));
+                state.stroke.extend(state.new_note(&layout, clip, grid, from, inputs.alt));
                 Gesture::Paint
             }
             (Some((grabbed, edge)), _) => {
                 if !state.selected.contains(&grabbed) {
-                    if !(shift || command) {
+                    if !(inputs.shift || inputs.command) {
                         state.selected.clear();
                     }
                     state.selected.insert(grabbed);
                 }
                 if edge { Gesture::Resize { from, grabbed } } else { Gesture::Move { from, grabbed } }
             }
-            (None, Tool::Select) => Gesture::Select { from, add: shift || command },
+            (None, Tool::Select) => Gesture::Select { from, add: inputs.shift || inputs.command },
         });
     }
 
@@ -745,7 +1162,7 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
             && let Some(pos) = at
         {
             match stem_at(&layout, &clip.notes, &BTreeSet::new(), pos) {
-                Some(index) if shift || command => {
+                Some(index) if inputs.shift || inputs.command => {
                     if !state.selected.remove(&index) {
                         state.selected.insert(index);
                     }
@@ -765,8 +1182,13 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         }
     }
 
-    // The drag's effect, shown while it lasts and made a command when it ends.
-    let now = ui.input(|i| i.pointer.latest_pos());
+    // The key column: pressing a key plays it through the track's instrument while it is held,
+    // and Ctrl+click or Ctrl+drag selects the notes of that pitch or those pitches.
+    key_column(ui, &keys, &layout, clip, state, inputs, actions);
+
+    // The drag's effect, shown while it lasts and made a command when it ends. The pointer
+    // position is the interaction's own, so the frame a drag ends still has one.
+    let now = ui.input(|i| i.pointer.latest_pos()).or_else(|| ui.ctx().pointer_hover_pos()).or(pointer);
     let dragging = response.dragged_by(PointerButton::Primary)
         || lane_response.as_ref().is_some_and(|r| r.dragged_by(PointerButton::Primary));
     let stopped = response.drag_stopped_by(PointerButton::Primary)
@@ -774,6 +1196,7 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
     if dragging && let Some(now) = now {
         match state.gesture {
             Some(Gesture::Paint) => paint(state, &layout, clip, now),
+            Some(Gesture::DrawRun) => gesture.draw_run(state, now, inputs.alt),
             Some(Gesture::Erase) => {
                 if let Some((index, _)) = note_at(&layout, &clip.notes, now) {
                     state.erasing.insert(index);
@@ -783,18 +1206,18 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
         }
     }
     let chosen: Vec<Note> = state.selected.iter().filter_map(|i| clip.notes.get(*i).copied()).collect();
-    let preview = match (state.gesture, now) {
+    let preview = match (state.gesture.as_ref(), now) {
         (Some(Gesture::Draw { from }), Some(now)) if dragging || stopped => {
-            Some(Effect::Draw(drawn_note(state, &layout, clip, grid, from, now, alt)))
+            Some(Effect::Draw(drawn_note(state, &layout, clip, grid, *from, now, inputs.alt)))
         }
         (Some(gesture), Some(now)) if dragging || stopped => {
-            Some(effect(gesture, now, &layout, clip, &chosen, grid, alt))
+            Some(effect(gesture, now, &layout, clip, &chosen, grid, inputs.alt))
         }
         _ => None,
     };
     if stopped {
-        if let (Some(effect), Some(gesture)) = (preview, state.gesture) {
-            commit(gesture, effect, clip, state, actions, &layout);
+        if let (Some(effect), Some(gesture)) = (preview.clone(), state.gesture.take()) {
+            commit(&gesture, effect, clip, state, actions, &layout);
         }
         state.gesture = None;
     } else if !dragging && !ui.input(|i| i.pointer.primary_down()) {
@@ -805,11 +1228,20 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
 
     draw(ui, &layout, clip, state, grid, preview);
     for_readers(ui, &layout, clip, state);
-    quantize_panel(ui, Rect::from_min_max(area.min, Pos2::new(keys.right(), ruler.bottom())), state, actions);
 }
 
-/// The toolbar along the top of the piano roll: the tools, and the grid value on the right.
-fn toolbar(ui: &mut Ui, rect: Rect, clip: &PianoClip, state: &mut PianoRollState) {
+/// The toolbar along the top of the piano roll: the tools, the note clipboard and the quantise
+/// button as icons drawn in code, and the grid value at the right end. Returns nothing; a button
+/// that runs something adds to `actions`.
+fn toolbar(
+    ui: &mut Ui,
+    rect: Rect,
+    clip: &PianoClip,
+    state: &mut PianoRollState,
+    keymap: &crate::keymap::Keymap,
+    copied: Option<usize>,
+    actions: &mut Vec<Action>,
+) {
     if rect.height() < 4.0 {
         return;
     }
@@ -817,31 +1249,48 @@ fn toolbar(ui: &mut Ui, rect: Rect, clip: &PianoClip, state: &mut PianoRollState
     painter.rect_filled(rect, 0.0, theme::panel_background());
     painter.hline(rect.x_range(), rect.bottom() - 0.5, theme::hairline(theme::border()));
     let row = rect.shrink2(Vec2::new(4.0, 3.0));
-    let font = theme::ui_font(theme::TEXT_SMALL);
-    let mut x = row.left() + KEYS - 4.0;
-    for (tool, name) in Tool::ALL {
-        let width = painter.layout_no_wrap(name.to_string(), font.clone(), Color32::WHITE).size().x + 14.0;
-        let button = Rect::from_min_size(Pos2::new(x, row.top()), Vec2::new(width, row.height()));
-        x = button.right() + 1.0;
-        if button.right() > row.right() {
-            break;
+    let side = row.height().min(TOOL_ICON);
+    let x = std::cell::Cell::new(row.left() + KEYS - 4.0);
+    let place = || {
+        let area = Rect::from_min_size(Pos2::new(x.get(), row.top() + (row.height() - side) / 2.0), Vec2::splat(side));
+        x.set(area.right() + TOOL_GAP);
+        area
+    };
+    for (tool, button) in [
+        (Some(Tool::Select), IconButton::Select),
+        (Some(Tool::Draw), IconButton::Draw),
+        (Some(Tool::Paint), IconButton::Paint),
+        (Some(Tool::Erase), IconButton::Erase),
+        (Some(Tool::Slice), IconButton::Slice),
+    ] {
+        let area = place();
+        let chosen = tool == Some(state.tool);
+        if icon_button(ui, &painter, area, button, chosen, true, keymap) {
+            state.tool = tool.unwrap_or(state.tool);
         }
-        let response = widgets::button_area(ui, button, Id::new(("piano-roll-tool", name)), format!("{name} tool"));
-        let chosen = state.tool == tool;
-        response
-            .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, chosen, format!("{name} tool")));
-        if response.clicked() {
-            state.tool = tool;
-        }
-        let fill = if chosen { theme::control_active() } else { theme::control_background() };
-        painter.rect_filled(
-            button,
-            0.0,
-            crate::motion::mix(fill, theme::control_hover(), widgets::hover(ui, &response)),
-        );
-        let text = if chosen { theme::text_primary() } else { theme::text_secondary() };
-        widgets::text_in(&painter, button, Align2::CENTER_CENTER, name, font.clone(), text);
     }
+    // A divider, then the note clipboard's buttons.
+    x.set(x.get() + 2.0);
+    if x.get() < row.right() {
+        painter.vline(x.get(), row.top() + 2.0..=row.bottom() - 2.0, theme::hairline(theme::border_strong()));
+    }
+    x.set(x.get() + 5.0);
+    let selected = !state.selected.is_empty();
+    for button in [IconButton::Cut, IconButton::Copy, IconButton::Paste, IconButton::Duplicate] {
+        let area = place();
+        let active = matches!(button, IconButton::Paste) || selected;
+        if icon_button(ui, &painter, area, button, false, active, keymap)
+            && let Some(command) = state.clipboard_action(button, clip, copied)
+        {
+            actions.push(command);
+        }
+    }
+    x.set(x.get() + 2.0);
+    let quantise = place();
+    if icon_button(ui, &painter, quantise, IconButton::Quantise, state.quantize_open, true, keymap) {
+        state.quantize_open = !state.quantize_open;
+    }
+    let x = x.get();
     // The grid value, at the right end.
     let menu = Rect::from_min_max(Pos2::new(row.right() - 64.0, row.top()), row.max);
     if menu.left() < x + 40.0 {
@@ -849,7 +1298,14 @@ fn toolbar(ui: &mut Ui, rect: Rect, clip: &PianoClip, state: &mut PianoRollState
     }
     let label =
         Rect::from_min_max(Pos2::new(menu.left() - 34.0, row.top()), Pos2::new(menu.left() - 4.0, row.bottom()));
-    widgets::text_in(&painter, label, Align2::RIGHT_CENTER, "Grid", font, theme::text_hint());
+    widgets::text_in(
+        &painter,
+        label,
+        Align2::RIGHT_CENTER,
+        "Grid",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_hint(),
+    );
     let mono = theme::mono_font(theme::TEXT_SMALL);
     let mut chosen = clip.grid_name;
     let shown = chosen;
@@ -870,69 +1326,47 @@ fn toolbar(ui: &mut Ui, rect: Rect, clip: &PianoClip, state: &mut PianoRollState
     }
 }
 
-/// The Quantise button in the corner over the keys, and the panel it opens: the grid, the amount
-/// and whether ends move, kept for Ctrl+U, and a button that quantises now.
-fn quantize_panel(ui: &mut Ui, corner: Rect, state: &mut PianoRollState, actions: &mut Vec<Action>) {
-    // Its hit area keeps clear of the corner's edges, so a press just inside the grid or the keys
-    // reaches them and not the button.
-    let response = widgets::button_area(ui, corner.shrink(3.0), Id::new("piano-roll-quantize"), "Quantise");
-    if response.clicked() {
-        state.quantize_open = !state.quantize_open;
+/// One icon button: the shape in the tool's colours, a tooltip with its name and the key it has,
+/// and the same name as its accessible label. Returns whether it was clicked.
+fn icon_button(
+    ui: &Ui,
+    painter: &egui::Painter,
+    area: Rect,
+    button: IconButton,
+    chosen: bool,
+    active: bool,
+    keymap: &crate::keymap::Keymap,
+) -> bool {
+    let response = widgets::button_area(ui, area, Id::new(("piano-roll-icon", button.name())), button.name());
+    let hint = icon_hint(button, keymap);
+    let response = response.on_hover_text(hint.clone());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, active, chosen, hint.clone()));
+    if active {
+        let fill = if chosen { theme::control_active() } else { theme::control_background() };
+        painter.rect_filled(area, 0.0, crate::motion::mix(fill, theme::control_hover(), widgets::hover(ui, &response)));
     }
-    let painter = ui.painter_at(corner);
-    let hover = widgets::hover(ui, &response);
-    let fill = if state.quantize_open { theme::control_hover() } else { theme::control_background() };
-    painter.rect_filled(corner, 0.0, crate::motion::mix(fill, theme::control_hover(), hover));
-    widgets::text_in(
-        &painter,
-        corner,
-        Align2::CENTER_CENTER,
-        "Q",
-        theme::mono_font(theme::TEXT_TINY),
-        theme::text_value(),
-    );
-    if !state.quantize_open {
-        return;
-    }
-    let mut settings = state.quantize;
-    let mut apply = false;
-    let area = egui::Area::new(Id::new("piano-roll-quantize-panel"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(corner.left_bottom() + Vec2::new(0.0, 2.0))
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.label("Quantise");
-                egui::ComboBox::from_label("Grid").selected_text(settings.grid).show_ui(ui, |ui| {
-                    for grid in QUANTIZE_GRIDS {
-                        ui.selectable_value(&mut settings.grid, grid, grid);
-                    }
-                });
-                ui.add(egui::Slider::new(&mut settings.amount, 0.0..=100.0).suffix(" %").integer().text("Amount"));
-                ui.checkbox(&mut settings.ends, "Move ends too");
-                ui.horizontal(|ui| {
-                    apply = ui.button("Quantise notes").clicked();
-                    if ui.button("Close").clicked() {
-                        state.quantize_open = false;
-                    }
-                });
-            });
-        });
-    state.quantize = settings;
-    if apply && let Some(action) = state.quantize_selected() {
-        actions.push(action);
-    }
-    // A press outside the panel and its button, or Escape, closes it.
-    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    let outside = ui.input(|i| i.pointer.any_pressed())
-        && ui.ctx().pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !corner.contains(p))
-        && !egui::Popup::is_any_open(ui.ctx());
-    if escape || outside {
-        state.quantize_open = false;
+    let color = if !active {
+        theme::text_hint()
+    } else if chosen {
+        theme::text_primary()
+    } else {
+        theme::text_secondary()
+    };
+    button.draw(painter, area, color);
+    active && response.clicked()
+}
+
+/// The name and key an icon button shows, such as "Draw (2)": the key is the one the keymap has
+/// bound to the button's action now, so a rebound key (or one a preset moved) shows as it is.
+fn icon_hint(button: IconButton, keymap: &crate::keymap::Keymap) -> String {
+    match button.action().and_then(|id| keymap.label(id)) {
+        Some(key) => format!("{} ({key})", button.name()),
+        None => button.name().to_string(),
     }
 }
 
 /// What a gesture does with the pointer at `now`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Effect {
     Move(f64, i32),
     Resize(f64),
@@ -940,12 +1374,14 @@ enum Effect {
     Velocity(f64),
     /// The note a draw drag makes.
     Draw(Option<Note>),
+    /// A slice: the beat the cut is at, and the notes it crosses.
+    Slice(f64, Vec<usize>),
     /// A paint or erase stroke: what it does is in the state.
     Stroke,
 }
 
 fn effect(
-    gesture: Gesture,
+    gesture: &Gesture,
     now: Pos2,
     layout: &Layout,
     clip: &PianoClip,
@@ -963,16 +1399,39 @@ fn effect(
         Gesture::Resize { from, grabbed } => {
             let raw = f64::from((now.x - from.x) / layout.beat_width);
             clip.notes
-                .get(grabbed)
+                .get(*grabbed)
                 .map_or(Effect::Resize(0.0), |g| Effect::Resize(resize_by(raw, g, chosen, grid, free)))
         }
-        Gesture::Select { from, .. } => Effect::Select(Rect::from_two_pos(from, now)),
+        Gesture::Select { from, .. } => Effect::Select(Rect::from_two_pos(*from, now)),
         Gesture::Velocity { from, .. } => {
             let per_point = 127.0 / (layout.lane.height() - 4.0).max(1.0);
             Effect::Velocity(f64::from(-(now.y - from.y) * per_point).round())
         }
-        Gesture::Draw { .. } | Gesture::Paint | Gesture::Erase => Effect::Stroke,
+        Gesture::Slice { .. } => match slice_at(clip, layout, grid, now.x, free) {
+            Some((at, cut)) => Effect::Slice(at, cut),
+            None => Effect::Stroke,
+        },
+        Gesture::Draw { .. } | Gesture::DrawRun | Gesture::Paint | Gesture::Erase | Gesture::KeySelect { .. } => {
+            Effect::Stroke
+        }
     }
+}
+
+/// The beat a cut at `x` lands on, and the notes it crosses; `None` when it misses every note.
+/// The line's own x is used, so the cut is where the pointer is, not where the drag started.
+fn slice_at(clip: &PianoClip, layout: &Layout, grid: NoteGrid, x: f32, free: bool) -> Option<(f64, Vec<usize>)> {
+    let at = if free { layout.beat_at(x).max(0.0) } else { grid.nearest_line(layout.beat_at(x)) };
+    if !at.is_finite() {
+        return None;
+    }
+    let crossed: Vec<usize> = clip
+        .notes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.time < at - EPSILON && n.time + n.duration > at + EPSILON)
+        .map(|(i, _)| i)
+        .collect();
+    if crossed.is_empty() { None } else { Some((at, crossed)) }
 }
 
 /// The note a draw drag from `from` to `now` makes: it starts where the press was, and its end
@@ -1018,7 +1477,7 @@ fn paint(state: &mut PianoRollState, layout: &Layout, clip: &PianoClip, now: Pos
 }
 
 fn commit(
-    gesture: Gesture,
+    gesture: &Gesture,
     effect: Effect,
     clip: &PianoClip,
     state: &mut PianoRollState,
@@ -1047,6 +1506,29 @@ fn commit(
             state.selected = BTreeSet::from([clip.notes.len()]);
             state.remember(&note);
         }
+        // Shift and Draw: one `note.add` for the whole stroke, the notes it drew.
+        (Gesture::DrawRun, _) => {
+            let stroke: Vec<Note> = std::mem::take(&mut state.stroke)
+                .into_iter()
+                .filter(|p| !clip.notes.iter().any(|n| n.key == p.key && (n.time - p.time).abs() < EPSILON))
+                .collect();
+            if !stroke.is_empty() {
+                actions.push(Action::new("note.add", add_params(clip, &stroke)));
+                state.selected = (clip.notes.len()..clip.notes.len() + stroke.len()).collect();
+                if let Some(last) = stroke.last() {
+                    state.remember(last);
+                }
+            }
+        }
+        // Slice: one `note.split` for the whole stroke, at the beat the line ends at.
+        (Gesture::Slice { .. }, Effect::Slice(at, cut)) if !cut.is_empty() => {
+            let mut params = clip.address.clone();
+            params["notes"] = json!(cut);
+            params["at"] = json!(round_beat(at));
+            // `note.split` appends the second halves: they are the notes after the ones there.
+            state.selected = (clip.notes.len()..clip.notes.len() + cut.len()).collect();
+            actions.push(Action::new("note.split", params));
+        }
         (Gesture::Paint, _) => {
             // A painted note on top of one already there (same key, same start) is left out.
             let stroke: Vec<Note> = std::mem::take(&mut state.stroke)
@@ -1065,7 +1547,7 @@ fn commit(
             actions.push(Action::new("note.delete", params));
         }
         (Gesture::Select { add, .. }, Effect::Select(rect)) => {
-            if !add {
+            if !*add {
                 state.selected.clear();
             }
             for (i, note) in clip.notes.iter().enumerate() {
@@ -1075,6 +1557,24 @@ fn commit(
             }
         }
         _ => {}
+    }
+}
+
+/// The tool `step` places on from `tool`, wrapping: what the right button and the wheel choose.
+fn step_tool(tool: Tool, step: i32) -> Tool {
+    let count = Tool::ALL.len() as i32;
+    let index = Tool::ALL.iter().position(|(t, _)| *t == tool).unwrap_or(0) as i32;
+    let next = (index + step).rem_euclid(count) as usize;
+    Tool::ALL.get(next).map(|(tool, _)| *tool).unwrap_or(Tool::Select)
+}
+
+/// The cursor a tool shows over the grid.
+fn cursor_for(tool: Tool) -> Option<CursorIcon> {
+    match tool {
+        Tool::Select => None,
+        Tool::Draw | Tool::Paint => Some(CursorIcon::Crosshair),
+        Tool::Erase => Some(CursorIcon::NotAllowed),
+        Tool::Slice => Some(CursorIcon::Text),
     }
 }
 
@@ -1096,16 +1596,34 @@ fn fit(state: &mut PianoRollState, area: Rect, clip: &PianoClip) {
 }
 
 /// The wheel scrolls, with Ctrl it zooms time and with Ctrl+Shift or Alt key height, around
-/// the pointer; the middle button pans.
-fn scroll_and_zoom(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, shift: bool, alt: bool) {
-    if let Some(pointer) = widgets::pointer_over(ui, area) {
-        let (zoom, wheel) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta()));
+/// the pointer; the middle button pans. While the right button is held over the grid, a wheel
+/// step chooses the next or the previous tool instead, and the toolbar and the cursor follow.
+fn scroll_and_zoom(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, inputs: Inputs) {
+    let pointer = widgets::pointer_over(ui, area);
+    let (zoom, wheel) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta()));
+    // The right button and the wheel: the next tool for a step one way, the previous for the
+    // other. Held over the grid only, and the step scrolls and zooms nothing.
+    let wheel_event = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { .. })));
+    if inputs.right
+        && wheel_event
+        && let Some(_pointer) = pointer.filter(|p| grid.contains(*p))
+    {
+        let steps = if wheel.y == 0.0 { wheel.x } else { wheel.y };
+        if steps != 0.0 {
+            state.tool = step_tool(state.tool, if steps > 0.0 { 1 } else { -1 });
+        }
+        if let Some(cursor) = cursor_for(state.tool) {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        return;
+    }
+    if let Some(pointer) = pointer {
         let zoom_keys = |state: &mut PianoRollState, factor: f32| {
             let key = (pointer.y - grid.top() + state.scroll.y) / state.key_height;
             state.key_height = (state.key_height * factor).clamp(KEY_HEIGHT_RANGE.0, KEY_HEIGHT_RANGE.1);
             state.scroll.y = key * state.key_height - (pointer.y - grid.top());
         };
-        if alt && zoom == 1.0 {
+        if inputs.alt && zoom == 1.0 {
             // Alt (Option on macOS) and the wheel; some systems turn it into a sideways scroll,
             // so either axis zooms.
             let steps = if wheel.y == 0.0 { wheel.x } else { wheel.y };
@@ -1113,7 +1631,7 @@ fn scroll_and_zoom(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, 
                 zoom_keys(state, (steps * KEY_ZOOM_PER_POINT).exp());
             }
         } else if zoom != 1.0 {
-            if shift {
+            if inputs.shift {
                 zoom_keys(state, zoom);
             } else {
                 let beat = (pointer.x - grid.left() + state.scroll.x) / state.beat_width;
@@ -1274,6 +1792,17 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         grid_painter.rect_filled(rect, 0.0, clip.color.gamma_multiply(0.7));
         grid_painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::text_primary()), StrokeKind::Inside);
     }
+    // The cut line of a slice drag, and a mark on each note it would split.
+    if let Some(Effect::Slice(at, cut)) = &preview {
+        let x = layout.x_of(*at).round() + 0.5;
+        grid_painter.vline(x, layout.grid.y_range(), Stroke::new(1.0, theme::accent()));
+        for index in cut {
+            if let Some(note) = clip.notes.get(*index) {
+                let row = layout.note_rect(note);
+                grid_painter.hline(row.x_range(), row.top() - 0.5, Stroke::new(1.0, theme::accent()));
+            }
+        }
+    }
     painter.hline(layout.lane.x_range(), layout.lane.top() + 0.5, theme::hairline(theme::border_strong()));
 
     // The key column: keys, every C named.
@@ -1285,7 +1814,15 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
             Pos2::new(layout.keys.left(), top),
             Pos2::new(layout.keys.right(), top + layout.key_height),
         );
-        let fill = if is_black(key) { theme::window_background() } else { theme::control_background() };
+        // The key under the pointer and the key that is playing are lit.
+        let lit = state.hover_key() == Some(key) || state.playing_key() == Some(key);
+        let fill = if lit {
+            theme::control_hover()
+        } else if is_black(key) {
+            theme::window_background()
+        } else {
+            theme::control_background()
+        };
         key_painter.rect_filled(row.shrink2(Vec2::new(0.0, 0.5)), 0.0, fill);
         if key % 12 == 0 && layout.key_height >= 8.0 {
             widgets::text_in(

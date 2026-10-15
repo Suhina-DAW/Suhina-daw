@@ -1194,11 +1194,17 @@ impl App {
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
+        let options = piano_roll::Options { right_click_deletes: self.keymap.preset().right_click_deletes() };
+        // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
+        // visible on the button.
+        let keymap = self.keymap.clone();
+        let copied = self.session().and_then(Session::copied_notes);
         let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
-                let rest = detail_view::show_clip_column(ui, info, stacked);
-                piano_roll::show(ui, rest, piano, piano_roll, actions);
+                let rest = detail_view::show_clip_column(ui, info, stacked, piano_roll, actions);
+                let cx = piano_roll::Context { options, keymap: &keymap, copied };
+                piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
             } else if stacked {
                 detail_view::show_stack(ui, &shown, actions, &mut places);
             } else {
@@ -1256,6 +1262,13 @@ impl App {
     /// The piano roll's state: its zoom, scroll and selected notes.
     pub fn piano_roll(&self) -> &PianoRollState {
         &self.piano_roll
+    }
+
+    /// The piano roll's state, to change: the ignored render test opens its quantise block with
+    /// this, where a click would toggle it back.
+    #[doc(hidden)]
+    pub fn piano_roll_mut(&mut self) -> &mut PianoRollState {
+        &mut self.piano_roll
     }
 
     /// Tells the active project where the panel shows its embedded plug-in editors this frame
@@ -1776,6 +1789,10 @@ impl App {
             "settings.open" => self.settings_open = !self.settings_open,
             "file.new" => self.open_project_dialog(false),
             "file.open" => self.open_project_dialog(true),
+            "view.browser" if self.keymap.keys("view.browser").is_empty() => {
+                // A keymap preset (Draw-first) may leave the browser with no key: the window's own
+                // action then does nothing, so the file and what happens on a key press agree.
+            }
             "view.browser" => self.toggle_browser(),
             "view.sampleMap" => {
                 self.settings_open = false;

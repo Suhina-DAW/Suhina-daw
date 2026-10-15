@@ -1,5 +1,6 @@
 //! Keyboard shortcuts: which keys run which action, kept in a file the user can edit
-//! (`keymap.json`: an action id to a list of keys such as `"Ctrl+Shift+Z"`). An action is a
+//! (`keymap.json`: an action id to a list of keys such as `"Ctrl+Shift+Z"`, and the name of the
+//! `preset` the keys came from). An action is a
 //! session command that needs no parameters, an action on the selection (which the window turns
 //! into a command), or something the window itself does.
 
@@ -80,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 36] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 41] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -121,6 +122,11 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 36] = [
     ("pianoRoll.shorter", "Make the selected notes one grid step shorter", PIANO_ROLL),
     ("pianoRoll.longer", "Make the selected notes one grid step longer", PIANO_ROLL),
     ("pianoRoll.draw", "Switch the piano roll between the Select and Draw tools", PIANO_ROLL),
+    ("pianoRoll.tool1", "Choose the Select tool", PIANO_ROLL),
+    ("pianoRoll.tool2", "Choose the Draw tool", PIANO_ROLL),
+    ("pianoRoll.tool3", "Choose the Paint tool", PIANO_ROLL),
+    ("pianoRoll.tool4", "Choose the Erase tool", PIANO_ROLL),
+    ("pianoRoll.tool5", "Choose the Slice tool", PIANO_ROLL),
 ];
 
 /// The Shortcuts list's group for the piano roll's own actions.
@@ -153,13 +159,67 @@ pub fn actions() -> Vec<Action> {
     all
 }
 
-/// The keys bound to each action.
+/// The keys bound to each action, and the preset the user chose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
+    preset: Preset,
 }
 
-const DEFAULTS: [(&str, &[&str]); 37] = [
+/// A set of keys for a way of working, chosen in Settings › Shortcuts (› Keymap presets in
+/// `docs/spec/ui-clip-editor.md`). The names describe the habit, not another program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Preset {
+    /// Suhina's own keys: duplicate is Ctrl+D, a right-click on a note does nothing.
+    #[default]
+    SelectFirst,
+    /// Drawing notes first: duplicate is Ctrl+B (which the browser's Ctrl+B gives up) and a
+    /// right-click on a note deletes it in the Draw and Paint tools.
+    DrawFirst,
+}
+
+impl Preset {
+    pub const ALL: [Self; 2] = [Self::SelectFirst, Self::DrawFirst];
+
+    /// The name the menu and the keymap file use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SelectFirst => "Select-first",
+            Self::DrawFirst => "Draw-first",
+        }
+    }
+
+    /// The preset `name` names; `None` when it is not one of them (an edited file, a rename).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.name().eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// What the preset says beyond the default keys, in its own words: the Settings row shows it.
+    pub fn note(self) -> &'static str {
+        match self {
+            Self::SelectFirst => "Duplicate is Ctrl+D; a right-click on a note does nothing",
+            Self::DrawFirst => "Duplicate is Ctrl+B; in Draw and Paint a right-click on a note deletes it",
+        }
+    }
+
+    /// Whether a right-click on a note deletes it in the Draw and Paint tools.
+    pub fn right_click_deletes(self) -> bool {
+        self == Self::DrawFirst
+    }
+
+    /// The key the preset gives the duplicate action, as the Shortcuts list shows it.
+    pub fn duplicate_key(self) -> &'static str {
+        match self {
+            Self::SelectFirst => "Ctrl+D",
+            Self::DrawFirst => "Ctrl+B",
+        }
+    }
+}
+
+/// The keymap file's entry for the preset.
+const PRESET_KEY: &str = "preset";
+
+const DEFAULTS: [(&str, &[&str]); 42] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -197,29 +257,52 @@ const DEFAULTS: [(&str, &[&str]); 37] = [
     ("pianoRoll.shorter", &["Shift+Left"]),
     ("pianoRoll.longer", &["Shift+Right"]),
     ("pianoRoll.draw", &["B"]),
+    ("pianoRoll.tool1", &["1"]),
+    ("pianoRoll.tool2", &["2"]),
+    ("pianoRoll.tool3", &["3"]),
+    ("pianoRoll.tool4", &["4"]),
+    ("pianoRoll.tool5", &["5"]),
 ];
 
 impl Default for Keymap {
     fn default() -> Self {
-        let bindings = DEFAULTS
-            .iter()
-            .map(|(id, keys)| ((*id).to_string(), keys.iter().filter_map(|k| Shortcut::parse(k)).collect()))
-            .collect();
-        Self { bindings }
+        Self { bindings: bindings_for(&DEFAULTS), preset: Preset::default() }
     }
+}
+
+/// The keys of `defaults`, read from their text.
+fn bindings_for(defaults: &[(&str, &[&str])]) -> BTreeMap<String, Vec<Shortcut>> {
+    defaults
+        .iter()
+        .map(|(id, keys)| ((*id).to_string(), keys.iter().filter_map(|k| Shortcut::parse(k)).collect()))
+        .collect()
 }
 
 impl Keymap {
     /// Reads a keymap file over the defaults: an action listed there takes the keys listed
-    /// (an empty list unbinds it). Unknown actions and keys are skipped with a warning.
+    /// (an empty list unbinds it), `preset` names the set the keys came from. Unknown actions,
+    /// keys and presets are skipped with a warning; an unknown preset leaves the default one.
     pub fn from_json(text: &str) -> (Self, Vec<String>) {
         let mut keymap = Self::default();
         let mut warnings = Vec::new();
         let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) else {
             return (keymap, vec!["the keymap file is not a JSON object; using the default keys".into()]);
         };
+        if let Some(named) = map.get(PRESET_KEY) {
+            match named.as_str().and_then(Preset::from_name) {
+                Some(preset) => keymap.preset = preset,
+                None => warnings.push(format!(
+                    "keymap: {} is not a preset the program knows; using {}",
+                    named,
+                    Preset::default().name()
+                )),
+            }
+        }
         let known = actions();
         for (id, keys) in map {
+            if id == PRESET_KEY {
+                continue;
+            }
             if !known.iter().any(|a| a.id == id) {
                 warnings.push(format!("keymap: {id} is not an action"));
                 continue;
@@ -244,14 +327,35 @@ impl Keymap {
         (keymap, warnings)
     }
 
-    /// Every binding, as the keymap file keeps it.
+    /// Every binding and the preset, as the keymap file keeps them.
     pub fn to_json(&self) -> String {
-        let map: serde_json::Map<String, Value> = self
+        let mut map: serde_json::Map<String, Value> = self
             .bindings
             .iter()
             .map(|(id, keys)| (id.clone(), json!(keys.iter().map(Shortcut::text).collect::<Vec<_>>())))
             .collect();
+        map.insert(PRESET_KEY.to_string(), json!(self.preset.name()));
         serde_json::to_string_pretty(&Value::Object(map)).unwrap_or_default()
+    }
+
+    /// The preset the keys came from.
+    pub fn preset(&self) -> Preset {
+        self.preset
+    }
+
+    /// Puts the keys of `preset` back: every default, with the preset's own changes. Keys changed
+    /// by hand go back to the preset's; everything else keeps what it has.
+    pub fn set_preset(&mut self, preset: Preset) {
+        let defaults = Self::default();
+        let mut bindings = defaults.bindings;
+        if preset == Preset::DrawFirst {
+            // Duplicate takes Ctrl+B; the browser keeps a key of its own, Ctrl+Shift+B.
+            let ctrl_shift = Modifiers::COMMAND.plus(Modifiers::SHIFT);
+            bindings.insert("view.browser".to_string(), vec![Shortcut::new(ctrl_shift, Key::B)]);
+            bindings.insert("selection.duplicate".to_string(), vec![Shortcut::new(Modifiers::COMMAND, Key::B)]);
+        }
+        self.bindings = bindings;
+        self.preset = preset;
     }
 
     pub fn keys(&self, action: &str) -> &[Shortcut] {
@@ -367,6 +471,71 @@ mod tests {
         }
         assert!(known.iter().any(|a| a.id == "transport.play"), "commands without parameters are actions");
         assert!(!known.iter().any(|a| a.id == "track.setVolume"), "commands that need parameters are not");
+        // The piano roll's tools have their number keys and their own labels.
+        for (index, id) in
+            ["pianoRoll.tool1", "pianoRoll.tool2", "pianoRoll.tool3", "pianoRoll.tool4", "pianoRoll.tool5"]
+                .into_iter()
+                .enumerate()
+        {
+            let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(action.group, PIANO_ROLL);
+            assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");
+            let number = (index + 1).to_string();
+            assert_eq!(Keymap::default().label(id).as_deref(), Some(number.as_str()), "{id}");
+        }
+    }
+
+    #[test]
+    fn the_presets_set_their_keys_and_are_kept_in_the_file() {
+        for preset in Preset::ALL {
+            let mut keymap = Keymap::default();
+            keymap.set_preset(preset);
+            assert_eq!(keymap.preset(), preset);
+            assert!(keymap.conflicts().is_empty(), "{preset:?} has no key bound twice");
+            assert_eq!(keymap.label("selection.duplicate").as_deref(), Some(preset.duplicate_key()));
+            assert_eq!(preset.right_click_deletes(), preset == Preset::DrawFirst);
+            // Every other key is the default's: the preset only changes what it names.
+            for (id, _) in DEFAULTS {
+                if id != "selection.duplicate" && id != "view.browser" {
+                    assert_eq!(keymap.keys(id), Keymap::default().keys(id), "{id} under {preset:?}");
+                }
+            }
+            assert!(!keymap.keys("view.browser").is_empty(), "{preset:?} leaves the browser a key");
+            // The choice comes back from the file.
+            let (again, warnings) = Keymap::from_json(&keymap.to_json());
+            assert_eq!((&again, warnings.len()), (&keymap, 0));
+            assert_eq!(again.preset(), preset);
+        }
+    }
+
+    #[test]
+    fn a_preset_chosen_again_puts_keys_changed_by_hand_back() {
+        let mut keymap = Keymap::default();
+        keymap.set_preset(Preset::DrawFirst);
+        keymap.set("selection.duplicate", vec![Shortcut::new(Modifiers::COMMAND, Key::D)]);
+        keymap.set_preset(Preset::DrawFirst);
+        assert_eq!(keymap.label("selection.duplicate").as_deref(), Some("Ctrl+B"));
+        // And choosing the other preset sets its own keys.
+        keymap.set_preset(Preset::SelectFirst);
+        assert_eq!(keymap.label("selection.duplicate").as_deref(), Some("Ctrl+D"));
+        assert_eq!(keymap.label("view.browser").as_deref(), Some("Ctrl+B"));
+    }
+
+    #[test]
+    fn an_unknown_or_malformed_preset_in_the_file_falls_back_with_a_warning() {
+        let (keymap, warnings) = Keymap::from_json(r#"{ "preset": "Fancy-first", "edit.undo": ["Alt+Z"] }"#);
+        assert_eq!(keymap.preset(), Preset::SelectFirst, "an unknown preset is the default one");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Fancy-first"), "{}", warnings[0]);
+        assert_eq!(keymap.label("edit.undo").as_deref(), Some("Alt+Z"), "the rest of the file is read");
+        // A preset that is not text at all, and a file that is not JSON.
+        let (number, warnings) = Keymap::from_json(r#"{ "preset": 3 }"#);
+        assert_eq!((number.preset(), warnings.len()), (Preset::SelectFirst, 1));
+        let (broken, warnings) = Keymap::from_json("{ not json");
+        assert_eq!((broken.preset(), warnings.len()), (Preset::SelectFirst, 1));
+        // The name is read without case, as a hand-edited file may write it.
+        let (named, warnings) = Keymap::from_json(r#"{ "preset": "draw-first" }"#);
+        assert_eq!((named.preset(), warnings.len()), (Preset::DrawFirst, 0));
     }
 
     #[test]

@@ -13,6 +13,7 @@ use suhina_engine::model::{DeviceKind, LaneData, Project, TrackId};
 use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::grid::gain_to_db;
+use crate::piano_roll::{PianoRollState, QUANTIZE_GRIDS};
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action};
 
@@ -341,17 +342,117 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
 }
 
 /// The clip's properties column for a clip whose editor fills the rest of the detail area (the
-/// piano roll): on the left in a row, on top when `stacked`. Returns the rest.
-pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> Rect {
+/// piano roll): on the left in a row, on top when `stacked`. Returns the rest. When the quantise
+/// block is open it takes the column's top and the properties move down under it, so the block
+/// is part of the column and nothing floats over the note grid.
+pub fn show_clip_column(
+    ui: &mut Ui,
+    info: &ClipInfo,
+    stacked: bool,
+    piano: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+) -> Rect {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
-    let column = clip_properties(&painter, area, info, stacked);
+    let top = if piano.quantize_open {
+        let block = Rect::from_min_size(area.min, Vec2::new(CLIP_WIDTH.min(area.width()), quantise_height()));
+        quantise_block(ui, &painter, block, piano, actions);
+        block.height()
+    } else {
+        0.0
+    };
+    let below = Rect::from_min_max(Pos2::new(area.left(), area.top() + top), area.max);
+    let column = clip_properties(&painter, below, info, stacked);
     if stacked {
         Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
     } else {
         Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max)
+    }
+}
+
+/// The room the quantise block needs: its title, the grid, the amount, the ends box and the two
+/// buttons.
+fn quantise_height() -> f32 {
+    ROW + PAD + PARAM_ROW * 3.0 + BUTTON_HEIGHT + PAD
+}
+
+/// The quantise controls at the top of the clip column: title, Grid, Amount, "Move ends too",
+/// **Quantise notes** and **Close** (› Quantise in `docs/spec/ui-clip-editor.md`). The settings
+/// are kept for Ctrl+U; **Quantise notes** adds `note.quantize` to `actions`.
+fn quantise_block(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    piano: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+) {
+    if rect.width() < 40.0 || rect.height() < 20.0 {
+        return;
+    }
+    painter.rect_filled(rect, 0.0, theme::panel_background());
+    let title = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
+    widgets::text_in(
+        painter,
+        title.shrink2(Vec2::new(PAD, 0.0)),
+        Align2::LEFT_CENTER,
+        "Quantise",
+        theme::ui_font(theme::TEXT),
+        theme::text_primary(),
+    );
+    let mut settings = piano.quantize;
+    let mut apply = false;
+    let body =
+        Rect::from_min_max(Pos2::new(rect.left() + PAD, title.bottom()), Pos2::new(rect.right() - PAD, rect.bottom()));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+        let small = theme::ui_font(theme::TEXT_SMALL);
+        // Each field takes a row of its own in the 196 px column: beside another, its value would
+        // fall off the column's edge. The block still leaves room for the properties under it.
+        let mono = theme::mono_font(theme::TEXT_SMALL);
+        let mut chosen = settings.grid;
+        let shown = chosen;
+        let menu = egui::ComboBox::from_id_salt("piano-roll-quantise-grid")
+            .width(64.0)
+            .selected_text(egui::RichText::new(shown).font(mono.clone()))
+            .show_ui(ui, |ui| {
+                for grid in QUANTIZE_GRIDS {
+                    ui.selectable_value(&mut chosen, grid, egui::RichText::new(grid).font(mono.clone()));
+                }
+            });
+        menu.response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Quantise grid {shown}"))
+        });
+        if chosen != settings.grid {
+            settings.grid = chosen;
+        }
+        let slider = ui.add_sized(
+            Vec2::new(ui.available_width().min(150.0), 16.0),
+            egui::Slider::new(&mut settings.amount, 0.0..=100.0).suffix(" %").integer().max_decimals(0),
+        );
+        slider.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, format!("Amount {} %", settings.amount))
+        });
+        ui.checkbox(&mut settings.ends, egui::RichText::new("Move ends too").font(small.clone()));
+        ui.horizontal(|ui| {
+            let quantise = ui.button(egui::RichText::new("Quantise notes").font(small.clone()));
+            quantise.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Quantise notes"));
+            apply = quantise.clicked();
+            let close = ui.button(egui::RichText::new("Close").font(small.clone()));
+            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close quantise"));
+            if close.clicked() {
+                piano.quantize_open = false;
+            }
+        });
+    });
+    piano.quantize = settings;
+    if apply && let Some(action) = piano.quantize_selected() {
+        actions.push(action);
+    }
+    // Escape closes the block, as it closes the panel it replaces (Escape also clears the note
+    // selection in the piano roll; both happen, as both are what the key means there).
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        piano.quantize_open = false;
     }
 }
 

@@ -2,7 +2,7 @@
 //! by its splitter, Alt and the wheel zooming key rows, the toolbar's tools (Select, Draw, Paint,
 //! Erase) and its own grid value.
 
-#![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers outside #[test] functions
 
 use egui::{Key, Modifiers, Pos2, Rect, pos2, vec2};
 use egui_kittest::Harness;
@@ -11,6 +11,7 @@ use serde_json::json;
 use suhina_engine::model::{LaneData, Note};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
+use suhina_ui::keymap::{Keymap, Preset};
 use suhina_ui::piano_roll::{Tool, key_name};
 use suhina_ui::settings::{PianoRollTop, Settings};
 use suhina_ui::widgets::Action;
@@ -116,8 +117,17 @@ fn undo(h: &mut Harness<'static, App>) {
     h.run();
 }
 
+/// Chooses a tool from the toolbar: by name, or by the key it has ("Draw", "Draw (2)").
 fn tool(h: &mut Harness<'static, App>, name: &str) {
-    h.get_by_label(&format!("{name} tool")).click();
+    // The toolbar's tool buttons are icons; their label is the tool's name and key ("Draw (2)",
+    // "Select (1)") and their tooltip the same.
+    let keys = ["1", "2", "3", "4", "5"];
+    let label = keys
+        .iter()
+        .map(|key| format!("{name} ({key})"))
+        .find(|label| h.query_by_label(label).is_some())
+        .expect("a tool button with that name");
+    h.get_by_label(&label).click();
     h.run();
 }
 
@@ -379,6 +389,376 @@ fn settings_general_has_both_piano_roll_settings_and_they_change_the_settings() 
     h.run();
     assert_eq!(h.state().settings().piano_roll_top, PianoRollTop::Window);
     assert!(h.state().settings().piano_grid_follows);
+}
+
+/// The number keys choose the tools, the way the toolbar's icons do (after a click in the piano
+/// roll, so the keys keep their meaning elsewhere).
+#[test]
+fn the_number_keys_choose_the_tools() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    // Without the keyboard the number keys do nothing.
+    h.key_press(Key::Num3);
+    h.run();
+    assert_eq!(h.state().piano_roll().tool, Tool::Select, "the piano roll does not have the keyboard");
+    // A click in the piano roll gives it the keyboard; the notes are the demo clip's.
+    let at = note_rect(&h, &notes(&h)[0]).center();
+    click(&mut h, at);
+    for (key, tool) in [
+        (Key::Num1, Tool::Select),
+        (Key::Num2, Tool::Draw),
+        (Key::Num3, Tool::Paint),
+        (Key::Num4, Tool::Erase),
+        (Key::Num5, Tool::Slice),
+    ] {
+        h.key_press(key);
+        h.run();
+        assert_eq!(h.state().piano_roll().tool, tool, "{key:?}");
+    }
+    // B keeps switching between Select and Draw; the toolbar's icons show the key.
+    h.key_press(Key::B);
+    h.run();
+    assert_eq!(h.state().piano_roll().tool, Tool::Draw);
+    assert!(h.query_by_label("Draw (2)").is_some(), "the tool's key is in its label");
+    h.key_press(Key::B);
+    h.run();
+    assert_eq!(h.state().piano_roll().tool, Tool::Select);
+}
+
+/// The Slice tool: a line drawn across notes splits each where it crosses, snapped to the grid,
+/// in one undo step. A cut that lands on a note's start or end leaves that note alone.
+#[test]
+fn the_slice_tool_splits_the_notes_a_cut_line_crosses() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    let key = empty_key(&h);
+    let first = notes(&h)[0].time;
+    // One long note in an empty row, from beat 2 to beat 2.8, so a cut at 2.5 can split it.
+    let mut params = h.state().piano_roll_address().unwrap();
+    params["notes"] = json!([{ "time": first + 2.0, "length": 0.8, "key": key, "velocity": 100 }]);
+    h.state_mut().run(&Action::new("note.add", params));
+    h.run();
+    let before = notes(&h).len();
+    tool(&mut h, "Slice");
+    assert_eq!(h.state().piano_roll().tool, Tool::Slice);
+
+    // A drag across the middle of the note: the cut snaps to the sixteenth's line at 2.5 and
+    // the note becomes two.
+    let from = spot(&h, first + 2.45, key);
+    let to = spot(&h, first + 2.55, key);
+    drag(&mut h, from, to, 4);
+    let after = notes(&h);
+    assert_eq!(after.len(), before + 1, "one note was split in two");
+    let halves: Vec<Note> = after.iter().skip(before).copied().collect();
+    assert_eq!(halves.len(), 1);
+    let first_half = after[before - 1];
+    assert_eq!((first_half.time, first_half.key), (first + 2.0, key));
+    assert!((first_half.duration - 0.5).abs() < 1e-9, "{first_half:?}");
+    assert_eq!((halves[0].time, halves[0].key), (first + 2.5, key));
+    assert!((halves[0].duration - 0.3).abs() < 1e-9, "{:?}", halves[0]);
+    // One stroke is one undo step.
+    undo(&mut h);
+    assert_eq!(notes(&h).len(), before);
+
+    // A cut that lands on the note's end leaves it alone; a cut across an empty row does too.
+    let from = spot(&h, first + 2.6, key);
+    drag(&mut h, from, from + vec2(0.0, 0.0), 2);
+    assert_eq!(notes(&h).len(), before, "a cut that crosses nothing splits nothing");
+    let beyond = spot(&h, first + 5.0, empty_key(&h));
+    drag(&mut h, beyond, beyond + vec2(0.0, 4.0), 2);
+    assert_eq!(notes(&h).len(), before);
+
+    // One cut line across two notes splits both, in one command and one undo step. The beats
+    // here are close together so both notes are in view.
+    let mut params = h.state().piano_roll_address().unwrap();
+    params["notes"] = json!([
+        { "time": first + 0.2, "length": 0.8, "key": key, "velocity": 100 },
+        { "time": first + 0.4, "length": 0.8, "key": key + 2, "velocity": 100 },
+    ]);
+    h.state_mut().run(&Action::new("note.add", params));
+    h.run();
+    let count = notes(&h).len();
+    let from = spot(&h, first + 0.6, key);
+    let to = spot(&h, first + 0.6, key + 3);
+    drag(&mut h, from, to, 6);
+    let after: Vec<(f64, u8)> = notes(&h).into_iter().skip(count).map(|n| (n.time, n.key)).collect();
+    assert_eq!(notes(&h).len(), count + 2, "both notes the line crosses were split: {after:?}");
+    undo(&mut h);
+    assert_eq!(notes(&h).len(), count, "one stroke, one undo step");
+}
+
+#[test]
+fn the_right_button_and_the_wheel_choose_the_tools() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    let grid = h.get_by_label_contains("Piano roll,").rect();
+    let at = grid.center();
+    // The right button held over the grid, then a wheel step: the next tool.
+    let wheel = |h: &mut Harness<'static, App>, delta: f32| {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        });
+        h.step();
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, delta),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        h.step();
+    };
+    h.hover_at(at);
+    h.step();
+    let scroll = h.state().piano_roll().scroll;
+    wheel(&mut h, 60.0);
+    assert_eq!(h.state().piano_roll().tool, Tool::Draw, "one step on from Select");
+    assert_eq!(h.state().piano_roll().scroll, scroll, "the wheel did not scroll");
+    wheel(&mut h, 60.0);
+    assert_eq!(h.state().piano_roll().tool, Tool::Paint);
+    wheel(&mut h, -60.0);
+    assert_eq!(h.state().piano_roll().tool, Tool::Draw, "the other way is the previous tool");
+    // Letting the right button go opens nothing and changes no selection.
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert_eq!(h.state().piano_roll().tool, Tool::Draw);
+    assert!(h.state().piano_roll().selected.is_empty());
+    assert!(!h.state().piano_roll().quantize_open, "no menu opened");
+}
+
+/// Shift and Draw: a drag draws notes back to back, each as long as the note last drawn or
+/// clicked, in the row the drag started in, as one `note.add` and one undo step.
+#[test]
+fn shift_and_draw_repeats_the_last_notes_length() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    let key = empty_key(&h);
+    let first = notes(&h)[0].time;
+    // A note two grid steps long (an eighth grid: a quarter beat), to be the last one clicked,
+    // so the stroke repeats its length.
+    let mut params = h.state().piano_roll_address().unwrap();
+    params["notes"] = json!([{ "time": first, "length": 0.5, "key": key, "velocity": 100 }]);
+    h.state_mut().run(&Action::new("note.add", params));
+    h.run();
+    let before = notes(&h).len();
+    tool(&mut h, "Draw");
+    let at = note_rect(&h, notes(&h).last().unwrap()).center();
+    click(&mut h, at);
+    assert_eq!(notes(&h).len(), before, "clicking the note selected it, did not add one");
+
+    // Shift and a sideways drag in an empty row just under it: back-to-back notes, one per half
+    // beat, from where the press was.
+    let row = key.wrapping_sub(1);
+    let from = spot(&h, first + 2.0, row);
+    let to = spot(&h, first + 4.4, row);
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::SHIFT));
+    drag(&mut h, from, to, 8);
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+    let drawn: Vec<Note> = notes(&h).into_iter().skip(before).collect();
+    assert!(drawn.len() >= 4, "{drawn:?}");
+    for (i, note) in drawn.iter().enumerate() {
+        assert_eq!(note.key, row, "the stroke stays in the row it started in");
+        assert!((note.duration - 0.5).abs() < 1e-9, "the last note's length: {note:?}");
+        assert!((note.time - (drawn[0].time + i as f64 * 0.5)).abs() < 1e-9, "{drawn:?}");
+    }
+    undo(&mut h);
+    assert_eq!(notes(&h).len(), before, "the whole stroke is one undo step");
+}
+
+/// Clicks one of the toolbar's note clipboard buttons by name; their label is the name and the
+/// key they have ("Copy (Ctrl+C)"), so a button whose key the keymap has moved is still found.
+fn clipboard(h: &mut Harness<'static, App>, name: &str) {
+    let action = match name {
+        "Cut" => "selection.cut",
+        "Copy" => "selection.copy",
+        "Paste" => "selection.paste",
+        _ => "selection.duplicate",
+    };
+    let key = h.state().keymap().label(action).unwrap_or_default();
+    let label = format!("{name} ({key})");
+    assert!(h.query_by_label(&label).is_some(), "the {name} button reads {label:?}");
+    h.get_by_label(&label).click();
+    h.run();
+}
+
+#[test]
+fn the_toolbar_cuts_copies_pastes_and_duplicates_the_selection() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    let start = notes(&h).len();
+    // The buttons show the key they run.
+    assert!(h.query_by_label("Copy (Ctrl+C)").is_some(), "Copy names its key");
+    assert!(h.query_by_label("Cut (Ctrl+X)").is_some(), "Cut names its key");
+    // Nothing selected: the clipboard buttons are greyed out, so a click does nothing.
+    clipboard(&mut h, "Copy");
+    assert_eq!(notes(&h).len(), start, "nothing to copy");
+    // A click in the piano roll selects a note; the buttons then run the same commands as the
+    // keys (Ctrl+C, Ctrl+V, Ctrl+D, Ctrl+X).
+    let at = note_rect(&h, &notes(&h)[0]).center();
+    click(&mut h, at);
+    h.run();
+    clipboard(&mut h, "Copy");
+    clipboard(&mut h, "Paste");
+    assert!(notes(&h).len() > start, "the toolbar's Paste added the copied notes");
+    let pasted = notes(&h).len();
+    clipboard(&mut h, "Duplicate");
+    assert!(notes(&h).len() > pasted);
+    let before_cut = notes(&h).len();
+    clipboard(&mut h, "Cut");
+    assert!(notes(&h).len() < before_cut, "the toolbar's Cut deleted the selection");
+}
+
+/// The Settings › Shortcuts presets: Draw-first makes Ctrl+B duplicate notes and a right-click in
+/// Draw delete one; Select-first, the default, keeps Ctrl+D and does nothing on a right-click.
+#[test]
+fn the_shortcuts_presets_set_their_keys_and_the_right_click() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    assert_eq!(h.state().keymap().preset(), Preset::SelectFirst);
+    // Draw a note in an empty row to right-click later.
+    let key = empty_key(&h);
+    let first = notes(&h)[0].time;
+    let mut params = h.state().piano_roll_address().unwrap();
+    params["notes"] = json!([{ "time": first, "length": 0.25, "key": key, "velocity": 100 }]);
+    h.state_mut().run(&Action::new("note.add", params));
+    h.run();
+    let before = notes(&h).len();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run();
+    assert!(h.state().settings_open());
+    h.get_by_label("Settings page: Shortcuts").click();
+    h.run();
+    h.get_by_label("Preset: Draw-first").click();
+    h.run();
+    assert_eq!(h.state().keymap().preset(), Preset::DrawFirst);
+    assert_eq!(h.state().keymap().label("selection.duplicate").as_deref(), Some("Ctrl+B"));
+    // The choice is saved with the keymap.
+    let saved = h.state_mut().take_changed_keymap().unwrap_or_else(|| panic!("the keymap changed"));
+    assert!(saved.to_json().contains("\"preset\": \"Draw-first\""));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    h.run();
+    assert!(!h.state().settings_open());
+
+    // In Draw, a right-click on a note deletes it.
+    tool(&mut h, "Draw");
+    let at = note_rect(&h, notes(&h).last().unwrap()).center();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert_eq!(notes(&h).len(), before - 1, "the right-click deleted the note");
+    undo(&mut h);
+    assert_eq!(notes(&h).len(), before);
+
+    // Ctrl+B duplicates the selected notes instead of toggling the browser.
+    let browser = h.state().settings().browser_open;
+    let at = note_rect(&h, notes(&h).last().unwrap()).center();
+    click(&mut h, at);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::B);
+    h.run();
+    assert!(notes(&h).len() > before, "Ctrl+B duplicated the notes");
+    assert_eq!(h.state().settings().browser_open, browser, "and did not touch the browser");
+
+    // Back to Select-first: Ctrl+D again, and a right-click does nothing.
+    let map = Keymap::default();
+    h.state_mut().set_keymap(map);
+    h.run();
+    assert_eq!(h.state().keymap().preset(), Preset::SelectFirst);
+    let count = notes(&h).len();
+    let at = note_rect(&h, notes(&h).last().unwrap()).center();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.step();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert_eq!(notes(&h).len(), count, "Select-first leaves the note alone");
+}
+
+/// The key column plays: a press sends `preview.noteOn` through the track's instrument, the
+/// release sends `preview.noteOff`, and Ctrl+click selects the notes of that pitch.
+#[test]
+fn the_key_column_plays_and_ctrl_click_selects_a_pitch() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer, Settings::default());
+    let before = notes(&h);
+    let grid = h.get_by_label_contains("Piano roll,").rect();
+    // The row of the first note: the key column is the 36 points left of the grid.
+    let row = note_rect(&h, &before[0]).center().y;
+    let at = egui::pos2(grid.left() - 28.0, row);
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    h.step();
+    assert_eq!(h.state().piano_roll().playing_key(), Some(before[0].key), "the press plays the key");
+    h.run();
+    assert_eq!(h.state().piano_roll().playing_key(), Some(before[0].key), "it stays on while held");
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert_eq!(h.state().piano_roll().playing_key(), None, "the release let the key go");
+    // The session ran the two statements the UI sends; the engine side of them is tested in
+    // crates/session and crates/engine (`preview.noteOn`, `preview.noteOff`).
+    let session = h.state().session().unwrap();
+    assert!(session.player().is_some());
+
+    // Ctrl+click on a key selects every note of that pitch, and changes nothing else.
+    let with_ctrl = |h: &mut Harness<'static, App>, pos: egui::Pos2| {
+        h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::COMMAND));
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::COMMAND,
+        });
+        h.step();
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::COMMAND,
+        });
+        h.run();
+        h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+    };
+    with_ctrl(&mut h, at);
+    let expected: Vec<usize> =
+        before.iter().enumerate().filter(|(_, n)| n.key == before[0].key).map(|(i, _)| i).collect();
+    assert_eq!(h.state().piano_roll().selected.iter().copied().collect::<Vec<_>>(), expected);
+    assert_eq!(notes(&h), before, "selection only");
+    assert_eq!(h.state().piano_roll().playing_key(), None, "no sound with Ctrl");
 }
 
 #[test]

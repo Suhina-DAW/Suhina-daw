@@ -196,15 +196,20 @@ fn clicks_and_a_rectangle_select_notes() {
     click(&mut h, at, Modifiers::SHIFT);
     h.run();
     assert_eq!(selected(&h), [2]);
-    // A click on an empty spot clears; a rectangle around the first two notes selects them.
+    // A click on an empty spot of the grid clears; a rectangle around the first two notes
+    // selects them. The empty spot is inside the note grid (not the key column at its left).
     let (a, b) = (note_rect(&h, &n[0]), note_rect(&h, &n[1]));
     let grid = h.get_by_label_contains("Piano roll,").rect();
-    let empty = pos2(a.left() - 2.0, grid.top() + 2.0);
-    click(&mut h, empty, Modifiers::NONE);
+    let gap = pos2(a.right() + 2.0, a.center().y);
+    assert!(gap.x > grid.left(), "the spot is in the grid, not the key column: {gap:?} {grid:?}");
+    click(&mut h, gap, Modifiers::NONE);
     h.run();
     assert!(selected(&h).is_empty());
+    // The rectangle starts inside the grid, not in the key column at its left (a clip whose
+    // first note starts at the clip's start begins at the grid's left edge).
     let around = a.union(b).expand(3.0);
-    drag(&mut h, around.left_top(), around.right_bottom(), Modifiers::NONE);
+    let from = pos2(grid.left() + 2.0, around.top());
+    drag(&mut h, from, around.right_bottom(), Modifiers::NONE);
     assert_eq!(selected(&h), [0, 1]);
     // Nothing in the project changed.
     assert_eq!(notes(&h), n);
@@ -216,7 +221,7 @@ fn dragging_a_note_moves_the_selection_by_grid_steps_and_alt_moves_freely() {
     let mut h = piano_app(&mut renderer);
     let before = notes(&h);
     let (beat, row) = scale(&h);
-    let from = note_rect(&h, &before[0]).left_center() + vec2(4.0, 0.0);
+    let from = note_rect(&h, &before[0]).center() - vec2(6.0, 0.0);
     // 1.3 beats right and one row up: an eighth grid makes it 1.5 beats, three steps.
     drag(&mut h, from, from + vec2(beat * 1.3, -row), Modifiers::NONE);
     let moved = notes(&h)[0];
@@ -225,7 +230,7 @@ fn dragging_a_note_moves_the_selection_by_grid_steps_and_alt_moves_freely() {
     undo(&mut h);
     assert_eq!(notes(&h), before);
     // With Alt the drag is not snapped.
-    let from = note_rect(&h, &before[0]).left_center() + vec2(4.0, 0.0);
+    let from = note_rect(&h, &before[0]).center() - vec2(6.0, 0.0);
     drag(&mut h, from, from + vec2(beat * 1.3, 0.0), Modifiers::ALT);
     let free = notes(&h)[0].time - before[0].time;
     assert!((free - 1.3).abs() < 0.05, "{free}");
@@ -242,7 +247,7 @@ fn dragging_a_notes_end_resizes_the_selection_on_the_grid() {
     let at = note_rect(&h, &before[1]).center();
     click(&mut h, at, Modifiers::SHIFT);
     h.run();
-    let end = note_rect(&h, &before[0]).right_center() - vec2(2.0, 0.0);
+    let end = note_rect(&h, &before[0]).right_center() - vec2(3.5, 0.0);
     drag(&mut h, end, end + vec2(beat * 0.3, 0.0), Modifiers::NONE);
     let after = notes(&h);
     // The end, half a beat after the start, goes 0.3 beats on: onto the line at beat 1.
@@ -280,7 +285,7 @@ fn dragging_a_velocity_stem_changes_the_selections_velocity() {
     let label =
         format!("Velocity of note {} at beat {}: {}", key_name(before[0].key), before[0].time, velocity(&before[0]));
     let stem = h.get_by_label(&label).rect();
-    let from = pos2(stem.center().x, stem.bottom() - 10.0);
+    let from = stem.center();
     drag(&mut h, from, from - vec2(0.0, 30.0), Modifiers::NONE);
     let after = notes(&h);
     assert!(velocity(&after[0]) > velocity(&before[0]), "{} {}", velocity(&after[0]), velocity(&before[0]));

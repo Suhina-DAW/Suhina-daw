@@ -4,7 +4,7 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, Shortcut, actions};
+use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
 use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
@@ -815,7 +815,35 @@ fn shortcuts_page(
         state.capture = None;
         changed = true;
     }
+
+    // The preset: two sets of keys, one for drawing notes first and one for selecting first. A
+    // choice sets the keys it names; single keys can still be changed below.
     let mut top = head.bottom() + 4.0;
+    let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
+    let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
+    widgets::text_in(
+        painter,
+        preset_label,
+        Align2::LEFT_CENTER,
+        "Preset",
+        theme::ui_font(theme::TEXT),
+        theme::text_primary(),
+    );
+    let current = keymap.preset();
+    let control =
+        Rect::from_min_size(Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()), Vec2::new(160.0, SEGMENT));
+    let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
+    if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
+        keymap.set_preset(picked);
+        state.capture = None;
+        changed = true;
+    }
+    let note = Rect::from_min_size(
+        Pos2::new(preset_row.left(), preset_row.top() + SEGMENT + 3.0),
+        Vec2::new(page.width(), 16.0),
+    );
+    widgets::text_in(painter, note, Align2::LEFT_CENTER, current.note(), small.clone(), theme::text_secondary());
+    top += 30.0;
     for (key, ids) in keymap.conflicts() {
         let r = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 16.0));
         let text = format!("{} runs {} at once", key.text(), ids.join(" and "));
@@ -1125,6 +1153,35 @@ fn audio_page(
     let r = row(y);
     label(painter, r, "Latency", &format!("Engine to speaker, measured: {latency}"));
     (picked, response.clicked())
+}
+
+/// A segmented control for the keymap preset: the two sets of keys, with the chosen one lit.
+/// Returns the preset clicked, if it is not the current one.
+fn preset_segmented(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    options: &[(&str, Preset)],
+    current: Preset,
+) -> Option<Preset> {
+    let small = theme::ui_font(theme::TEXT_SMALL);
+    let count = options.len().max(1) as f32;
+    let part = (rect.width() - (count - 1.0)) / count;
+    let mut picked = None;
+    for (index, (text, value)) in options.iter().enumerate() {
+        let x = rect.left() + index as f32 * (part + 1.0);
+        let segment = Rect::from_min_size(Pos2::new(x, rect.top()), Vec2::new(part, rect.height()));
+        let chosen = *value == current;
+        let response = widgets::button_area(ui, segment, Id::new(("keymap-preset", *text)), format!("Preset: {text}"));
+        let fill = if chosen { theme::control_active() } else { theme::control_background() };
+        painter.rect_filled(segment, 0.0, motion::mix(fill, theme::control_hover(), widgets::hover(ui, &response)));
+        let color = if chosen { theme::text_primary() } else { theme::text_secondary() };
+        widgets::text_in(painter, segment, Align2::CENTER_CENTER, text, small.clone(), color);
+        if response.clicked() && !chosen {
+            picked = Some(*value);
+        }
+    }
+    picked
 }
 
 /// A dropdown on the right of `row` listing `options` (text, value). Returns the value picked,
