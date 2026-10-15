@@ -376,6 +376,124 @@ fn tracks_group_ungroup_and_move() {
     assert_eq!(session.project(), &project());
 }
 
+fn names(session: &Session, ids: Vec<TrackId>) -> Vec<String> {
+    ids.iter().filter_map(|id| session.project().tracks.iter().find(|t| t.id == *id)).map(|t| t.name.clone()).collect()
+}
+
+fn parent_of(session: &Session, name: &str) -> Option<String> {
+    let p = session.project();
+    let parent = p.tracks.iter().find(|t| t.name == name)?.parent?;
+    p.tracks.iter().find(|t| t.id == parent).map(|t| t.name.clone())
+}
+
+fn output_of(session: &Session, name: &str) -> Option<String> {
+    let p = session.project();
+    let channel = p.tracks.iter().find(|t| t.name == name)?.channel?;
+    let output = p.channels.iter().find(|c| c.id == channel)?.output?;
+    p.tracks.iter().find(|t| t.channel == Some(output)).map(|t| t.name.clone())
+}
+
+#[test]
+fn groups_nest_and_tracks_move_between_them() {
+    let mut session = Session::new(project());
+    run(&mut session, "track.group", json!({ "tracks": ["Bass"], "name": "Low" })).unwrap();
+    run(&mut session, "track.group", json!({ "tracks": ["Low"], "name": "Band" })).unwrap();
+    assert_eq!(order(&session), ["Band", "Low", "Bass", "Lead"]);
+    assert_eq!(parent_of(&session, "Low").as_deref(), Some("Band"));
+    assert_eq!(output_of(&session, "Low").as_deref(), Some("Band"));
+    assert_eq!(output_of(&session, "Bass").as_deref(), Some("Low"));
+    let bass = session.project().tracks[2].id;
+    assert_eq!(names(&session, session.project().ancestors(bass)), ["Low", "Band"]);
+
+    // Into the inner group, at the end, then at its start.
+    let moved = run(&mut session, "track.setGroup", json!({ "track": "Lead", "group": "Low" })).unwrap();
+    assert_eq!(moved["position"], 3);
+    assert_eq!(order(&session), ["Band", "Low", "Bass", "Lead"]);
+    assert_eq!(parent_of(&session, "Lead").as_deref(), Some("Low"));
+    assert_eq!(output_of(&session, "Lead").as_deref(), Some("Low"));
+    run(&mut session, "track.setGroup", json!({ "track": "Lead", "group": "Low", "index": 0 })).unwrap();
+    assert_eq!(order(&session), ["Band", "Low", "Lead", "Bass"]);
+
+    // A group moves with everything inside it: "Low" out to the top level, after "Band".
+    run(&mut session, "track.setGroup", json!({ "track": "Low", "group": "none" })).unwrap();
+    assert_eq!(order(&session), ["Band", "Low", "Lead", "Bass"]);
+    assert_eq!(parent_of(&session, "Low"), None);
+    assert_eq!(output_of(&session, "Low"), None);
+    assert_eq!(output_of(&session, "Bass").as_deref(), Some("Low"));
+    // And back in, first at the top level, then into "Band" (empty now) by its id.
+    run(&mut session, "track.setGroup", json!({ "track": "Low", "group": "none", "index": 0 })).unwrap();
+    assert_eq!(order(&session), ["Low", "Lead", "Bass", "Band"]);
+    let band = session.project().tracks[3].id.0;
+    run(&mut session, "track.setGroup", json!({ "track": "Low", "group": band })).unwrap();
+    assert_eq!(order(&session), ["Band", "Low", "Lead", "Bass"]);
+    assert_eq!(session.project().validate(), Ok(()));
+
+    // Every step undoes, back to the project it began with.
+    for _ in 0..7 {
+        run(&mut session, "edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(session.project(), &project());
+}
+
+#[test]
+fn moving_into_a_group_refuses_loops_non_groups_and_bad_params() {
+    let mut session = Session::new(project());
+    run(&mut session, "track.group", json!({ "tracks": ["Bass"], "name": "Low" })).unwrap();
+    run(&mut session, "track.group", json!({ "tracks": ["Low"], "name": "Band" })).unwrap();
+    let before = session.project().clone();
+    for (params, why) in [
+        (json!({ "track": "Band", "group": "Low" }), "inside the track"),
+        (json!({ "track": "Band", "group": "Band" }), "inside the track"),
+        (json!({ "track": "Lead", "group": "Bass" }), "not a group"),
+        (json!({ "track": "Lead", "group": "Nowhere" }), "Nowhere"),
+        (json!({ "track": "Lead", "group": 99 }), "does not exist"),
+        (json!({ "track": "Lead", "group": -1 }), "whole number"),
+        (json!({ "track": "Lead", "group": true }), ""),
+        (json!({ "track": "Lead" }), "group must be"),
+        (json!({ "track": "Lead", "group": "Low", "index": -1 }), "index"),
+        (json!({ "track": "Lead", "group": "Low", "index": 1.5 }), "index"),
+        (json!({ "track": "Lead", "group": "Low", "index": "first" }), "index"),
+        (json!({ "group": "Low" }), ""),
+    ] {
+        let error = run(&mut session, "track.setGroup", params.clone()).unwrap_err();
+        assert!(error.contains(why), "{params}: {error}");
+        assert_eq!(session.project(), &before, "{params}");
+    }
+    // An index past the end is the end.
+    run(&mut session, "track.setGroup", json!({ "track": "Lead", "group": "Band", "index": 99 })).unwrap();
+    assert_eq!(order(&session), ["Band", "Low", "Bass", "Lead"]);
+}
+
+#[test]
+fn groups_nest_up_to_the_cap() {
+    let mut session = Session::new(project());
+    for level in 0..MAX_GROUP_DEPTH {
+        let inner = if level == 0 { "Bass".to_string() } else { format!("G{}", level - 1) };
+        run(&mut session, "track.group", json!({ "tracks": [inner], "name": format!("G{level}") })).unwrap();
+    }
+    let bass = session.project().tracks.iter().find(|t| t.name == "Bass").unwrap().id;
+    assert_eq!(session.project().group_depth(bass), Some(MAX_GROUP_DEPTH));
+    let deeper = run(&mut session, "track.group", json!({ "tracks": ["Bass"] })).unwrap_err();
+    assert!(deeper.contains("nest at most"), "{deeper}");
+    // "Lead" fits into the innermost group, "G0", a group holding a track does not.
+    let deepest = "G0";
+    run(&mut session, "track.group", json!({ "tracks": ["Lead"], "name": "Pair" })).unwrap();
+    let error = run(&mut session, "track.setGroup", json!({ "track": "Pair", "group": deepest })).unwrap_err();
+    assert!(error.contains("nest at most"), "{error}");
+    run(&mut session, "track.setGroup", json!({ "track": "Lead", "group": deepest })).unwrap();
+    assert_eq!(session.project().validate(), Ok(()));
+}
+
+#[test]
+fn a_return_track_stays_out_of_groups() {
+    let mut p = project();
+    p.channels[1].role = ChannelRole::Effect;
+    let mut session = Session::new(p);
+    run(&mut session, "track.group", json!({ "tracks": ["Bass"], "name": "Low" })).unwrap();
+    let error = run(&mut session, "track.setGroup", json!({ "track": "Lead", "group": "Low" })).unwrap_err();
+    assert!(error.contains("return"), "{error}");
+}
+
 #[test]
 fn tracks_rename_colour_and_delete() {
     let mut session = Session::new(project());

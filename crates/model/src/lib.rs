@@ -19,6 +19,11 @@ pub struct ChannelId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ContentId(pub u32);
 
+/// How deep groups nest: a track is inside at most this many groups (its parent, the parent's
+/// parent and so on). Deep enough for any real project, small enough that walking up a track's
+/// groups is always short.
+pub const MAX_GROUP_DEPTH: usize = 16;
+
 /// A Suhina project.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Project {
@@ -66,7 +71,8 @@ pub struct Track {
     pub content: ContentKinds,
     /// The mixer strip this track plays through, if any.
     pub channel: Option<ChannelId>,
-    /// The group track this track belongs to, if any.
+    /// The group track this track belongs to, if any. Groups nest: a group's own `parent` is
+    /// the group it is inside, at most [`MAX_GROUP_DEPTH`] levels deep and never in a cycle.
     pub parent: Option<TrackId>,
     pub extensions: Extensions,
 }
@@ -513,6 +519,10 @@ pub enum ValidationError {
         lane: usize,
         clip: usize,
     },
+    /// Following this track's parents leads back to it.
+    GroupCycle(TrackId),
+    /// This track is inside more than [`MAX_GROUP_DEPTH`] groups.
+    GroupTooDeep(TrackId),
 }
 
 impl fmt::Display for ValidationError {
@@ -524,6 +534,10 @@ impl fmt::Display for ValidationError {
             Self::MissingTrack(id) => write!(f, "track {} does not exist", id.0),
             Self::MissingChannel(id) => write!(f, "channel {} does not exist", id.0),
             Self::MissingContent(id) => write!(f, "clip content {} does not exist", id.0),
+            Self::GroupCycle(id) => write!(f, "track {} is inside itself through its groups", id.0),
+            Self::GroupTooDeep(id) => {
+                write!(f, "track {} is inside more than {MAX_GROUP_DEPTH} nested groups", id.0)
+            }
             Self::BadFades { lane, clip } => {
                 write!(
                     f,
@@ -569,6 +583,11 @@ impl Project {
             }
             if let Some(parent) = track.parent {
                 track_ref(parent, &mut errors);
+                match self.group_depth(track.id) {
+                    None => errors.push(ValidationError::GroupCycle(track.id)),
+                    Some(depth) if depth > MAX_GROUP_DEPTH => errors.push(ValidationError::GroupTooDeep(track.id)),
+                    Some(_) => {}
+                }
             }
         }
         for channel in &self.channels {
@@ -605,6 +624,67 @@ impl Project {
         }
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+
+    /// The groups `track` is inside, nearest first: its parent, the parent's parent and so on.
+    /// Stops at a parent that does not exist, and at a cycle (the track that would repeat is
+    /// left out), so it always ends.
+    pub fn ancestors(&self, track: TrackId) -> Vec<TrackId> {
+        let mut out = Vec::new();
+        let mut next = self.tracks.iter().find(|t| t.id == track).and_then(|t| t.parent);
+        while let Some(id) = next {
+            if id == track || out.contains(&id) || out.len() > self.tracks.len() {
+                break;
+            }
+            out.push(id);
+            next = self.tracks.iter().find(|t| t.id == id).and_then(|t| t.parent);
+        }
+        out
+    }
+
+    /// How many groups `track` is inside (0 at the top level); `None` when its parents lead
+    /// back to a track already passed, a cycle a valid project never has.
+    pub fn group_depth(&self, track: TrackId) -> Option<usize> {
+        let mut seen = vec![track];
+        let mut next = self.tracks.iter().find(|t| t.id == track).and_then(|t| t.parent);
+        while let Some(id) = next {
+            if seen.contains(&id) {
+                return None;
+            }
+            seen.push(id);
+            next = self.tracks.iter().find(|t| t.id == id).and_then(|t| t.parent);
+        }
+        Some(seen.len() - 1)
+    }
+
+    /// `track` and every track inside it at any depth (for a group), in project order. Bounded
+    /// by the track count, so a parent cycle in a malformed project cannot loop.
+    pub fn with_descendants(&self, track: TrackId) -> Vec<TrackId> {
+        let mut family = vec![track];
+        for _ in 0..self.tracks.len() {
+            let before = family.len();
+            for t in &self.tracks {
+                if t.parent.is_some_and(|parent| family.contains(&parent)) && !family.contains(&t.id) {
+                    family.push(t.id);
+                }
+            }
+            if family.len() == before {
+                break;
+            }
+        }
+        self.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
+    }
+
+    /// How many levels of groups hang under `track`: 0 for a track with nothing inside it, 1
+    /// for a group of plain tracks, 2 for a group holding a group, and so on.
+    pub fn nesting_below(&self, track: TrackId) -> usize {
+        let base = self.group_depth(track).unwrap_or(0);
+        self.with_descendants(track)
+            .iter()
+            .filter_map(|&t| self.group_depth(t))
+            .map(|d| d.saturating_sub(base))
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn content(&self, id: ContentId) -> Option<&ClipContent> {
@@ -891,5 +971,50 @@ mod tests {
         let project =
             Project { tracks: vec![track(1, 1), track(1, 1)], channels: vec![channel(1)], ..Project::default() };
         assert_eq!(project.validate(), Err(vec![ValidationError::DuplicateTrack(TrackId(1))]));
+    }
+    /// Tracks 1..=n, each inside the one before it.
+    fn chain_of_groups(n: u32) -> Project {
+        let tracks = (1..=n).map(|id| Track { parent: (id > 1).then(|| TrackId(id - 1)), ..track(id, id) }).collect();
+        Project { tracks, channels: (1..=n).map(channel).collect(), ..Project::default() }
+    }
+
+    #[test]
+    fn nested_groups_report_their_ancestors_depth_and_descendants() {
+        let project = chain_of_groups(4);
+        assert_eq!(project.ancestors(TrackId(4)), vec![TrackId(3), TrackId(2), TrackId(1)]);
+        assert_eq!(project.group_depth(TrackId(4)), Some(3));
+        assert_eq!(project.group_depth(TrackId(1)), Some(0));
+        assert_eq!(project.with_descendants(TrackId(2)), vec![TrackId(2), TrackId(3), TrackId(4)]);
+        assert_eq!(project.nesting_below(TrackId(2)), 2);
+        assert_eq!(project.nesting_below(TrackId(4)), 0);
+        assert_eq!(project.validate(), Ok(()));
+        // A track that does not exist is at the top level and holds nothing.
+        assert_eq!(project.ancestors(TrackId(9)), Vec::<TrackId>::new());
+        assert_eq!(project.with_descendants(TrackId(9)), vec![]);
+    }
+
+    #[test]
+    fn groups_may_nest_up_to_the_cap_and_no_deeper() {
+        let deepest = u32::try_from(MAX_GROUP_DEPTH).unwrap() + 1;
+        assert_eq!(chain_of_groups(deepest).validate(), Ok(()));
+        let too_deep = chain_of_groups(deepest + 1);
+        assert_eq!(too_deep.validate(), Err(vec![ValidationError::GroupTooDeep(TrackId(deepest + 1))]));
+    }
+
+    #[test]
+    fn a_group_cycle_is_reported_and_walking_it_ends() {
+        let mut project = chain_of_groups(3);
+        project.tracks[0].parent = Some(TrackId(3));
+        assert_eq!(project.group_depth(TrackId(2)), None);
+        assert_eq!(project.ancestors(TrackId(2)), vec![TrackId(1), TrackId(3)]);
+        assert_eq!(project.with_descendants(TrackId(1)).len(), 3);
+        let errors = project.validate().unwrap_err();
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().all(|e| matches!(e, ValidationError::GroupCycle(_))));
+        // A track that is its own parent too.
+        let mut own = chain_of_groups(1);
+        own.tracks[0].parent = Some(TrackId(1));
+        assert_eq!(own.validate(), Err(vec![ValidationError::GroupCycle(TrackId(1))]));
+        assert_eq!(own.ancestors(TrackId(1)), vec![]);
     }
 }

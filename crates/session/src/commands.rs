@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, MAX_GROUP_DEPTH, Project,
+    Track, TrackId,
 };
 
 use crate::{CommandError, Session, devices, files, preview};
@@ -255,6 +256,21 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: group_tracks,
+    },
+    CommandSpec {
+        id: "track.setGroup",
+        label: "Move a track (a group with its tracks) into a group track, or out of every group, and play into it",
+        params: &[
+            TRACK,
+            param("group", ParamType::Track, "a group track (id or name) to move into, or \"none\" for the top level"),
+            optional(
+                "index",
+                ParamType::Integer,
+                "its place among the tracks directly in that group (or at the top level), from 0; the end if left out",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: set_group,
     },
     CommandSpec {
         id: "track.ungroup",
@@ -892,24 +908,6 @@ fn channel_id_of(p: &Project, track: TrackId) -> Option<ChannelId> {
     p.tracks.iter().find(|t| t.id == track).and_then(|t| t.channel)
 }
 
-/// A track and every track inside it (for a group), in project order.
-fn with_descendants(p: &Project, track: TrackId) -> Vec<TrackId> {
-    let mut family = vec![track];
-    // Bounded by the track count, so a parent cycle in a malformed project cannot loop.
-    for _ in 0..p.tracks.len() {
-        let before = family.len();
-        for t in &p.tracks {
-            if t.parent.is_some_and(|parent| family.contains(&parent)) && !family.contains(&t.id) {
-                family.push(t.id);
-            }
-        }
-        if family.len() == before {
-            break;
-        }
-    }
-    p.tracks.iter().map(|t| t.id).filter(|id| family.contains(id)).collect()
-}
-
 pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let p = &mut session.project;
     let members = track_list(p, params)?;
@@ -918,6 +916,11 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
     let parent = parents.first().copied().flatten();
     if parents.iter().any(|x| *x != parent) {
         return Err("the tracks to group must all be in the same group, or in none".into());
+    }
+    // The new group adds a level above every track it takes.
+    let deepest = members.iter().map(|&m| p.group_depth(m).unwrap_or(0) + p.nesting_below(m)).max().unwrap_or(0);
+    if deepest + 1 > MAX_GROUP_DEPTH {
+        return Err(format!("groups nest at most {MAX_GROUP_DEPTH} deep; this grouping would go deeper").into());
     }
     let name = match params.get("name") {
         None => "Group".to_string(),
@@ -940,7 +943,7 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         extensions: Default::default(),
     });
     // The group takes the place of its first track; its tracks (with theirs) follow it.
-    let family: Vec<TrackId> = members.iter().flat_map(|m| with_descendants(p, *m)).collect();
+    let family: Vec<TrackId> = members.iter().flat_map(|m| p.with_descendants(*m)).collect();
     let first = p.tracks.iter().position(|t| family.contains(&t.id)).unwrap_or(p.tracks.len());
     let moved: Vec<Track> = p.tracks.iter().filter(|t| family.contains(&t.id)).cloned().collect();
     p.tracks.retain(|t| !family.contains(&t.id));
@@ -984,6 +987,79 @@ fn ungroup_track(session: &mut Session, params: &Value) -> Result<Value, Command
     Ok(json!({ "ungrouped": group.0 }))
 }
 
+/// Moves a track, with everything inside it, into a group or to the top level: it becomes the
+/// group's track at `index` among the group's own tracks, and its channel plays into the group.
+fn set_group(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = &mut session.project;
+    let track = track_id(p, params)?;
+    let role_of = |p: &Project, t: TrackId| {
+        channel_id_of(p, t).and_then(|id| p.channels.iter().find(|c| c.id == id)).map(|c| c.role)
+    };
+    if matches!(role_of(p, track), Some(ChannelRole::Effect | ChannelRole::Master)) {
+        return Err("a return track cannot go into a group".into());
+    }
+    let group = match params.get("group") {
+        Some(Value::String(none)) if none.eq_ignore_ascii_case("none") => None,
+        Some(_) => Some(track_at(p, params, "group")?),
+        None => return Err("group must be a group track or \"none\"".into()),
+    };
+    let index = match params.get("index") {
+        None => None,
+        Some(v) => Some(v.as_u64().ok_or("index must be a whole number from 0")?),
+    };
+    let family = p.with_descendants(track);
+    let output = match group {
+        None => None,
+        Some(g) => {
+            let name = p.tracks.iter().find(|t| t.id == g).map(|t| t.name.clone()).unwrap_or_default();
+            if role_of(p, g) != Some(ChannelRole::Submix) {
+                return Err(format!("{name:?} is not a group track").into());
+            }
+            if family.contains(&g) {
+                return Err(format!("{name:?} is inside the track being moved, or is that track").into());
+            }
+            let depth = p.group_depth(g).unwrap_or(0) + 1 + p.nesting_below(track);
+            if depth > MAX_GROUP_DEPTH {
+                return Err(format!(
+                    "groups nest at most {MAX_GROUP_DEPTH} deep; moving into {name:?} would go deeper"
+                )
+                .into());
+            }
+            channel_id_of(p, g)
+        }
+    };
+
+    let block: Vec<Track> = p.tracks.iter().filter(|t| family.contains(&t.id)).cloned().collect();
+    p.tracks.retain(|t| !family.contains(&t.id));
+    // The group's own tracks, top-level returns aside, and where the block goes among them.
+    let is_return = |p: &Project, t: &Track| {
+        t.channel.and_then(|id| p.channels.iter().find(|c| c.id == id)).is_some_and(|c| c.role == ChannelRole::Effect)
+    };
+    let siblings: Vec<TrackId> =
+        p.tracks.iter().filter(|t| t.parent == group && !is_return(p, t)).map(|t| t.id).collect();
+    let index = index.map_or(siblings.len(), |i| usize::try_from(i).unwrap_or(usize::MAX).min(siblings.len()));
+    let position_of = |p: &Project, id: TrackId| p.tracks.iter().position(|t| t.id == id);
+    let at = match (siblings.get(index), index.checked_sub(1).and_then(|i| siblings.get(i)), group) {
+        (Some(&next), _, _) => position_of(p, next),
+        // After the last sibling and everything inside it.
+        (None, Some(&last), _) => p.with_descendants(last).last().and_then(|&t| position_of(p, t)).map(|i| i + 1),
+        (None, None, Some(g)) => position_of(p, g).map(|i| i + 1),
+        (None, None, None) => None,
+    }
+    .unwrap_or(p.tracks.len())
+    .min(p.tracks.len());
+    p.tracks.splice(at..at, block);
+    if let Some(t) = p.tracks.iter_mut().find(|t| t.id == track) {
+        t.parent = group;
+    }
+    if let Some(channel) = channel_id_of(p, track)
+        && let Some(c) = p.channels.iter_mut().find(|c| c.id == channel)
+    {
+        c.output = output;
+    }
+    Ok(json!({ "track": track.0, "group": group.map(|g| g.0), "position": at }))
+}
+
 /// Removes a track, its channel, its lanes and slots, and every reference to them.
 fn remove_track(p: &mut Project, track: TrackId, channel: ChannelId) {
     p.tracks.retain(|t| t.id != track);
@@ -1005,7 +1081,7 @@ fn move_track(session: &mut Session, params: &Value) -> Result<Value, CommandErr
     let p = &mut session.project;
     let track = track_id(p, params)?;
     let to = params.get("to").and_then(Value::as_u64).ok_or("to must be a whole number from 0")?;
-    let family = with_descendants(p, track);
+    let family = p.with_descendants(track);
     let block: Vec<Track> = p.tracks.iter().filter(|t| family.contains(&t.id)).cloned().collect();
     p.tracks.retain(|t| !family.contains(&t.id));
     let at = usize::try_from(to).unwrap_or(usize::MAX).min(p.tracks.len());
