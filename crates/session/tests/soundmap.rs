@@ -73,7 +73,8 @@ fn samples_are_analysed_laid_out_and_compared() {
         wav(&samples.join("Kicks").join(format!("kick {v}.wav")), &kick(v));
         wav(&samples.join("Hats").join(format!("hat {v}.wav")), &hat(v));
     }
-    wav(&samples.join("thing.wav"), &kick(30));
+    // A kick like the others, with no kind in its name.
+    wav(&samples.join("thing.wav"), &kick(12));
     let mut p = projects(&settings);
     let folder = samples.display().to_string();
     run(&mut p, "library.addFolder", json!({ "folder": folder })).unwrap();
@@ -137,12 +138,35 @@ fn samples_are_analysed_laid_out_and_compared() {
     assert!(run(&mut p, "soundmap.analyse", json!({ "folder": "nowhere" })).is_err());
     assert!(run(&mut p, "soundmap.info", json!({ "item": "nowhere.wav" })).is_err());
 
+    // A kind set by hand wins over the sound and the name, and is kept.
+    let set = run(&mut p, "soundmap.setKind", json!({ "item": thing, "kind": "tom" })).unwrap();
+    assert_eq!(set["kind"], "tom");
+    let info = run(&mut p, "soundmap.info", json!({ "item": thing })).unwrap();
+    assert_eq!((info["kind"].as_str(), info["kindFrom"].as_str()), (Some("tom"), Some("hand")));
+    let map = run(&mut p, "soundmap.layout", json!({})).unwrap();
+    let item = map["items"].as_array().unwrap().iter().find(|i| i["item"] == thing.as_str()).unwrap().clone();
+    assert_eq!(
+        (item["kind"].as_str(), item["byHand"].as_bool(), item["guessed"].as_bool()),
+        (Some("tom"), Some(true), Some(false))
+    );
+    assert!(run(&mut p, "soundmap.setKind", json!({ "item": thing, "kind": "banjo" })).is_err());
+    assert!(run(&mut p, "soundmap.setKind", json!({ "item": "nowhere.wav", "kind": "kick" })).is_err());
+    assert!(run(&mut p, "soundmap.setKind", json!({ "item": thing })).is_err());
+
     // The analysis is kept: new projects with the same settings need none.
     drop(p);
     let mut again = projects(&settings);
     again.start_sound_map();
     let status = run(&mut again, "soundmap.status", json!({})).unwrap();
     assert_eq!(status["folders"][0]["analysed"], 21);
+    // So is the kind set by hand, until it is given back to the name and the sound.
+    let info = run(&mut again, "soundmap.info", json!({ "item": thing })).unwrap();
+    assert_eq!(info["kindFrom"], "hand");
+    let set = run(&mut again, "soundmap.setKind", json!({ "item": thing, "kind": "auto" })).unwrap();
+    assert_eq!(set["kind"], "auto");
+    again.wait_sound_map();
+    let info = run(&mut again, "soundmap.info", json!({ "item": thing })).unwrap();
+    assert_eq!((info["kind"].as_str(), info["kindFrom"].as_str()), (Some("kick"), Some("guess")));
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&samples);
 }

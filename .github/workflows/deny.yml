@@ -1,0 +1,42 @@
+name: Dependencies
+
+# Every dependency's licence must be GPLv3-compatible (AGENTS.md rule 9), come from crates.io and
+# have no open RustSec advisory. deny.toml says what is allowed and why; this runs it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deny-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned, so a new release cannot change the result of a pull request by itself. To update:
+  # change the version and the checksum of its x86_64-unknown-linux-musl archive together
+  # (CONTRIBUTING.md › Dependencies). cargo-deny is MIT OR Apache-2.0.
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+
+jobs:
+  cargo-deny:
+    name: cargo deny (licences, sources, advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-deny
+        run: |
+          name="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl -sSfL -o "$RUNNER_TEMP/cargo-deny.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${name}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP"
+          install -m 755 "$RUNNER_TEMP/${name}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+          cargo deny --version
+      # Fails on a licence, a source or an advisory deny.toml does not allow. Duplicate crate
+      # versions are reported as warnings only.
+      - run: cargo deny --locked check

@@ -119,6 +119,8 @@ pub struct Timeline {
     pub start_beat: f64,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
+    /// The parameters each track's automation lanes can show, with their points.
+    pub automation: crate::automation_lanes::Params,
 }
 
 impl Timeline {
@@ -201,6 +203,7 @@ impl Timeline {
             beat: 0.0,
             start_beat: 0.0,
             waveforms: Arc::default(),
+            automation: crate::automation_lanes::Params::build(project),
         };
         timeline.follow(monitor);
         timeline

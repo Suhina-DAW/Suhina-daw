@@ -7,6 +7,8 @@
 use std::collections::HashSet;
 use std::fmt;
 
+pub mod automation;
+
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(pub u32);
@@ -100,6 +102,9 @@ pub struct Channel {
     pub output: Option<ChannelId>,
     pub sends: Vec<Send>,
     pub devices: Vec<Device>,
+    /// The channel's mixer parameters over the arrangement: lanes for `volume` (linear gain, as
+    /// `volume`), `pan` (-1 to 1) and `mute` (0 or 1).
+    pub automation: Vec<AutomationLane>,
     pub extensions: Extensions,
 }
 
@@ -143,10 +148,41 @@ pub struct Device {
     /// bank (an `.fxb` file's contents), which also a VST3 version standing in for the plug-in
     /// reads; for VST3 it is the component's state.
     pub state: Option<Vec<u8>>,
-    /// Parameter values of a built-in effect or instrument (`DeviceKind::Builtin`); empty for plug-ins and
-    /// placeholders. Parameters that are not listed keep their defaults.
+    /// Parameter values set on the device. A built-in effect or instrument's
+    /// (`DeviceKind::Builtin`) go by the parameter's stable id; a plug-in's by its parameter id
+    /// (the number the plug-in gives it, written in decimal) in the plug-in's own range, and are
+    /// set over the state it loads with. Parameters that are not listed keep their defaults (a
+    /// plug-in's, what its state says).
     pub params: Vec<DeviceParam>,
+    /// The device's parameters over the arrangement, one lane per parameter (by the same id as
+    /// in `params`), for plug-ins and built-in effects and instruments alike.
+    pub automation: Vec<AutomationLane>,
     pub extensions: Extensions,
+}
+
+/// A parameter's value over the arrangement (an envelope): points in beat order, the value
+/// moving from one to the next along the first one's curve and holding before the first and
+/// after the last. Two points at the same beat make a jump. See `docs/spec/automation.md`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AutomationLane {
+    /// The parameter, by the id `Device::params` uses, or a mixer parameter of a channel
+    /// (`volume`, `pan`, `mute`).
+    pub param: String,
+    pub points: Vec<AutomationPoint>,
+    /// Whether the lane plays. A manual change to the parameter turns it off, so the value set
+    /// by hand holds until the lane is turned on again.
+    pub enabled: bool,
+}
+
+/// A value at an arrangement beat, in the parameter's own unit or range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutomationPoint {
+    pub beat: f64,
+    pub value: f64,
+    /// The shape of the segment from this point to the next, -1 to 1: 0 is a straight line,
+    /// above 0 it moves fast first and slow later, below 0 slow first (see
+    /// [`automation::shape`]).
+    pub curve: f64,
 }
 
 /// One parameter value of a built-in effect or instrument, by the parameter's stable id (ADR 0004). The value
@@ -781,6 +817,7 @@ mod tests {
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }
     }
 

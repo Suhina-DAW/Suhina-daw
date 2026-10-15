@@ -4,6 +4,9 @@
 
 mod ahead;
 mod audio;
+mod automation;
+#[cfg(test)]
+mod automation_render_tests;
 mod buses;
 #[cfg(test)]
 mod buses_tests;
@@ -19,6 +22,9 @@ mod follow_tests;
 mod launcher;
 mod metronome;
 mod plugin;
+mod plugin_params;
+#[cfg(test)]
+mod plugin_params_tests;
 #[cfg(test)]
 mod plugin_tests;
 mod preview;
@@ -46,6 +52,7 @@ use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
     OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent, plugin_devices, plugin_key,
 };
+pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
 use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
@@ -442,6 +449,14 @@ impl Renderer {
             beat: self.graph.launcher.beat_and_bar().0,
             playing: self.running,
         };
+        // Plug-in parameter events (set values, automation) are planned before any of the
+        // block runs: a chain may run part of it early, when notes crowd it.
+        let at = self.running.then(|| self.time());
+        let time = self.time();
+        for chain in &mut self.graph.chains {
+            chain.automate(at, frames);
+            chain.automate_mix(time, frames, self.running);
+        }
         let attack = (ATTACK_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let release = (RELEASE_SECONDS * f64::from(self.sample_rate)).max(1.0);
         let block_start = self.position;
@@ -727,6 +742,10 @@ impl Graph {
             return Err(RenderError::InvalidTempo(bpm));
         }
         project.validate().map_err(RenderError::InvalidProject)?;
+        // Mixer parameters that follow lanes are built at their neutral values and applied
+        // after the track's chain, frame by frame (#395).
+        let neutral = automation::neutral(project);
+        let project = neutral.as_ref().unwrap_or(project);
 
         let frames_per_beat = 60.0 / bpm * f64::from(sample_rate);
         let column_of = |track: TrackId| {
@@ -1089,6 +1108,7 @@ mod tests {
                     sends: Vec::new(),
                     devices: Vec::new(),
                     extensions: Extensions::default(),
+                    automation: Vec::new(),
                 })
                 .collect(),
             contents: vec![ClipContent {
@@ -1709,6 +1729,7 @@ mod tests {
             enabled: true,
             state: None,
             params: Vec::new(),
+            automation: Vec::new(),
             extensions: Extensions::default(),
         });
     }
