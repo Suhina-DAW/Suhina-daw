@@ -91,8 +91,8 @@ CHAPTERS = [
     (19, "Recording New Clips", 13, 0.00, "absent",
      "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
-     "Whole-project offline render to 32-bit float WAV (CLI/MCP); no per-track or group bounce, "
-     "no paste."),
+     "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
+     "running plug-ins' state as heard; no per-track or group bounce, no paste."),
     (21, "Comping", 6, 0.00, "absent", "No take lanes, no comping."),
     (22, "Stem Separation", 8, 0.00, "planned", "Roadmap item (Demucs candidate, weights unaudited)."),
     (23, "Working with Instruments and Effects (Device View)", 34, 0.30, "partial",

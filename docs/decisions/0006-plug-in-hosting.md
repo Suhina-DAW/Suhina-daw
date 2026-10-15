@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -173,6 +173,11 @@ workspace forbids.
    read stands in for one that has not answered) and writes that, with the last state of
    stopped ones
    ([ADR 0010](0010-project-files.md)).
+   A render from an open project (`project_render`) reads the states the same way
+   (`Session::project_as_heard`, which the save uses too) and starts its own offline instances
+   with them, so it plays what is heard, edits made in an editor since the project was opened
+   included (#363). The running instances are only asked for their state: the render's
+   instances are separate host processes, as for any offline render.
 6. **`unsafe` only in two crates.** `crates/ipc` (shared memory and block sync, linked into the
    engine) and `crates/plugin-host` (the plug-in host process) may use `unsafe`; every other
    crate stays `forbid`. Both offer safe APIs, keep `unsafe` blocks small, explain each one in a

@@ -247,6 +247,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the chain. On Linux the window is an X11 one whenever an X server (or XWayland) is there,
   so this works on Wayland desktops too.
 - Renders (`suhina-cli render`, MCP `project_render`) run the same plug-ins.
+- MCP `project_render` from an open project starts its plug-ins with the state the running ones
+  have now, so a change made in a plug-in's editor is in the render as it is heard.
 - The plug-ins of different tracks run at the same time (one block out to every host, then
   every answer collected), the engine renders ahead of the audio device in blocks of its own,
   and host audio threads run at real-time priority: a project with 25 plug-ins plays without a
