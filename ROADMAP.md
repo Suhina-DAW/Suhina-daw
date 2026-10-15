@@ -222,6 +222,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
 - A sample dropped into a slot loops over the whole file even when its tempo is not known (it
   plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
+- An arrangement clip goes into a clip slot, and a slot's clip onto the arrangement, as a copy
+  with its gain, warping, loop and fades: Copy and Paste in the right-click menus, Ctrl+C and
+  Ctrl+V on the selected clip or slot (`clip.copy` and `clip.paste` take `scene`), or a drag held
+  over the other view's name in the control bar until the view switches
+  ([spec](docs/spec/clip-launching.md) › Clips between the arrangement and the slots).
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.

@@ -197,6 +197,28 @@ own decision (**Suhina:**), not yet compared with Live 12 (see *To observe*).
   a scene's tempo carry over (`LaunchCommand::SetLaunchTempo`). Only the moment the device needs
   to open is lost.
 
+## Clips between the arrangement and the slots
+
+**Suhina**, our own design: a clip gets into a slot from the arrangement, and from a slot onto
+the arrangement, by copying ([Session view](ui-session-view.md) › Between the views).
+
+- `clip.copy {track, scene}` copies the clip in a track's slot (scene from 1); `clip.copy
+  {track, index}` an arrangement clip. Both fill the same clipboard.
+- `clip.paste {track, scene}` puts the copied clip in that track's slot: the track must have clip
+  slots (a group or return track has none), the scene must exist, and the track must take the
+  clip's kind (notes or audio). A clip already in the slot is replaced; the slot keeps its stop
+  button. One undo step; an error changes nothing and records nothing.
+- The slot's clip plays its own copy of the content (gain, warping and transpose come with it) and
+  keeps the clip's length, offset, loop, enabled state and fades; its start is 0. Fades that
+  do not fit the clip are fitted as when a clip is shortened.
+- The other way, `clip.paste {track, start, stack?}` places a slot's clip on the arrangement, as
+  an arrangement clip is pasted ([arrangement editing](arrangement-editing.md) › Copy, cut and
+  paste).
+- In the window: Copy and Paste in a slot's or a clip's right-click menu, Ctrl+C and Ctrl+V on the
+  selected slot or clip, and dragging a clip over the other view's name in the control bar.
+- A slot clip's fades are kept, but launched clips do not play them yet (Suhina decisions ›
+  Fades above).
+
 ## To observe
 
 Checks in Live 12.4.6 that would turn the hypotheses above into observations (a corpus series
@@ -224,3 +246,4 @@ with a screen recording or notes, no audio from Live needed):
   is there, but not its elements yet.
 - Capturing the playing clips into a new scene.
 - Recording into slots.
+- Moving a clip between a slot and the arrangement (a cut and paste works; a drag copies).

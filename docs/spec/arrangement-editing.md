@@ -57,7 +57,20 @@ in the [automation spec](automation.md#in-the-arrangement-view).
 it covers unless stacked. The pasted clip plays its own copy of the content, so editing one does
 not change the other. The window's keys paste after the selected clip, or at the playhead on the
 selected track ([shortcuts](../shortcuts.md)), and stack when the stacking setting for the
-clip's kind is on, like a moved clip.
+clip's kind is on, like a moved clip. A clip's right-click menu has Copy.
+
+The clipboard is shared with the clip slots ([clip launching](clip-launching.md) › Clips between
+the arrangement and the slots): `clip.copy {track, scene}` copies a slot's clip, which pastes
+onto the arrangement like any other, and `clip.paste {track, scene}` puts the copied
+arrangement clip into a slot. Pasting with `start` and `scene` together, or neither, is an error;
+`start` is at most 120000 beats.
+
+**Dragging into a slot, and back.** A clip dragged in the Arrangement view and held over
+**Session** in the control bar for half a second switches the view; let go over a slot and the
+clip is copied into it, the arrangement left as it was. A slot's clip dragged and held over
+**Arrangement** lands on the lane under the pointer, at the beat on the grid, as a copy that
+replaces what it covers unless stacked. Both are `clip.copy` then `clip.paste`
+([Session view](ui-session-view.md) › Between the views).
 
 ## Fades
 
@@ -368,5 +381,6 @@ overlaps shows one row.
 - Placing clips by recording follows the same rules (clips from the browser, duplicating and
   pasting already do).
 - Moving several selected clips at once.
+- Moving (rather than copying) a clip between a slot and the arrangement.
 - Whether a stacked lane should grow taller automatically.
 - Dragging along the ruler to scrub.

@@ -65,11 +65,13 @@ CHAPTERS = [
      "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "
      "command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, "
      "consolidate, crop, crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.60, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching; "
+    (7, "Session View", 13, 0.62, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
+     "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
+     "the view switch); "
      "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
      "each. A launched clip is selected and the detail area shows its follow-action controls. "
-     "Missing capture-and-insert scene, select-on-launch options."),
+     "Missing capture-and-insert scene, moving clips between slots, select-on-launch options."),
     (8, "Clip View", 34, 0.15, "started",
      "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
      "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "

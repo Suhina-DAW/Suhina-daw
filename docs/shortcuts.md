@@ -121,6 +121,12 @@ puts the copied notes right after the selected notes, or at the playhead when it
 clip, else right after where they were copied from; pasted and duplicated notes are selected
 ([clip editor spec](spec/ui-clip-editor.md) › Shortcuts).
 
+In the Session view, copy and paste act on the selected clip slot (the one clicked last): Ctrl+C
+copies its clip, Ctrl+V puts the copied clip in it, replacing what it holds. That is how an
+arrangement clip goes into a slot: Ctrl+C on the clip, Tab, click a slot, Ctrl+V
+([Session view](spec/ui-session-view.md) › Between the views). Cut, duplicate and delete act on
+arrangement clips only.
+
 Zoom in has two keys, `Ctrl+Plus` and `Ctrl+Equals`. On macOS `+` is typed as Shift and `=`, and
 while Cmd is held the window reports that key as `=`, never `+`: `Ctrl+Plus` cannot fire there, and
 `Cmd+=`, the usual zoom-in key on a Mac, does. Both work on Windows and Linux, and a keyboard with a

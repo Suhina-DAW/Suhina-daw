@@ -254,6 +254,16 @@ impl ArrangementViewState {
         self.selected = None;
     }
 
+    /// The clip being dragged with the mouse, if any: its track and index.
+    pub fn dragged_clip(&self) -> Option<(TrackId, usize)> {
+        self.clip_drag.map(|d| (d.track, d.index))
+    }
+
+    /// Ends a clip's drag without moving it, as when the window carries it to the other view.
+    pub fn cancel_clip_drag(&mut self) {
+        self.clip_drag = None;
+    }
+
     /// Sets a lane's height, as dragging its lower edge does.
     pub fn set_lane_height(&mut self, track: TrackId, height: f32) {
         self.heights.insert(track, height.clamp(MIN_LANE, MAX_LANE));
@@ -854,7 +864,9 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             if lane.kind != ColumnKind::Track {
                 continue;
             }
-            probe.offer(Rect::from_x_y_ranges(headers, row.clip.y_range()), DropTarget::Track(row.track));
+            if !probe.clip {
+                probe.offer(Rect::from_x_y_ranges(headers, row.clip.y_range()), DropTarget::Track(row.track));
+            }
             if probe.files {
                 let beat = beat_at(probe.pointer.x, free);
                 let x = x_of(beat);
@@ -869,7 +881,7 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
                 probe.offer(row.clip, DropTarget::Track(row.track));
             }
         }
-        if empty.height() > 0.0 && empty.contains(probe.pointer) {
+        if !probe.clip && empty.height() > 0.0 && empty.contains(probe.pointer) {
             let beat = beat_at(probe.pointer.x.max(time.left()), free);
             probe.offer(empty, DropTarget::NewTracks { beat: Some(beat), scene: None });
         }

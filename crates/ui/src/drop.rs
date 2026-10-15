@@ -97,6 +97,9 @@ pub struct DropProbe {
     pub files: bool,
     /// The drag holds devices, presets or plug-ins.
     pub devices: bool,
+    /// The drag is a clip carried from a slot or the arrangement: it lands only in a slot or on
+    /// a lane (`docs/spec/ui-session-view.md` › Between the views).
+    pub clip: bool,
     pub target: Option<DropTarget>,
     /// The target's area, outlined while dragging.
     pub area: Option<egui::Rect>,
@@ -108,9 +111,15 @@ impl DropProbe {
             pointer,
             files: items.iter().any(|i| i.kind.is_file_clip()),
             devices: items.iter().any(|i| i.kind.is_device()),
+            clip: false,
             target: None,
             area: None,
         }
+    }
+
+    /// A probe for a clip carried between the views.
+    pub fn for_clip(pointer: egui::Pos2) -> Self {
+        Self { pointer, files: true, devices: false, clip: true, target: None, area: None }
     }
 
     /// Takes `target` when the pointer is in `area` and nothing took it yet.

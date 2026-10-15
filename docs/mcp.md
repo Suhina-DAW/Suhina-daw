@@ -95,7 +95,10 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   (lengths, shapes and curves); `clip.move`, `clip.duplicate`, `clip.delete`, `clip.copy`,
   `clip.cut`, `clip.paste`, `clip.setGain` and `clip.setFades` (fade-in and fade-out in beats,
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
-  `command_run` ([arrangement editing](spec/arrangement-editing.md)).
+  `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.copy {track, scene}`
+  copies a clip slot's clip and `clip.paste {track, scene}` puts the copied clip into a slot, so a
+  clip goes from the arrangement into a slot and back
+  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots).
 
 - **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
   it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`

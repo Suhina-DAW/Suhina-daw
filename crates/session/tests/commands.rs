@@ -889,3 +889,147 @@ fn bad_loop_edits_are_errors_and_change_nothing() {
     }
     assert_eq!(session.project(), &before);
 }
+
+/// The audio test project with an audio track Drums (3), and clip slots in two scenes for
+/// Bass and Drums; Lead has none. Drums holds a clip in scene 1; the audio clip on the
+/// arrangement has fades, a loop, a gain, warping and an offset.
+fn launcher_project() -> Project {
+    let mut p = audio_project();
+    p.tracks.push(Track {
+        id: TrackId(3),
+        name: "Drums".into(),
+        color: None,
+        content: ContentKinds { notes: false, audio: true },
+        channel: Some(ChannelId(3)),
+        parent: None,
+        extensions: Extensions::default(),
+    });
+    let mut channel = p.channels[0].clone();
+    (channel.id, channel.name) = (ChannelId(3), "C3".into());
+    p.channels.push(channel);
+    if let LaneData::Audio(region) = &mut p.contents[1].lanes[0].data {
+        region.gain = 0.5;
+        region.warped = true;
+        region.stretch = StretchMode::Tonal;
+    }
+    let audio = &mut p.arrangement.lanes[0].clips[1];
+    (audio.fade_in, audio.fade_out, audio.offset) = (1.0, 0.5, 0.25);
+    audio.fade_out_curve = FadeCurve { shape: FadeShape::EqualPower, curve: 0.5 };
+    audio.loop_range = Some(LoopRange { start: 0.0, end: 2.0 });
+    let mut held = p.arrangement.lanes[0].clips[1].clone();
+    held.start = 0.0;
+    p.launcher = Launcher {
+        scenes: vec![Scene::default(), Scene::default()],
+        columns: vec![
+            LauncherColumn { track: TrackId(1), slots: vec![Slot::default(), Slot::default()] },
+            LauncherColumn {
+                track: TrackId(3),
+                slots: vec![Slot { clip: Some(held), has_stop: true }, Slot::default()],
+            },
+        ],
+    };
+    p
+}
+
+#[test]
+fn an_arrangement_clip_pastes_into_a_slot_with_everything_it_carries() {
+    let mut session = Session::new(launcher_project());
+    let arranged = session.project().arrangement.lanes[0].clips[1].clone();
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    let pasted = run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).unwrap();
+    assert_eq!(pasted, json!({ "track": 3, "scene": 2, "replaced": false }));
+    let p = session.project();
+    let placed = p.launcher.columns[1].slots[1].clip.clone().unwrap();
+    assert_ne!(placed.content, arranged.content, "the slot clip plays its own content");
+    assert_eq!(Clip { content: arranged.content, start: arranged.start, ..placed.clone() }, arranged);
+    assert_eq!(placed.start, 0.0);
+    let (copy, original) = (p.content(placed.content).unwrap(), p.content(arranged.content).unwrap());
+    assert_eq!(copy.lanes, original.lanes, "gain and warping travel with the content");
+    assert_eq!(p.arrangement.lanes[0].clips.len(), 2, "the arrangement is left as it was");
+    assert_eq!(p.validate(), Ok(()));
+
+    // One undo step takes it out again, content and all.
+    let contents = p.contents.len();
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().launcher.columns[1].slots[1].clip.is_none());
+    assert_eq!(session.project().contents.len(), contents - 1);
+}
+
+#[test]
+fn a_paste_into_a_held_slot_replaces_its_clip() {
+    let mut session = Session::new(launcher_project());
+    let before = session.project().launcher.columns[1].slots[0].clone();
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    let pasted = run(&mut session, "clip.paste", json!({ "track": 3, "scene": 1 })).unwrap();
+    assert_eq!(pasted["replaced"], true);
+    let after = &session.project().launcher.columns[1].slots[0];
+    assert_ne!(after.clip.as_ref().map(|c| c.content), before.clip.as_ref().map(|c| c.content));
+    assert!(after.has_stop, "the slot keeps its stop button");
+}
+
+#[test]
+fn a_slot_clip_copies_onto_the_arrangement() {
+    let mut session = Session::new(launcher_project());
+    run(&mut session, "clip.copy", json!({ "track": "Drums", "scene": 1 })).unwrap();
+    let pasted = run(&mut session, "clip.paste", json!({ "track": "Drums", "start": 16 })).unwrap();
+    assert_eq!((pasted["track"].as_u64(), pasted["start"].as_f64()), (Some(3), Some(16.0)));
+    let p = session.project();
+    let lane = p.arrangement.lanes.iter().find(|l| l.track == Some(TrackId(3))).unwrap();
+    let slot = p.launcher.columns[1].slots[0].clip.clone().unwrap();
+    assert_eq!(lane.clips.len(), 1);
+    assert_eq!(Clip { content: slot.content, start: 0.0, ..lane.clips[0].clone() }, slot);
+    assert_eq!(p.validate(), Ok(()));
+    // A MIDI clip from a slot goes to a MIDI track's slot too.
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 1 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "scene": 1 })).unwrap();
+    run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 2 })).unwrap();
+    assert!(session.project().launcher.columns[0].slots.iter().all(|s| s.clip.is_some()));
+}
+
+#[test]
+fn malformed_copies_and_pastes_into_slots_are_errors_that_record_nothing() {
+    let mut session = Session::new(launcher_project());
+    let copy = |session: &mut Session, params: Value| run(session, "clip.copy", params);
+    for params in [
+        json!({ "track": "Bass" }),
+        json!({ "track": "Bass", "index": 0, "scene": 1 }),
+        json!({ "track": "Bass", "scene": 1 }),
+        json!({ "track": "Drums", "scene": 3 }),
+        json!({ "track": "Drums", "scene": 0 }),
+        json!({ "track": "Drums", "scene": -1 }),
+        json!({ "track": "Drums", "scene": "one" }),
+        json!({ "track": "Lead", "scene": 1 }),
+    ] {
+        assert!(copy(&mut session, params.clone()).is_err(), "{params}");
+    }
+    assert!(run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).is_err(), "nothing copied");
+    assert!(
+        run(&mut session, "clip.cut", json!({ "track": "Drums", "scene": 1 })).is_err(),
+        "cut is for the arrangement"
+    );
+
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    let before = session.project().clone();
+    for params in [
+        json!({ "track": "Drums" }),
+        json!({ "track": "Drums", "start": 4, "scene": 2 }),
+        json!({ "track": "Drums", "scene": 2, "stack": true }),
+        json!({ "track": "Drums", "scene": 3 }),
+        json!({ "track": "Drums", "scene": 0 }),
+        json!({ "track": "Drums", "scene": 1.5 }),
+        json!({ "track": "Drums", "scene": null }),
+        json!({ "track": "Lead", "scene": 1 }),
+        json!({ "track": "Nobody", "scene": 1 }),
+        json!({ "track": "Drums", "start": -1 }),
+        json!({ "track": "Drums", "start": 1e12 }),
+    ] {
+        assert!(run(&mut session, "clip.paste", params.clone()).is_err(), "{params}");
+    }
+    // Audio onto a MIDI track's slot, and MIDI onto an audio track's.
+    assert!(run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 2 })).is_err());
+    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    assert!(run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).is_err());
+    assert_eq!(session.project(), &before);
+    assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");
+}
