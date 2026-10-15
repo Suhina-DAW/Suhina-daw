@@ -340,6 +340,7 @@ fn launcher_project() -> Project {
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: suhina_model::Extensions::default(),
     };
     for column in p.launcher.columns.iter_mut().take(2) {

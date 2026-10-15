@@ -218,8 +218,26 @@ fn offline_runs_line_the_output_up_with_the_input_and_ring_out() {
     assert!(refused.state_refused.is_some());
     assert_eq!(refused.samples, default.samples);
 
+    // A host that dies in a block is reported as a crash, not as a plug-in that stopped answering.
     let crashing = render(launch("test:crash-after:2"), &input, 0);
-    assert!(matches!(crashing, Err(PluginError::Timeout(_))), "{crashing:?}");
+    assert!(matches!(&crashing, Err(PluginError::Protocol(why)) if why.contains("crashed")), "{crashing:?}");
+    let hanging = render(launch("test:hang-after:2"), &input, 0);
+    assert!(matches!(hanging, Err(PluginError::Timeout(_))), "{hanging:?}");
+}
+
+#[test]
+fn a_clap_plugin_gets_every_audio_port_it_declares() {
+    use suhina_plugins::offline::render;
+    // `test:clap-ports` declares an 8-channel main input and output and a stereo side input and
+    // output, reads all of them, and refuses (silence) a block laid out otherwise: a host that
+    // gave it only the link's two channels left it without most of what it reads (#327).
+    let input: Vec<f32> = (0..1_500).flat_map(|n| [n as f32 + 1.0, -(n as f32) - 1.0]).collect();
+    let rendered = render(launch("test:clap-ports"), &input, 0).unwrap();
+    assert_eq!(rendered.samples, input);
+
+    // In real time too: the link's stereo goes through the main ports.
+    let (_plugin, mut audio) = start("test:clap-ports");
+    assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 1.0));
 }
 
 #[test]

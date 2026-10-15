@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use suhina_ipc::Outcome;
 
-use crate::{Event, Launch, Plugin, PluginError, SavedState};
+use crate::{Event, Health, Launch, Plugin, PluginError, SavedState};
 
 /// Frames per block offline.
 pub const BLOCK_FRAMES: u32 = 512;
@@ -95,6 +95,11 @@ pub fn render_with_events(
         }
         match audio.process_with_events(block_in, &block_events, block_out, BLOCK_TIMEOUT) {
             Outcome::Done => output.extend_from_slice(block_out),
+            // A host that died with the block (a plug-in that crashed) is told apart from one
+            // that is stuck in it.
+            Outcome::Missed | Outcome::Busy if plugin.health() == Health::Crashed => {
+                return Err(PluginError::Protocol("the plug-in crashed while running a block offline".into()));
+            }
             Outcome::Missed | Outcome::Busy => {
                 return Err(PluginError::Timeout("a block offline (the plug-in stopped answering)"));
             }
