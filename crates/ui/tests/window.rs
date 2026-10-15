@@ -1503,6 +1503,21 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     assert!(harness.query_by_label("CPU load").is_none());
 }
 
+#[test]
+fn the_control_bar_shows_the_ram_usage_whether_or_not_an_engine_plays() {
+    // The program's own RAM is shown without an engine too: it is the process's, not the
+    // engine's.
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.query_by_label_contains("RAM usage");
+    assert!(ram.is_some(), "the RAM shows next to the CPU's place");
+    // In megabytes or gigabytes, as the issue asks.
+    let text = format!("{:?}", ram.unwrap());
+    assert!(text.contains("MB") || text.contains("GB"), "{text}");
+}
+
 /// The label of the active project's Close button in the tab row.
 fn active_close_label(harness: &Harness<'static, App>) -> String {
     let projects = harness.state().projects();
