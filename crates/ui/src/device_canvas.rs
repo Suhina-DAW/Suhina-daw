@@ -32,13 +32,30 @@ pub(crate) fn graph(bytes: &[u8]) -> Option<Arc<Parsed>> {
 #[derive(Clone)]
 struct Loaded {
     source: Arc<DeviceUi>,
+    palette: WidgetPalette,
     images: Vec<Result<egui::TextureHandle, String>>,
     controls: Vec<Vec<Draw>>,
 }
+fn rgba(color: egui::Color32) -> [u8; 4] {
+    [color.r(), color.g(), color.b(), color.a()]
+}
+fn accent_text(accent: egui::Color32) -> [u8; 4] {
+    let luminance = 0.2126 * f32::from(accent.r()) + 0.7152 * f32::from(accent.g()) + 0.0722 * f32::from(accent.b());
+    if luminance > 145.0 { [29, 28, 26, 255] } else { [255, 255, 255, 255] }
+}
 fn images(ctx: &egui::Context, source: &Arc<DeviceUi>) -> Arc<Loaded> {
+    let colors = crate::theme::palette();
+    let palette = WidgetPalette {
+        text: rgba(colors.text_primary),
+        panel: rgba(colors.panel_background),
+        control: rgba(colors.control_background),
+        border: rgba(colors.border),
+        accent: rgba(colors.accent),
+        accent_text: accent_text(colors.accent),
+    };
     let key = egui::Id::new("sd-image-cache");
     let mut cache = ctx.data_mut(|d| d.get_temp::<Vec<Arc<Loaded>>>(key)).unwrap_or_default();
-    if let Some(found) = cache.iter().find(|v| Arc::ptr_eq(&v.source, source)) {
+    if let Some(found) = cache.iter().find(|v| Arc::ptr_eq(&v.source, source) && v.palette == palette) {
         return found.clone();
     }
     let images = source
@@ -59,8 +76,8 @@ fn images(ctx: &egui::Context, source: &Arc<DeviceUi>) -> Arc<Loaded> {
                 .map_err(|e| e.to_string())
         })
         .collect();
-    let controls = source.controls.iter().map(|c| c.drawings().into_owned()).collect();
-    let loaded = Arc::new(Loaded { source: source.clone(), images, controls });
+    let controls = source.controls.iter().map(|c| c.drawings_with_palette(&palette).into_owned()).collect();
+    let loaded = Arc::new(Loaded { source: source.clone(), palette, images, controls });
     cache.push(loaded.clone());
     if cache.len() > 8 {
         cache.remove(0);
@@ -227,7 +244,12 @@ pub(crate) fn show(
 ) {
     let loaded = images(ui.ctx(), canvas);
     let painter = ui.painter_at(rect.intersect(ui.clip_rect()));
-    painter.rect_filled(rect, 0.0, color(canvas.background));
+    let background = if canvas.background == DeviceUi::default().background {
+        crate::theme::palette().panel_background
+    } else {
+        color(canvas.background)
+    };
+    painter.rect_filled(rect, 0.0, background);
     paint(&painter, &canvas.layers, rect.min, parameters, &loaded);
     for (control, drawings) in canvas.controls.iter().zip(&loaded.controls) {
         if control.visible_when.as_ref().is_some_and(|v| {
@@ -289,20 +311,20 @@ pub(crate) fn show(
                 }
                 let frame = egui::Frame::popup(ui.style())
                     .corner_radius(0)
-                    .fill(Color32::from_rgb(24, 24, 24))
-                    .stroke(Stroke::new(1., Color32::from_rgb(255, 173, 86)));
+                    .fill(color(loaded.palette.panel))
+                    .stroke(Stroke::new(1., color(loaded.palette.accent)));
                 let mut picked = None;
                 popup.frame(frame).show(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.;
                     ui.spacing_mut().interact_size.y = 14.;
-                    ui.visuals_mut().selection.bg_fill = Color32::from_rgb(255, 173, 86);
+                    ui.visuals_mut().selection.bg_fill = color(loaded.palette.accent);
                     for (index, label) in p.ui.options.iter().enumerate() {
                         let selected = p.value.round() == index as f64;
-                        let text = egui::RichText::new(label).size(11.).color(if selected {
-                            Color32::from_rgb(24, 24, 24)
+                        let text = egui::RichText::new(label).size(11.).color(color(if selected {
+                            loaded.palette.accent_text
                         } else {
-                            Color32::from_rgb(255, 173, 86)
-                        });
+                            loaded.palette.text
+                        }));
                         if ui.selectable_label(selected, text).clicked() {
                             picked = Some(index as f64);
                             ui.close();
@@ -422,7 +444,7 @@ pub(crate) fn show(
         if focused {
             let r = bounds.shrink(0.5);
             let leg = 3.0_f32.min(r.width() * 0.25).min(r.height() * 0.25);
-            let stroke = Stroke::new(1., Color32::from_rgb(160, 160, 154));
+            let stroke = Stroke::new(1., crate::theme::accent());
             for (corner, dx, dy) in [
                 (r.left_top(), 1., 1.),
                 (r.right_top(), -1., 1.),
@@ -742,6 +764,74 @@ mod tests {
         assert_eq!(actions[0].params["gesture"], "xy");
         assert!((actions[0].params["value"].as_f64().unwrap() - 3556.5588).abs() < 0.1);
         assert_eq!(actions[1].params["value"], 0.75);
+    }
+
+    #[test]
+    fn built_in_widget_colors_follow_the_active_theme_and_refresh_the_cache() {
+        let context = egui::Context::default();
+        let canvas = Arc::new(DeviceUi {
+            controls: vec![CustomControl {
+                widget: Some(Widget::Button { label: "On".into(), off_label: None, indicator: false }),
+                id: "on".into(),
+                name: "On".into(),
+                tooltip: String::new(),
+                bounds: [0.0, 0.0, 40.0, 12.0],
+                visible_when: None,
+                gesture: UiGesture::Toggle,
+                x: Some(UiBinding::new("enabled")),
+                y: None,
+                drawing: Vec::new(),
+            }],
+            ..DeviceUi::default()
+        });
+        let dark = crate::theme::Palette::DARK;
+        crate::theme::set_palette(&context, dark);
+        let dark_loaded = images(&context, &canvas);
+        let mut alternate = dark;
+        alternate.accent = Color32::from_rgb(12, 34, 56);
+        crate::theme::set_palette(&context, alternate);
+        let alternate_loaded = images(&context, &canvas);
+        assert!(!Arc::ptr_eq(&dark_loaded, &alternate_loaded));
+        assert!(
+            alternate_loaded.controls[0]
+                .iter()
+                .any(|draw| matches!(draw, Draw::Rect { color, .. } if *color == [12, 34, 56, 255]))
+        );
+        crate::theme::set_palette(&context, dark);
+    }
+
+    #[test]
+    fn default_canvas_background_follows_the_theme_and_authored_background_stays_fixed() {
+        let context = egui::Context::default();
+        let mut palette = crate::theme::Palette::DARK;
+        palette.panel_background = Color32::from_rgb(11, 22, 33);
+        crate::theme::set_palette(&context, palette);
+        let default = Arc::new(DeviceUi::default());
+        let authored = Arc::new(DeviceUi { background: [44, 55, 66, 255], ..DeviceUi::default() });
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            let mut actions = Vec::new();
+            for (x, canvas) in [(8.0, &default), (56.0, &authored)] {
+                show(
+                    ui,
+                    Rect::from_min_size(Pos2::new(x, 8.0), Vec2::splat(40.0)),
+                    canvas,
+                    &[],
+                    TrackId(1),
+                    0,
+                    &mut actions,
+                );
+            }
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == palette.panel_background
+        )));
+        assert!(output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == Color32::from_rgb(44, 55, 66)
+        )));
+        output.textures_delta.clear();
+        crate::theme::set_palette(&context, crate::theme::Palette::DARK);
     }
 }
 

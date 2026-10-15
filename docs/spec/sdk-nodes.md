@@ -113,6 +113,7 @@ The JSON catalog uses the same records and includes a minimal configuration exam
 | `midi_input` / `MidiInput` | None | Incoming MIDI events for a MIDI-effect graph. |
 | `midi_output` / `MidiOutput` | `in` (required, midi) | Emits processed MIDI events from a MIDI-effect graph. |
 | `midi_transpose` / `MidiTranspose` | `in` (required, midi) | Transposes note-on and note-off events by semitones; keys outside 0..127 are dropped. |
+| `midi_transpose_parameter` / `MidiTransposeParameter` | `in` (required, midi) | Transposes note events by an integer parameter; keys outside 0..127 are dropped. |
 | `midi_key` / `MidiKey` | None | Instrument signal containing the current MIDI key, or 0 when no key is held. |
 | `midi_velocity` / `MidiVelocity` | None | Instrument signal containing the current note velocity from 0 to 1. |
 | `midi_gate` / `MidiGate` | None | Instrument signal set to 1 while a note is held and 0 otherwise. |

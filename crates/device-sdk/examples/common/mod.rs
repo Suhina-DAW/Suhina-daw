@@ -14,6 +14,14 @@ pub fn wire(graph: &mut DeviceGraph, from: &str, to: &str, port: &str) {
     graph.connections.push(C::ports(from, "out", to, port));
 }
 
+pub fn style_parameter(parameter: &mut Parameter) {
+    parameter.ui.font_size = 11.0;
+    let knob = matches!(parameter.control, ParameterControl::Knob | ParameterControl::LogKnob);
+    parameter.ui.shape =
+        if knob { suhina_device_sdk::ControlShape::Rounded } else { suhina_device_sdk::ControlShape::Square };
+    parameter.ui.corner_radius = if knob { 5.0 } else { 0.0 };
+}
+
 pub fn finish(mut g: DeviceGraph) -> Result<DeviceGraph, Box<dyn std::error::Error>> {
     // Hide implementation details so the generated panel has room for the user controls.
     for node in &mut g.nodes {
@@ -27,6 +35,7 @@ pub fn finish(mut g: DeviceGraph) -> Result<DeviceGraph, Box<dyn std::error::Err
             "ratio" | "attack" | "release" => ParameterControl::Number,
             _ => p.control,
         };
+        style_parameter(p);
         p.ui.tooltip = format!("{} ({})", p.name, p.unit);
     }
     g.validate()?;

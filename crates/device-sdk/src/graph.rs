@@ -15,10 +15,17 @@ impl DeviceGraph {
             if node.id.is_empty() || node.id.len() > MAX_TEXT_BYTES || !ids.insert(&node.id) {
                 return Err(fail("id must be unique and 1..128 bytes"));
             }
-            if midi && !matches!(node.kind, NodeKind::MidiInput | NodeKind::MidiOutput | NodeKind::MidiTranspose { .. })
+            if midi
+                && !matches!(
+                    node.kind,
+                    NodeKind::MidiInput
+                        | NodeKind::MidiOutput
+                        | NodeKind::MidiTranspose { .. }
+                        | NodeKind::MidiTransposeParameter { .. }
+                )
             {
                 return Err(fail(
-                    "only midi_input, midi_transpose and midi_output are supported in midi_effect graphs",
+                    "only midi_input, MIDI transpose nodes and midi_output are supported in midi_effect graphs",
                 ));
             }
             if instrument && matches!(node.kind, NodeKind::MidiKey | NodeKind::MidiVelocity | NodeKind::MidiGate) {
@@ -34,8 +41,16 @@ impl DeviceGraph {
                 NodeKind::AudioOutput => outputs += 1,
                 NodeKind::MidiInput if midi => inputs += 1,
                 NodeKind::MidiOutput if midi => outputs += 1,
+                NodeKind::MidiTransposeParameter { parameter } if midi => {
+                    if !self.parameters.iter().any(|p| p.id == *parameter) {
+                        return Err(fail(&format!("unknown parameter {parameter:?}")));
+                    }
+                }
                 NodeKind::MidiTranspose { .. } if midi => {}
-                NodeKind::MidiInput | NodeKind::MidiOutput | NodeKind::MidiTranspose { .. } => {
+                NodeKind::MidiInput
+                | NodeKind::MidiOutput
+                | NodeKind::MidiTranspose { .. }
+                | NodeKind::MidiTransposeParameter { .. } => {
                     return Err(fail("MIDI nodes are only valid in midi_effect graphs"));
                 }
                 NodeKind::Gain { parameter } | NodeKind::Parameter { parameter } => {

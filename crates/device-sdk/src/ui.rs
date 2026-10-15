@@ -34,12 +34,35 @@ pub struct DeviceUi {
     pub controls: Vec<CustomControl>,
     pub hidden_parameters: Vec<String>,
 }
+
+/// Host theme colours used to resolve the SDK's built-in widget drawings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WidgetPalette {
+    pub text: [u8; 4],
+    pub panel: [u8; 4],
+    pub control: [u8; 4],
+    pub border: [u8; 4],
+    pub accent: [u8; 4],
+    pub accent_text: [u8; 4],
+}
+impl Default for WidgetPalette {
+    fn default() -> Self {
+        Self {
+            text: [236, 232, 225, 255],
+            panel: [37, 36, 33, 255],
+            control: [46, 45, 42, 255],
+            border: [56, 55, 51, 255],
+            accent: [166, 163, 255, 255],
+            accent_text: [29, 28, 26, 255],
+        }
+    }
+}
 impl Default for DeviceUi {
     fn default() -> Self {
         Self {
             size: [640.0, 240.0],
             viewport_size: None,
-            background: [24, 28, 34, 255],
+            background: [37, 36, 33, 255],
             assets: Vec::new(),
             layers: Vec::new(),
             controls: Vec::new(),

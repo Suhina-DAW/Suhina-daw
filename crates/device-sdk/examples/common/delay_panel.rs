@@ -1,30 +1,7 @@
 use suhina_device_sdk::{Parameter, ui::*};
-const TEXT: [u8; 4] = [194, 194, 190, 255];
-const DARK: [u8; 4] = [24, 24, 24, 255];
-const BG: [u8; 4] = [54, 54, 54, 255];
-const CYAN: [u8; 4] = [3, 195, 213, 255];
-const ORANGE: [u8; 4] = [255, 173, 86, 255];
-fn text(x: f32, y: f32, label: &str, color: [u8; 4], center: bool) -> Draw {
-    Draw::Text {
-        position: [x.into(), y.into()],
-        text: label.into(),
-        size: 10.,
-        color,
-        parameter: None,
-        decimals: 0,
-        align: if center { TextAlign::Center } else { TextAlign::Left },
-        format: TextFormat::Number,
-    }
-}
+const ACCENT: [u8; 4] = [166, 163, 255, 255];
 fn equal(id: &str, v: u16) -> UiValue {
     UiValue::Expression(Box::new(UiExpression::Equal { a: UiValue::parameter(id, false), b: (v as f32).into() }))
-}
-fn conditional_text(x: f32, y: f32, label: &str, color: [u8; 4], visible: UiValue) -> Draw {
-    let mut d = text(x, y, label, color, true);
-    if let Draw::Text { position, .. } = &mut d {
-        position[0] = UiValue::from(x) + (UiValue::from(1.) + visible * (-1.).into()) * 4096.0.into();
-    }
-    d
 }
 fn button(ui: &mut DeviceUi, id: &str, value: Option<u16>, label: &str, bounds: [f32; 4]) {
     ui.controls.push(CustomControl {
@@ -86,19 +63,22 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
     let mut ui = DeviceUi {
         size: [400., 180.],
         viewport_size: Some([400., 180.]),
-        background: BG,
         hidden_parameters: parameters.iter().map(|p| p.id.clone()).collect(),
         ..DeviceUi::default()
     };
     for (side, x) in [("left", 7.), ("right", 77.)] {
         let sync = format!("sync_{side}");
-        ui.layers.push(text(x + 23., 0., if side == "left" { "Left" } else { "Right" }, TEXT, true));
-        button(&mut ui, &sync, None, "Sync", [x, 13., 46., 12.]);
+        let label = if side == "left" { "L Sync" } else { "R Sync" };
+        button(&mut ui, &sync, None, label, [x, 13., 46., 12.]);
         when(&mut ui, &sync, 1);
-        button(&mut ui, &sync, None, "Time", [x, 13., 46., 12.]);
+        button(&mut ui, &sync, None, label, [x, 13., 46., 12.]);
         if let Some(c) = ui.controls.last_mut() {
             c.id = format!("{sync}_time");
-            c.widget = Some(Widget::Button { label: "Sync".into(), off_label: Some("Time".into()), indicator: false });
+            c.widget = Some(Widget::Button {
+                label: label.into(),
+                off_label: Some(if side == "left" { "L Time" } else { "R Time" }.into()),
+                indicator: false,
+            });
         }
         when(&mut ui, &sync, 0);
         for (i, value) in [1, 2, 3, 4, 5, 6, 8, 16].into_iter().enumerate() {
@@ -111,7 +91,7 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
             );
             when(&mut ui, &sync, 1);
         }
-        number(&mut ui, &format!("offset_{side}"), [x, 94., 46., 12.], 1, false, TEXT, true);
+        number(&mut ui, &format!("offset_{side}"), [x, 94., 46., 12.], 1, false, [236, 232, 225, 255], true);
         if let Some(c) = ui.controls.last_mut()
             && let Some(Widget::Number { bordered, .. }) = &mut c.widget
         {
@@ -124,25 +104,13 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
     button(&mut ui, "link", None, "↔", [58., 56., 14., 12.]);
     knob(&mut ui, "feedback", "Feedback", [37., 126., 54., 40.], false);
     button(&mut ui, "freeze", None, "*", [93., 136., 13., 13.]);
-    ui.layers.push(text(368., 0., "Smoothing", TEXT, true));
     for (i, label) in ["Repitch", "Fade", "Jump"].into_iter().enumerate() {
         button(&mut ui, "mode", Some(i as u16), label, [340., 13. + i as f32 * 14., 55., 12.]);
     }
     button(&mut ui, "ping_pong", None, "Ping Pong", [340., 94., 55., 12.]);
     knob(&mut ui, "wet", "Dry/Wet", [345., 126., 44., 40.], false);
     let expanded = UiValue::normalized("lfo_expanded", false);
-    ui.layers.push(Draw::Rect {
-        rect: [
-            129.0.into(),
-            (UiValue::from(165.) + expanded.clone() * (-30.).into()),
-            204.0.into(),
-            UiValue::from(15.) + expanded.clone() * 30.0.into(),
-        ],
-        color: DARK,
-        radius: 0.,
-    });
     for (state, height, offset) in [(1, 118., 0.), (0, 148., 30.)] {
-        let layer_start = ui.layers.len();
         let control_start = ui.controls.len();
         ui.controls.push(CustomControl {
             widget: Some(Widget::FilterBand { min_hz: 50., max_hz: 18000. }),
@@ -160,10 +128,8 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
         if let Some(c) = ui.controls.last_mut() {
             c.widget = Some(Widget::Button { label: "Filter".into(), off_label: None, indicator: true });
         }
-        ui.layers.push(text(182., 120. + offset, "Freq", TEXT, false));
-        number(&mut ui, "cutoff", [208., 120. + offset, 53., 12.], 0, true, CYAN, false);
-        ui.layers.push(text(266., 120. + offset, "Width", TEXT, false));
-        number(&mut ui, "width", [302., 120. + offset, 31., 12.], 2, false, CYAN, false);
+        number(&mut ui, "cutoff", [208., 120. + offset, 53., 12.], 0, true, ACCENT, false);
+        number(&mut ui, "width", [302., 120. + offset, 31., 12.], 2, false, ACCENT, false);
         ui.controls.push(CustomControl {
             widget: Some(Widget::Disclosure { label: "LFO".into() }),
             id: "lfo_disclosure".into(),
@@ -176,17 +142,9 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
             y: None,
             drawing: vec![],
         });
-        ui.layers.push(text(178., 135. + offset, "Delay", TEXT, false));
-        number(&mut ui, "mod_delay", [207., 135. + offset, 52., 12.], 1, false, ORANGE, false);
-        ui.layers.push(text(266., 135. + offset, "Filter", TEXT, false));
-        number(&mut ui, "mod_filter", [298., 135. + offset, 35., 12.], 1, false, ORANGE, false);
+        number(&mut ui, "mod_delay", [207., 135. + offset, 52., 12.], 1, false, ACCENT, false);
+        number(&mut ui, "mod_filter", [298., 135. + offset, 35., 12.], 1, false, ACCENT, false);
         let visible = equal("lfo_expanded", state);
-        let hidden = (UiValue::from(1.) + visible.clone() * (-1.).into()) * 4096.0.into();
-        for layer in &mut ui.layers[layer_start..] {
-            if let Draw::Text { position, .. } = layer {
-                position[0] = position[0].clone() + hidden.clone();
-            }
-        }
         for control in &mut ui.controls[control_start..] {
             control.visible_when = Some(visible.clone());
             if state == 0 {
@@ -194,28 +152,19 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
             }
         }
     }
-    let details_layer_start = ui.layers.len();
     let details_control_start = ui.controls.len();
-    ui.layers.push(conditional_text(196., 149., "Time", TEXT, equal("mod_rate_mode", 1)));
-    ui.layers.push(conditional_text(
-        196.,
-        149.,
-        "Rate",
-        TEXT,
-        UiValue::from(1.) + equal("mod_rate_mode", 1) * (-1.).into(),
-    ));
-    number(&mut ui, "mod_rate", [209., 149., 54., 12.], 2, true, ORANGE, false);
+    number(&mut ui, "mod_rate", [209., 149., 54., 12.], 2, true, ACCENT, false);
     when(&mut ui, "mod_rate_mode", 0);
-    number(&mut ui, "mod_time", [209., 149., 54., 12.], 0, true, ORANGE, false);
+    number(&mut ui, "mod_time", [209., 149., 54., 12.], 0, true, ACCENT, false);
     when(&mut ui, "mod_rate_mode", 1);
-    number(&mut ui, "mod_division", [209., 149., 54., 12.], 0, false, ORANGE, false);
+    number(&mut ui, "mod_division", [209., 149., 54., 12.], 0, false, ACCENT, false);
     if let Some(c) = ui.controls.last_mut() {
         c.visible_when = Some(equal("mod_rate_mode", 2) + equal("mod_rate_mode", 3) + equal("mod_rate_mode", 4));
         if let Some(Widget::Number { prefix, .. }) = &mut c.widget {
             *prefix = "1/".into();
         }
     }
-    number(&mut ui, "mod_division", [209., 149., 54., 12.], 0, false, ORANGE, false);
+    number(&mut ui, "mod_division", [209., 149., 54., 12.], 0, false, ACCENT, false);
     if let Some(c) = ui.controls.last_mut() {
         c.id = "mod_division_16th".into();
         if let Some(Widget::Number { suffix, .. }) = &mut c.widget {
@@ -223,7 +172,6 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
         }
     }
     when(&mut ui, "mod_rate_mode", 5);
-    ui.layers.push(text(266., 149., "Wave", TEXT, false));
     ui.controls.push(CustomControl {
         widget: Some(Widget::WaveformMenu),
         id: "mod_shape".into(),
@@ -243,14 +191,7 @@ pub fn build(parameters: &[Parameter]) -> DeviceUi {
         c.gesture = UiGesture::Menu;
         c.widget = Some(Widget::Menu);
     }
-    ui.layers.push(text(266., 163., "Morph", TEXT, false));
-    number(&mut ui, "mod_morph", [302., 163., 31., 12.], 1, false, ORANGE, false);
-    let hidden = (UiValue::from(1.) + expanded.clone() * (-1.).into()) * 4096.0.into();
-    for layer in &mut ui.layers[details_layer_start..] {
-        if let Draw::Text { position, .. } = layer {
-            position[0] = position[0].clone() + hidden.clone();
-        }
-    }
+    number(&mut ui, "mod_morph", [302., 163., 31., 12.], 1, false, ACCENT, false);
     for control in &mut ui.controls[details_control_start..] {
         control.visible_when = Some(
             control.visible_when.take().map_or_else(|| expanded.clone(), |condition| condition * expanded.clone()),

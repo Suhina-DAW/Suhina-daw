@@ -33,6 +33,17 @@ pub const MIDI_TRANSPOSE: NodeInfo = NodeInfo {
     rust_variant: "MidiTranspose",
 };
 
+pub const MIDI_TRANSPOSE_PARAMETER: NodeInfo = NodeInfo {
+    kind: "midi_transpose_parameter",
+    name: "MIDI Transpose Parameter",
+    inputs: &[PortInfo { name: "in", default: None, unit: "midi" }],
+    outputs: &["out"],
+    description: "Transposes note events by an integer parameter; keys outside 0..127 are dropped.",
+    configuration: "parameter: String",
+    example: "{\"kind\":\"midi_transpose_parameter\",\"parameter\":\"semitones\"}",
+    rust_variant: "MidiTransposeParameter",
+};
+
 pub const MIDI_KEY: NodeInfo = NodeInfo {
     kind: "midi_key",
     name: "MIDI Key",

@@ -17,8 +17,9 @@ covers:
 `device.ui` optionally describes a canvas. It contains size, background RGBA, embedded image
 assets, drawing layers, custom controls and a list of parameters hidden from the stock panel.
 Everything is stored in the single JSON `.sd` and then embedded in the project. Old files
-without a canvas use their existing controls. No external paths or executable UI code are read
-from a device file. Rust authors program panels by constructing the SDK's drawing expressions
+without a canvas use their existing controls. Built-in SDK widgets and stock parameter controls
+read the active Suhina theme at render time; authored drawing colours remain explicit. No external
+paths or executable UI code are read from a device file. Rust authors program panels by constructing the SDK's drawing expressions
 and input bindings. Normalized expressions can select logarithmic mapping explicitly. Standard controls remain available below the canvas.
 
 Canvas `size: [width, height]` defaults to `[640, 240]`. Optional
@@ -99,16 +100,16 @@ A serialized control referencing a declared continuous `cutoff` parameter:
   "bounds":[16,16,100,100], "gesture":"drag",
   "y":{"parameter":"cutoff","logarithmic":true},
   "drawing":[
-    {"kind":"rect","rect":[0,0,100,100],"radius":8,"color":[18,30,42,255]},
+    {"kind":"rect","rect":[0,0,100,100],"radius":0,"color":[37,36,33,255]},
     {"kind":"text","position":[8,40],"text":"","parameter":"cutoff",
-     "decimals":0,"color":[120,230,190,255],"size":14}
+     "decimals":0,"color":[166,163,255,255],"size":14}
   ]
 }
 ```
 
 `x`/`y` bindings default to none; `tooltip` and `drawing` default to empty; `gesture` defaults to
 `drag`. `id`, `name`, and `bounds` are required. A canvas defaults to 640x240 with background
-[24,28,34,255], empty assets/layers/controls/hidden_parameters. Asset objects require `id` and
+[37,36,33,255], empty assets/layers/controls/hidden_parameters. Asset objects require `id` and
 `data` (standard base64). Runtime controls bind only declared parameters, never paths or commands.
 
 ## Conditional controls and text layout
@@ -153,5 +154,6 @@ for the filter band display). They are not DSP nodes. The SDK supplies buttons,
 number fields, knobs, disclosure toggles, choice menus, waveform menus and filter
 band displays. Styling and bindings belong to each instance; no LFO section widget
 exists. The host uses the same gestures, commands, keyboard handling, undo and
-persistence as custom controls. Legacy drawing controls remain readable. A widget
-and a nonempty custom drawing are mutually exclusive.
+persistence as custom controls. Knobs use Suhina's small circular face, pointer and value;
+the widget palette follows the active theme. Legacy drawing colours remain literal and legacy
+drawing controls remain readable. A widget and a nonempty custom drawing are mutually exclusive.

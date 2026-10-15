@@ -1,4 +1,6 @@
 //! A gain graph with authored node positions, port anchors and wire bends.
+#[allow(dead_code)]
+mod common;
 use suhina_device_sdk::{
     Connection, DeviceGraph, DeviceRole, Node, Parameter,
     editor::{Editor, GraphLayout, NodeLayout, WireLayout},
@@ -6,7 +8,10 @@ use suhina_device_sdk::{
 
 pub fn build() -> DeviceGraph {
     let mut graph = DeviceGraph::new("org.example.wire-layout", "Wire Layout", DeviceRole::Effect);
-    graph.parameters.push(Parameter::new("gain", "Gain", (0.0, 2.0), 1.0));
+    let mut gain = Parameter::new("gain", "Gain", (0.0, 2.0), 1.0);
+    gain.control = suhina_device_sdk::ParameterControl::Knob;
+    common::style_parameter(&mut gain);
+    graph.parameters.push(gain);
     graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
     graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
     graph.editor = Some(Editor {

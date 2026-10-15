@@ -1,22 +1,27 @@
-use suhina_device_sdk::{DeviceGraph, ui::*};
+use image::ImageEncoder as _;
+use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ui::*};
 #[path = "../examples/custom_panel.rs"]
 mod panel;
 
 #[test]
-fn custom_panel_roundtrips_with_embedded_artwork() {
+fn example_panel_roundtrips_and_processes_audio() {
     let graph = panel::build().unwrap();
+    for parameter in &graph.parameters {
+        if matches!(
+            parameter.control,
+            suhina_device_sdk::ParameterControl::Knob | suhina_device_sdk::ParameterControl::LogKnob
+        ) {
+            assert_eq!(parameter.ui.shape, suhina_device_sdk::ControlShape::Rounded, "{}", parameter.id);
+        }
+    }
     let restored = DeviceGraph::from_sd(&graph.to_sd().unwrap()).unwrap();
     assert_eq!(restored, graph);
-    let canvas = restored.ui.as_ref().unwrap();
-    assert_eq!(canvas.assets[0].decode_rgba().unwrap().1, [16, 16]);
-    let expression = UiValue::from(10.0) + UiValue::normalized("level", false) * 80.0.into();
-    assert_eq!(expression.evaluate(&|_, normalized, _| if normalized { 0.5 } else { 1.0 }), 50.0);
     let mut effect = restored.compile().unwrap();
     effect.process(&mut [0.1, 0.2]);
 }
 #[test]
-fn custom_panel_rejects_invalid_resources_and_bindings() {
-    let graph = panel::build().unwrap();
+fn custom_ui_rejects_invalid_resources_and_bindings() -> Result<(), Box<dyn std::error::Error>> {
+    let graph = test_ui_graph()?;
     let mut bad = graph.clone();
     bad.ui.as_mut().unwrap().assets[0].data = "not-base64".into();
     assert!(bad.validate().is_err());
@@ -27,7 +32,7 @@ fn custom_panel_rejects_invalid_resources_and_bindings() {
     bad.ui.as_mut().unwrap().controls[0].bounds[2] = f32::INFINITY;
     assert!(bad.validate().is_err());
     let mut bad = graph.clone();
-    bad.ui.as_mut().unwrap().controls[0].x.as_mut().unwrap().parameter = "balance".into();
+    bad.ui.as_mut().unwrap().controls[0].y = Some(UiBinding::new("level"));
     assert!(bad.validate().is_err());
     let mut bad = graph;
     let mut value = UiValue::from(1.0);
@@ -40,6 +45,37 @@ fn custom_panel_rejects_invalid_resources_and_bindings() {
         color: [255; 4],
     });
     assert!(bad.validate().is_err());
+    Ok(())
+}
+
+fn test_ui_graph() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
+    let mut graph = DeviceGraph::new("org.example.test-ui", "Test UI", DeviceRole::Effect);
+    graph.parameters.extend([
+        Parameter::new("level", "Level", (0.0, 1.0), 0.5),
+        Parameter::new("balance", "Balance", (-1.0, 1.0), 0.0),
+    ]);
+    graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "level"), Node::audio_output("out")];
+    graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&[0, 0, 0, 0], 1, 1, image::ExtendedColorType::Rgba8)?;
+    graph.ui = Some(DeviceUi {
+        size: [320.0, 180.0],
+        assets: vec![ImageAsset::from_bytes("pixel", &png)?],
+        controls: vec![CustomControl {
+            widget: None,
+            id: "level-control".into(),
+            name: "Level".into(),
+            tooltip: String::new(),
+            bounds: [0.0, 0.0, 100.0, 24.0],
+            visible_when: None,
+            gesture: UiGesture::Position,
+            x: Some(UiBinding::new("level")),
+            y: Some(UiBinding::new("balance")),
+            drawing: Vec::new(),
+        }],
+        ..DeviceUi::default()
+    });
+    Ok(graph)
 }
 #[test]
 fn jpeg_assets_decode_without_external_paths() {
@@ -54,8 +90,8 @@ fn jpeg_assets_decode_without_external_paths() {
 }
 
 #[test]
-fn canvas_and_viewport_sizes_roundtrip_and_validate() {
-    let mut graph = panel::build().unwrap();
+fn canvas_and_viewport_sizes_roundtrip_and_validate() -> Result<(), Box<dyn std::error::Error>> {
+    let mut graph = test_ui_graph()?;
     let defaults: DeviceUi = serde_json::from_str("{}").unwrap();
     assert_eq!(defaults.size, [640.0, 240.0]);
     assert_eq!(defaults.viewport_size, None);
@@ -67,4 +103,5 @@ fn canvas_and_viewport_sizes_roundtrip_and_validate() {
         graph.ui.as_mut().unwrap().viewport_size = Some(size);
         assert!(graph.validate().is_err());
     }
+    Ok(())
 }

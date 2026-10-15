@@ -1,8 +1,9 @@
 use super::*;
-const TEXT: [u8; 4] = [194, 194, 190, 255];
-const DARK: [u8; 4] = [24, 24, 24, 255];
-const CYAN: [u8; 4] = [3, 195, 213, 255];
-const ORANGE: [u8; 4] = [255, 173, 86, 255];
+const TEXT: [u8; 4] = [236, 232, 225, 255];
+const DARK: [u8; 4] = [37, 36, 33, 255];
+const RIM: [u8; 4] = [56, 55, 51, 255];
+const ACCENT: [u8; 4] = [166, 163, 255, 255];
+const INK: [u8; 4] = [29, 28, 26, 255];
 fn text(x: f32, y: f32, label: &str, color: [u8; 4], center: bool) -> Draw {
     Draw::Text {
         position: [x.into(), y.into()],
@@ -54,10 +55,10 @@ fn button(ui: &mut DeviceUi, id: &str, value: Option<u16>, label: &str, b: [f32;
         x: Some(UiBinding::new(id)),
         y: None,
         drawing: vec![
-            rect(0., 0., w.into(), h, [30, 30, 30, 255]),
-            rect(0., 0., active.clone() * w.into(), h, ORANGE),
+            rect(0., 0., w.into(), h, [46, 45, 42, 255]),
+            rect(0., 0., active.clone() * w.into(), h, ACCENT),
             conditional_text(w / 2., 0., label, TEXT, UiValue::from(1.) + active.clone() * (-1.).into()),
-            conditional_text(w / 2., 0., label, DARK, active),
+            conditional_text(w / 2., 0., label, INK, active),
         ],
     });
 }
@@ -78,10 +79,11 @@ fn number(ui: &mut DeviceUi, id: &str, b: [f32; 4], decimals: usize, log: bool, 
 fn knob(ui: &mut DeviceUi, id: &str, label: &str, b: [f32; 4], log: bool) {
     let [x, y, w, h] = b;
     let label_height = if label.is_empty() { 0. } else { 12. };
-    let angle = UiValue::from(-3.92) + UiValue::normalized(id, log) * 4.7.into();
+    let angle = UiValue::from(-2.35) + UiValue::normalized(id, log) * 4.7.into();
     let cx = w / 2.;
     let cy = (h - 12.) / 2.;
-    let radius = cy.min(20.) - 2.;
+    let center_y = cy + label_height;
+    let radius = cy.clamp(0., 9.);
     ui.controls.push(CustomControl {
         id: id.into(),
         name: if label.is_empty() { id.replace('_', " ") } else { label.into() },
@@ -94,30 +96,20 @@ fn knob(ui: &mut DeviceUi, id: &str, label: &str, b: [f32; 4], log: bool) {
         y: Some(UiBinding { parameter: id.into(), logarithmic: log }),
         drawing: vec![
             text(cx, 0., label, TEXT, true),
-            Draw::Arc {
-                center: [cx.into(), (cy + label_height).into()],
-                radius: radius.into(),
-                start: (-3.92).into(),
-                end: 0.78.into(),
-                color: DARK,
-                width: 2.,
-            },
-            Draw::Arc {
-                center: [cx.into(), (cy + label_height).into()],
-                radius: radius.into(),
-                start: (-3.92).into(),
-                end: angle.clone(),
-                color: CYAN,
-                width: 2.,
+            Draw::Circle { center: [cx.into(), center_y.into()], radius: radius.into(), color: RIM },
+            Draw::Circle {
+                center: [cx.into(), center_y.into()],
+                radius: (radius - 1.).max(0.).into(),
+                color: [46, 45, 42, 255],
             },
             Draw::Line {
-                from: [cx.into(), (cy + label_height).into()],
+                from: [cx.into(), center_y.into()],
                 to: [
-                    UiValue::from(cx) + angle.clone().cos() * (radius - 2.).into(),
-                    UiValue::from(cy + label_height) + angle.sin() * (radius - 2.).into(),
+                    UiValue::from(cx) + angle.clone().cos() * (radius - 2.).max(0.).into(),
+                    UiValue::from(center_y) + angle.sin() * (radius - 2.).max(0.).into(),
                 ],
-                color: TEXT,
-                width: 1.,
+                color: ACCENT,
+                width: 1.5,
             },
             readout(id, cx, h - 12. + label_height, 0, TEXT, true),
         ],
@@ -168,6 +160,46 @@ impl CustomControl {
             None => std::borrow::Cow::Borrowed(&self.drawing),
         }
     }
+
+    /// Resolve built-in widget colours against the host's active theme.
+    pub fn drawings_with_palette(&self, palette: &WidgetPalette) -> std::borrow::Cow<'_, [Draw]> {
+        if self.widget.is_none() {
+            return std::borrow::Cow::Borrowed(&self.drawing);
+        }
+        let mut drawings = self.drawings().into_owned();
+        for draw in &mut drawings {
+            resolve_widget_draw(draw, palette);
+        }
+        std::borrow::Cow::Owned(drawings)
+    }
+}
+
+fn resolve_widget_draw(draw: &mut Draw, palette: &WidgetPalette) {
+    let resolve = |color: &mut [u8; 4]| {
+        *color = match *color {
+            [236, 232, 225, 255] => palette.text,
+            [37, 36, 33, 255] => palette.panel,
+            [46, 45, 42, 255] => palette.control,
+            [56, 55, 51, 255] => palette.border,
+            [92, 92, 88, 255] | [112, 112, 112, 255] => palette.border,
+            [30, 30, 30, 255] => palette.control,
+            [166, 163, 255, 255] => palette.accent,
+            [29, 28, 26, 255] => palette.accent_text,
+            color => color,
+        };
+    };
+    match draw {
+        Draw::Rect { color, .. } | Draw::Circle { color, .. } | Draw::Text { color, .. } => resolve(color),
+        Draw::Line { color, .. } | Draw::Arc { color, .. } => resolve(color),
+        Draw::Path { color, fill, .. } => {
+            resolve(color);
+            if let Some(fill) = fill {
+                resolve(fill);
+            }
+        }
+        Draw::Gradient { colors, .. } => colors.iter_mut().for_each(resolve),
+        Draw::Image { tint, .. } => resolve(tint),
+    }
 }
 impl Widget {
     fn drawings(&self, control: &CustomControl) -> Vec<Draw> {
@@ -185,16 +217,16 @@ impl Widget {
                     if *indicator {
                         c.drawing = vec![
                             rect(0., 1., 8.0.into(), 8., [92, 92, 88, 255]),
-                            rect(0., 1., UiValue::normalized(id, false) * 8.0.into(), 8., CYAN),
+                            rect(0., 1., UiValue::normalized(id, false) * 8.0.into(), 8., ACCENT),
                             text(11., 0., label, TEXT, false),
                         ];
                     } else if let Some(off) = off_label {
                         let active = UiValue::normalized(id, false);
                         c.drawing = vec![
-                            rect(0., 0., w.into(), height, CYAN),
-                            rect(0., 0., active.clone() * w.into(), height, ORANGE),
-                            conditional_text(w / 2., 0., off, DARK, UiValue::from(1.) + active.clone() * (-1.).into()),
-                            conditional_text(w / 2., 0., label, DARK, active),
+                            rect(0., 0., w.into(), height, ACCENT),
+                            rect(0., 0., active.clone() * w.into(), height, ACCENT),
+                            conditional_text(w / 2., 0., off, INK, UiValue::from(1.) + active.clone() * (-1.).into()),
+                            conditional_text(w / 2., 0., label, INK, active),
                         ];
                     }
                 }
@@ -264,11 +296,11 @@ impl Widget {
                         };
                         pts.push([UiValue::from(2. + t * 15.) + shift.clone(), (6. - y * 3.).into()]);
                     }
-                    wave.push(Draw::Path { points: pts, color: ORANGE, width: 1., closed: false, fill: None });
+                    wave.push(Draw::Path { points: pts, color: ACCENT, width: 1., closed: false, fill: None });
                 }
                 wave.push(Draw::Path {
                     points: vec![[23.0.into(), 5.0.into()], [26.0.into(), 8.0.into()], [29.0.into(), 5.0.into()]],
-                    color: ORANGE,
+                    color: ACCENT,
                     width: 1.,
                     closed: false,
                     fill: None,
@@ -277,7 +309,7 @@ impl Widget {
                 return wave;
             }
             Self::Menu => {
-                let mut label = readout(id, 0., 0., 0, ORANGE, false);
+                let mut label = readout(id, 0., 0., 0, ACCENT, false);
                 if let Draw::Text { format, .. } = &mut label {
                     *format = TextFormat::Choice;
                 }
@@ -289,7 +321,7 @@ impl Widget {
                             [(w - 3.).into(), 7.0.into()],
                             [w.into(), 4.0.into()],
                         ],
-                        color: ORANGE,
+                        color: ACCENT,
                         width: 1.,
                         closed: false,
                         fill: None,
@@ -306,7 +338,7 @@ impl Widget {
                     drawing.push(Draw::Line {
                         from: [x.into(), 0.0.into()],
                         to: [x.into(), height.into()],
-                        color: [44, 44, 44, 255],
+                        color: [56, 55, 51, 255],
                         width: 0.5,
                     });
                 }
@@ -315,7 +347,7 @@ impl Widget {
                     drawing.push(Draw::Line {
                         from: [0.0.into(), y.into()],
                         to: [w.into(), y.into()],
-                        color: [44, 44, 44, 255],
+                        color: [56, 55, 51, 255],
                         width: 0.5,
                     });
                 }
@@ -337,9 +369,9 @@ impl Widget {
                             * ((height * 88. / 118.) / (1.8 * std::f32::consts::LN_10)).into();
                     points.push([(t * w).into(), y]);
                 }
-                drawing.push(Draw::Path { points, color: CYAN, width: 1.2, closed: false, fill: None });
+                drawing.push(Draw::Path { points, color: ACCENT, width: 1.2, closed: false, fill: None });
                 let cy = UiValue::from(height) + UiValue::normalized(&y.parameter, false) * (-height).into();
-                drawing.push(Draw::Circle { center: [cx.clone(), cy.clone()], radius: 4.6.into(), color: ORANGE });
+                drawing.push(Draw::Circle { center: [cx.clone(), cy.clone()], radius: 4.6.into(), color: ACCENT });
                 drawing.push(Draw::Circle { center: [cx, cy], radius: 3.0.into(), color: DARK });
 
                 return drawing;
@@ -364,7 +396,7 @@ mod tests {
                 Widget::Number {
                     decimals: 2,
                     format: TextFormat::Number,
-                    color: CYAN,
+                    color: ACCENT,
                     center: false,
                     bordered: false,
                     prefix: String::new(),
@@ -409,5 +441,94 @@ mod tests {
             let ui = DeviceUi { controls: vec![control], ..DeviceUi::default() };
             ui.validate(&[bound_amount, spread.clone()]).unwrap();
         }
+    }
+
+    #[test]
+    fn widget_drawings_resolve_the_host_palette() {
+        let control = CustomControl {
+            widget: Some(Widget::Button { label: "Enable".into(), off_label: None, indicator: false }),
+            id: "enable".into(),
+            name: "Enable".into(),
+            tooltip: String::new(),
+            bounds: [0.0, 0.0, 40.0, 12.0],
+            visible_when: None,
+            gesture: UiGesture::Toggle,
+            x: Some(UiBinding::new("enabled")),
+            y: None,
+            drawing: Vec::new(),
+        };
+        let palette = WidgetPalette {
+            text: [1, 2, 3, 255],
+            panel: [4, 5, 6, 255],
+            control: [7, 8, 9, 255],
+            border: [10, 11, 12, 255],
+            accent: [13, 14, 15, 255],
+            accent_text: [16, 17, 18, 255],
+        };
+        let draws = control.drawings_with_palette(&palette);
+        assert!(matches!(&draws[0], Draw::Rect { color, .. } if *color == palette.control));
+        assert!(matches!(&draws[1], Draw::Rect { color, .. } if *color == palette.accent));
+        assert!(draws.iter().any(|draw| matches!(draw, Draw::Text { color, .. } if *color == palette.text)));
+
+        let knob = CustomControl {
+            widget: Some(Widget::Knob { label: "Amount".into() }),
+            id: "amount".into(),
+            name: "Amount".into(),
+            tooltip: String::new(),
+            bounds: [0.0, 0.0, 40.0, 40.0],
+            visible_when: None,
+            gesture: UiGesture::Drag,
+            x: None,
+            y: Some(UiBinding::new("amount")),
+            drawing: Vec::new(),
+        };
+        let draws = knob.drawings_with_palette(&palette);
+        assert!(draws.iter().any(|draw| matches!(draw, Draw::Circle { color, .. } if *color == palette.border)));
+        assert!(draws.iter().any(|draw| matches!(draw, Draw::Line { color, .. } if *color == palette.accent)));
+        assert!(!draws.iter().any(|draw| matches!(draw, Draw::Arc { .. })));
+
+        let authored = CustomControl {
+            widget: None,
+            id: "authored".into(),
+            name: "Authored".into(),
+            tooltip: String::new(),
+            bounds: [0.0, 0.0, 40.0, 12.0],
+            visible_when: None,
+            gesture: UiGesture::Toggle,
+            x: Some(UiBinding::new("enabled")),
+            y: None,
+            drawing: vec![Draw::Rect {
+                rect: [0.0.into(), 0.0.into(), 40.0.into(), 12.0.into()],
+                color: [166, 163, 255, 255],
+                radius: 0.0,
+            }],
+        };
+        assert!(
+            matches!(&authored.drawings_with_palette(&palette)[0], Draw::Rect { color, .. } if *color == [166, 163, 255, 255])
+        );
+
+        let number = CustomControl {
+            widget: Some(Widget::Number {
+                decimals: 0,
+                format: TextFormat::Number,
+                color: TEXT,
+                center: true,
+                bordered: true,
+                prefix: String::new(),
+                suffix: String::new(),
+            }),
+            id: "value".into(),
+            name: "Value".into(),
+            tooltip: String::new(),
+            bounds: [0.0, 0.0, 40.0, 12.0],
+            visible_when: None,
+            gesture: UiGesture::Drag,
+            x: None,
+            y: Some(UiBinding::new("value")),
+            drawing: Vec::new(),
+        };
+        let draws = number.drawings_with_palette(&palette);
+        assert!(matches!(&draws[0], Draw::Rect { color, .. } if *color == palette.border));
+        assert!(matches!(&draws[1], Draw::Rect { color, .. } if *color == palette.control));
     }
 }

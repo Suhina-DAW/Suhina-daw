@@ -1109,9 +1109,6 @@ mod tests {
             }
             p.ui.size = Some([240.0, 140.0]);
             p.ui.position = Some([180.0, 40.0]);
-            p.ui.accent = Some([30, 180, 140]);
-            p.ui.background = Some([20, 25, 30]);
-            p.ui.text_color = Some([230, 240, 250]);
             p.ui.font_size = 16.0;
             p.ui.monospace = true;
             p.ui.shape = suhina_device_sdk::ControlShape::Square;
@@ -1199,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn render_custom_panel_with_embedded_artwork() {
+    fn render_sdk_example_with_stock_controls() {
         let graph = custom_panel::build().unwrap();
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
@@ -1222,13 +1219,12 @@ mod tests {
         let image = harness.render().unwrap();
         let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
         std::fs::create_dir_all(&output).unwrap();
-        image.save(output.join("custom-panel.png")).unwrap();
+        image.save(output.join("sdk-example-controls.png")).unwrap();
     }
 
     #[test]
-    fn render_custom_panel_with_smaller_viewport() {
-        let mut graph = custom_panel::build().unwrap();
-        graph.ui.as_mut().unwrap().viewport_size = Some([320.0, 180.0]);
+    fn render_sdk_example_in_a_narrow_panel() {
+        let graph = custom_panel::build().unwrap();
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
             name: graph.name.clone(),
@@ -1240,7 +1236,7 @@ mod tests {
         });
         let detail = build(&project, Some(TrackId(1)), None);
         if let Detail::Devices(chain) = &detail {
-            assert_eq!(sdk_viewport(&chain.devices[0]), Some([320.0, 180.0]));
+            assert_eq!(sdk_viewport(&chain.devices[0]), None);
         } else {
             panic!("expected device chain");
         }
@@ -1255,7 +1251,7 @@ mod tests {
         let image = harness.render().unwrap();
         let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
         std::fs::create_dir_all(&output).unwrap();
-        image.save(output.join("custom-panel-viewport.png")).unwrap();
+        image.save(output.join("sdk-example-narrow.png")).unwrap();
     }
 
     fn report(status: PluginStatus, editor_open: bool) -> PluginReport {

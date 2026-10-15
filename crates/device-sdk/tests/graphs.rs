@@ -6,8 +6,13 @@ use suhina_device_sdk::{
 mod examples;
 
 fn graph(kind: K) -> DeviceGraph {
-    if matches!(kind, K::MidiTranspose { .. }) {
+    if matches!(kind, K::MidiTranspose { .. } | K::MidiTransposeParameter { .. }) {
         let mut g = DeviceGraph::new("org.test.graph", "Graph", DeviceRole::MidiEffect);
+        if let K::MidiTransposeParameter { parameter } = &kind {
+            let mut parameter = Parameter::new(parameter, "Semitones", (-24.0, 24.0), 12.0);
+            parameter.control = ParameterControl::Integer;
+            g.parameters.push(parameter);
+        }
         g.nodes = vec![N::new("in", K::MidiInput), N::new("node", kind), N::new("out", K::MidiOutput)];
         g.connections = vec![C::new("in", "node"), C::new("node", "out")];
         return g;
@@ -36,6 +41,20 @@ fn graph(kind: K) -> DeviceGraph {
         g.connections.push(C::new("node", "out"));
     }
     g
+}
+
+#[test]
+fn midi_transpose_parameter_updates_without_recompiling() {
+    use suhina_device_api::NoteEvent;
+    let g = graph(K::MidiTransposeParameter { parameter: "amount".into() });
+    let mut effect = g.compile_midi().unwrap();
+    let input = [(0, NoteEvent::On { key: 60, velocity: 0.8 })];
+    let mut output = [(0, NoteEvent::Off { key: 0, velocity: 0.0 })];
+    assert_eq!(effect.process(&input, &mut output), 1);
+    assert_eq!(output[0].1, NoteEvent::On { key: 72, velocity: 0.8 });
+    effect.set_parameter(0, -80.0);
+    assert_eq!(effect.process(&input, &mut output), 1);
+    assert_eq!(output[0].1, NoteEvent::On { key: 36, velocity: 0.8 });
 }
 
 #[test]
@@ -484,6 +503,28 @@ fn lfo_disclosure_round_trips_without_changing_audio() {
 }
 
 #[test]
+fn effect_examples_use_circular_knobs_and_square_value_controls() {
+    use suhina_device_sdk::ControlShape;
+
+    for name in ["auto-pan", "compressor", "delay", "distortion", "filter", "stereo-utility"] {
+        let graph = examples::build(name).unwrap();
+        for parameter in &graph.parameters {
+            let expected = if matches!(parameter.control, ParameterControl::Knob | ParameterControl::LogKnob) {
+                ControlShape::Rounded
+            } else {
+                ControlShape::Square
+            };
+            assert_eq!(parameter.ui.shape, expected, "{name}: {}", parameter.id);
+        }
+        if name == "delay" {
+            let canvas = graph.ui.as_ref().unwrap();
+            assert!(canvas.layers.is_empty());
+            assert!(canvas.controls.iter().all(|control| control.widget.is_some() && control.drawing.is_empty()));
+        }
+    }
+}
+
+#[test]
 fn delay_folding_gives_space_to_the_filter_graph() {
     let graph = examples::build("delay").unwrap();
     let canvas = graph.ui.as_ref().unwrap();
@@ -502,17 +543,8 @@ fn delay_folding_gives_space_to_the_filter_graph() {
         assert_eq!(disclosure.bounds, [129., 135. + offset, 43., 12.]);
         assert_eq!(visible("mod delay").bounds, [207., 135. + offset, 52., 12.]);
         assert_eq!(visible("mod filter").bounds, [298., 135. + offset, 35., 12.]);
-        let background = canvas
-            .layers
-            .iter()
-            .find_map(|d| match d {
-                suhina_device_sdk::ui::Draw::Rect { rect, .. } => Some(rect),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(background[1].evaluate(&lookup), 135. + offset);
-        assert_eq!(background[1].evaluate(&lookup) + background[3].evaluate(&lookup), 180.);
     }
+    assert!(canvas.layers.is_empty());
 }
 
 #[test]
