@@ -75,7 +75,11 @@ create a new scene or track.
 ### Track header
 
 Track name over a strip in the track colour (Live colours the name itself). Clicking selects the
-track; dragging moves it; right-clicking opens its menu (rename, colour, group, ungroup, delete).
+track; dragging moves it (after the header of an open group is into that group, and over another
+group's column it joins that group, [arrangement editing](arrangement-editing.md) › Groups inside
+groups); right-clicking opens its menu (rename, colour, group, ungroup, move into group, move out
+of group, delete). A track inside groups has its name stepped in 4 px per level; a group's name
+follows a fold arrow, and a folded group hides the columns of the tracks inside it.
 Double-clicking to rename is planned.
 Dropping a device or file from the browser on the empty area right of the last track creates a
 new track; the area also has **+ MIDI track** and **+ Audio track** buttons ([browser](browser.md) ›

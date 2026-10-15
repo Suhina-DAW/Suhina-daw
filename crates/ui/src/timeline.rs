@@ -90,8 +90,9 @@ pub struct Lane {
     pub name: String,
     pub color: Rgb,
     pub kind: ColumnKind,
-    /// How many groups the track is inside.
+    /// How many groups the track is inside, and the one it is directly in.
     pub depth: usize,
+    pub parent: Option<TrackId>,
     /// The track's place in the project's track order, as `track.move` counts it.
     pub position: usize,
     pub mute: bool,
@@ -143,6 +144,19 @@ pub struct Timeline {
     pub waveforms: Arc<Waveforms>,
     /// The parameters each track's automation lanes can show, with their points.
     pub automation: crate::automation_lanes::Params,
+}
+
+impl Lane {
+    /// Where the track sits in the track list.
+    pub fn place(&self) -> crate::nesting::Place {
+        crate::nesting::Place {
+            track: self.track,
+            parent: self.parent,
+            depth: self.depth,
+            position: self.position,
+            group: self.kind == ColumnKind::Group,
+        }
+    }
 }
 
 impl Timeline {
@@ -199,6 +213,7 @@ impl Timeline {
                 color: track.color.unwrap_or_else(|| default_track_colour(position)),
                 kind,
                 depth: depth(project, track.parent),
+                parent: track.parent,
                 position,
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),

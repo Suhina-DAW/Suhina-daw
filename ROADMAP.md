@@ -112,8 +112,7 @@ command with undo. Behaviour, detectors and tests: [`docs/spec/audio-to-midi.md`
 ## Later, not ordered
 
 FL Studio projects (`.flp`), MIDI controllers and remote mapping (hardware controllers: scope in
-[ADR 0016](docs/decisions/0016-parity-target.md)), nested groups
-([#209](https://github.com/suhina-daw/suhina-daw/issues/209)), devices of an imported project that
+[ADR 0016](docs/decisions/0016-parity-target.md)), devices of an imported project that
 Suhina cannot run kept as placeholders and copied along with the project
 ([device import](docs/spec/device-import.md)), bridging Windows plug-ins.
 
@@ -441,6 +440,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Groups inside groups, up to 16 levels ([#209](https://github.com/suhina-daw/suhina-daw/issues/209)):
+  the sound goes through every group's volume, mute and devices to the output, solo follows the
+  nesting, and a fold arrow on a group's header hides its tracks in both views. Drag a header
+  into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
+  groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right

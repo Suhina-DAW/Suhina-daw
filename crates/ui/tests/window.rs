@@ -959,6 +959,32 @@ fn project_with_a_group() -> suhina_engine::model::Project {
 }
 
 #[test]
+fn a_folded_group_hides_its_columns_in_the_session_view() {
+    // Drums (track 1) inside the group.
+    let mut project = project_with_a_group();
+    project.tracks[0].parent = Some(suhina_engine::model::TrackId(20));
+    let group = project.tracks.pop().unwrap();
+    project.tracks.insert(0, group);
+    let view =
+        SessionHarness { grid: Grid::build(&project, None), state: SessionViewState::default(), actions: vec![] };
+    let mut harness = Harness::builder().with_size(SIZE).build_ui_state(
+        |ui, v: &mut SessionHarness| session_view::show(ui, &v.grid, &[], &mut v.state, &mut v.actions),
+        view,
+    );
+    theme::install(&harness.ctx);
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_some());
+    harness.get_by_label("Fold Group").click();
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_none());
+    assert!(harness.query_by_label("Track Bass").is_some());
+    harness.get_by_label("Unfold Group").click();
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_some());
+    assert!(harness.state().actions.is_empty());
+}
+
+#[test]
 fn a_tall_header_routes_its_track_into_a_group() {
     struct Arrangement {
         timeline: Timeline,
@@ -1041,6 +1067,82 @@ fn dragging_a_header_moves_the_track() {
     harness.drop_at(to);
     harness.run();
     assert_eq!(names(&harness)[..4], ["Vox", "Drums", "Bass", "Keys"]);
+}
+
+fn parent_name(h: &Harness<'static, App>, name: &str) -> Option<String> {
+    let session = h.state().session()?;
+    let p = session.project();
+    let parent = p.tracks.iter().find(|t| t.name == name)?.parent?;
+    p.tracks.iter().find(|t| t.id == parent).map(|t| t.name.clone())
+}
+
+#[test]
+fn groups_nest_fold_and_take_tracks_from_the_menu_and_by_dragging() {
+    let mut harness = arrangement_app();
+    // Drums into a group, and that group into another.
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    harness.get_by_label("Track Group").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    assert_eq!(names(&harness)[..3], ["Group", "Group", "Drums"]);
+    assert_eq!(parent_name(&harness, "Drums").as_deref(), Some("Group"));
+
+    // Keys into the outer group from its menu.
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Move into group").click();
+    harness.run();
+    harness.get_all_by_label("Group").next().unwrap().click();
+    harness.run();
+    assert!(parent_name(&harness, "Keys").is_some());
+
+    // Folding the outer group hides everything inside it; unfolding shows it again.
+    assert_eq!(harness.query_all_by_label("Fold Group").count(), 2);
+    harness.get_all_by_label("Fold Group").next().unwrap().click();
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_none());
+    assert!(harness.query_by_label("Track Keys").is_none());
+    assert_eq!(harness.query_all_by_label("Track Group").count(), 1);
+    harness.get_by_label("Unfold Group").click();
+    harness.run();
+    assert!(harness.query_by_label("Track Drums").is_some());
+
+    // Keys out of its group again, from its menu.
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    harness.get_by_label("Move out of group").click();
+    harness.run();
+    assert_eq!(parent_name(&harness, "Keys"), None);
+    assert_eq!(harness.state().session().map(|s| s.project().validate()), Some(Ok(())));
+}
+
+#[test]
+fn dragging_a_header_below_a_group_header_puts_the_track_in_the_group() {
+    let mut harness = arrangement_app();
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::G);
+    harness.run();
+    let from = harness.get_by_label("Track Vox").rect().center();
+    let group = harness.get_by_label("Track Group").rect();
+    // The lower half of the group's header.
+    let to = egui::pos2(from.x, group.bottom() - 6.0);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from - egui::vec2(0.0, 40.0));
+    harness.run();
+    harness.hover_at(to);
+    harness.run();
+    harness.drop_at(to);
+    harness.run();
+    assert_eq!(names(&harness)[..3], ["Group", "Vox", "Drums"]);
+    assert_eq!(parent_name(&harness, "Vox").as_deref(), Some("Group"));
 }
 
 /// The demo project with an audio track, "Loop", whose clip plays `loop.wav` (two seconds of a

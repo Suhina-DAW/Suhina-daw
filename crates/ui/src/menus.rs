@@ -31,9 +31,14 @@ pub struct TrackMenu<'a> {
     pub is_group: bool,
     /// The tracks selected in the view; grouping takes them when this track is one of them.
     pub selection: &'a [TrackId],
+    /// The groups the track can move into, with their names.
+    pub into: &'a [(TrackId, String)],
+    /// Takes the track out of its group, one level up; `None` when it is in none.
+    pub out: Option<Action>,
 }
 
-/// The menu of a track header or column: name, colour, group, ungroup, delete.
+/// The menu of a track header or column: name, colour, group, ungroup, move into or out of a
+/// group, delete.
 pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) {
     let track = menu.track.0;
     ui.set_min_width(180.0);
@@ -81,6 +86,22 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     }
     if menu.is_group && ui.button("Ungroup").clicked() {
         actions.push(Action::new("track.ungroup", json!({ "track": track })));
+        ui.close();
+    }
+    if !menu.into.is_empty() {
+        ui.menu_button("Move into group", |ui| {
+            for (group, name) in menu.into {
+                if ui.button(name).clicked() {
+                    actions.push(Action::new("track.setGroup", json!({ "track": track, "group": group.0 })));
+                    ui.close();
+                }
+            }
+        });
+    }
+    if let Some(out) = &menu.out
+        && ui.button("Move out of group").clicked()
+    {
+        actions.push(out.clone());
         ui.close();
     }
     ui.separator();

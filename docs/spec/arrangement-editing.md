@@ -296,8 +296,9 @@ while playing; offline it plays without a gap.
 
 | Command | Does |
 |---|---|
-| `track.group {tracks, name?}` | A new group track takes the place of the first track; the tracks (with what is inside them) follow it, play into it, and it plays where they played. They must all be in the same group, or in none. |
+| `track.group {tracks, name?}` | A new group track takes the place of the first track; the tracks (with what is inside them) follow it, play into it, and it plays where they played. They must all be in the same group, or in none. Grouping tracks already in a group nests the new group inside it. |
 | `track.ungroup {track}` | The group goes; its tracks stay where they were and play where the group played. |
+| `track.setGroup {track, group, index?}` | Moves a track, a group with everything inside it, into the group track `group` (an id or a name), or out of every group with `"none"`, and its channel plays into that group (the main output for `"none"`). It lands at `index` among the tracks directly in that group (or at the top level), from 0; at the end without `index`, or with one past the end. Refused for a return track, a target that is not a group, a group into itself or a group inside it, and a move that would nest deeper than the cap. |
 | `track.move {track, to}` | Moves a track, a group with everything inside it, to position `to` in the track order. |
 | `track.rename`, `track.setColor`, `track.delete` | Name (not empty), colour (`#rrggbb` or `none`), and deleting a track with its clips and slots; deleting a group ungroups it. |
 | `track.add {kind?, name?, after?, device?, preset?, voice?}` | A new audio or MIDI track with its channel, slots and lane, after `after` or after the last regular track ([browser](browser.md) › Commands). |
@@ -308,8 +309,27 @@ not per kind) ([browser](browser.md) › Files).
 
 In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G groups the selection,
 dragging a header moves the track above the lane under the pointer (below it from its lower half),
-and a right-click opens the track's menu: name, colour, group, ungroup, delete. The Session view's
-column headers have the same menu.
+and a right-click opens the track's menu: name, colour, group, ungroup, **Move into group** (a
+submenu of every other group it can go into), **Move out of group** (one level up, right after the
+group it leaves), delete. The Session view's column headers have the same menu.
+
+### Groups inside groups
+
+Groups nest: a group track can hold tracks and other groups, at most 16 levels deep
+(`MAX_GROUP_DEPTH` in the model, which also refuses a group that is inside itself). A track's
+sound goes through its own channel, its group's, that group's group's and so on to the main
+output; each group's volume, mute and devices apply on the way ([ADR 0004](../decisions/0004-built-in-devices.md)
+› 10), and solo follows the nesting: a soloed track is heard through every group above it, a
+soloed group plays everything inside it at any depth.
+
+A header shows its nesting by stepping in 8 px per level. A group's colour square is its fold
+arrow: pointing down while the group is open, right while it is folded, when the lanes of every
+track inside it are hidden (the Session view hides their columns; both views fold the same
+groups, and folding is part of the view, not an edit, so it does not undo). A dragged header
+joins the group of the lane it is let go over: above that lane, or below it from its lower half,
+and below the header of an open group is into that group, first. Within the same group the drop
+is a `track.move`; into another group, or out to the top level, it is a `track.setGroup`. After a
+folded group is after everything inside it.
 
 While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
 the view shows only its ruler and the edited track's lane, lit, with no return tracks and no main

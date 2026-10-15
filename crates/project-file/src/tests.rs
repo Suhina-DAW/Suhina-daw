@@ -453,6 +453,30 @@ fn a_clip_without_a_follow_action_has_it_off() {
 }
 
 #[test]
+fn nested_groups_survive_a_round_trip_and_a_group_cycle_is_refused() {
+    // Track 3 moves into a group of its own (track 5), which sits inside group 1.
+    let mut project = everything();
+    let mut inner = project.tracks[0].clone();
+    inner.id = TrackId(5);
+    inner.channel = Some(ChannelId(6));
+    inner.parent = Some(TrackId(1));
+    project.tracks.insert(1, inner);
+    project.tracks[3].parent = Some(TrackId(5));
+    let mut bus = project.channels[3].clone();
+    bus.id = ChannelId(6);
+    bus.output = Some(ChannelId(4));
+    project.channels.push(bus);
+    project.channels[4].output = Some(ChannelId(6));
+    assert_eq!(project.validate(), Ok(()));
+    assert_eq!(project.group_depth(TrackId(3)), Some(2));
+    assert_eq!(from_json(&to_json(&project)), Ok(project.clone()));
+
+    project.tracks[0].parent = Some(TrackId(5));
+    let error = from_json(&to_json(&project)).err().map(|e| e.0).unwrap_or_default();
+    assert!(error.contains("inside itself"), "{error}");
+}
+
+#[test]
 fn a_project_that_does_not_hold_together_is_refused() {
     let mut project = everything();
     project.tracks.push(project.tracks[0].clone());

@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 139
+COMMANDS = 140
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -57,9 +57,10 @@ CHAPTERS = [
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
      "relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.45, "partial",
+    (6, "Arrangement View", 22, 0.47, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
-     "overlap replace/stack, fades and fade shapes, grid snap, markers (locators: add, move, rename, delete, jump; imported from Live "
+     "overlap replace/stack, fades and fade shapes, grid snap, nested groups folded and unfolded, "
+     "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
      "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "
      "command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, "
@@ -106,8 +107,9 @@ CHAPTERS = [
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.50, "partial",
-     "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, "
+    (18, "Mixing", 18, 0.52, "partial",
+     "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
+     "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
      "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level "
      "meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks "

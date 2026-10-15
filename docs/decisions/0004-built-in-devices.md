@@ -126,7 +126,10 @@ decision 9.
    with the rest (`crates/engine/src/buses.rs`). A device reports its delay with `latency()`
    (the overdrive and vinyl distortion, 31 frames; the limiter, its 1.5 ms lookahead), and every
    other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
-   tracks routed through it, with no buffer of its own.
+   tracks routed through it, with no buffer of its own. Groups nest (up to 16 levels, ADR
+   0001): a bus inside a bus runs before it, and a level without devices between two buses is
+   a gain on the way; offline renders through three nested buses check the sum at every level,
+   solo and mute through the levels and the latency of every path (`crates/engine/src/buses_tests.rs`).
 
 11. **Automation splits a chain on the arrangement's grid** (added 2026-10-15, #395). A built-in
    device's lanes (`Device::automation`, ADR 0001) set its parameters at their points and at

@@ -76,7 +76,12 @@ Its key ideas:
 Objects refer to each other by typed ids (`TrackId`, `ChannelId`, `ContentId`), not by pointers.
 `Project::validate` checks that every id resolves, that every arrangement clip's fades fit it and
 that every marker is at a beat from 0 on, so a malformed import becomes an error instead of a
-crash.
+crash. A track's `parent` is the group it is
+in, and groups nest: validation also refuses a track that is inside itself through its groups,
+and one inside more than `MAX_GROUP_DEPTH` (16) groups, so walking up a track's groups always
+ends (added 2026-10-15, [#209](https://github.com/suhina-daw/suhina-daw/issues/209)). A group's
+routing is its channel's `output`; the commands that move tracks between groups keep the two
+in step.
 
 How each DAW maps onto the core:
 

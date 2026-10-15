@@ -223,3 +223,159 @@ fn a_routing_cycle_through_buses_is_silence_not_a_hang() {
     project.channels[2].output = Some(ChannelId(1));
     assert_eq!(render_offline(&project, SR, 512), Ok(Vec::new()));
 }
+
+/// Three groups, one inside the other: group 10 inside group 11 inside group 12. Track 1 plays
+/// into 10, track 2 into 11, track 3 into 12, track 4 straight to the output; each plays the
+/// same A4 for a beat. `devices` are the chains of groups 10, 11 and 12.
+fn nested(devices: [Vec<Device>; 3]) -> Project {
+    let mut project = grouped(vec![], true);
+    let [inner, middle, outer] = devices;
+    let template = project.channels[2].clone();
+    let group_track = project.tracks[2].clone();
+    project.tracks.truncate(2);
+    project.tracks.push(project.tracks[1].clone());
+    project.tracks.push(Track {
+        id: TrackId(4),
+        channel: Some(ChannelId(4)),
+        parent: None,
+        ..project.tracks[0].clone()
+    });
+    project.channels.truncate(2);
+    project.channels.push(Channel { id: ChannelId(3), ..project.channels[1].clone() });
+    project.channels.push(Channel { id: ChannelId(4), output: None, ..project.channels[1].clone() });
+    for (i, (group, chain)) in [(10u32, inner), (11, middle), (12, outer)].into_iter().enumerate() {
+        let parent = (group < 12).then_some(group + 1);
+        project.tracks.push(Track {
+            id: TrackId(group),
+            name: format!("G{group}"),
+            channel: Some(ChannelId(group)),
+            parent: parent.map(TrackId),
+            ..group_track.clone()
+        });
+        project.channels.push(Channel {
+            id: ChannelId(group),
+            role: ChannelRole::Submix,
+            output: parent.map(ChannelId),
+            devices: chain,
+            ..template.clone()
+        });
+        // Track i + 1 plays into this group.
+        project.tracks[i].id = TrackId(i as u32 + 1);
+        project.tracks[i].channel = Some(ChannelId(i as u32 + 1));
+        project.tracks[i].parent = Some(TrackId(group));
+        project.channels[i].output = Some(ChannelId(group));
+    }
+    project.arrangement.lanes = (1..=4)
+        .map(|t| ArrangementLane {
+            name: format!("l{t}"),
+            track: Some(TrackId(t)),
+            clips: project.arrangement.lanes[0].clips.clone(),
+        })
+        .collect();
+    project
+}
+
+/// One track playing the note straight to the output: what every path above is a multiple of.
+fn one_track() -> Vec<f32> {
+    let mut project = grouped(vec![], true);
+    project.tracks.retain(|t| t.id == TrackId(4));
+    project.channels.retain(|c| c.id == ChannelId(4));
+    project.arrangement.lanes.retain(|l| l.track == Some(TrackId(4)));
+    render_offline(&project, SR, 512).unwrap()
+}
+
+fn half() -> Vec<Device> {
+    vec![device("utility", &[("gain", -6.0206)])]
+}
+
+fn assert_scaled(out: &[f32], reference: &[f32], scale: f32, what: &str) {
+    assert!(out.len() >= reference.len(), "{what}: {} frames", out.len() / 2);
+    let expected: Vec<f32> = reference.iter().map(|s| s * scale).collect();
+    let diff = max_diff(&out[..reference.len()], &expected);
+    assert!(diff < 1e-4, "{what}: off by {diff}");
+    assert!(peak(&out[reference.len()..]) < 1e-4, "{what}: sound after the note");
+}
+
+#[test]
+fn three_nested_buses_sum_each_level_through_every_chain_above_it() {
+    let project = nested([half(), half(), half()]);
+    assert_eq!(project.validate(), Ok(()));
+    assert_eq!(project.group_depth(TrackId(1)), Some(3));
+    let reference = one_track();
+    // Track 1 is halved by three buses, track 2 by two, track 3 by one, track 4 by none.
+    let out = render_offline(&project, SR, 512).unwrap();
+    assert_scaled(&out, &reference, 0.125 + 0.25 + 0.5 + 1.0, "all four");
+    for (alone, scale) in [(0usize, 0.125f32), (1, 0.25), (2, 0.5), (3, 1.0)] {
+        let mut one = project.clone();
+        for (i, channel) in one.channels.iter_mut().enumerate().take(4) {
+            if i != alone {
+                channel.volume = 0.0;
+            }
+        }
+        assert_scaled(&render_offline(&one, SR, 512).unwrap(), &reference, scale, &format!("track {}", alone + 1));
+    }
+}
+
+#[test]
+fn a_level_without_devices_between_buses_is_a_gain() {
+    // The middle group has no devices: a fader at a quarter between two buses.
+    let mut project = nested([half(), vec![], half()]);
+    project.channels[5].volume = 0.25;
+    let out = render_offline(&project, SR, 512).unwrap();
+    // Track 1: 0.5 * 0.25 * 0.5; track 2: 0.25 * 0.5; track 3: 0.5; track 4: 1.
+    assert_scaled(&out, &one_track(), 0.0625 + 0.125 + 0.5 + 1.0, "mixed levels");
+    // The fader of the outer group scales everything inside it, after its devices.
+    project.channels[6].volume = 0.0;
+    assert_scaled(&render_offline(&project, SR, 512).unwrap(), &one_track(), 1.0, "outer group down");
+}
+
+#[test]
+fn solo_and_mute_follow_the_nesting() {
+    let project = nested([half(), half(), half()]);
+    let reference = one_track();
+    let render = |p: &Project| render_offline(p, SR, 512).unwrap();
+
+    // A soloed track deep inside is heard through every group above it, and nothing else is.
+    let mut solo = project.clone();
+    solo.channels[0].solo = true;
+    assert_scaled(&render(&solo), &reference, 0.125, "track 1 soloed");
+
+    // A soloed group plays everything inside it at any depth.
+    let mut solo = project.clone();
+    solo.channels[5].solo = true;
+    assert_scaled(&render(&solo), &reference, 0.125 + 0.25, "middle group soloed");
+    solo.channels[6].solo = true;
+    assert_scaled(&render(&solo), &reference, 0.125 + 0.25 + 0.5, "middle and outer soloed");
+
+    // A muted group silences everything inside it, soloed or not.
+    let mut muted = project.clone();
+    muted.channels[5].mute = true;
+    assert_scaled(&render(&muted), &reference, 0.5 + 1.0, "middle group muted");
+    muted.channels[0].solo = true;
+    assert_eq!(render(&muted), Vec::<f32>::new());
+}
+
+#[test]
+fn latency_through_nested_buses_is_compensated_on_every_path() {
+    let reference = first_sound(&render_offline(&nested([vec![], vec![], vec![]]), SR, 512).unwrap());
+    // A limiter (lookahead) on the inner and the outer group: track 1 passes both, track 2 and
+    // 3 only the outer one, track 4 neither; all still start together.
+    let project = nested([vec![device("limiter", &[])], vec![], vec![device("limiter", &[])]]);
+    let latency = Renderer::new(&project, SR).unwrap().latency() as usize;
+    assert!(latency > 0);
+    for alone in 0..4 {
+        let mut one = project.clone();
+        for (i, channel) in one.channels.iter_mut().enumerate().take(4) {
+            if i != alone {
+                channel.volume = 0.0;
+            }
+        }
+        let out = render_offline(&one, SR, 512).unwrap();
+        assert_eq!(first_sound(&out), reference + latency, "track {}", alone + 1);
+    }
+    // And the render does not depend on the block size.
+    let whole = render_offline(&project, SR, 1024).unwrap();
+    for size in [1usize, 300, 4096] {
+        assert!(max_diff(&render_offline(&project, SR, size).unwrap(), &whole) < 1e-6, "block {size}");
+    }
+}
