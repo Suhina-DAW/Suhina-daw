@@ -2,7 +2,7 @@
 
 The bot moves issue cards on the project board, so a wrong branch would write to the board instead
 of failing a test. This runs the script with mocked API clients instead: every command
-(`/claim`, `/unclaim`, `/hold`, `/ready`) is answered for each state a card can be in — free, held,
+(`/claim`, `/claim @login`, `/unclaim`, `/hold`, `/ready`) is answered for each state a card can be in — free, held,
 taken, closed, absent from the board — and for the mistakes the bot is meant to catch (an open pull
 request, an epic, a status the field does not have, a missing token).
 
@@ -135,7 +135,13 @@ function scenario(input) {
           },
         }),
         listComments,
-        addAssignees: async (args) => state.assigned.push(...args.assignees),
+        // GitHub answers with the issue, and silently leaves out anyone it may not assign.
+        addAssignees: async (args) => {
+          const taken = args.assignees.filter((login) => !(input.unassignable || []).includes(login));
+          state.assigned.push(...taken);
+          const all = [...(input.assignees || []), ...taken];
+          return { data: { assignees: all.map((login) => ({ login })) } };
+        },
         removeAssignees: async (args) => state.unassigned.push(...args.assignees),
       },
     },
@@ -272,6 +278,121 @@ const cases = [
       issue: { labels: [{ name: "enhancement" }] },
     },
     expect: (s) => s.state.moved === "opt-progress",
+  },
+  {
+    name: "a maintainer claims for someone else, who is assigned and named",
+    input: { body: "/claim @Other-Person Plan: the wheel routing", association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) =>
+      s.state.moved === "opt-progress" &&
+      s.state.assigned.length === 1 &&
+      s.state.assigned[0] === "Other-Person" &&
+      says(s.state, "Claimed by @Other-Person, on behalf of a maintainer (@someone)"),
+  },
+  {
+    name: "a maintainer claims for someone assigned by hand: the card moves, nobody is assigned again",
+    input: { body: "/claim @other", association: "OWNER", assignees: ["Other"], board: { status: "Ready" } },
+    expect: (s) =>
+      s.state.moved === "opt-progress" && s.state.assigned.length === 0 && says(s.state, "Claimed by @Other, on behalf"),
+  },
+  {
+    name: "a maintainer may claim a feature in Backlog for someone",
+    input: {
+      body: "/claim @other",
+      association: "COLLABORATOR",
+      board: { status: "Backlog" },
+      issue: { labels: [{ name: "enhancement" }] },
+    },
+    expect: (s) => s.state.moved === "opt-progress" && s.state.assigned.includes("other"),
+  },
+  {
+    name: "a maintainer's claim for someone already In progress for them changes nothing",
+    input: { body: "/claim @other", association: "MEMBER", assignees: ["other"], board: { status: "In progress" } },
+    expect: (s) => says(s.state, "already **In progress** for @other") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a contributor may not claim for someone else",
+    input: { body: "/claim @other Plan: …", board: { status: "Ready" } },
+    expect: (s) => says(s.state, "Only a maintainer can claim an issue for someone else") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a contributor naming themselves makes an ordinary claim",
+    input: { body: "/claim @Someone Plan: …", board: { status: "Ready" } },
+    expect: (s) => s.state.moved === "opt-progress" && says(s.state, "Claimed by @someone:") && !says(s.state, "on behalf"),
+  },
+  {
+    name: "a name that is not a GitHub login is refused and not quoted",
+    input: { body: "/claim @bad$(name) @everyone", association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) =>
+      says(s.state, "not a GitHub username") && !says(s.state, "bad$") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a login with a double hyphen is refused",
+    input: { body: `/claim @a--b`, association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) => says(s.state, "not a GitHub username") && !s.state.moved,
+  },
+  {
+    name: "a login longer than 39 characters is refused",
+    input: { body: `/claim @${"a".repeat(40)}`, association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) => says(s.state, "not a GitHub username") && !s.state.moved,
+  },
+  {
+    name: "a trailing comma after the name is not part of it",
+    input: { body: "/claim @other, please take this", association: "MEMBER", board: { status: "Ready" } },
+    expect: (s) => s.state.assigned.includes("other") && s.state.moved === "opt-progress",
+  },
+  {
+    name: "a maintainer's claim for someone on a held card is refused",
+    input: {
+      body: "/claim @other",
+      association: "MEMBER",
+      board: { status: "Do not start yet" },
+      issue: { comments: ["/hold waiting for ADR 0003"] },
+    },
+    expect: (s) => says(s.state, "This is held", "waiting for ADR 0003") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a maintainer's claim for someone on a taken card is refused",
+    input: { body: "/claim @other", association: "MEMBER", assignees: ["third"], board: { status: "In progress" } },
+    expect: (s) => says(s.state, "already **In progress** (@third)") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a maintainer's claim for someone is refused when a pull request closes the issue",
+    input: {
+      body: "/claim @other",
+      association: "MEMBER",
+      board: { status: "Ready", openPrs: [{ number: 239, title: "Fix", url: "u" }] },
+    },
+    expect: (s) => says(s.state, "already a pull request", "#239") && !s.state.moved,
+  },
+  {
+    name: "a maintainer's claim for someone on an epic is refused",
+    input: { body: "/claim @other", association: "MEMBER", board: { status: "Ready" }, issue: { labels: [{ name: "epic" }] } },
+    expect: (s) => says(s.state, "`epic`") && !s.state.moved,
+  },
+  {
+    name: "a lapsed claim passes to the person a maintainer names",
+    input: {
+      body: "/claim @other",
+      association: "MEMBER",
+      board: { status: "In progress" },
+      assignees: ["third"],
+      issue: { comments: [{ body: "Claimed by @third: **In progress**", bot: true, hoursAgo: 49 }] },
+    },
+    expect: (s) =>
+      says(s.state, "lapsed", "passes to @other") &&
+      s.state.unassigned.includes("third") &&
+      s.state.assigned.includes("other") &&
+      s.state.moved === "opt-progress",
+  },
+  {
+    name: "someone GitHub will not assign is named in the answer",
+    input: { body: "/claim @ghost", association: "MEMBER", unassignable: ["ghost"], board: { status: "Ready" } },
+    expect: (s) => s.state.moved === "opt-progress" && says(s.state, "Claimed by @ghost", "GitHub did not assign @ghost"),
+  },
+  {
+    name: "/unclaim ignores a name after it",
+    input: { body: "/unclaim @other", assignees: ["someone"], board: { status: "In progress" } },
+    expect: (s) => s.state.moved === "opt-ready" && s.state.unassigned.includes("someone"),
   },
   {
     name: "claim on an epic is refused",

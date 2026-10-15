@@ -51,7 +51,7 @@ body:
     id: version
     attributes:
       label: Suhina version or commit
-      description: Settings > About, or `suhina-cli --version`.
+      description: Help › About Suhina (Copy version), or `suhina-cli --version`.
     validations:
       required: true
   - type: dropdown

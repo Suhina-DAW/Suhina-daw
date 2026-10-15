@@ -62,6 +62,7 @@ fn project() -> Project {
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     let slot = |content: Option<u32>| Slot { clip: content.map(clip), has_stop: true };
