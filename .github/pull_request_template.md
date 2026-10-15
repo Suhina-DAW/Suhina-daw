@@ -2,7 +2,8 @@
 
 <!-- A few lines. Link the issue it closes: "Closes #123". One pull request per issue: when the
      issue already has an open one, push to it or offer your change there instead
-     (CONTRIBUTING.md › Working on an issue). -->
+     (CONTRIBUTING.md › Working on an issue). When it builds on another open pull request that it
+     cannot be stacked on, add a line "Depends on #123": a check keeps it from merging first. -->
 
 ## Where the knowledge comes from
 
