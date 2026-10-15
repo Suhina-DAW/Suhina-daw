@@ -108,7 +108,11 @@ and output devices, `audio.setOutput` chooses one (host, device, sample rate, bu
 WASAPI exclusive mode) and reopens the active project's output there, and `audio.info` says what
 plays now. The session only describes the choice; the output layer lists devices and opens
 streams through the `AudioSystem` trait it implements and the front end hands to `Projects`
-(the desktop app always, the MCP server with `--audio`). It never changes a project.
+(the desktop app always, the MCP server with `--audio`). It never changes a project. The MIDI
+inputs belong to it too ([ADR 0017](0017-inputs-and-latency.md)): `midi.inputs` lists the ports
+and `midi.setInput` turns one on or off, through the `MidiSystem` trait the MIDI layer
+implements. Arming a track (`track.setArm`) is a transport command that, unlike the others, works
+without an engine: the session keeps the armed tracks and tells each new player.
 
 ## Amendment: device commands (2026-10-12)
 

@@ -73,6 +73,16 @@ pub struct Column {
     pub stop_queued: bool,
     pub mute: bool,
     pub solo: bool,
+    /// The track plays notes, so it can be armed to play a MIDI controller (ADR 0017), and
+    /// whether it is: the session knows, not the project, so [`Grid::build`] leaves it false.
+    pub armable: bool,
+    pub armed: bool,
+    /// What the track hears while armed.
+    pub midi_input: suhina_engine::model::MidiInput,
+    /// The track plays notes, or audio: which of its inputs it has.
+    pub plays_notes: bool,
+    pub plays_audio: bool,
+    pub audio_input: suhina_engine::model::AudioInput,
     pub volume_db: f64,
     /// The track's place in the project's track order, as `track.move` counts it, and how many
     /// groups it is inside.
@@ -137,6 +147,11 @@ impl Scene {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Grid {
     pub columns: Vec<Column>,
+    /// The MIDI input ports there are, for the tracks' MIDI input menus; set by the app.
+    pub midi_ports: Vec<String>,
+    /// The channels of the audio input device open now (0 when none is), for the tracks'
+    /// audio input menus; set by the app.
+    pub input_channels: u16,
     pub scenes: Vec<Scene>,
     pub running: bool,
     /// Beats since the transport started.
@@ -216,6 +231,12 @@ impl Grid {
                 stop_queued: queued == Some(Queued::Stop),
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
+                armable: kind == ColumnKind::Track && (track.content.notes || track.content.audio),
+                armed: false,
+                midi_input: track.midi_input.clone(),
+                plays_notes: kind == ColumnKind::Track && track.content.notes,
+                plays_audio: kind == ColumnKind::Track && track.content.audio,
+                audio_input: track.audio_input,
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
@@ -274,7 +295,7 @@ impl Grid {
             Meter { time_signature: project.transport.time_signature, ..Meter::default() },
             LauncherMonitor::meter,
         );
-        Self { columns, scenes, running, beat, tempo_bpm, meter }
+        Self { columns, midi_ports: Vec::new(), input_channels: 0, scenes, running, beat, tempo_bpm, meter }
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.

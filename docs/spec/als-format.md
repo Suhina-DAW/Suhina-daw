@@ -71,6 +71,7 @@ Per track:
 | Group | `TrackGroupId@Value` | `-1` when not in a group; otherwise the group track's `Id`. Grouping two tracks (file `60`) inserted a `GroupTrack` before them and renumbered the default names (`3-Audio` became `4-Audio`). A `GroupTrack` has a `TrackGroupId` too, so a group inside a group names the outer group's `Id`; the reader takes any depth (the synthetic tests write such sets by hand from this; no corpus file holds one yet). A track whose groups contain each other, or that sits deeper than Suhina nests groups (16 levels), is moved to the top level and plays to the main output, with a warning. |
 | Mixer | `DeviceChain/Mixer` | see below |
 | Output | `DeviceChain/AudioOutputRouting/Target@Value` | `AudioOut/Main` routes to the main output; `AudioOut/GroupTrack` to the track's group. |
+| MIDI input | not read yet | An imported track hears every MIDI port and channel when armed ([ADR 0017](../decisions/0017-inputs-and-latency.md)); where a Live Set keeps a track's input is still to be observed. |
 | Session clips | `DeviceChain/MainSequencer/ClipSlotList/ClipSlot` | One slot per scene, in scene order. Return tracks have no slots. |
 | Arrangement clips | `DeviceChain/MainSequencer/ClipTimeable/ArrangerAutomation/Events` | `MidiClip` (and `AudioClip`) elements. |
 

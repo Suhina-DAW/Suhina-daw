@@ -50,6 +50,8 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }],
         channels: vec![Channel {

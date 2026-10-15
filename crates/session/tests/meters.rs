@@ -18,7 +18,7 @@ fn project(volume: f64) -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
     };
     let channel = |id: u32, volume: f64| Channel {
         id: ChannelId(id),

@@ -118,6 +118,14 @@ pub enum LaunchCommand {
     /// Seeds the random numbers that follow actions are picked with; the same seed picks the
     /// same actions in the same playback.
     SeedRandom(u64),
+    /// Arms or disarms a track: an armed track's instrument plays the notes of the live input
+    /// that `input` takes (ADR 0017). Arming an armed track changes what it hears. Disarming
+    /// lets go of the keys held down.
+    SetArmed {
+        track: suhina_model::TrackId,
+        armed: bool,
+        input: crate::live::LiveFilter,
+    },
 }
 
 /// The time signature playing and where its bars start, as [`LauncherMonitor::meter`] reports
@@ -350,9 +358,17 @@ pub struct Controller {
     pub(crate) preview_monitor: Arc<crate::preview::PreviewMonitor>,
     pub(crate) cpu_monitor: Arc<crate::cpu::CpuMonitor>,
     pub(crate) meter_monitor: Arc<crate::meters::MeterMonitor>,
+    /// The live-note queue's sending end, until taken for the MIDI input (ADR 0017).
+    live: Option<crate::live::LiveSender>,
 }
 
 impl Controller {
+    /// The sending end of the renderer's live-note queue, for the thread a MIDI driver calls
+    /// back on; `None` once taken.
+    pub fn take_live_input(&mut self) -> Option<crate::live::LiveSender> {
+        self.live.take()
+    }
+
     /// Queues a command for the start of the next audio block. Fails only if the queue is full,
     /// which means the renderer is not running.
     pub fn send(&mut self, command: LaunchCommand) -> Result<(), String> {
@@ -885,6 +901,7 @@ impl Renderer {
             preview_monitor: Arc::clone(&self.preview.monitor),
             cpu_monitor: Arc::clone(&self.cpu.monitor),
             meter_monitor: Arc::clone(&self.meters.monitor),
+            live: Some(self.live.sender()),
         }
     }
 
@@ -927,6 +944,10 @@ impl Renderer {
                     self.graph.launcher.tempo_bpm = bpm;
                     self.graph.launcher.pending_tempo = None;
                 }
+            }
+            LaunchCommand::SetArmed { track, armed, input } => {
+                let frame = self.block_frame;
+                self.live.set_armed(&mut self.graph.chains, track, armed, input, frame);
             }
             LaunchCommand::SetMetronome { on, gain } => {
                 self.metronome.set(on, gain);
@@ -1503,6 +1524,8 @@ mod tests {
                     content: ContentKinds { notes: true, audio: true },
                     channel: Some(ChannelId(i)),
                     parent: None,
+                    midi_input: Default::default(),
+                    audio_input: Default::default(),
                     extensions: Extensions::default(),
                 })
                 .collect(),

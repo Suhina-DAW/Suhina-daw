@@ -43,7 +43,7 @@ fn project() -> Project {
         content: ContentKinds { notes: true, audio: true },
         channel: None,
         parent: None,
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
     };
     let notes = |n: Vec<Note>| ContentLane { target: None, data: LaneData::Notes(n) };
     let audio = AudioRegion {

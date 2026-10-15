@@ -183,6 +183,8 @@ impl Reader {
                 content: ContentKinds { notes: entry.kind == TrackKind::Midi, audio: entry.kind == TrackKind::Audio },
                 channel: Some(entry.channel),
                 parent,
+                midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             });
             if entry.kind != TrackKind::Return {

@@ -122,6 +122,8 @@ fn everything() -> Project {
         content: ContentKinds { notes, audio: !notes },
         channel: channel.map(ChannelId),
         parent: parent.map(TrackId),
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -132,9 +134,20 @@ fn everything() -> Project {
             loop_enabled: true,
         },
         tracks: vec![
-            Track { color: None, ..track(1, false, Some(4), None) },
-            track(2, true, Some(2), Some(1)),
-            track(3, false, Some(5), Some(1)),
+            Track {
+                color: None,
+                audio_input: AudioInput { channels: InputChannels::Mono(3), monitor: Monitor::Off },
+                ..track(1, false, Some(4), None)
+            },
+            Track {
+                midi_input: MidiInput { port: MidiPort::Named("Keys: Port 1, \"A\"".into()), channel: Some(16) },
+                ..track(2, true, Some(2), Some(1))
+            },
+            Track {
+                midi_input: MidiInput { port: MidiPort::Nothing, channel: None },
+                audio_input: AudioInput { channels: InputChannels::Stereo(255), monitor: Monitor::In },
+                ..track(3, false, Some(5), Some(1))
+            },
             Track { extensions: ext("ReturnTrack"), ..track(4, false, Some(3), None) },
         ],
         channels: vec![
@@ -345,6 +358,22 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "chance_a": 101 } } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "chance_b": -3 } } ] } ] } }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "follow": { "enabled": "on" } } ] } ] } }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "channel": 0 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "channel": 17 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "channel": "one" } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "port": "some" } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "port": { "name": " " } } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": { "port": 3 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "midi_input": "keys" } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [0] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [257] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [1, 3] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [2, 1] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": [1, 2, 3] } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "channels": 1 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": "loud" } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": { "monitor": 1 } } ] }"#,
+        r#"{ "tracks": [ { "id": 1, "audio_input": [1] } ] }"#,
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
@@ -387,6 +416,25 @@ fn automation_defaults_are_left_out_and_read_back() {
     let json = to_json(&project);
     assert!(json.contains("automation") && !json.contains("curve") && !json.contains("\"enabled\": false"), "{json}");
     assert_eq!(from_json(&json).unwrap().channels[0].automation, [lane]);
+}
+
+/// A track written before MIDI inputs existed hears every port and channel; the default is not
+/// written.
+#[test]
+fn a_track_without_a_midi_input_hears_every_controller() {
+    let project =
+        from_json(r#"{ "format": "suhina", "version": 1, "project": { "tracks": [ { "id": 1 } ] } }"#).unwrap();
+    assert_eq!(project.tracks[0].midi_input, MidiInput::default());
+    assert_eq!(MidiInput::default(), MidiInput { port: MidiPort::All, channel: None });
+    assert!(!to_json(&project).contains("midi_input"));
+    assert_eq!(project.tracks[0].audio_input, AudioInput::default());
+    assert_eq!(AudioInput::default(), AudioInput { channels: InputChannels::None, monitor: Monitor::Auto });
+    assert!(!to_json(&project).contains("audio_input"));
+    let all_on_one = r#"{ "format": "suhina", "version": 1, "project": { "tracks": [ { "id": 1, "midi_input": { "port": "all", "channel": 10 } } ] } }"#;
+    assert_eq!(
+        from_json(all_on_one).unwrap().tracks[0].midi_input,
+        MidiInput { port: MidiPort::All, channel: Some(10) }
+    );
 }
 
 /// A clip written before fade shapes existed has linear, unbent fades, so it sounds the same.

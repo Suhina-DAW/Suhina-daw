@@ -14,6 +14,7 @@ mod library;
 mod meters;
 mod notes;
 mod plugin_edits;
+mod midi;
 mod plugins;
 mod preview;
 mod projects;
@@ -29,12 +30,13 @@ use serde_json::Value;
 use suhina_engine::{Controller, LauncherMonitor, Quantization};
 use suhina_model::Project;
 
-pub use audio::{AudioSystem, LiveOutput, OutputChoice, OutputInfo, audio_commands};
+pub use audio::{AudioSystem, InputChoice, LiveOutput, OutputChoice, OutputInfo, audio_commands};
 pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
 pub use library::{Category, Found, file_info, library_commands, search_items};
 pub use notes::{MAX_NOTES_PER_CLIP, MAX_NOTES_PER_COMMAND, midi_velocity};
+pub use midi::{LiveInput, MidiSystem, midi_commands};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{
@@ -191,6 +193,11 @@ impl Player {
         &mut self.controller
     }
 
+    /// The sending end of the engine's live-note queue (ADR 0017); `None` once taken.
+    pub fn take_live_input(&mut self) -> Option<suhina_engine::LiveSender> {
+        self.controller.take_live_input()
+    }
+
     /// Hands a running plug-in's audio half to the engine for the plug-in device `key`.
     pub fn send_plugin(
         &mut self,
@@ -252,6 +259,9 @@ pub struct Session {
     player_behind: bool,
     /// When the project was last backed up and where (`backup.rs`).
     pub(crate) backup: backup::SessionBackups,
+    /// The armed tracks, whose instruments play the MIDI inputs (ADR 0017). Not part of the
+    /// project: arming is not undone and not saved.
+    armed: Vec<suhina_model::TrackId>,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -279,6 +289,7 @@ impl Session {
             open_step: None,
             player_behind: false,
             backup: backup::SessionBackups::default(),
+            armed: Vec::new(),
         }
     }
 
@@ -406,6 +417,56 @@ impl Session {
         let _ = player.send(suhina_engine::LaunchCommand::SetQuantization(self.quantization));
         self.player = Some(player);
         self.audio_changed = false;
+        // A new engine hears the tracks armed before it.
+        self.send_armed();
+    }
+
+    /// Tells the playing engine every armed track and what each hears (its MIDI input): after a
+    /// new player, an arm, or an edit or undo that may have changed an input.
+    fn send_armed(&mut self) {
+        let armed: Vec<_> = self.armed().into_iter().map(|track| (track, live_filter(&self.project, track))).collect();
+        if let Some(player) = self.player.as_mut() {
+            for (track, input) in armed {
+                // A full queue means an engine that does not run; it has nothing to arm.
+                let _ = player.send(suhina_engine::LaunchCommand::SetArmed { track, armed: true, input });
+            }
+        }
+    }
+
+    /// The armed tracks that are in the project, in the order they were armed.
+    pub fn armed(&self) -> Vec<suhina_model::TrackId> {
+        self.armed.iter().copied().filter(|id| self.project.tracks.iter().any(|t| t.id == *id)).collect()
+    }
+
+    pub fn is_armed(&self, track: suhina_model::TrackId) -> bool {
+        self.armed.contains(&track) && self.project.tracks.iter().any(|t| t.id == track)
+    }
+
+    /// Arms `track` or disarms it; `exclusive` also disarms every other track. The playing
+    /// engine hears it from its next block.
+    pub(crate) fn set_armed(&mut self, track: suhina_model::TrackId, armed: bool, exclusive: bool) {
+        let before = self.armed.clone();
+        // Tracks removed since they were armed are forgotten.
+        let tracks = &self.project.tracks;
+        self.armed.retain(|id| *id != track && !exclusive && tracks.iter().any(|t| t.id == *id));
+        if armed {
+            self.armed.push(track);
+        }
+        if let Some(player) = self.player.as_mut() {
+            for id in before.iter().filter(|id| !self.armed.contains(id)) {
+                let _ = player.send(suhina_engine::LaunchCommand::SetArmed {
+                    track: *id,
+                    armed: false,
+                    input: Default::default(),
+                });
+            }
+        }
+        self.send_armed();
+    }
+
+    /// The sending end of the playing engine's live-note queue, the first time it is asked for.
+    pub(crate) fn take_live_input(&mut self) -> Option<suhina_engine::LiveSender> {
+        self.player.as_mut().and_then(Player::take_live_input)
     }
 
     /// The launch quantisation `launcher.setQuantization` set last (1 bar until then); the
@@ -717,6 +778,8 @@ impl Session {
                 let value = (spec.run)(self, params)?;
                 let shift = suhina_engine::SceneShift::between(&scenes, &self.project.launcher);
                 self.update_player(shift)?;
+                // Undo may have changed what an armed track hears.
+                self.send_armed();
                 Ok(value)
             }
             CommandKind::Edit => {
@@ -764,6 +827,8 @@ impl Session {
                                     Err(_) if continued => self.player_behind = true,
                                     Err(e) => return Err(e),
                                 }
+                                // The edit may have changed what an armed track hears.
+                                self.send_armed();
                             }
                         }
                         Ok(value)
@@ -880,4 +945,19 @@ mod tests {
         assert!(!session.has_unsaved_changes());
         let _clean = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// What `track` hears while armed, for the engine: its MIDI input, by port id (ADR 0017).
+fn live_filter(project: &Project, track: suhina_model::TrackId) -> suhina_engine::LiveFilter {
+    use suhina_engine::{LiveFilter, LivePorts};
+    use suhina_model::MidiPort;
+    let Some(input) = project.tracks.iter().find(|t| t.id == track).map(|t| &t.midi_input) else {
+        return LiveFilter::default();
+    };
+    let ports = match &input.port {
+        MidiPort::All => LivePorts::All,
+        MidiPort::Named(name) => LivePorts::One(suhina_engine::port_id(name)),
+        MidiPort::Nothing => LivePorts::Nothing,
+    };
+    LiveFilter { ports, channel: input.channel.and_then(|c| c.checked_sub(1)) }
 }

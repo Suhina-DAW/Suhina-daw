@@ -81,6 +81,8 @@ palette! {
         "The playhead, queued clips, a key being set";
     recording, "recording", 0xE5484D,
         "Recording and errors";
+    recording_background, "recording.background", 0x3A2B2A,
+        "Behind an armed track's arm button and a recording clip";
     meter_normal, "meter.normal", 0x8BC48A,
         "A level meter below the top";
     meter_hot, "meter.hot", 0xE3C86A,

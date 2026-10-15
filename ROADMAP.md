@@ -29,7 +29,9 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
    [spec](docs/spec/ui-clip-editor.md)).
 2. **Automation:** device, plug-in and mixer parameters first, then tempo
    ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
-3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
+3. **Recording and inputs:** audio and MIDI recording, audio inputs, monitoring, count-in
+   ([#263](https://github.com/suhina-daw/suhina-daw/issues/263); arming and playing from MIDI
+   controllers work).
 4. **Cue, and the rest of the mixer:** sends and return tracks play and level meters are done;
    the cue output follows.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
@@ -497,6 +499,28 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   place (Settings › Audio › Now says "until … is back"); Suhina looks every few seconds and moves
   back to the chosen device when it is connected again, with a notice
   ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)).
+- **MIDI controllers** play the armed tracks' instruments, built in or plug-ins, with the
+  transport running or stopped, and with the sustain pedal
+  ([ADR 0017](docs/decisions/0017-inputs-and-latency.md)): an arm button in the Session mixer
+  and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
+  input port opened and Settings › Audio › MIDI inputs to turn one off (`midi.inputs`,
+  `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
+  the buffer size. Still to do: recording
+  ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
+- **Audio input and monitoring:** choose an input device in Settings › Audio (off by default);
+  each audio track hears one channel or a stereo pair of it, monitored while armed (Auto),
+  always (In) or never (Off), through its devices and mix (`track.setAudioInput`); arm many
+  tracks at once to hear a band on separate tracks
+  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017). Recording is next
+  ([#268](https://github.com/suhina-daw/suhina-daw/issues/268)).
+- **A MIDI input per track:** each track hears every MIDI port, one port, or none, and every
+  channel or one, so a keyboard and a pad controller (or two players) each play their own armed
+  track; set from the track's menu or the Arrangement header (`track.setMidiInput`), saved with
+  the project ([#278](https://github.com/suhina-daw/suhina-daw/issues/278), ADR 0017).
+- **Lower latency for live playing:** while a track is armed the engine keeps one block queued
+  ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
+  takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
+  ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command

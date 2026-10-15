@@ -44,7 +44,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             content: ContentKinds { notes: true, audio: true },
             channel: Some(ChannelId(1)),
             parent: None,
-            extensions: Extensions::default(),
+            extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),

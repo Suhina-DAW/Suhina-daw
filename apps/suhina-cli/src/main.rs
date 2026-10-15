@@ -806,7 +806,9 @@ fn mcp(args: &[String]) -> Result<(), String> {
     let library = suhina_library::Library::new(suhina_plugins::library::settings_folder());
     let mut server = SuhinaMcp::new(workspace).with_file_library(library);
     if audio {
-        server = server.with_audio_output(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
+        server = server
+            .with_audio_output(std::sync::Arc::new(suhina_output::DeviceOutput::new()))
+            .with_midi_input(std::sync::Arc::new(suhina_midi::Midi::new()));
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -832,6 +834,8 @@ fn demo_project() -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let channel = |id: u32, name: &str, volume: f64, pan: f64| Channel {

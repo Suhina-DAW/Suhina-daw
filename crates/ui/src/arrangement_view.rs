@@ -33,6 +33,8 @@ const LANE_ZOOM_PER_POINT: f32 = 0.004;
 /// Heights at which a header shows its next group (components › Track header levels).
 const SHOWS_MIXER: f32 = 48.0;
 const SHOWS_ROUTING: f32 = 70.0;
+/// A track that plays notes shows its MIDI input under its routing from this height.
+const SHOWS_MIDI_INPUT: f32 = 90.0;
 const DROPDOWN: f32 = 15.0;
 /// Padding inside a header: top and bottom, and the sides.
 const HEADER_PAD_Y: f32 = 5.0;
@@ -1831,6 +1833,69 @@ fn routing(
     }
 }
 
+/// The MIDI input dropdown (ADR 0017): "MIDI" and what the track hears while armed; its menu
+/// runs `track.setMidiInput`.
+fn midi_input(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    lane: &Lane,
+    ports: &[String],
+    actions: &mut Vec<Action>,
+) {
+    let current = menus::midi_input_text(&lane.midi_input);
+    let label = Rect::from_min_size(rect.min, Vec2::new(28.0, rect.height()));
+    widgets::text_in(
+        painter,
+        label,
+        Align2::LEFT_CENTER,
+        "MIDI",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_hint(),
+    );
+    let field = Rect::from_min_max(Pos2::new(label.right(), rect.top()), rect.max);
+    let response = widgets::button_area(
+        ui,
+        field,
+        Id::new(("midi-input", lane.track.0)),
+        format!("{} MIDI input: {current}", lane.name),
+    );
+    widgets::dropdown(ui, painter, field, &response, &current);
+    egui::Popup::menu(&response).show(|ui| menus::midi_input_choices(ui, lane.track, &lane.midi_input, ports, actions));
+}
+
+/// The audio input dropdown (ADR 0017): "In" and the track's input channels and monitoring;
+/// its menu runs `track.setAudioInput`.
+fn audio_input(
+    ui: &mut Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    lane: &Lane,
+    channels: u16,
+    actions: &mut Vec<Action>,
+) {
+    let current = menus::audio_input_text(&lane.audio_input);
+    let label = Rect::from_min_size(rect.min, Vec2::new(28.0, rect.height()));
+    widgets::text_in(
+        painter,
+        label,
+        Align2::LEFT_CENTER,
+        "Audio",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_hint(),
+    );
+    let field = Rect::from_min_max(Pos2::new(label.right(), rect.top()), rect.max);
+    let response = widgets::button_area(
+        ui,
+        field,
+        Id::new(("audio-input", lane.track.0)),
+        format!("{} audio input: {current}", lane.name),
+    );
+    widgets::dropdown(ui, painter, field, &response, &current);
+    egui::Popup::menu(&response)
+        .show(|ui| menus::audio_input_choices(ui, lane.track, &lane.audio_input, channels, actions));
+}
+
 /// Width of the meter lying in a return or main row, left of its volume.
 const LYING_METER: f32 = 48.0;
 
@@ -1923,6 +1988,8 @@ fn track_header(
             selection: &selection,
             into: &into,
             out: nesting::out_of_group(nest.places, lane.track),
+            midi: lane.plays_notes.then_some((&lane.midi_input, timeline.midi_ports.as_slice())),
+            audio: lane.plays_audio.then_some((&lane.audio_input, timeline.input_channels)),
         };
         menus::track_menu(ui, &menu, actions);
     });
@@ -1947,7 +2014,12 @@ fn track_header(
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
     let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
     let solo = Rect::from_min_size(Pos2::new(toggle.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
-    let square = Rect::from_min_size(Pos2::new(solo.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
+    // A track that can be armed has its arm button after solo, as wide.
+    let arm = lane
+        .armable
+        .then(|| Rect::from_min_size(Pos2::new(solo.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW)));
+    let square =
+        Rect::from_min_size(Pos2::new(arm.unwrap_or(solo).right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     let color = if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) };
     if lane.kind == ColumnKind::Group {
         // A group's colour mark is its fold arrow.
@@ -1983,6 +2055,20 @@ fn track_header(
     {
         actions.push(action);
     }
+    if let Some(arm) = arm.filter(|a| a.intersects(clip))
+        && let Some(action) = widgets::arm_button(
+            ui,
+            painter,
+            arm,
+            id.with("arm"),
+            lane.track.0,
+            &lane.name,
+            lane.armed,
+            lane.plays_notes,
+        )
+    {
+        actions.push(action);
+    }
     if toggle.intersects(clip) {
         let label = if lane.mute { format!("Turn {} on", lane.name) } else { format!("Turn {} off", lane.name) };
         let response = widgets::button_area(ui, toggle.intersect(clip), id.with("on"), label);
@@ -2014,6 +2100,15 @@ fn track_header(
         let line = Rect::from_min_max(Pos2::new(inner.left(), top), Pos2::new(inner.right(), top + DROPDOWN));
         if line.intersects(clip) {
             routing(ui, painter, line, lane, nest.groups, actions);
+        }
+        // Taller still, on a track that plays notes: which controllers it hears when armed.
+        let input = line.translate(Vec2::new(0.0, DROPDOWN + PAD));
+        if rect.height() >= SHOWS_MIDI_INPUT && input.intersects(clip) {
+            if lane.plays_notes {
+                midi_input(ui, painter, input, lane, &timeline.midi_ports, actions);
+            } else if lane.plays_audio {
+                audio_input(ui, painter, input, lane, timeline.input_channels, actions);
+            }
         }
     }
 

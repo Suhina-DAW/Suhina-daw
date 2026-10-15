@@ -132,6 +132,8 @@ pub(crate) fn insert_track(
         content: kind.contents(),
         channel: Some(channel),
         parent,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Default::default(),
     };
     let at = at.min(p.tracks.len());

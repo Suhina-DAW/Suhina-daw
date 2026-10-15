@@ -1,0 +1,16 @@
+[package]
+name = "suhina-midi"
+description = "MIDI controllers for Suhina: lists the input ports, opens the ones that are on, hands their notes to the engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+suhina-engine.workspace = true
+suhina-session.workspace = true
+# MIDI input ports: ALSA sequencer on Linux, WinMM on Windows, CoreMIDI on macOS.
+midir.workspace = true
+
+[lints]
+workspace = true

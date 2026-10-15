@@ -10,6 +10,8 @@ fn project() -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let channel = |id: u32| Channel {
@@ -978,7 +980,7 @@ fn launcher_project() -> Project {
         content: ContentKinds { notes: false, audio: true },
         channel: Some(ChannelId(3)),
         parent: None,
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
     });
     let mut channel = p.channels[0].clone();
     (channel.id, channel.name) = (ChannelId(3), "C3".into());

@@ -203,7 +203,10 @@ double-clicked to reset; the change is heard while dragging, and one drag is one
 the same. **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
-the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
+the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). **Arm:**
+an armed track's instrument plays what the MIDI controllers play; a click arms one track and
+disarms the others, Ctrl adds (`track.setArm`, `exclusive`; [ADR 0017](../decisions/0017-inputs-and-latency.md)).
+A track that plays audio is armed to hear its audio input (`track.setAudioInput`, monitoring Auto). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
 

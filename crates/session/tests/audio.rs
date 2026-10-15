@@ -42,6 +42,8 @@ impl LiveOutput for Live {
             buffer_frames: self.0.buffer_frames.unwrap_or(512),
             engine_block: self.0.buffer_frames.unwrap_or(1024),
             latency_ms: 21.3,
+            live: true,
+            live_latency_ms: 26.6,
             underruns: 2,
             failed: self.1.load(std::sync::atomic::Ordering::Relaxed),
             fallback: self.2,
@@ -67,7 +69,7 @@ impl AudioSystem for Stand {
         if self.missing.lock().unwrap().as_deref() != Some("USB") {
             devices.push(DeviceInfo { name: "USB".into(), default: false, ..device });
         }
-        vec![HostInfo { name: "Stand".into(), default: true, devices, error: None }]
+        vec![HostInfo { name: "Stand".into(), default: true, devices, inputs: Vec::new(), error: None }]
     }
 
     fn open(
@@ -191,6 +193,7 @@ fn a_new_choice_reopens_the_playing_project_where_it_was() {
 
     let info = run(&mut projects, "audio.info", json!({})).unwrap();
     assert_eq!(info["latency_ms"], json!(21.3));
+    assert_eq!((info["live"].clone(), info["live_latency_ms"].clone()), (json!(true), json!(26.6)));
     assert_eq!(info["underruns"], json!(2));
     assert_eq!(info["chosen"]["sample_rate"], json!(44_100));
 }

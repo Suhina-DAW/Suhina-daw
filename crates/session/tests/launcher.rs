@@ -18,6 +18,8 @@ fn project() -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let channel = |id: u32| Channel {
@@ -115,8 +117,12 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 #[test]
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
-    // The quantisation is kept by the session until a player is attached (tested below).
-    for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport && c.id != "launcher.setQuantization") {
+    // The quantisation is kept by the session until a player is attached (tested below). Arming
+    // is kept by the session and told to each new player, so it needs none either (ADR 0017).
+    for spec in commands()
+        .iter()
+        .filter(|c| c.kind == CommandKind::Transport && c.id != "launcher.setQuantization" && c.id != "track.setArm")
+    {
         let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0, "key": 60 });
         let params: Value = params
             .as_object()

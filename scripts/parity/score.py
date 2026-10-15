@@ -39,7 +39,8 @@ CHAPTERS = [
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
      "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
      "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive; "
-     "a change or a device back after unplugging keeps playback and launched clips going), "
+     "a change or a device back after unplugging keeps playback and launched clips going; "
+     "input device, MIDI inputs on/off), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
@@ -110,9 +111,11 @@ CHAPTERS = [
      "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop). "
      "Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier "
      "and scene follow actions."),
-    (17, "Routing and I/O", 22, 0.10, "absent",
-     "Only track output to main or a group (track.setOutput); track input is a model field read "
-     "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
+    (17, "Routing and I/O", 22, 0.35, "partial",
+     "Track output to main or a group (track.setOutput); MIDI controllers play the armed tracks, "
+     "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
+     "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
+     "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
     (18, "Mixing", 18, 0.52, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
@@ -122,7 +125,8 @@ CHAPTERS = [
      "imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement "
      "headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
-     "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
+     "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
+     "recording, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
      "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
      "running plug-ins' state as heard; no per-track or group bounce, no paste."),

@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
+read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
 type: system
 status: current
 last_verified: 2026-10-15
@@ -8,6 +8,7 @@ covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
   - crates/session/src/audio.rs
+  - crates/session/src/midi.rs
   - crates/automation/src/render.rs
   - crates/engine/src/cpu.rs
   - apps/suhina-cli/src/main.rs
@@ -74,8 +75,31 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   output there, the same way. The engine renders in blocks of
   `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
-  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns`,
-  `failed` and `fallback` (it plays in place of a chosen host or device that is not there). Without `--audio`, `audio.devices` returns an error.
+  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
+  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a
+  key on a MIDI controller takes to be heard), `underruns`, `failed` and `fallback` (it plays in
+  place of a chosen host or device that is not there). Without `--audio`, `audio.devices`
+  returns an error.
+
+- **MIDI controllers.** With `--audio`, the server also opens every MIDI input port
+  ([ADR 0017](decisions/0017-inputs-and-latency.md)). `midi.inputs` lists them with `enabled`,
+  `open` and the `error` a port could not be opened with, and whether the playing engine takes
+  their notes (`connected`); `midi.setInput {port, enabled}` turns one off or on again.
+  `track.setArm {track, armed, exclusive?}` arms a track: its instrument plays what the ports
+  play, transport running or not. `track.setMidiInput {track, port?, channel?}` chooses which
+  controllers it hears (`port` `"all"`, `"none"` or a port's name from `midi.inputs`; `channel`
+  1 to 16, or 0 for every one), so two controllers can play two armed tracks; it is an edit,
+  saved with the project, and `project.tracks` reports each track's `midi_input`.
+
+- **Audio input.** `audio.devices` lists each host's `inputs` (name, channels, sample rates).
+  `audio.setOutput {input}` opens one beside the output (`"off"`, the default; `"default"`; or
+  a name), at the output's sample rate. `track.setAudioInput {track, input?, monitor?}` chooses
+  what a track hears: `input` `"none"`, a channel (`"3"`) or a pair (`"1/2"`), `monitor`
+  `auto` (while armed), `in` or `off`; it is an edit, saved with the project. Arm several
+  tracks with `track.setArm` and `exclusive: false` to hear a band on separate tracks.
+  `audio.info` adds `input`, `input_channels` and `input_underruns`. Arming is not an edit (no undo step, not saved) and works
+  before an engine plays; `project.tracks` says which tracks are `armed`. Without `--audio`,
+  `midi.*` returns an error.
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`

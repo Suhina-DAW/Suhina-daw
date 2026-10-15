@@ -67,7 +67,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
                 content: ContentKinds { notes: false, audio: true },
                 channel: Some(ChannelId(t)),
                 parent: None,
-                extensions: Extensions::default(),
+                extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
             })
             .collect(),
         channels: (1..=TRACKS)

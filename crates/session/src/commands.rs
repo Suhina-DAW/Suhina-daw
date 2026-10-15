@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, MAX_GROUP_DEPTH,
-    Marker, Project, Scene, Slot, TimeSignature, Track, TrackId,
+    Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
 use crate::{CommandError, Session, automation, devices, files, follow, meters, notes, preview};
@@ -33,8 +33,9 @@ pub enum CommandKind {
     /// The browser's library: folders, search, pins, recent items, tags (ADR 0012); belongs
     /// to Suhina, not to one project. Runs on [`crate::Projects`].
     Library,
-    /// Lists or chooses the audio output (host, device, sample rate, buffer size) or reports
-    /// on it; belongs to Suhina, not to one project. Runs on [`crate::Projects`].
+    /// Lists or chooses the audio output (host, device, sample rate, buffer size) or the MIDI
+    /// inputs, or reports on them; belongs to Suhina, not to one project. Runs on
+    /// [`crate::Projects`].
     Audio,
 }
 
@@ -262,7 +263,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.tracks",
-        label: "List tracks with id, name, volume (dB), pan, mute and devices",
+        label: "List tracks with id, name, volume (dB), pan, mute, whether armed, the MIDI and audio inputs it hears, and devices",
         params: &[],
         kind: CommandKind::Read,
         run: tracks,
@@ -649,6 +650,47 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Transport,
         run: meters::reset_clip,
+    },
+    CommandSpec {
+        id: "track.setMidiInput",
+        label: "Choose which MIDI controllers a track hears while armed: every port, one port by name (from midi.inputs), or none, and every channel or one; saved with the project",
+        params: &[
+            TRACK,
+            optional(
+                "port",
+                ParamType::Text,
+                "\"all\" (the default), \"none\", or a port's name; left out keeps the port",
+            ),
+            optional("channel", ParamType::Integer, "1 to 16, or 0 for every channel; left out keeps the channel"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_midi_input,
+    },
+    CommandSpec {
+        id: "track.setAudioInput",
+        label: "Choose which channels of the audio input device a track hears (none, one channel, or a stereo pair) and when it is heard through the track: auto (while armed), in (always) or off; saved with the project",
+        params: &[
+            TRACK,
+            optional(
+                "input",
+                ParamType::Text,
+                "\"none\", a channel from 1 (\"3\"), or a pair (\"1/2\"); left out keeps it",
+            ),
+            optional("monitor", ParamType::Text, "auto (the default), in or off; left out keeps it"),
+        ],
+        kind: CommandKind::Edit,
+        run: set_audio_input,
+    },
+    CommandSpec {
+        id: "track.setArm",
+        label: "Arm a track or disarm it: an armed track's instrument plays what the MIDI inputs play (midi.inputs), whether the transport runs or not. Arming is not an edit: it is not undone and not saved",
+        params: &[
+            TRACK,
+            param("armed", ParamType::Bool, "true arms the track"),
+            optional("exclusive", ParamType::Bool, "true also disarms every other track (false by default)"),
+        ],
+        kind: CommandKind::Transport,
+        run: set_arm,
     },
     CommandSpec {
         id: "clip.launch",
@@ -1407,6 +1449,9 @@ fn tracks(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
                     "volume_db": channel.map(|c| to_db(c.volume)),
                     "pan": channel.map(|c| c.pan),
                     "mute": channel.map(|c| c.mute),
+                    "armed": session.is_armed(t.id),
+                    "midi_input": midi_input_json(&t.midi_input),
+                    "audio_input": audio_input_json(&t.audio_input),
                     "devices": channel.map(|c| c.devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>()),
                     "sends": channel.map(|c| crate::sends::sends_json(p, c)),
                     "arrangement_clips": clips,
@@ -1627,6 +1672,8 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         content: Default::default(),
         channel: Some(channel_id),
         parent,
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Default::default(),
     };
     p.tracks.splice(at..at, std::iter::once(group).chain(moved));
@@ -2178,6 +2225,117 @@ fn set_solo(session: &mut Session, params: &Value) -> Result<Value, CommandError
         }
     }
     Ok(json!({ "solo": solo }))
+}
+
+fn set_midi_input(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let id = track_id(&session.project, params)?;
+    let port = match params.get("port") {
+        None => None,
+        Some(Value::String(s)) => Some(match s.trim() {
+            "" => return Err("port must be \"all\", \"none\" or a port's name".into()),
+            "all" => MidiPort::All,
+            "none" => MidiPort::Nothing,
+            name => MidiPort::Named(name.to_string()),
+        }),
+        Some(_) => return Err("port must be a text".into()),
+    };
+    let channel = match params.get("channel") {
+        None => None,
+        Some(v) => match v.as_u64() {
+            Some(0) => Some(None),
+            Some(c @ 1..=16) => Some(u8::try_from(c).ok()),
+            _ => return Err("channel must be 0 (every channel) or 1 to 16".into()),
+        },
+    };
+    let track = session.project.tracks.iter_mut().find(|t| t.id == id).ok_or("the track is missing")?;
+    if let Some(port) = port {
+        track.midi_input.port = port;
+    }
+    if let Some(channel) = channel {
+        track.midi_input.channel = channel;
+    }
+    Ok(json!({ "midi_input": midi_input_json(&track.midi_input) }))
+}
+
+fn set_audio_input(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    use suhina_model::{InputChannels, MAX_INPUT_CHANNEL, Monitor};
+    let id = track_id(&session.project, params)?;
+    let bad = || {
+        CommandError(format!("input must be \"none\", a channel from 1 to {MAX_INPUT_CHANNEL} or a pair like \"1/2\""))
+    };
+    let channel = |text: &str| text.trim().parse::<u16>().ok().filter(|c| (1..=MAX_INPUT_CHANNEL).contains(c));
+    let channels = match params.get("input") {
+        None => None,
+        Some(Value::String(text)) => Some(match text.trim() {
+            "none" => InputChannels::None,
+            pair if pair.contains('/') => {
+                let (left, right) = pair.split_once('/').ok_or_else(bad)?;
+                let (left, right) = (channel(left).ok_or_else(bad)?, channel(right).ok_or_else(bad)?);
+                if left.checked_add(1) != Some(right) {
+                    return Err("a stereo pair is two neighbouring channels, like \"1/2\" or \"3/4\"".into());
+                }
+                InputChannels::Stereo(left)
+            }
+            one => InputChannels::Mono(channel(one).ok_or_else(bad)?),
+        }),
+        Some(_) => return Err(bad()),
+    };
+    let monitor = match params.get("monitor") {
+        None => None,
+        Some(v) => Some(match v.as_str() {
+            Some("auto") => Monitor::Auto,
+            Some("in") => Monitor::In,
+            Some("off") => Monitor::Off,
+            _ => return Err("monitor must be auto, in or off".into()),
+        }),
+    };
+    let track = session.project.tracks.iter_mut().find(|t| t.id == id).ok_or("the track is missing")?;
+    if let Some(channels) = channels {
+        track.audio_input.channels = channels;
+    }
+    if let Some(monitor) = monitor {
+        track.audio_input.monitor = monitor;
+    }
+    Ok(json!({ "audio_input": audio_input_json(&track.audio_input) }))
+}
+
+/// A track's audio input as commands show it: `input` "none", "3" or "1/2", and `monitor`.
+pub(crate) fn audio_input_json(input: &suhina_model::AudioInput) -> Value {
+    use suhina_model::{InputChannels, Monitor};
+    let channels = match input.channels {
+        InputChannels::None => "none".to_string(),
+        InputChannels::Mono(c) => c.to_string(),
+        InputChannels::Stereo(c) => format!("{c}/{}", c.saturating_add(1)),
+    };
+    let monitor = match input.monitor {
+        Monitor::Auto => "auto",
+        Monitor::In => "in",
+        Monitor::Off => "off",
+    };
+    json!({ "input": channels, "monitor": monitor })
+}
+
+/// A track's MIDI input as commands show it: `port` "all", "none" or the port's name, and
+/// `channel` 1 to 16 or null for every one.
+pub(crate) fn midi_input_json(input: &suhina_model::MidiInput) -> Value {
+    let port = match &input.port {
+        MidiPort::All => "all",
+        MidiPort::Nothing => "none",
+        MidiPort::Named(name) => name.as_str(),
+    };
+    json!({ "port": port, "channel": input.channel })
+}
+
+fn set_arm(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let armed = params.get("armed").and_then(Value::as_bool).ok_or("armed must be true or false")?;
+    let exclusive = match params.get("exclusive") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("exclusive must be true or false")?,
+    };
+    let track = track_id(&session.project, params)?;
+    session.set_armed(track, armed, exclusive);
+    let tracks: Vec<u32> = session.armed().iter().map(|t| t.0).collect();
+    Ok(json!({ "armed": armed, "armed_tracks": tracks, "playing": session.player().is_some() }))
 }
 
 fn set_metronome(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

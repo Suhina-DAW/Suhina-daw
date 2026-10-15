@@ -60,6 +60,8 @@ pub struct Projects {
     output_watched: Option<std::time::Instant>,
     /// Backups of the open projects: the settings and the thread that writes them.
     pub(crate) backups: crate::backup::Backups,
+    /// The MIDI input ports and where they send their notes (ADR 0017).
+    midi: crate::midi::MidiInputs,
 }
 
 /// How often an output whose device reported an error is opened again.
@@ -125,6 +127,52 @@ impl Projects {
 
     pub fn audio_system(&self) -> Option<std::sync::Arc<dyn crate::AudioSystem>> {
         self.audio.clone()
+    }
+
+    /// Lets the projects hear MIDI controllers through `system`'s input ports (`midi.*`
+    /// commands, ADR 0017), and opens every port that is on. Returns what the user should
+    /// hear about: ports that could not be opened.
+    pub fn set_midi_system(&mut self, system: std::sync::Arc<dyn crate::MidiSystem>) -> Vec<String> {
+        self.midi.system = Some(system);
+        self.midi.sync()
+    }
+
+    /// The MIDI input ports turned off, by name (the window keeps them in its settings).
+    pub fn midi_inputs_off(&self) -> Vec<String> {
+        self.midi.off.iter().cloned().collect()
+    }
+
+    /// Turns the ports `off` names off and every other one on, opening and closing them.
+    pub fn set_midi_inputs_off(&mut self, off: impl IntoIterator<Item = String>) -> Vec<String> {
+        self.midi.off = off.into_iter().collect();
+        self.midi.sync()
+    }
+
+    /// Where the open MIDI ports send what they play: the active project's engine.
+    pub fn live_input(&self) -> std::sync::Arc<crate::LiveInput> {
+        std::sync::Arc::clone(&self.midi.input)
+    }
+
+    /// The MIDI input ports there were when they were last looked at (every two seconds while
+    /// the window polls), by name: what a track's MIDI input can be set to.
+    pub fn midi_ports(&self) -> &[String] {
+        &self.midi.ports
+    }
+
+    pub(crate) fn midi_mut(&mut self) -> &mut crate::midi::MidiInputs {
+        &mut self.midi
+    }
+
+    /// Sends the MIDI inputs' notes to the active project's engine when it is a new one, and
+    /// looks at the ports again now and then, so a controller plugged in later is heard.
+    fn poll_midi(&mut self) -> Vec<String> {
+        if let Some(sender) = self.session_mut(None).ok().and_then(Session::take_live_input) {
+            self.midi.input.connect(sender);
+        }
+        if self.midi.system.is_some() && self.midi.checked.is_none_or(|t| t.elapsed() >= crate::midi::MIDI_RESCAN) {
+            return self.midi.sync();
+        }
+        Vec::new()
     }
 
     pub fn output_choice(&self) -> &crate::OutputChoice {
@@ -349,6 +397,7 @@ impl Projects {
         }
         let mut notices = self.check_output();
         notices.extend(self.sync_active_plugins());
+        notices.extend(self.poll_midi());
         notices
     }
 
@@ -492,6 +541,7 @@ fn projects_commands() -> impl Iterator<Item = &'static CommandSpec<Projects>> {
         .chain(crate::sound_map_commands())
         .chain(crate::audio_commands())
         .chain(crate::backup::backup_commands())
+        .chain(crate::midi_commands())
 }
 
 /// `docs/commands.md`: every command in the order of [`all_commands`], as `suhina-cli commands

@@ -186,6 +186,8 @@ mod tests {
                 content: ContentKinds { notes: true, audio: false },
                 channel: Some(ChannelId(1)),
                 parent: None,
+                midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             }],
             channels: vec![Channel {

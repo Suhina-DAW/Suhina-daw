@@ -94,6 +94,10 @@ fn main() -> ExitCode {
     // The audio devices, and the output the settings choose (Settings › Audio, `audio.*`).
     window.app.projects_mut().set_audio_system(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
     window.app.projects_mut().set_output_choice(settings.output_choice());
+    // The MIDI controllers, every port on but the ones the settings turn off (Settings › MIDI,
+    // `midi.*`, ADR 0017).
+    window.app.projects_mut().set_midi_inputs_off(settings.midi_inputs_off.clone());
+    settings_warnings.extend(window.app.projects_mut().set_midi_system(std::sync::Arc::new(suhina_midi::Midi::new())));
     // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
     let mut library = suhina_library::Library::new(eframe::storage_dir(app_id()));
     settings_warnings.extend(library.take_warnings());

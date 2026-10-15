@@ -7,7 +7,9 @@
 //! the ring, converts samples and sets atomics: no allocation, locks or I/O on either thread
 //! (AGENTS.md rule 3). The plug-ins of a block get a share of that block's playing time
 //! (ADR 0006), so the deadline follows the buffer the user chose. The ring keeps two blocks
-//! ahead, or a device buffer and a block when the device asks for more at once. Launcher
+//! ahead, or a device buffer and a block when the device asks for more at once; while a track
+//! is armed to play a MIDI controller, one block or a device buffer, so a key sounds sooner
+//! (ADR 0017). Launcher
 //! commands reach the renderer through its lock-free command queue, and stretched clips are
 //! rendered ahead on a worker thread of their own (ADR 0003).
 //!
@@ -18,6 +20,7 @@
 pub mod devices;
 #[cfg(windows)]
 mod exclusive;
+mod input;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
@@ -39,6 +42,9 @@ pub const ENGINE_BLOCK: usize = 1024;
 /// Blocks the ring keeps ahead of the device: the latency from the engine to the device is up
 /// to this many blocks (more when the device takes more than a block at once).
 const RING_BLOCKS: usize = 2;
+/// Blocks the ring keeps ahead while a track is armed (ADR 0017): a key pressed waits for one
+/// block less, and the render thread has one device buffer's time to fill the next.
+const LIVE_RING_BLOCKS: usize = 1;
 /// The largest device buffer the ring makes room for, in frames.
 const MAX_DEVICE_FRAMES: usize = 8192;
 /// How long the render thread waits when the ring is full before looking again.
@@ -70,6 +76,10 @@ pub struct Progress {
     callback_frames: AtomicUsize,
     /// The last measured latency, engine to speaker, in microseconds.
     latency_us: AtomicU64,
+    /// The render thread keeps the shallower queue of live playing (a track is armed).
+    live: AtomicBool,
+    /// Frames the engine renders per block, set when the render thread starts.
+    block: AtomicUsize,
     /// The render thread, woken when the device has taken from the ring.
     render: std::sync::OnceLock<std::thread::Thread>,
 }
@@ -99,6 +109,19 @@ impl Progress {
     /// The last measured time from the engine rendering a frame to the device playing it.
     pub fn latency(&self) -> Duration {
         Duration::from_micros(self.latency_us.load(Ordering::Relaxed))
+    }
+
+    /// Whether the render thread keeps the shallower queue of live playing (ADR 0017).
+    pub fn live(&self) -> bool {
+        self.live.load(Ordering::Relaxed)
+    }
+
+    /// The longest time from a key pressed on a MIDI controller to the speaker: the measured
+    /// latency and one block, which is how long the note may wait for the render thread to
+    /// begin its next block.
+    pub fn live_latency(&self, sample_rate: u32) -> Duration {
+        let block = self.block.load(Ordering::Relaxed);
+        self.latency().saturating_add(Duration::from_secs_f64(block as f64 / f64::from(sample_rate.max(1))))
     }
 
     pub(crate) fn fail(&self) {
@@ -171,9 +194,12 @@ fn block_for(chosen: Option<u32>, overridden: Option<&str>) -> usize {
 }
 
 /// Frames the render thread keeps ahead in the ring: two blocks, or a device buffer and a
-/// block when the device takes more at once.
-fn ring_target(block: usize, device_frames: usize) -> usize {
-    (RING_BLOCKS * block).max(device_frames.min(MAX_DEVICE_FRAMES) + block)
+/// block when the device takes more at once. While someone may be playing live (`live`, a
+/// track armed), one block or one device buffer: the device's next callback is then all the
+/// render thread has to fill the ring again, so underruns tell when it is too little.
+fn ring_target(block: usize, device_frames: usize, live: bool) -> usize {
+    let device = device_frames.min(MAX_DEVICE_FRAMES);
+    if live { (LIVE_RING_BLOCKS * block).max(device) } else { (RING_BLOCKS * block).max(device + block) }
 }
 
 /// The device's side of a playing stream.
@@ -488,7 +514,7 @@ impl Output {
 
 /// A ring for blocks of `block` frames: room for the target and a device buffer more.
 fn ring(block: usize) -> (rtrb::Producer<f32>, Ring) {
-    rtrb::RingBuffer::<f32>::new((ring_target(block, MAX_DEVICE_FRAMES) + block) * 2)
+    rtrb::RingBuffer::<f32>::new((ring_target(block, MAX_DEVICE_FRAMES, false) + block) * 2)
 }
 
 /// The render thread: runs the engine a block at a time whenever the ring holds less than its
@@ -507,9 +533,14 @@ fn render_ahead(
     let _unheard = joined.try_send((realtime.priority(), realtime.notice()));
     let mut block = vec![0.0f32; frames * 2];
     let capacity = ring.buffer().capacity();
+    progress.block.store(frames, Ordering::Relaxed);
     while !stop.load(Ordering::Acquire) {
         let queued = (capacity - ring.slots()) / 2;
-        let target = ring_target(frames, progress.callback_frames());
+        // Arming shrinks the queue as the device drains it, and disarming fills it again: no
+        // jump either way.
+        let live = renderer.live_armed();
+        progress.live.store(live, Ordering::Relaxed);
+        let target = ring_target(frames, progress.callback_frames(), live);
         if queued >= target || ring.slots() < block.len() {
             std::thread::park_timeout(RENDER_WAIT);
             realtime.waited();
@@ -626,6 +657,9 @@ struct Live {
     block: usize,
     exclusive: bool,
     fallback: bool,
+    /// The input device open beside it: its name, channels and the engine's count of blocks
+    /// that found too little input.
+    input: Option<(String, usize, Arc<AtomicU64>)>,
 }
 
 impl LiveOutput for Live {
@@ -638,9 +672,17 @@ impl LiveOutput for Live {
             engine_block: u32::try_from(self.block).unwrap_or(u32::MAX),
             exclusive: self.exclusive,
             latency_ms: self.progress.latency().as_secs_f64() * 1000.0,
+            live: self.progress.live(),
+            live_latency_ms: self.progress.live_latency(self.sample_rate).as_secs_f64() * 1000.0,
             underruns: self.progress.underruns(),
             failed: self.progress.failed(),
             fallback: self.fallback,
+            input: self.input.as_ref().map(|(name, _, _)| name.clone()),
+            input_channels: self
+                .input
+                .as_ref()
+                .map_or(0, |(_, channels, _)| u16::try_from(*channels).unwrap_or(u16::MAX)),
+            input_underruns: self.input.as_ref().map_or(0, |(_, _, underruns)| underruns.load(Ordering::Relaxed)),
         }
     }
 }
@@ -685,16 +727,28 @@ pub fn open_chosen(
                 };
                 let mut renderer = Renderer::stopped_with_plugins(&project, &audio, output.sample_rate, plugins)
                     .map_err(|e| e.to_string())?;
+                // The input device, when one is chosen: a failure leaves the output playing.
+                let input = match input::open(&output.host, &choice.input, output.sample_rate) {
+                    Ok(Some((stream, ring))) => {
+                        renderer.set_audio_input(ring, stream.channels, Arc::clone(&stream.underruns));
+                        Some(stream)
+                    }
+                    Ok(None) => None,
+                    Err(e) => {
+                        output.notices.push(format!("{e}; there is no audio input"));
+                        None
+                    }
+                };
                 let mut controller = renderer.controller();
                 controller
                     .run_stretch_worker(&mut renderer)
                     .map_err(|e| format!("could not start the stretch worker: {e}"))?;
                 let stream = output.play(device, renderer, producer, &progress)?;
                 output.notices.extend(stream.priority_notice().map(str::to_owned));
-                Ok::<_, String>((output, controller, progress, stream, kept))
+                Ok::<_, String>((output, controller, progress, stream, kept, input))
             })();
             match started {
-                Ok((output, controller, progress, stream, kept)) => {
+                Ok((output, controller, progress, stream, kept, input)) => {
                     let live = Live {
                         progress,
                         host: output.host.clone(),
@@ -703,6 +757,7 @@ pub fn open_chosen(
                         block: output.block,
                         exclusive: output.exclusive,
                         fallback: in_place_of(&choice, &output.host, &output.device_name),
+                        input: input.as_ref().map(|i| (i.name.clone(), i.channels, Arc::clone(&i.underruns))),
                     };
                     let notice = (!output.notices.is_empty()).then(|| output.notices.join("; "));
                     if ready.send(Ok((controller, live, notice, kept))).is_ok() {
@@ -710,6 +765,7 @@ pub fn open_chosen(
                         let _closed = closed.recv();
                     }
                     let plugins = stream.close().map(Renderer::into_plugins);
+                    drop(input);
                     let _unheard = back_tx.send((output.sample_rate, plugins));
                 }
                 Err(e) => {

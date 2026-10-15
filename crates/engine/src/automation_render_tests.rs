@@ -159,7 +159,7 @@ fn a_groups_volume_lane_scales_the_tracks_routed_into_it() {
         content: ContentKinds::default(),
         channel: Some(ChannelId(2)),
         parent: None,
-        extensions: Extensions::default(),
+        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
     });
     p.channels[0].output = Some(ChannelId(2));
     p.tracks[0].parent = Some(TrackId(2));
