@@ -2163,6 +2163,29 @@ impl App {
                 }
                 actions.push(Action::new(id, params));
             }
+            "selection.split" | "selection.consolidate" => {
+                let Some((track, index)) = self.arrangement.selected_clip() else {
+                    self.status = Status::Hint("Select a clip in the Arrangement first".into());
+                    return;
+                };
+                let timeline = self.timeline.as_ref().map(|(_, t)| t);
+                let beat = timeline.map_or(0.0, |t| t.beat);
+                let clip = timeline
+                    .and_then(|t| t.lanes.iter().find(|l| l.track == track))
+                    .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                    .map(|c| (c.start, c.length));
+                let Some((start, length)) = clip else { return };
+                if action == "selection.consolidate" {
+                    // The clips under it become one new clip.
+                    self.arrangement.clear_selected_clip();
+                    let params = json!({ "track": track.0, "start": start, "end": start + length });
+                    actions.push(Action::new("clip.consolidate", params));
+                } else if beat > start && beat < start + length {
+                    actions.push(Action::new("clip.split", json!({ "track": track.0, "index": index, "at": beat })));
+                } else {
+                    self.status = Status::Hint("Move the playhead into the selected clip to split it there".into());
+                }
+            }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.
                 let timeline = self.timeline.as_ref().map(|(_, t)| t);

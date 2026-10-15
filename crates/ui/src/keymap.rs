@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 44] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 46] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -110,6 +110,8 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 44] = [
     ),
     ("selection.duplicate", "Duplicate the selected clip, or the selected notes in the piano roll", "Edit"),
     ("selection.delete", "Delete the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.split", "Split the selected clip at the playhead", "Edit"),
+    ("selection.consolidate", "Consolidate the selected clip into a new one", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
     ("pianoRoll.quantize", "Quantise the piano roll's selected notes, or all its notes", PIANO_ROLL),
     ("pianoRoll.selectAll", "Select every note in the piano roll", PIANO_ROLL),
@@ -222,7 +224,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 45] = [
+const DEFAULTS: [(&str, &[&str]); 47] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -246,6 +248,8 @@ const DEFAULTS: [(&str, &[&str]); 45] = [
     ("selection.paste", &["Ctrl+V"]),
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
+    ("selection.split", &["Ctrl+E"]),
+    ("selection.consolidate", &["Ctrl+J"]),
     ("selection.group", &["Ctrl+G"]),
     ("pianoRoll.quantize", &["Ctrl+U"]),
     ("marker.addAtPlayhead", &["M"]),
@@ -492,7 +496,7 @@ mod tests {
     fn every_default_is_an_action_and_there_are_no_conflicts() {
         let known = actions();
         for (id, _) in DEFAULTS {
-            assert!(known.iter().any(|a| a.id == id), "{id}");
+            assert!(known.iter().any(|a| a.id == *id), "{id}");
         }
         assert!(Keymap::default().conflicts().is_empty());
         for id in ["view.zoomIn", "view.zoomOut", "view.zoomReset"] {

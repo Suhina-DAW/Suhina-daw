@@ -1,6 +1,6 @@
 ---
-description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), and named markers on the timeline
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
+description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), how clips are split and consolidated, and named markers on the timeline
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -19,6 +19,8 @@ covers:
   - crates/project-file/src/lib.rs
   - crates/ui/src/settings.rs
   - crates/ui/src/keymap.rs
+  - crates/session/src/editing.rs
+  - crates/engine/src/track_render.rs
 ---
 
 # Arrangement editing
@@ -71,6 +73,76 @@ clip is copied into it, the arrangement left as it was. A slot's clip dragged an
 **Arrangement** lands on the lane under the pointer, at the beat on the grid, as a copy that
 replaces what it covers unless stacked. Both are `clip.copy` then `clip.paste`
 ([Session view](ui-session-view.md) › Between the views).
+
+## Splitting
+
+`clip.split {track, index, at}` cuts an arrangement clip in two at song position `at` (beats from
+the beginning), which must be inside the clip (not on its edges). It is one undo step and returns
+both parts' indices (`first`, `second`).
+
+- **Both parts play the same content** (one content in the pool, as before the cut), so editing
+  the notes or the audio of one changes the other, as for a duplicated clip.
+- **The second part carries on from where the clip was at the cut:** its start marker
+  (`offset`) is the content position the clip had reached there, following the loop (a clip
+  whose start marker is at or past the loop end starts at the loop start) and, for a transposed
+  audio clip that is not warped, the faster or slower speed it moves through its file at
+  (`2^(transpose / 12)` content beats per beat). Loop, warp markers, warp mode, gain and
+  transpose are the content's or the clip's, and stay as they are.
+- **Fades:** the first part keeps the fade-in and the second the fade-out, each with its shape
+  and curve; there is no fade at the cut (a zero-length fade, so only the engine's 2 ms click
+  guard is there). A fade longer than its part shrinks to fit it, as when a clip is shortened.
+- **Notes across the cut end there.** A note that starts before the cut belongs to the first
+  part and is cut at its end; the second part does not start it again (notes are not picked up
+  mid-way, as when playback starts inside a clip). Notes that start at or after the cut play in
+  the second part.
+
+**The renders before and after a split are the same,** sample for sample, for a MIDI clip with
+no note across the cut. An audio clip differs only around the cut: within the click guard on
+both sides (2 ms), and for a warped clip, whose second part starts its time-stretcher at the cut
+without the audio before it, very slightly for its first moments, as when playback starts there
+(Play position).
+
+In the Arrangement view **Ctrl+E** splits the selected clip at the playhead (nothing happens,
+with a hint in the status bar, when the playhead is not inside it), and a clip's right-click
+menu has **Split here**, which cuts where the clip was right-clicked, on the grid clips snap to
+at that zoom (Alt held while right-clicking: exactly there).
+
+## Consolidating
+
+`clip.consolidate {track, start, end}` turns the range `start … end` (beats) on one track into
+one new clip there. It is one undo step and returns the clip's `index`, and for audio the `file`
+written.
+
+- **What is in the range:** the enabled clips on the track's lane that overlap it. A clip
+  reaching in from before or past the range counts with the part inside it; clips outside are
+  unchanged. As with a split, a note that starts before the range is left out.
+- **MIDI clips** are joined: the new clip's content holds every note the clips play inside the
+  range, where it sounds (after start markers, loops and clip ends are applied), each cut where
+  its clip ends or the range ends. Gaps between clips are silent.
+- **Audio clips** are rendered: the track's clips play through the engine's renderer
+  (`suhina_engine::render_track`, the same `process` as playback) with their own gain, fades,
+  warping and transpose, but no devices, no track volume, pan or mute and no other track, at
+  unity gain, straight through: the arrangement's loop region does not wrap it. Gaps are silent. The audio is written as a 32-bit float stereo WAV file to a
+  folder **`Consolidated`** next to the project file, named after the track and the bar the range
+  starts on (`3 Audio bar 5.wav`; ` 2`, ` 3` … are added when that file exists), at the highest
+  sample rate of the files rendered. The new clip plays that file unwarped, at gain 0 dB, without
+  fades. A project that has not been saved has no folder for it, so the command asks to save it
+  first. Undo removes the clip but leaves the file on disk.
+- **The new clip** starts at `start`, is `end − start` long, has its start marker at 0, no loop
+  and no fades, and replaces what the range held (the clips under it are shortened, split or
+  removed as for a clip placed there, whatever the stacking settings). Its content is named
+  after the first clip's.
+- **Refused:** a range that is empty, negative, past 120 000 beats or longer than an hour of
+  audio from the earliest clip in it; a range with no clips; MIDI and audio clips together; a
+  clip that plays on other tracks (a shared pattern).
+
+The render of the project before and after a consolidation is the same, apart from the click
+guard at the range's edges when audio is playing there, since the new clip starts and ends
+there. An audio clip consolidated plays at the tempo it was rendered at.
+
+In the Arrangement view **Ctrl+J** consolidates the selected clip (its own start to its end,
+with any clips stacked over it), and a clip's right-click menu has **Consolidate**. Consolidating
+a single clip makes its loop, start marker, fades and warping one plain clip.
 
 ## Fades
 
@@ -384,3 +456,6 @@ overlaps shows one row.
 - Moving (rather than copying) a clip between a slot and the arrangement.
 - Whether a stacked lane should grow taller automatically.
 - Dragging along the ruler to scrub.
+- Consolidating more than one selected clip, or a time selection; the window consolidates the
+  selected clip's range until there is a selection of several clips.
+- A consolidated audio clip warped to the project, so it follows a later tempo change.

@@ -43,6 +43,7 @@ mod sends;
 mod sends_tests;
 mod stretch;
 mod swap;
+mod track_render;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -72,6 +73,7 @@ pub use suhina_device_api::NoteEvent as DeviceEvent;
 use suhina_device_api::ProcessContext;
 pub use suhina_model as model;
 use suhina_model::{ChannelId, ChannelRole, Clip, ContentLane, LaneData, Project, TrackId};
+pub use track_render::render_track;
 
 /// The most frames a plug-in is asked to process at once: the size of a device chain's block.
 pub const MAX_BLOCK_FRAMES: usize = MAX_BLOCK;

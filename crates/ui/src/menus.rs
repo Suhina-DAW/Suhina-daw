@@ -133,6 +133,32 @@ pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions
     }
 }
 
+/// The editing part of an arrangement clip's menu: split it at `at`, the beat right-clicked on
+/// (when it is inside the clip), and consolidate it into a new clip.
+pub fn clip_edit_menu(
+    ui: &mut Ui,
+    track: TrackId,
+    index: usize,
+    span: (f64, f64),
+    at: Option<f64>,
+    actions: &mut Vec<Action>,
+) {
+    let (start, length) = span;
+    ui.separator();
+    let inside = at.filter(|beat| *beat > start && *beat < start + length);
+    if ui.add_enabled(inside.is_some(), egui::Button::new("Split here")).clicked()
+        && let Some(beat) = inside
+    {
+        actions.push(Action::new("clip.split", json!({ "track": track.0, "index": index, "at": beat })));
+        ui.close();
+    }
+    if ui.add(egui::Button::new("Consolidate").shortcut_text("Ctrl+J")).clicked() {
+        actions
+            .push(Action::new("clip.consolidate", json!({ "track": track.0, "start": start, "end": start + length })));
+        ui.close();
+    }
+}
+
 /// What a scene's menu needs to know.
 pub struct SceneMenu<'a> {
     /// Counted from 1, as commands take it.

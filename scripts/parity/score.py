@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 146
+COMMANDS = 148
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -58,14 +58,15 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.47, "partial",
+    (6, "Arrangement View", 22, 0.54, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
      "overlap replace/stack, fades and fade shapes, grid snap, nested groups folded and unfolded, "
      "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
-     "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "
-     "command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, "
-     "consolidate, crop, crossfades, linked-track editing, the time commands."),
+     "sample-accurately; imported from Live Sets), split at the playhead or a clicked beat, consolidate "
+     "(MIDI joined, audio rendered to a file). A clip's loop range is read and drawn but no "
+     "command sets it. Missing previous/next marker, punch in/out, time-signature changes, time "
+     "selections, crop, crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.62, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
      "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
