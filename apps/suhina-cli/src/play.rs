@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use suhina_engine::model::{LaneData, Project};
 use suhina_engine::{AudioPool, Renderer};
-use suhina_output::{Output, Progress};
+use suhina_output::{Output, Progress, Stream};
 use suhina_session::{OutputChoice, Player, Session};
 
 /// Extra time to wait after the last frame, so the device can drain its buffer.
@@ -23,6 +23,13 @@ fn chosen_output(choice: &OutputChoice) -> Result<Output, String> {
     Ok(output)
 }
 
+/// Says when the render thread could not have real-time priority (once per process).
+fn note_priority(stream: &Stream) {
+    if let Some(notice) = stream.priority_notice() {
+        eprintln!("note: {notice}");
+    }
+}
+
 /// Plays the project's arrangement once on the output `choice` names and returns when it ends.
 pub fn play(project: &Project, audio: &AudioPool, choice: &OutputChoice) -> Result<(), String> {
     let output = chosen_output(choice)?;
@@ -35,6 +42,7 @@ pub fn play(project: &Project, audio: &AudioPool, choice: &OutputChoice) -> Resu
     let progress = Arc::new(Progress::default());
     let mut controller = renderer.controller();
     let stream = output.start(renderer, &mut controller, &progress)?;
+    note_priority(&stream);
 
     let seconds = length as f64 / f64::from(output.sample_rate());
     println!("playing {seconds:.2} s on {}; Ctrl+C stops", output.describe());
@@ -95,6 +103,7 @@ pub fn launcher(project: Project, audio: &AudioPool, choice: &OutputChoice) -> R
     let mut controller = renderer.controller();
     let progress = Arc::new(Progress::default());
     let stream = output.start(renderer, &mut controller, &progress)?;
+    note_priority(&stream);
     let mut session = Session::new(project);
     session.attach_player(Player::new(controller, None));
     println!("clip launcher on {}\n{LAUNCHER_HELP}\n", output.describe());

@@ -33,6 +33,7 @@ suhina-device-limiter = { path = "devices/limiter" }
 suhina-device-registry = { path = "crates/device-registry" }
 suhina-stretch = { path = "crates/stretch" }
 suhina-output = { path = "crates/output" }
+suhina-realtime = { path = "crates/realtime" }
 suhina-ui = { path = "crates/ui" }
 suhina-soundmap = { path = "crates/soundmap" }
 

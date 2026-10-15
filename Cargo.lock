@@ -4211,13 +4211,12 @@ version = "0.0.1"
 name = "suhina-output"
 version = "0.0.1"
 dependencies = [
- "audio_thread_priority",
  "cpal",
  "rtrb",
  "suhina-engine",
  "suhina-model",
+ "suhina-realtime",
  "suhina-session",
- "thread-priority",
  "wasapi",
 ]
 
@@ -4225,7 +4224,6 @@ dependencies = [
 name = "suhina-plugin-host"
 version = "0.0.1"
 dependencies = [
- "audio_thread_priority",
  "clack-extensions",
  "clack-host",
  "clack-plugin",
@@ -4237,8 +4235,8 @@ dependencies = [
  "suhina-ipc",
  "suhina-model",
  "suhina-plugins",
+ "suhina-realtime",
  "suhina-session",
- "thread-priority",
  "vst3",
  "windows-sys 0.61.2",
  "x11rb",
@@ -4261,6 +4259,16 @@ dependencies = [
  "base64",
  "serde_json",
  "suhina-model",
+]
+
+[[package]]
+name = "suhina-realtime"
+version = "0.0.1"
+dependencies = [
+ "audio_thread_priority",
+ "rustix 1.1.5",
+ "thread-priority",
+ "zbus",
 ]
 
 [[package]]

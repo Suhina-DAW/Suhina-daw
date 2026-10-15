@@ -158,7 +158,7 @@ documented behaviour that exists today.
 | 35 | Using Push 1 | 40 | 0 % | absent | No control-surface support. |
 | 36 | Using Push 2 | 59 | 0 % | absent | No control-surface support. |
 | 37 | Synchronizing with Link, Tempo Follower, and MIDI | 9 | 0 % | absent | No Link, no Tempo Follower, no MIDI clock sync. |
-| 38 | Computer Audio Resources and Strategies | 7 | 35 % | partial | CPU-load meter, buffer-size choice, render-ahead engine, plug-in deadline reporting, an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter. |
+| 38 | Computer Audio Resources and Strategies | 7 | 40 % | partial | CPU-load meter, buffer-size choice, render-ahead engine, plug-in deadline reporting, real-time scheduling without setup (MMCSS Pro Audio, SCHED_FIFO or rtkit), an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter. |
 | 39 | Audio Fact Sheet | 8 | — | n/a | Not a feature list. Suhina renders 32-bit float and does not dither; no neutrality test suite. |
 | 40 | MIDI Fact Sheet | 6 | — | n/a | Not a feature list; MIDI timing and quantisation behaviour. Suhina has no MIDI timing tests yet. |
 | 41 | Accessibility and Keyboard Navigation | 11 | 5 % | absent | No screen-reader or keyboard-navigation story beyond the shortcut system. |
@@ -174,7 +174,7 @@ documented behaviour that exists today.
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
-| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
+| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 22 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
@@ -349,7 +349,7 @@ or does something Live does not:
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
-| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 21 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
+| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 22 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 1 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
 

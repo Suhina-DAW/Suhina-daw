@@ -101,3 +101,34 @@ fn a_choice_of_missing_things_falls_back_to_the_default() {
         Err(e) => assert!(!e.is_empty()),
     }
 }
+
+#[test]
+fn the_priority_notice_is_told_once() {
+    let told = AtomicBool::new(false);
+    assert_eq!(tell_once(&told, None), None, "nothing to tell leaves it untold");
+    assert_eq!(tell_once(&told, Some("first".into())), Some("first".into()));
+    assert_eq!(tell_once(&told, Some("again".into())), None);
+}
+
+/// The render thread says what priority it got before it renders anything, so the stream can
+/// tell the user before the device starts; it plays on whatever it got.
+#[test]
+fn the_render_thread_says_its_priority_first() {
+    let said = std::thread::spawn(|| {
+        let renderer = Renderer::stopped(&suhina_model::Project::default(), &AudioPool::new(), 48_000).unwrap();
+        let (producer, _consumer) = ring(256);
+        let (stop, progress) = (AtomicBool::new(true), Progress::default());
+        let (joined, said) = mpsc::sync_channel(1);
+        let _renderer = render_ahead(renderer, producer, 256, &stop, &progress, &joined);
+        said.try_recv().unwrap()
+    })
+    .join()
+    .unwrap();
+    let (priority, notice) = said;
+    if priority.is_real_time() || priority == Priority::Off {
+        assert_eq!(notice, None);
+    }
+    if let Some(notice) = notice {
+        assert!(notice.contains(priority.describe()), "{notice}");
+    }
+}

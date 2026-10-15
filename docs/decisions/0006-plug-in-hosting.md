@@ -3,11 +3,12 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
   - crates/plugin-host/**
+  - crates/realtime/**
   - crates/engine/src/plugin.rs
   - crates/session/src/rack.rs
   - crates/output/src/lib.rs
@@ -131,10 +132,29 @@ workspace forbids.
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
    without a deadline (with a long timeout), so they run as fast as the plug-in allows.
-   *Built:* the host's audio threads and the desktop app's render thread join MMCSS "Pro Audio"
-   on Windows (`audio_thread_priority`; `thread-priority`'s highest, `THREAD_PRIORITY_HIGHEST`,
-   only where MMCSS refuses) and take the highest priority the system gives them elsewhere (on
-   Linux the normal priority until real-time rights are set up). The deadline is 60 % of a block's
+   *Built:* the host's audio threads and the desktop app's render thread take their priority
+   from `suhina-realtime`, which says what each system gives. **Windows:** MMCSS "Pro Audio"
+   (`audio_thread_priority`, MPL-2.0), which also bounds a thread's share of a core;
+   `THREAD_PRIORITY_HIGHEST` only where MMCSS refuses. **Linux:** `SCHED_FIFO` at priority 10
+   set directly where the user has real-time rights (`rtprio`, the `audio` group); otherwise
+   rtkit over the system D-Bus (`zbus`, pure Rust, so nothing to install or ship), which grants
+   `SCHED_RR` at 10 or its ceiling when lower, after `RLIMIT_RTTIME` is set within rtkit's
+   maximum as it requires; otherwise the highest normal priority, and otherwise the normal one.
+   Priority 10 keeps the sound server's own threads (PipeWire, JACK) above the ones feeding
+   them. The D-Bus exchange runs on a helper thread with a 2 s limit, so a system bus that never
+   answers costs no more. rtkit's grant comes with a limit the kernel enforces: a real-time
+   thread that runs `RLIMIT_RTTIME` (200 ms by default) without waiting ends its process. The
+   render thread tells `RealTime` when it waits and how long each block took: it rests 50 µs
+   after an eighth of the limit without waiting (a device that drains faster than it plays, a
+   project too heavy to render in time), and leaves real-time scheduling for good when one
+   block alone takes a quarter of it, so an overloaded project drops out instead of ending
+   Suhina. The hosts' audio threads wait for every block, so only a plug-in stuck in one block
+   that long hits the limit, and the host process ending is then a crash the engine already
+   reports and restarts. **macOS:** the highest priority (the audio workgroup is to come).
+   Nothing fails over it: when real-time scheduling is refused the first stream in a process
+   adds a notice (the app shows it, `suhina-cli play` prints it), and the hosts' threads, which
+   ask the same system, play on silently. `SUHINA_NO_REALTIME=1` turns it off, to compare.
+   The deadline is 60 % of a block's
    playing time for all of a block's plug-ins together, one after another, so it depends on
    the block: the audio output renders the engine in blocks of its own ahead of the device into a
    ring, rather than in the device's buffers, after a driver that gave 3 ms buffers left 25
