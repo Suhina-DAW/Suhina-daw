@@ -196,6 +196,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
 - A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- A sample dropped into a slot loops over the whole file even when its tempo is not known (it
+  plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.

@@ -3,10 +3,11 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands
 type: spec
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/launcher.rs
   - crates/session/tests/launcher.rs
+  - crates/session/tests/files.rs
 ---
 
 # Clip launching
@@ -70,6 +71,15 @@ decides something the sources do not settle, the text says so (**Suhina:**).
 
 ## Suhina decisions
 
+- **Files dropped into a slot loop.** A sample, a MIDI file's track or a Stems file's part placed
+  in a slot (`clip.addFiles` with `scene`) loops over its whole length, a sample with no known
+  tempo too: unwarped, it plays the whole file at its own speed and starts it again
+  ([browser](browser.md) › Warping says why the rule is "always").
+- **Loop switch.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot
+  (one undo step). On, it repeats its whole length (or the loop it already has); off, it plays
+  once from its start to its end marker and the column stops (behaviour 4). A clip that is
+  playing follows the switch at once, like any edit while playing
+  ([ADR 0005](../decisions/0005-edits-while-playing.md)).
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
   marker of a clip without a loop) is shortened to end there.
 - **Instruments.** A launched clip's notes play on the track's instrument when its device
