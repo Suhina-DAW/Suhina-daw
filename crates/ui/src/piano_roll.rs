@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use egui::{Align2, Color32, CursorIcon, Id, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::{Value, json};
 use suhina_engine::Quantization;
-use suhina_engine::model::{LaneData, Note, Project, TrackId};
+use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
 
 use crate::grid::default_track_colour;
 use crate::theme;
@@ -115,6 +115,32 @@ pub fn arrangement_clip(
     quantization: Quantization,
 ) -> Option<PianoClip> {
     let clip = project.arrangement.lanes.iter().find(|l| l.track == Some(track))?.clips.get(index)?;
+    let mut piano = piano_clip_from(project, track, clip, quantization)?;
+    piano.address = json!({ "track": track.0, "index": index });
+    Some(piano)
+}
+
+/// The piano roll for a launcher slot's clip: `scene` is 0-based, as the session's selection
+/// carries it; the `note.*` commands name the clip by `scene` (1-based). A slot's clip plays
+/// from its launch, not from an arrangement position: its placement starts at the launch and
+/// never ends, so the beats since the launch map through it — the playhead and paste at the
+/// playhead take those beats.
+pub fn launcher_clip(project: &Project, track: TrackId, scene: usize, quantization: Quantization) -> Option<PianoClip> {
+    let clip = project.launcher.columns.iter().find(|c| c.track == track)?.slots.get(scene)?.clip.as_ref()?;
+    let mut piano = piano_clip_from(project, track, clip, quantization)?;
+    piano.placement = Placement {
+        start: 0.0,
+        length: f64::INFINITY,
+        offset: clip.offset,
+        loop_range: clip.loop_range.map(|l| (l.start, l.end)),
+    };
+    piano.address = json!({ "track": track.0, "scene": scene + 1 });
+    Some(piano)
+}
+
+/// What `arrangement_clip` and `launcher_clip` share: the content's notes and shape as the
+/// piano roll shows them.
+fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization: Quantization) -> Option<PianoClip> {
     let content = project.content(clip.content)?;
     let mut notes = None;
     for lane in content.lanes.iter().filter(|l| l.target.is_none_or(|t| t == track)) {
@@ -133,7 +159,7 @@ pub fn arrangement_clip(
     let bar_beats =
         if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
     Some(PianoClip {
-        address: json!({ "track": track.0, "index": index }),
+        address: json!({ "track": track.0 }),
         notes: notes.unwrap_or_default(),
         length: content_end(clip.loop_range.map(|l| l.end), clip.offset, clip.length, content.length),
         color: Color32::from_rgb(color.0, color.1, color.2),

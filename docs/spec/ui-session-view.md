@@ -100,10 +100,10 @@ Each cell is a slot for one clip.
 | Slot state | Shows | Click |
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
-| Empty, without stop button | nothing | nothing (**Suhina:** selects it) |
-| Clip, stopped | clip colour, clip name, launch control | on the launch control: launches the clip (**Suhina:** and selects it); on the name: selects it |
+| Empty, without stop button | nothing; **Suhina:** a double-click creates an empty MIDI clip | nothing (**Suhina:** selects it) |
+| Clip, stopped | a play triangle in the track colour, clip name, launch control | on the launch control: launches the clip (**Suhina:** and selects it); on the name: selects it |
 | Clip, queued | launch control in a pending (blinking) state until the quantisation point | as stopped |
-| Clip, playing | launch control in the playing state, progress through the clip | on the launch control: relaunches; on the name: selects it |
+| Clip, playing | a stop square in the track colour, progress through the clip | on the launch control: **Suhina:** a trigger clip (one that listens for no release) stops at the next quantisation point; a gate, toggle or repeat clip relaunches, its release keeps its own meaning; on the name: selects it |
 | Clip, recording | recording state | |
 
 **Launching and selecting** (public manual, Session View › clips and launch settings). A clip's
@@ -145,8 +145,10 @@ column has **stop all clips** for the whole set.
 right-click selects it and opens its menu: **Copy** copies its clip (`clip.copy {track,
 scene}`), **Paste** puts the copied clip in it (`clip.paste {track, scene}`), greyed out while
 nothing has been copied. Ctrl+C and Ctrl+V do the same on the selected slot
-([shortcuts](../shortcuts.md)); Ctrl+X, Ctrl+D and Delete act on arrangement clips only and say so
-in the Session view.
+([shortcuts](../shortcuts.md)); Ctrl+X and Ctrl+D act on arrangement clips only and say so in the
+Session view. **Suhina:** the Delete key (or Backspace) takes a selected slot's clip off its
+slot (`clip.delete` with the slot's track and scene); one undo puts it back, and the detail area
+falls back to the track's devices.
 
 ### Between the views
 
@@ -175,10 +177,13 @@ a slot to the arrangement, in two ways. **Suhina** decisions, our own design:
 
 One launch control per scene with its number or name. Launching a scene launches every clip in
 its row and stops tracks whose slot in that row is empty with a stop button. Scenes can carry a
-tempo and time signature that apply when launched.
+tempo and time signature that apply when launched. **Suhina:** while a row plays, its button
+stops the row: every track whose slot in that row has a clip stops at the next quantisation
+point (`scene.stop`); a track whose slot in the row is empty keeps playing.
 
-**Suhina:** the launch button shows the scene's name, then its tempo and time signature when it
-has them (`Drop 128 3/4`), with the number on the right. Right-clicking it opens the scene menu:
+**Suhina:** the launch button shows a play glyph at its left — the stop square while the row
+plays — then the scene's name, its tempo and time signature when it has them (`Drop 128 3/4`),
+with the number on the right. Right-clicking it opens the scene menu:
 fields for the name, the tempo (empty for none) and the time signature (`3/4`, empty for none),
 each applied with Enter, then **Insert scene below**, **Duplicate scene** and **Delete scene**
 (greyed out for the only scene). Every entry is a `scene.*` command, undone with Ctrl+Z. The

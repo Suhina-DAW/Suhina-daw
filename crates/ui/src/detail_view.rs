@@ -400,6 +400,7 @@ pub fn show_clip_column(
     };
     let below = Rect::from_min_max(Pos2::new(area.left(), area.top() + top), area.max);
     let column = clip_properties(&painter, below, info, stacked);
+    clip_for_readers(ui, column, info);
     if stacked {
         Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
     } else {

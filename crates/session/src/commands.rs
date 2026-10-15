@@ -460,8 +460,8 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.delete",
-        label: "Delete an arrangement clip",
-        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        label: "Delete an arrangement clip, or the clip in a track's slot of a scene",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
         kind: CommandKind::Edit,
         run: delete_clip,
     },
@@ -821,6 +821,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[SCENE],
         kind: CommandKind::Transport,
         run: launch_scene,
+    },
+    CommandSpec {
+        id: "scene.stop",
+        label: "Stop a scene's row: every track whose slot in that row has a clip stops at the next quantisation boundary",
+        params: &[SCENE],
+        kind: CommandKind::Transport,
+        run: stop_scene,
     },
     CommandSpec {
         id: "scene.insert",
@@ -2333,11 +2340,41 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
 }
 
 fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let (lane, index) = lane_and_index(&session.project, params)?;
-    if let Some(lane) = session.project.arrangement.lanes.get_mut(lane) {
-        lane.clips.remove(index);
+    // A launcher slot's clip is named by `scene`, an arrangement clip by `index` — the way the
+    // note commands name the clip they edit.
+    let whole = |key: &str| -> Result<Option<u64>, CommandError> {
+        match params.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v.as_u64().map(Some).ok_or_else(|| format!("{key} must be a whole number").into()),
+        }
+    };
+    match (whole("index")?, whole("scene")?) {
+        (Some(_), Some(_)) => Err("give index or scene, not both".into()),
+        (None, None) => Err("give index (an arrangement clip) or scene (a launcher clip)".into()),
+        (Some(_), None) => {
+            let (lane, index) = lane_and_index(&session.project, params)?;
+            if let Some(lane) = session.project.arrangement.lanes.get_mut(lane) {
+                lane.clips.remove(index);
+            }
+            Ok(json!({ "deleted": index }))
+        }
+        (None, Some(scene)) => {
+            let column = column_index(session.project(), params)?;
+            let s = scene_index(session.project(), params)?;
+            let slot = session
+                .project
+                .launcher
+                .columns
+                .get_mut(column)
+                .and_then(|c| c.slots.get_mut(s))
+                .ok_or("the slot is missing")?;
+            if slot.clip.is_none() {
+                return Err(format!("the slot of scene {scene} is empty").into());
+            }
+            slot.clip = None;
+            Ok(json!({ "deleted": scene }))
+        }
     }
-    Ok(json!({ "deleted": index }))
 }
 
 fn duplicate_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -2960,6 +2997,12 @@ fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandE
     let scene = scene_index(session.project(), params)?;
     send(session, LaunchCommand::LaunchScene { scene })?;
     Ok(json!({ "scene": scene + 1, "queued": "launch" }))
+}
+
+fn stop_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(session.project(), params)?;
+    send(session, LaunchCommand::StopScene { scene })?;
+    Ok(json!({ "scene": scene + 1, "queued": "stop" }))
 }
 
 /// Scenes a project can have; inserting stops there.

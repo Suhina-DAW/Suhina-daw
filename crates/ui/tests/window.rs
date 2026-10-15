@@ -9,7 +9,7 @@ use suhina_engine::model::TrackId;
 use suhina_session::Session;
 use suhina_ui::arrangement_view::{self, ArrangementViewState};
 use suhina_ui::demo::demo_project;
-use suhina_ui::grid::Grid;
+use suhina_ui::grid::{Grid, SlotState};
 use suhina_ui::session_view::{self, SessionViewState};
 use suhina_ui::themes::FileAction;
 use suhina_ui::timeline::Timeline;
@@ -82,6 +82,12 @@ fn clicking_an_empty_slot_with_a_stop_button_stops_the_track() {
 fn scenes_and_stop_buttons_send_their_commands() {
     let mut harness = view();
     assert_eq!(clicked(&mut harness, "Launch scene 3 Build"), [Action::new("scene.launch", json!({ "scene": 3 }))]);
+    // A playing row's click stops its clips.
+    harness.state_mut().grid.scenes[2].playing = true;
+    harness.run();
+    assert_eq!(clicked(&mut harness, "Stop scene 3 Build"), [Action::new("scene.stop", json!({ "scene": 3 }))]);
+    harness.state_mut().grid.scenes[2].playing = false;
+    harness.run();
     assert_eq!(clicked(&mut harness, "Stop Drums"), [Action::new("track.stop", json!({ "track": 1 }))]);
     assert_eq!(clicked(&mut harness, "Stop all clips"), [Action::new("launcher.stopAll", json!({}))]);
     assert_eq!(
@@ -2417,6 +2423,97 @@ fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
 }
 
 #[test]
+fn the_delete_key_takes_a_selected_slot_clip_off_its_slot() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // A double-click makes the empty clip in Keys' slot; its name area selects the clip.
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    harness.get_by_label("Select MIDI clip on Keys (scene 1)").click();
+    harness.run();
+    // Delete takes the selected clip off its slot: the empty slot's stop control is back.
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert!(harness.query_by_label("Stop Keys (scene 1)").is_some(), "the slot is empty again");
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_none(), "the clip is gone");
+    // One undo puts it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some(), "the clip is back");
+}
+
+#[test]
+fn the_piano_roll_playhead_follows_a_launched_clip_not_the_transport() {
+    let project = demo_project();
+    let mut renderer = suhina_engine::Renderer::stopped(&project, &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(project);
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    // One-bar quantisation: a launch waits for the next bar.
+    harness.state_mut().projects_mut().execute("launcher.setQuantization", &json!({ "value": "1 bar" })).unwrap();
+    harness.state_mut().projects_mut().execute("transport.play", &json!({})).unwrap();
+    let mut block = vec![0.0f32; 2 * 256];
+    let mut pump = |harness: &mut Harness<'static, App>, renderer: &mut suhina_engine::Renderer, times: usize| {
+        for _ in 0..times {
+            harness.step();
+            for _ in 0..8 {
+                renderer.process(&mut block);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    };
+    // Two beats in: the clip's name selects it without launching, and the detail area opens its
+    // piano roll.
+    pump(&mut harness, &mut renderer, 24);
+    harness.get_by_label("Select Beat A on Drums (scene 1)").click();
+    pump(&mut harness, &mut renderer, 3);
+    // The clip is only selected, not playing: no playhead.
+    assert!(harness.query_by_label_contains("Playhead at beat").is_none(), "no playhead while the clip is not playing");
+    // Launch it on the mark: queued until the next bar, then playing.
+    harness.get_by_label("Launch Beat A on Drums (scene 1)").click();
+    let mut playing = false;
+    for _ in 0..200 {
+        pump(&mut harness, &mut renderer, 1);
+        if harness.query_by_label("Stop Beat A on Drums (scene 1)").is_some() {
+            playing = true;
+            break;
+        }
+    }
+    assert!(playing, "the clip plays at the bar");
+    // The playhead is the clip's own position (the beats since its launch), not the transport's,
+    // which by now is past the clip's end — the arrangement mapping would show none at all.
+    assert!(
+        harness.query_by_label_contains("Playhead at beat").is_some(),
+        "the piano roll shows the launched clip's playhead"
+    );
+    // Stopped, there is none.
+    harness.state_mut().projects_mut().execute("transport.stop", &json!({})).unwrap();
+    pump(&mut harness, &mut renderer, 5);
+    assert!(
+        harness.query_by_label_contains("Playhead at beat").is_none(),
+        "no playhead while the transport is stopped"
+    );
+}
+
+#[test]
+fn a_double_click_opens_the_new_clips_piano_roll() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // The double-click selects the clip it makes: the detail area opens its properties and its
+    // piano roll, empty.
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert!(harness.query_by_label("Clip MIDI clip, scene 1").is_some(), "the properties show");
+    assert!(harness.query_by_label("Piano roll, 0 notes").is_some(), "the piano roll opens");
+    // One undo takes the clip off again, and the piano roll with it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Piano roll, 0 notes").is_none(), "the piano roll closed");
+}
+
+#[test]
 fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
     harness.get_by_label("Arrangement view").click();
@@ -3134,6 +3231,19 @@ fn a_slots_menu_copies_its_clip_and_pastes_once_something_is_copied() {
 }
 
 #[test]
+fn a_playing_trigger_clips_click_stops_it() {
+    let mut harness = view();
+    // Walk's slot in scene 2, playing: its mark is the stop square, and the click stops the
+    // track (a trigger clip listens for no release, so the press stops instead of relaunching).
+    harness.state_mut().grid.columns[1].slots[1].state = SlotState::Playing;
+    harness.run();
+    assert_eq!(
+        clicked(&mut harness, "Stop Walk on Bass (scene 2)"),
+        [Action::new("track.stop", json!({ "track": 2 }))]
+    );
+}
+
+#[test]
 fn clicking_a_slot_selects_it_and_still_launches_or_stops() {
     let mut harness = view();
     assert_eq!(
@@ -3286,4 +3396,49 @@ fn escape_or_a_drop_on_nothing_leaves_the_project_alone() {
         harness.run();
         assert_eq!(project(&harness), before);
     }
+}
+
+/// Needs an audio device, so it is ignored by default, like the preview test.
+#[test]
+#[ignore]
+fn launching_a_clip_greys_the_arrangement_until_back_to_arrangement() {
+    let mut session = Session::new(demo_project());
+    let (player, _) = suhina_output::open_player(session.project(), session.audio()).unwrap();
+    session.attach_player(player);
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    // Launch a clip while the transport plays, on a fine grid so it fires at once.
+    harness.state_mut().projects_mut().execute("transport.play", &json!({})).unwrap();
+    harness.state_mut().projects_mut().execute("launcher.setQuantization", &json!({ "value": "1/32" })).unwrap();
+    harness.state_mut().projects_mut().execute("clip.launch", &json!({ "track": 1, "scene": 1 })).unwrap();
+    for _ in 0..30 {
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    eprintln!(
+        "LAUNCHER STATE: {:?}",
+        harness.state_mut().projects_mut().execute("launcher.state", &json!({})).unwrap()
+    );
+    // The Arrangement view: the Drums lane dims and Back to arrangement shows in the ruler.
+    harness.get_by_label("Arrangement view").click();
+    harness.run_steps(5);
+    assert!(
+        harness.query_by_label("Back to arrangement").is_some(),
+        "the button shows while a track plays launched clips"
+    );
+    // Clicking it returns every track to its arrangement clips: the launched clip stops at
+    // the next boundary (a 32nd here) with its fade, so wait for it.
+    harness.get_by_label("Back to arrangement").click();
+    let mut back = true;
+    for _ in 0..200 {
+        harness.step();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if harness.query_by_label("Back to arrangement").is_none() {
+            back = false;
+            break;
+        }
+    }
+    assert!(!back, "the arrangement is back");
 }

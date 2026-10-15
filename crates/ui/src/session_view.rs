@@ -22,10 +22,12 @@ const PITCH: f32 = ROW + 1.0;
 /// Width of a group header's fold arrow.
 const FOLD_ARROW: f32 = 12.0;
 /// Mark sizes inside a slot.
-const CLIP_MARK: f32 = 6.0;
+const CLIP_MARK: f32 = 10.0;
 /// The part of a clip's slot that launches it: the mark and the padding around it.
 const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
+/// The play and stop glyph size in a scene row, where the glyph sits on the row's fill.
+const SLOT_GLYPH: f32 = 4.5;
 /// How dim a muted track's lane is.
 const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
@@ -553,7 +555,8 @@ fn column_body(
                 format!("Stop {} (scene {number})", column.name),
             )),
             _ => {
-                let label = format!("Launch {name} on {} (scene {number})", column.name);
+                let verb = if slot.state == SlotState::Playing { "Stop" } else { "Launch" };
+                let label = format!("{verb} {name} on {} (scene {number})", column.name);
                 let response = ui.interact(launch_rect.intersect(clip), id.with(scene), sense);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                 Some(response)
@@ -569,10 +572,18 @@ fn column_body(
         let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         // The launch button launches as the pointer goes down, and releases a gate or repeat
-        // clip as it goes up.
+        // clip as it goes up. A playing trigger clip's press stops it instead.
         if slot.state != SlotState::Empty
             && let Some(response) = &launch
-            && crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions)
+            && crate::slot_launch::press_and_release(
+                ui,
+                response,
+                column.track,
+                number,
+                slot.launch,
+                slot.state == SlotState::Playing,
+                actions,
+            )
             && selectable
             && !state.keep_selection_on_launch
         {
@@ -580,6 +591,8 @@ fn column_body(
         }
         if !has_clip && column.notes && launch.as_ref().is_some_and(Response::double_clicked) {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
+            // The new clip is selected, so the detail area opens its piano roll.
+            state.select_slot(column.track, scene);
         }
         if select.as_ref().is_some_and(Response::clicked) {
             state.select_slot(column.track, scene);
@@ -700,14 +713,30 @@ fn slot_cell(
                 painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(accent), StrokeKind::Outside);
                 painter.rect_stroke(rect, 0.0, theme::hairline(accent), StrokeKind::Inside);
             } else {
-                painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(mark, column.mute));
+                // The mark is the shape its click does: a play triangle while stopped.
+                let box_rect = mark_rect(CLIP_MARK);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        box_rect.center() + Vec2::new(-3.0, -5.0),
+                        box_rect.center() + Vec2::new(5.0, 0.0),
+                        box_rect.center() + Vec2::new(-3.0, 5.0),
+                    ],
+                    lane(mark, column.mute),
+                    egui::Stroke::NONE,
+                ));
             }
             let text = if column.mute { theme::text_hint() } else { text };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
         }
         SlotState::Playing => {
             painter.rect_filled(rect, 0.0, lane(theme::control_playing(), column.mute));
-            painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(track_color, column.mute));
+            // The mark is the shape its click does: a stop square while playing. A stopped
+            // clip's mark is the play triangle the same way, for its click's launch.
+            painter.rect_filled(
+                Rect::from_center_size(mark_rect(CLIP_MARK).center(), Vec2::splat(CLIP_MARK - 2.0)),
+                0.0,
+                lane(track_color, column.mute),
+            );
             let text = if column.mute { theme::text_hint() } else { theme::text_playing() };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
             let done = progress.unwrap_or(1.0).clamp(0.0, 1.0);
@@ -992,15 +1021,18 @@ fn scene_column(
             continue;
         }
         let label = if scene.name.is_empty() {
-            format!("Launch scene {}", scene.number)
+            format!("{} scene {}", if scene.playing { "Stop" } else { "Launch" }, scene.number)
         } else {
-            format!("Launch scene {} {}", scene.number, scene.name)
+            format!("{} scene {} {}", if scene.playing { "Stop" } else { "Launch" }, scene.number, scene.name)
         };
         let response = widgets::button_area(ui, rect.intersect(clip), Id::new(("scene", scene.number)), label);
         let target = MappingTarget::Scene { scene: scene.number.saturating_sub(1) };
         if response.clicked() {
             if keys.mode.on {
                 keys.pick(target);
+            } else if scene.playing {
+                // A playing row's click stops its clips; anything else launches.
+                actions.push(Action::new("scene.stop", json!({ "scene": scene.number })));
             } else {
                 actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
             }
@@ -1013,6 +1045,19 @@ fn scene_column(
         let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
         let fill = motion::mix(hover, theme::control_playing(), playing);
         painter.rect_filled(rect, 0.0, fill);
+        // The row's glyph: the play arrow while its clips wait for a launch, the stop square
+        // while the row plays — the click does what the glyph says.
+        let glyph = Rect::from_min_size(
+            Pos2::new(rect.left() + PAD, rect.center().y - SLOT_GLYPH / 2.0),
+            Vec2::splat(SLOT_GLYPH),
+        );
+        crate::browser_view::play_glyph(
+            painter,
+            glyph.center(),
+            scene.playing,
+            motion::mix(theme::text_secondary(), theme::text_primary(), widgets::hover(ui, &response).max(playing)),
+            SLOT_GLYPH,
+        );
         let inner = rect.shrink2(Vec2::new(PAD, 0.0));
         let mut name = scene.name.clone();
         if let Some(tempo) = scene.tempo_bpm {
@@ -1030,7 +1075,10 @@ fn scene_column(
             theme::mono_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
-        let name_rect = Rect::from_min_max(inner.min, Pos2::new(inner.right() - 18.0, inner.bottom()));
+        let name_rect = Rect::from_min_max(
+            Pos2::new(glyph.right() + PAD, inner.top()),
+            Pos2::new(inner.right() - 18.0, inner.bottom()),
+        );
         widgets::text_in(
             painter,
             name_rect,

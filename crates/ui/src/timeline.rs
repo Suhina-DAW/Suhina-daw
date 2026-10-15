@@ -115,6 +115,10 @@ pub struct Lane {
     pub pan: f64,
     /// The group track this track plays into; `None` is the main output.
     pub output: Option<TrackId>,
+    /// The track's column in the launcher, for the engine's per-track state.
+    pub column: Option<usize>,
+    /// The track plays launched clips instead of its arrangement clips.
+    pub overrides: bool,
     pub clips: Vec<ClipBox>,
 }
 
@@ -163,6 +167,9 @@ pub struct Timeline {
     pub markers: Vec<MarkerFlag>,
     /// The loop region, when the project has one (on or off).
     pub loop_brace: Option<LoopBrace>,
+    /// Any lane's track plays launched clips instead of its arrangement clips: the
+    /// arrangement view dims its lanes and shows Back to arrangement.
+    pub overrides: bool,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
     /// The parameters each track's automation lanes can show, with their points.
@@ -292,6 +299,8 @@ impl Timeline {
                     .and_then(|c| c.output)
                     .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
                     .map(|t| t.id),
+                column: project.launcher.columns.iter().position(|c| c.track == track.id),
+                overrides: false,
                 clips,
             };
             if kind == ColumnKind::Return { returns.push(lane) } else { lanes.push(lane) }
@@ -335,6 +344,7 @@ impl Timeline {
             start_beat: 0.0,
             markers,
             loop_brace,
+            overrides: false,
             waveforms: Arc::default(),
             automation: crate::automation_lanes::Params::build(project),
         };
@@ -350,6 +360,15 @@ impl Timeline {
         self.running = running;
         self.beat = beats(beat);
         self.start_beat = beats(start);
+        // Which tracks play launched clips instead of their arrangement clips: their lanes
+        // dim, and the arrangement shows Back to arrangement while any does.
+        for lane in &mut self.lanes {
+            lane.overrides = lane
+                .column
+                .and_then(|column| monitor.and_then(|m| m.column(column)))
+                .is_some_and(|s| s.overrides_arrangement);
+        }
+        self.overrides = self.lanes.iter().any(|l| l.overrides);
     }
 }
 

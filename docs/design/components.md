@@ -132,7 +132,7 @@ space, the mixer at the bottom.
 | Row separator | 1 px `border` between scene rows, continued through returns and scenes |
 | Track header | 20 px, `control.background` (`control.activeBackground` when selected), 2 px bottom strip in the track colour; name 11 px `text.primary` (`text.hint` when off). A click selects the track, a drag moves it, a right-click opens its menu |
 | Main header | 20 px, `control.background`, "Main" in `text.primary`, no colour strip |
-| Scene button | 20 px, `control.background` (hover `#34332F`), name left in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground` |
+| Scene button | 20 px, `control.background` (hover `#34332F`), a 4.5 px play glyph in `text.secondary` (`text.primary` hovered) 6 px from its left, name after it in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground`, its glyph the stop square, its click `scene.stop` |
 | Stop row | 20 px under the last scene, `panel.background`: per track a 7 × 7 square outline in `text.secondary` (`accent` while the stop is queued), centred; in the scene column the square and "Stop all" |
 | Empty space | Right of the last track: "+ MIDI track" and "+ Audio track" buttons (20 px, `control.background`, 10 px `text.secondary`, 2 px apart, 6 px from its top left) and, below them, "Drop files or devices to add a track" in 10 px `text.hint`. Drops from the browser there make new tracks; the Arrangement has the same under its last lane |
 
@@ -146,9 +146,9 @@ Track colours: the track's own colour if it has one, else `track.1`–`track.4` 
 |---|---|---|---|
 | Empty without a stop button | `window.background` | none | |
 | Empty with a stop button | `window.background` | 3 × 3 `#4A4743` | |
-| Stopped | `control.background`, text `#C9C4BB` | 6 × 6 track colour | |
-| Queued | `control.background` | 6 × 6 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
-| Playing | `control.playingBackground`, text `#FFFFFF` | 6 × 6 track colour | 2 px `accent` progress line along the bottom |
+| Stopped | `control.background`, text `#C9C4BB` | a 8 × 10 px play triangle in the track colour (its tip right), the click's shape | |
+| Queued | `control.background` | 10 × 10 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
+| Playing | `control.playingBackground`, text `#FFFFFF` | an 8 × 8 px square in the track colour, the click's shape | 2 px `accent` progress line along the bottom |
 | Selected | `control.activeBackground` (playing keeps `control.playingBackground`) | as its state | 1 px inset `text.primary` outline (a queued clip keeps its `accent` outline) |
 | Recording | (planned) `#3A2B2A`, text `#FFFFFF` | 6 px red dot | 2 px red progress line |
 
@@ -183,6 +183,7 @@ track along the bottom edge.
 | Part | Spec |
 |---|---|
 | Bar ruler | 20 px, `panel.background`; bar numbers in 10 px mono `text.secondary`, 3 px right of a 1 px `border`, labelled every 1, 2, 4 … bars so labels are at least 40 px apart; bars and beat lines follow the time-signature changes. A tempo or time-signature change is a 1 px `accent` line with what changes ("140 bpm", "→ 140 bpm" for a ramp, "7/8") in 9 px mono `accent`, 30 px right of the line ([tempo map](../spec/tempo-map.md)). A click sets the play start marker (`transport.setPosition`) to the beat under the pointer, on the grid of that zoom, Alt for free ([spec](../spec/arrangement-editing.md) › Play position) |
+| Back to arrangement | In the bar ruler, 8 px from its right edge above the tracks: a 14 px square button with a return-arrow glyph (a curve over the top into a head pointing down), 1.1 px lines in `text.primary` on `control.background` (`control.hoverBackground` hovered), the name as its tooltip and accessible label; shown while any lane's track plays launched clips, clicked it runs `launcher.backToArrangement`. The dimmed lane: a wash of `window.background` at 45 % over lane and header |
 | Play start marker | A 9 × 6 px triangle in `text.primary`, pointing down, its tip on the ruler's lower edge at the marker's beat |
 | Marker row | 16 px under the ruler, `panel.background`, a 1 px `border` between them. Each marker: a 1 px `text.secondary` line at its beat and a tag to its right (`control.background`, `control.hoverBackground` hovered, `control.activeBackground` dragged) with its name in 10 px `text.value`, 3 px in; the tag is as wide as the name, 9–120 px, and ends 1 px before the next marker. Click jumps (`marker.jump`), drag moves (`marker.move`, on the ruler's grid, Alt for free), right-click opens its menu (name field and Rename, Jump to marker, Delete marker); a right-click on the ruler or an empty part of the row offers Add marker here ([spec](../spec/arrangement-editing.md#markers)) |
 | Loop brace | A 14 px row between the ruler and the marker row, `panel.background`, a 1 px `border` above and below. The brace: a 6 px bar, centred, from the loop start to the loop end; looping on: `control.activeBackground` with a 1 px `text.secondary` inset, off: `control.background` with a 1 px `text.hint` inset. Drag on the row draws a region (looping on), within 4 px of an end resizes it (the cursor shows resizing), the middle moves it (the cursor grabs), on the ruler's grid, Alt for free; a click on it or Ctrl+L turns looping on or off ([spec](../spec/arrangement-editing.md#loop-region)) |
