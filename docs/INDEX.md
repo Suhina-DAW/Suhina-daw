@@ -53,6 +53,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [MIDI controllers and mapping](spec/midi-mapping.md) | spec | planned | MIDI learn, MIDI mapping, map a knob, mapping mode, controller profile, controllers folder, controller_mappings, takeover, pick up, relative encoder, 14-bit CC, mapping.add, mapping.learn, controllers.list, gesture, controller feedback | What a MIDI controller can do in Suhina - sources, targets, ranges, takeover, relative encoders, gestures and undo, the controller profile file, mappings saved in a project, the mapping mode and MIDI learn, the commands, and how malformed input is treated |
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
 | [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them |
+| [Plug-ins in the browser](spec/plugin-browsing.md) | spec | current | plug-in views, browser plug-ins, group by type, vendor, flat list, sorting, columns, VST3 sub-categories, CLAP features, favourites, tags | How the browser shows installed plug-ins: grouped by vendor or by type, or as one flat list with sortable columns; and how each format's own categories map to Suhina's groups |
 | [Sample map](spec/sample-map.md) | spec | draft | sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands | How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map |
 | [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter |
 | [The .suhina project file](spec/suhina-format.md) | spec | current | .suhina layout, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state | The layout of Suhina's own project file (.suhina; .locr from before still read), field by field, with what a reader accepts |
@@ -118,6 +119,7 @@ Change this code, and check these documents.
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/library/**` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
 | `crates/library/src/find.rs` | [Missing files](spec/missing-files.md) |
+| `crates/library/src/store.rs` | [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/library/src/worker.rs` | [Architecture](architecture.md) |
 | `crates/media/src/info.rs` | [Browser](spec/browser.md) |
 | `crates/media/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
@@ -140,11 +142,11 @@ Change this code, and check these documents.
 | `crates/session/src/devices.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Device groups](spec/device-groups.md) |
 | `crates/session/src/files.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |
 | `crates/session/src/lib.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
-| `crates/session/src/library.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
+| `crates/session/src/library.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/session/src/plugins.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/session/src/projects.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0007: Several open projects](decisions/0007-several-open-projects.md) |
-| `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
 | `crates/session/src/soundmap.rs` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
@@ -154,8 +156,8 @@ Change this code, and check these documents.
 | `crates/ui/Cargo.toml` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) |
 | `crates/ui/src/app.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/ui/src/browser.rs` | [Architecture](architecture.md), [Browser](spec/browser.md) |
-| `crates/ui/src/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md) |
+| `crates/ui/src/browser.rs` | [Architecture](architecture.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
+| `crates/ui/src/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/ui/src/detail_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
 | `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |

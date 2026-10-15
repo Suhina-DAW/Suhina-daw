@@ -79,6 +79,36 @@ pub struct Tag {
     pub color: String,
 }
 
+/// How the browser shows the installed plug-ins
+/// ([the plug-in browsing spec](../spec/plugin-browsing.md) › The three views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PluginsView {
+    /// The tree: a Plug-ins heading, the vendors under it, the plug-ins under each vendor.
+    #[default]
+    Grouped,
+    /// The tree by type: Instruments and Effects headings, Suhina's groups under them.
+    Type,
+    /// One flat list, sortable by column.
+    Flat,
+}
+
+impl PluginsView {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Grouped => "grouped",
+            Self::Type => "type",
+            Self::Flat => "flat",
+        }
+    }
+
+    /// The view [`PluginsView::name`] gives `text`; anything else is not one.
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|v| v.name() == text)
+    }
+
+    pub const ALL: [PluginsView; 3] = [Self::Grouped, Self::Type, Self::Flat];
+}
+
 /// The seven tags a new library starts with.
 pub fn default_tags() -> Vec<Tag> {
     [
@@ -111,6 +141,8 @@ pub struct Store {
     /// Item key to the names of its tags.
     pub tagged: BTreeMap<String, Vec<String>>,
     pub tag_limit: usize,
+    /// How the browser shows plug-ins.
+    pub plugins_view: PluginsView,
 }
 
 impl Default for Store {
@@ -122,6 +154,7 @@ impl Default for Store {
             tags: default_tags(),
             tagged: BTreeMap::new(),
             tag_limit: DEFAULT_TAG_LIMIT,
+            plugins_view: PluginsView::Grouped,
         }
     }
 }
@@ -226,6 +259,14 @@ impl Store {
                 None => warnings.push("browser.json: tags is not a list; the defaults are used".into()),
             }
         }
+        if let Some(view) = map.get("plugins_view") {
+            match view.as_str().and_then(PluginsView::parse) {
+                Some(view) => store.plugins_view = view,
+                None => {
+                    warnings.push("browser.json: plugins_view is not grouped, type or flat; the default is used".into())
+                }
+            }
+        }
         if let Some(tagged) = map.get("tagged").and_then(Value::as_object) {
             for (item, names) in tagged.iter().take(MAX_TAGGED) {
                 if item.len() > MAX_KEY {
@@ -257,6 +298,7 @@ impl Store {
             "tags": self.tags.iter().map(|t| json!({ "name": t.name, "color": t.color })).collect::<Vec<_>>(),
             "tagged": self.tagged,
             "tag_limit": self.tag_limit,
+            "plugins_view": self.plugins_view.name(),
         })
     }
 
@@ -422,11 +464,28 @@ mod tests {
         store.record(Group::Samples, "/samples/a.wav");
         store.set_tag("Drums", Some("#112233"), None).unwrap();
         store.tag("/samples/kick.wav", "Drums", true).unwrap();
+        store.plugins_view = PluginsView::Flat;
         store.save(&file).unwrap();
         let (loaded, warnings) = Store::load(&file);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(loaded, store);
+        assert_eq!(loaded.plugins_view, PluginsView::Flat);
         assert_eq!(loaded.recent[&Group::Samples], ["/samples/a.wav", "/samples/b.wav"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugins_view_that_is_not_one_falls_back_to_grouped() {
+        let dir = temp("view");
+        let file = dir.join("browser.json");
+        for junk in ["all", "7", "{", ""] {
+            std::fs::write(&file, format!("{{ \"plugins_view\": \"{junk}\" }}")).unwrap();
+            let (store, warnings) = Store::load(&file);
+            assert_eq!(store.plugins_view, PluginsView::Grouped, "{junk}");
+            assert_eq!(warnings.len(), 1, "{junk}");
+        }
+        std::fs::write(&file, r#"{}"#).unwrap();
+        assert_eq!(Store::load(&file).0.plugins_view, PluginsView::Grouped, "missing is the default, quietly");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
