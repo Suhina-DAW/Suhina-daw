@@ -15,6 +15,7 @@ covers:
   - crates/ui/src/themes.rs
   - crates/ui/src/waveform.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/follow_view.rs
   - crates/ui/src/project_dialog.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/loading_dialog.rs
@@ -362,6 +363,21 @@ The detail area for a selected arrangement clip: a 196 px `panel.background` col
 "-" for none) for an audio clip, or Notes for a MIDI clip; a value keeps 52 px clear of its label, so a long track name is shortened
 rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
 the column is then as tall as its rows). Editing them, and the clip editor beside them, are planned.
+
+## Follow action
+
+**(proposed)** The detail area for a selected slot clip starts with its follow action
+([Session view spec](../spec/ui-session-view.md) › Detail area: follow action): a 196 px
+`panel.background` column in a row, or 140 px at the top of the stacked column.
+
+| Part | Spec |
+|---|---|
+| Title | 20 px, "Follow action" 11 px `text.primary`, 6 px padding; the on switch at its right |
+| On switch | 32 × 15, "On" / "Off" 10 px; on: `accent` with `window.background` text, off: `control.background` with `text.secondary` |
+| Rows | From 6 px under the title, 18 px apart: a 10 px `text.secondary` label (`text.hint` while off) in 64 px, the 15 px control in the rest |
+| Time, chances | Value fields: `control.background`, value right-aligned 10 px mono `#C9C4BB`; a chance's share fills from the left in `control.playingBackground`; a linked time, or a chance of 0, in `text.hint` |
+| Linked | 32 × 15 toggle as Track on: `#C9C4BB` with `window.background` text on, `control.background` with `text.hint` off |
+| Actions | Dropdowns (above); the menu lists the actions, then "Jump to scene N" |
 
 ## Clip editor (MIDI, planned)
 

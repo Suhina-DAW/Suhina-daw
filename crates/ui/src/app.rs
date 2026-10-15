@@ -16,6 +16,7 @@ use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
 use crate::detail_view;
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
+use crate::follow_view;
 use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
@@ -1120,6 +1121,27 @@ impl App {
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // A selected slot clip's follow action comes first, the rest of the detail beside or
+        // under it.
+        let follow = match (self.shown, self.view.selected_slot, self.session()) {
+            (View::Session, Some((t, scene)), Some(s)) => follow_view::FollowInfo::build(s.project(), t, scene),
+            _ => None,
+        };
+        let detail = match &follow {
+            Some(info) => {
+                let used = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+                    follow_view::show(ui, detail, info, stacked, actions)
+                });
+                if stacked {
+                    let top = (used.inner.bottom() + 1.0).min(detail.bottom());
+                    Rect::from_min_max(Pos2::new(detail.left(), top), detail.max)
+                } else {
+                    let left = (used.inner.right() + 1.0).min(detail.right());
+                    Rect::from_min_max(Pos2::new(left, detail.top()), detail.max)
+                }
+            }
+            None => detail,
+        };
         let mut places = Vec::new();
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if stacked {

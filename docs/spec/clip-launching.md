@@ -115,7 +115,9 @@ own decision (**Suhina:**), not yet compared with Live 12 (see *To observe*).
    actionB?, chanceA?, chanceB?}` changes what it is given, in one undo step; actions are named
    `nothing`, `stop`, `again`, `previous`, `next`, `first`, `last`, `any`, `other` or `jump N`
    (N a scene number, from 1). `project.launcher` lists each slot clip's `follow_action`. The
-   project file stores it as the clip's `follow` ([suhina-format](suhina-format.md)).
+   project file stores it as the clip's `follow` ([suhina-format](suhina-format.md)). The
+   detail area shows a selected slot clip's follow action and changes it through the same
+   command ([Session view](ui-session-view.md) › Detail area: follow action).
 8. **While playing.** Editing a follow action swaps in a new graph (ADR 0005); a clip that is
    playing keeps its launch time, so a follow time now shorter than what it has played runs at
    once.
