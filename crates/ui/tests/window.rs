@@ -737,6 +737,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -1384,6 +1385,80 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     assert!(harness.query_by_label("CPU load").is_none());
 }
 
+#[test]
+fn the_control_bar_shows_the_ram_usage_whether_or_not_an_engine_plays() {
+    // The program's own RAM is shown without an engine too: it is the process's, not the
+    // engine's.
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.query_by_label_contains("RAM usage");
+    assert!(ram.is_some(), "the RAM shows next to the CPU's place");
+    // In megabytes or gigabytes, as the issue asks.
+    let text = format!("{:?}", ram.unwrap());
+    assert!(text.contains("MB") || text.contains("GB"), "{text}");
+}
+
+#[test]
+fn the_view_switch_is_the_last_control_at_the_right_with_the_cpu_and_ram_left_of_it() {
+    // With an engine attached, all four show: RAM, CPU, then the view switch at the edge.
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.get_by_label_contains("RAM usage").rect();
+    let cpu = harness.get_by_label_contains("CPU load").rect();
+    let arrangement = harness.get_by_label("Arrangement view").rect();
+    let session = harness.get_by_label("Session view").rect();
+    let switch_left = arrangement.left().min(session.left());
+    let switch_right = arrangement.right().max(session.right());
+    assert!(ram.right() <= cpu.left(), "RAM {ram:?} left of CPU {cpu:?}");
+    assert!(cpu.right() <= switch_left, "CPU {cpu:?} left of the view switch at {switch_left}");
+    // The switch keeps its place at the right edge.
+    assert!(SIZE.0 - switch_right <= 16.0, "the switch ends at {switch_right}");
+}
+
+#[test]
+fn a_narrow_window_leaves_out_what_would_reach_the_position_readout() {
+    // At the smallest window the app allows, the blocks that show keep their order and stay
+    // right of the transport in the centre (play, stop and the 64 px position).
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let size = (640.0, 400.0);
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .with_step_dt(0.25)
+        .with_max_steps(4)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    let transport_end = size.0 / 2.0 + (28.0 * 2.0 + 1.0 + theme::PAD + 64.0) / 2.0;
+    let arrangement = harness.get_by_label("Arrangement view").rect();
+    let session = harness.get_by_label("Session view").rect();
+    let switch_left = arrangement.left().min(session.left());
+    assert!(switch_left > transport_end, "the switch at {switch_left} clears the position");
+    let cpu = harness.query_by_label_contains("CPU load").map(|n| n.rect());
+    let ram = harness.query_by_label_contains("RAM usage").map(|n| n.rect());
+    // The CPU still fits beside the switch; the RAM, further left, may not.
+    assert!(cpu.is_some(), "the CPU load fits at 640 px");
+    if let Some(cpu) = cpu {
+        assert!(cpu.left() >= transport_end && cpu.right() <= switch_left, "CPU at {cpu:?}");
+    }
+    if let Some(ram) = ram {
+        assert!(ram.left() >= transport_end, "RAM at {ram:?}");
+        assert!(cpu.is_some_and(|cpu| ram.right() <= cpu.left()), "RAM {ram:?} left of the CPU");
+    }
+}
+
 /// The label of the active project's Close button in the tab row.
 fn active_close_label(harness: &Harness<'static, App>) -> String {
     let projects = harness.state().projects();
@@ -1726,4 +1801,25 @@ fn each_project_tab_keeps_its_own_grid() {
     zoom_in_at_beat_b(&mut harness);
     drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
     assert_eq!(beat_b_start(&harness), Some(65.25));
+}
+
+#[test]
+fn help_about_shows_the_version_and_copies_it() {
+    let mut harness = window(demo_app());
+    let version = suhina_ui::project_dialog::VERSION;
+    assert!(harness.query_by_label_contains(version).is_none());
+    harness.get_by_label("Help").click();
+    harness.run();
+    harness.get_by_label_contains("About Suhina").click();
+    harness.run();
+    let line = suhina_ui::project_dialog::version_line();
+    assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
+    harness.get_by_label(&format!("Copy version: {line}")).click();
+    harness.run();
+    assert_eq!(harness.state().status(), &Status::Done(format!("Copied {line}")));
+    // Still open after copying; Escape closes it.
+    assert!(harness.query_by_label_contains(version).is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label_contains(version).is_none());
 }

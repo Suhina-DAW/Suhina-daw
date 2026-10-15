@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -90,6 +90,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Follow actions.** `clip.setFollowAction {track, scene, enabled?, time?, linked?, actionA?,
+  actionB?, chanceA?, chanceB?}` sets what a slot clip does after its follow time (one undo
+  step); `project.launcher` lists each slot clip's `follow_action`. A `project_render` script
+  picks the same random actions every time ([clip launching](spec/clip-launching.md#follow-actions)).
+
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new
@@ -170,7 +175,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 | `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`, `plugin`, `library`, `audio`) and parameter schema; optional `filter`. |
 | `command_run` | Run one command: `{"id": "track.setPan", "params": {"track": "Bass", "pan": -1}}`; optional `project`. |
 | `command_batch` | Run `steps` in order; each editing command is its own undo step; `stop_on_error` (default true); optional `project` for every step. |
-| `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |
+| `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. Its plug-ins start with the state the project's running plug-ins have now (what their editors changed included), as `project.save` writes it. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |
 
 Commands are defined once in `suhina-session` (ADR 0002); the MCP server, the CLI and the
 desktop app all run the same ones. [`commands.md`](commands.md) lists every command with its
