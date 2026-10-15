@@ -154,6 +154,13 @@ a maintainer presses *Merge when ready* on each green pull request: the queue te
 in one CI run, merges them in order, and takes out a pull request that fails, with no *Update
 branch* by hand. The test build never runs on the queue.
 
+**Which changes build Rust.** In a pull request, the merge queue and on `main`, `ci.yml`'s
+`changes` job skips fmt, clippy and the tests when every changed file is documentation (`docs/`,
+any `.md`, `LICENSE`, `NOTICE`), a script under `scripts/` or a file under `.github/`: no Rust
+build or test reads them. A change to `ci.yml` itself still runs every job. The `docs` job runs on
+every change, so the script tests and the claim bot's test still run; in the Actions tab the
+skipped jobs show as skipped and `ci` passes.
+
 The queue is a setting, not code: Settings › Rules (or Branches) › the rule for `main` › **Require
 merge queue**, with the merge method used today, a group size of about 5 and *Only merge
 non-failing pull requests*. With a queue, *Require branches to be up to date before merging* is not

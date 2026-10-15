@@ -31,9 +31,10 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # Changes that touch only documentation skip the build jobs entirely; no code reads these
-  # files. main requires only the `ci` job at the end, which passes when the others passed or
-  # were skipped.
+  # Changes that touch only documentation, scripts/ or .github/ skip the build jobs entirely: no
+  # Rust build or test reads these files, and the docs job below, which always runs, tests the
+  # scripts. A change to this file still runs every job. main requires only the `ci` job at the
+  # end, which passes when the others passed or were skipped.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -56,7 +57,10 @@ jobs:
             exit 0
           fi
           code=$(git diff --name-only "$BASE" HEAD \
-            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$' || true)
+            | grep -Ev '^docs/|\.md$|^LICENSE$|^NOTICE$|^scripts/|^\.github/' || true)
+          if git diff --name-only "$BASE" HEAD | grep -qx '\.github/workflows/ci\.yml'; then
+            code=true
+          fi
           if [ -n "$code" ]; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
 
   # Runs on every change, documentation included.
