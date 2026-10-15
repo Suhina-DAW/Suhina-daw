@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
+const WINDOW_ACTIONS: &[(&str, &str, &str)] = &[
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -104,6 +104,8 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
     ("selection.paste", "Paste after the selected clip, or at the playhead on the selected track", "Edit"),
     ("selection.duplicate", "Duplicate the selected clip", "Edit"),
     ("selection.delete", "Delete the selected clip", "Edit"),
+    ("selection.split", "Split the selected clip at the playhead", "Edit"),
+    ("selection.consolidate", "Consolidate the selected clip into a new one", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
 ];
 
@@ -132,7 +134,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 25] = [
+const DEFAULTS: &[(&str, &[&str])] = &[
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -155,6 +157,8 @@ const DEFAULTS: [(&str, &[&str]); 25] = [
     ("selection.paste", &["Ctrl+V"]),
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
+    ("selection.split", &["Ctrl+E"]),
+    ("selection.consolidate", &["Ctrl+J"]),
     ("selection.group", &["Ctrl+G"]),
     ("projects.next", &["Ctrl+Tab"]),
     ("projects.previous", &["Ctrl+Shift+Tab"]),
@@ -311,7 +315,7 @@ mod tests {
     fn every_default_is_an_action_and_there_are_no_conflicts() {
         let known = actions();
         for (id, _) in DEFAULTS {
-            assert!(known.iter().any(|a| a.id == id), "{id}");
+            assert!(known.iter().any(|a| a.id == *id), "{id}");
         }
         assert!(Keymap::default().conflicts().is_empty());
         for id in ["view.zoomIn", "view.zoomOut", "view.zoomReset"] {

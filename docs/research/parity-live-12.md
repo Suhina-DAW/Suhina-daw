@@ -3,7 +3,7 @@ description: How much of Ableton Live 12's documented functionality Suhina has t
 read_when: Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap.
 type: plan
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - scripts/parity/**
 ---
@@ -126,7 +126,7 @@ documented behaviour that exists today.
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 45 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
 | 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
-| 6 | Arrangement View | 22 | 35 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, crossfades, linked-track editing, the time commands. |
+| 6 | Arrangement View | 22 | 42 % | partial | Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and fade shapes, grid snap, split at the playhead or a clicked beat, consolidate (MIDI joined, audio rendered to a file). A clip's loop range is read and drawn but no command sets it. Missing locators, the arrangement loop brace, time-signature changes, time selections, crop, crossfades, linked-track editing, the time commands. |
 | 7 | Session View | 13 | 50 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. Missing scene view/editing depth, select-on-launch options, follow actions. |
 | 8 | Clip View | 34 | 8 % | started | Detail area shows clip properties; the MIDI clip editor is a spec only (docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels. |
 | 9 | Audio Clips, Tempo, and Warping | 18 | 35 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, tempo automation. |
@@ -171,7 +171,7 @@ documented behaviour that exists today.
 <!-- parity:begin area-table -->
 | Area | Manual pages | Covered |
 |---|---|---|
-| Views and editing (ch 6-10, 16) | 140 | 21 % |
+| Views and editing (ch 6-10, 16) | 140 | 22 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
@@ -345,7 +345,7 @@ or does something Live does not:
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 14 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
 | Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
-| Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
+| Views and clip editing | 140 (ch 6-10, 16) | 22 % | MIDI note editor, clip view panels, locators, loop brace, time selections, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
@@ -402,8 +402,9 @@ whether a DAW is usable without it.
 5. **Sends and returns into the engine** (part of ch 18): the model already holds the
    sends, so this is engine and command work, and it makes imported sets sound like their author
    meant them. Meters belong here too.
-6. **Arrangement editing: locators, the loop brace, split, consolidate** (ch 6):
-   small commands, large workflow gain, and two of them are already open issues (#98, #99).
+6. **Arrangement editing: locators and the loop brace** (ch 6): small commands, large
+   workflow gain, and both are already open issues (#98, #99). Split and consolidate are done
+   (#400).
 
 None of the six has a milestone today; the board's open items are dominated by the plug-in epic
 (M6) and UI polish. [ADR 0016](../decisions/0016-parity-target.md) turns the scope, the exclusions

@@ -32,7 +32,7 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
 4. **Sends, returns, cue and level meters:** return tracks are shown but play nothing yet.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
-   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
+   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)).
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
 7. **Follow actions, launch modes, legato and per-clip quantisation** (the rest of M4).
 
@@ -345,6 +345,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).
+- Arrangement clips split and consolidate: Ctrl+E cuts the selected clip at the playhead and
+  a clip's right-click menu has Split here (`clip.split`, the second part playing on from where
+  the clip was); Ctrl+J or Consolidate turns a range of one track into one clip, MIDI by joining
+  the notes, audio by rendering the clips without devices to a WAV file next to the project
+  (`clip.consolidate`, [spec](docs/spec/arrangement-editing.md#splitting)).
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.

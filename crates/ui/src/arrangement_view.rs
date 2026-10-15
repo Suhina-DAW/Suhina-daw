@@ -159,6 +159,8 @@ pub struct ArrangementViewState {
     gain_drag: Option<((TrackId, usize), f64)>,
     fade_drag: Option<FadeDrag>,
     curve_drag: Option<CurveDrag>,
+    /// The beat a clip was last right-clicked on, where its menu's Split here cuts.
+    split_at: Option<f64>,
     /// Tracks selected by clicking their headers (Ctrl adds), for grouping.
     pub selected_tracks: Vec<TrackId>,
     /// A track header being dragged to a new place, and where it was let go.
@@ -187,6 +189,7 @@ impl Default for ArrangementViewState {
             gain_drag: None,
             fade_drag: None,
             curve_drag: None,
+            split_at: None,
             selected_tracks: Vec::new(),
             track_drag: None,
             track_drop: None,
@@ -815,7 +818,20 @@ fn clip_box<'a>(
     let label = format!("Clip {name} on {} at bar {bar}", lane.name);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
     let stack = if clip.audio { state.stack_audio } else { state.stack_midi };
-    response.context_menu(|ui| menus::clip_menu(ui, lane.track, clip.index, stack, actions));
+    // A right-click remembers the beat under the pointer, for the menu's Split here.
+    if response.secondary_clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let raw = clip.start + f64::from((pointer.x - x_of(clip.start)) / state.beat_width);
+        let on_grid = snapped(raw);
+        let free = ui.input(|i| i.modifiers.alt) || on_grid <= clip.start || on_grid >= clip.start + clip.length;
+        state.split_at = Some(if free { raw } else { on_grid });
+    }
+    let split_at = state.split_at;
+    response.context_menu(|ui| {
+        menus::clip_menu(ui, lane.track, clip.index, stack, actions);
+        menus::clip_edit_menu(ui, lane.track, clip.index, (clip.start, clip.length), split_at, actions);
+    });
     if response.clicked() || response.drag_started_by(egui::PointerButton::Primary) {
         state.selected = Some(key);
     }

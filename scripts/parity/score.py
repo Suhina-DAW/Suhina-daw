@@ -51,11 +51,12 @@ CHAPTERS = [
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
      "relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.35, "partial",
+    (6, "Arrangement View", 22, 0.42, "partial",
      "Layout, zoom, transport, ruler/play start, clip drag+move, overlap replace/stack, fades and "
-     "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
-     "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
-     "crossfades, linked-track editing, the time commands."),
+     "fade shapes, grid snap, split at the playhead or a clicked beat, consolidate (MIDI joined, "
+     "audio rendered to a file). A clip's loop range is read and drawn but no command sets it. "
+     "Missing locators, the arrangement loop brace, time-signature changes, time selections, "
+     "crop, crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.50, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
      "Missing scene view/editing depth, select-on-launch options, follow actions."),

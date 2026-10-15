@@ -22,11 +22,11 @@ fn render(session: &Session) -> Vec<f32> {
     render_offline_with_audio(session.project(), session.audio(), SR, 512).unwrap()
 }
 
-/// The largest difference between two renders over the frames `from..to`, outside `skip`.
-fn max_diff(a: &[f32], b: &[f32], skip: &[std::ops::Range<usize>]) -> f32 {
+/// The largest difference between two renders over the frames both have, outside `skip`.
+fn max_diff(a: &[f32], b: &[f32], skip: Option<std::ops::Range<usize>>) -> f32 {
     let frames = a.len().min(b.len()) / 2;
     (0..frames)
-        .filter(|f| !skip.iter().any(|r| r.contains(f)))
+        .filter(|f| !skip.as_ref().is_some_and(|r| r.contains(f)))
         .map(|f| (a[f * 2] - b[f * 2]).abs().max((a[f * 2 + 1] - b[f * 2 + 1]).abs()))
         .fold(0.0, f32::max)
 }
@@ -122,7 +122,7 @@ fn a_split_midi_clip_plays_as_it_did() {
     assert_eq!(clips[0].content, clips[1].content, "both parts play the same content");
     let after = render(&session);
     assert_eq!(before.len(), after.len());
-    assert!(max_diff(&before, &after, &[]) < 1e-6, "{}", max_diff(&before, &after, &[]));
+    assert!(max_diff(&before, &after, None) < 1e-6, "{}", max_diff(&before, &after, None));
 
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(lane_clips(&session, 1).len(), 1, "one undo step");
@@ -141,7 +141,7 @@ fn a_note_across_the_cut_ends_there() {
     };
     // Until the cut the note sounds the same; a release later it is over, and the second part
     // does not start it again.
-    assert!(max_diff(&before, &after, &[BEAT..usize::MAX]) < 1e-6);
+    assert!(max_diff(&before, &after, Some(BEAT..usize::MAX)) < 1e-6);
     assert!(rms(&before, BEAT * 3 / 2, BEAT * 2) > 0.05);
     assert!(rms(&after, BEAT * 3 / 2, BEAT * 2) < 1e-6);
 }
@@ -159,7 +159,8 @@ fn a_split_audio_clip_plays_as_it_did_apart_from_the_click_guard_at_the_cut() {
     // The engine's 2 ms ramp at both ends of every audio clip, around the cut.
     let cut = BEAT * 5 / 2;
     let guard = cut - 100..cut + 100;
-    assert!(max_diff(&before, &after, &[guard.clone()]) < 1e-6, "{}", max_diff(&before, &after, &[guard]));
+    let diff = max_diff(&before, &after, Some(guard));
+    assert!(diff < 1e-6, "{diff}");
 
     // The file is warped to the project (its length fits whole beats); transposed and not
     // warped, the clip runs faster through its file; the second part
@@ -183,7 +184,7 @@ fn a_split_audio_clip_plays_as_it_did_apart_from_the_click_guard_at_the_cut() {
     let offset = lane_clips(&session, 3)[1].offset;
     assert!((offset - 1.5 * rate).abs() < 1e-9, "{offset}");
     let after = render(&session);
-    assert!(max_diff(&before, &after, &[cut - 100..cut + 100]) < 1e-5);
+    assert!(max_diff(&before, &after, Some(cut - 100..cut + 100)) < 1e-5);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -256,7 +257,7 @@ fn consolidated_midi_clips_join_their_notes_and_sound_the_same() {
         [(0.0, 0.5, 60), (1.0, 0.5, 64), (3.5, 0.5, 67), (8.0, 0.5, 60), (9.0, 0.5, 64), (10.0, 0.5, 60)]
     );
     let after = render(&session);
-    assert!(max_diff(&before, &after, &[]) < 1e-6, "{}", max_diff(&before, &after, &[]));
+    assert!(max_diff(&before, &after, None) < 1e-6, "{}", max_diff(&before, &after, None));
 
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(lane_clips(&session, 1).len(), 3);
@@ -305,7 +306,7 @@ fn consolidated_audio_is_rendered_to_a_file_next_to_the_project() {
     assert!(session.audio().files.contains_key(&region.file), "the rendered audio joins the pool");
     let after = render(&session);
     // The range starts and ends in silence, so even the click guard of the new clip is not heard.
-    assert!(max_diff(&before, &after, &[]) < 1e-5, "{}", max_diff(&before, &after, &[]));
+    assert!(max_diff(&before, &after, None) < 1e-5, "{}", max_diff(&before, &after, None));
 
     // A second consolidation of the same place does not overwrite the first file.
     run(&mut session, "edit.undo", json!({})).unwrap();
