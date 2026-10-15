@@ -7,6 +7,7 @@ mod blank;
 mod commands;
 mod devices;
 mod files;
+mod follow;
 mod library;
 mod plugins;
 mod preview;
@@ -73,9 +74,18 @@ pub struct Player {
     output: Option<std::sync::Arc<dyn LiveOutput>>,
 }
 
+/// `controller`, with the follow actions' random numbers seeded from the clock, so each
+/// playback picks its own (offline renders keep the engine's fixed seed).
+fn seeded(mut controller: Controller) -> Controller {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    // A full queue means the engine is not running yet; it then keeps its fixed seed.
+    let _ = controller.send(suhina_engine::LaunchCommand::SeedRandom(nanos as u64));
+    controller
+}
+
 impl Player {
     pub fn new(controller: Controller, keep_alive: Option<Box<dyn std::any::Any + Send>>) -> Self {
-        Self { controller, keep_alive, output: None }
+        Self { controller: seeded(controller), keep_alive, output: None }
     }
 
     /// A player whose output reports what it runs with (`audio.info`).
@@ -84,7 +94,7 @@ impl Player {
         keep_alive: Option<Box<dyn std::any::Any + Send>>,
         output: std::sync::Arc<dyn LiveOutput>,
     ) -> Self {
-        Self { controller, keep_alive, output: Some(output) }
+        Self { controller: seeded(controller), keep_alive, output: Some(output) }
     }
 
     /// What the output runs with now, when it says.
