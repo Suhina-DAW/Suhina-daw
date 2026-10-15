@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{OsStr, c_void};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -107,9 +107,28 @@ fn binary(path: &Path) -> Result<PathBuf, String> {
     } else if cfg!(target_os = "linux") {
         contents.join("x86_64-linux").join(stem).with_extension("so")
     } else {
-        return Err("VST3 bundles on macOS are not supported yet".into());
+        return macos_binary(&contents.join("MacOS"), stem)
+            .ok_or_else(|| format!("no executable in {}/MacOS in the bundle", contents.display()));
     };
     if inner.is_file() { Ok(inner) } else { Err(format!("no {} in the bundle", inner.display())) }
+}
+
+/// The executable in a macOS bundle's `MacOS` folder: the one named after the bundle without
+/// its extension, as most bundles have, or else the first non-hidden file (the bundle format
+/// allows any name; a hidden one, such as a stray `.DS_Store`, is not an executable).
+fn macos_binary(macos: &Path, stem: &OsStr) -> Option<PathBuf> {
+    let named = macos.join(stem);
+    if named.is_file() {
+        return Some(named);
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(macos)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('.')))
+        .collect();
+    files.sort();
+    files.into_iter().next()
 }
 
 impl ModuleFile {
@@ -1090,5 +1109,34 @@ mod tests {
     fn bundle_layout() {
         let missing = binary(Path::new("no-such.vst3"));
         assert!(missing.is_err());
+    }
+
+    #[test]
+    fn a_macos_bundles_executable_is_found() {
+        let dir = std::env::temp_dir().join(format!("suhina-vst3-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let stem = OsStr::new("Thing");
+        let macos = dir.join("Thing.vst3").join("Contents").join("MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        // An empty folder holds no executable; the bundle is refused.
+        assert_eq!(macos_binary(&macos, stem), None);
+        // Named after the bundle without the extension, as most bundles have.
+        std::fs::write(macos.join("Thing"), "not really a Mach-O").unwrap();
+        assert_eq!(macos_binary(&macos, stem), Some(macos.join("Thing")));
+        // On macOS the bundle then loads by that file, whatever its name says.
+        if cfg!(target_os = "macos") {
+            let found = binary(&dir.join("Thing.vst3")).ok();
+            assert_eq!(found, Some(macos.join("Thing")));
+        }
+        // An executable under another name, which the bundle format allows; a hidden file
+        // such as a stray .DS_Store is not taken for it.
+        let renamed = dir.join("Other.vst3").join("Contents").join("MacOS");
+        std::fs::create_dir_all(&renamed).unwrap();
+        std::fs::write(renamed.join(".DS_Store"), "x").unwrap();
+        std::fs::write(renamed.join("Other.vst3"), "not really a Mach-O").unwrap();
+        assert_eq!(macos_binary(&renamed, stem), Some(renamed.join("Other.vst3")));
+        // A folder that is not there holds nothing.
+        assert_eq!(macos_binary(&dir.join("missing").join("MacOS"), stem), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
