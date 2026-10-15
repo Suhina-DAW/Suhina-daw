@@ -123,7 +123,7 @@ All are edits with one undo step. Tempo points are numbered from 1 in beat order
 Each returns the list it changed. A beat past 120 000, a point or bar that does not exist, a
 signature outside the ranges, a missing or mistyped param is an error and changes nothing.
 
-`transport.state` reports the tempo and bar at the playhead through the map.
+`launcher.state` reports the tempo at the playhead and its bar and beat through the meter.
 
 ## The Arrangement
 

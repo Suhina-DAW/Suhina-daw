@@ -14,6 +14,7 @@ mod projects;
 mod rack;
 mod relink;
 mod soundmap;
+mod tempo;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
