@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-14
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -189,7 +189,11 @@ workspace forbids.
    state; the host makes the messages and attribute lists they send each other,
    `IHostApplication::createInstance` in `crates/plugin-host/src/vst3_message.rs`, without which
    some plug-ins crash as soon as they are connected and others when given a state), `setProcessing` and `process` on the audio thread, stereo on the main buses and
-   silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
+    silent buffers for any other bus. A plug-in is named `vst3:<bundle or file>[#<class id>]`;
+    in a bundle, the executable is looked up per system: `Contents/<arch>-win/<name>` on Windows,
+    `Contents/x86_64-linux/<stem>.so` on Linux, and on macOS in `Contents/MacOS` (the file named
+    after the bundle without the extension, or else the first non-hidden file in the folder, as
+    the bundle format lets the executable be named anything).
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
    the SDK writes them (`moduleinfo.json`, the model): on Windows the first three fields of the
