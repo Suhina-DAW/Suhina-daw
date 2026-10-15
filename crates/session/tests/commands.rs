@@ -746,7 +746,8 @@ fn slot_project() -> Project {
                 Slot { clip: Some(notes), has_stop: true },
                 Slot { clip: None, has_stop: true },
             ],
-        }], mappings: Default::default(),
+        }],
+        mappings: Default::default(),
     };
     p
 }
@@ -981,7 +982,9 @@ fn launcher_project() -> Project {
         content: ContentKinds { notes: false, audio: true },
         channel: Some(ChannelId(3)),
         parent: None,
-        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+        extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     });
     let mut channel = p.channels[0].clone();
     (channel.id, channel.name) = (ChannelId(3), "C3".into());
@@ -1005,7 +1008,8 @@ fn launcher_project() -> Project {
                 track: TrackId(3),
                 slots: vec![Slot { clip: Some(held), has_stop: true }, Slot::default()],
             },
-        ], mappings: Default::default(),
+        ],
+        mappings: Default::default(),
     };
     p
 }
@@ -1126,8 +1130,11 @@ fn midi_slot_project() -> Project {
         track: TrackId(track),
         slots: vec![Slot { clip: None, has_stop: true }, Slot { clip: None, has_stop: true }],
     };
-    p.launcher =
-        Launcher { scenes: vec![Scene::default(), Scene::default()], columns: vec![column(1), column(2), column(3)], mappings: Default::default(), };
+    p.launcher = Launcher {
+        scenes: vec![Scene::default(), Scene::default()],
+        columns: vec![column(1), column(2), column(3)],
+        mappings: Default::default(),
+    };
     let full = Clip { start: 0.0, ..p.arrangement.lanes[0].clips[0].clone() };
     p.launcher.columns[1].slots[0].clip = Some(full);
     p

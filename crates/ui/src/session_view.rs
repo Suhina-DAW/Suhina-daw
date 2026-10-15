@@ -393,18 +393,7 @@ fn draw_column(
     let header = Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip);
     column_header(ui, painter, header, column, bands, state, actions);
     let body_clip = bands.body.intersect(clip);
-    column_body(
-        ui,
-        &painter.with_clip_rect(body_clip),
-        body_clip,
-        span,
-        bands,
-        column,
-        progress,
-        id,
-        state,
-        actions,
-    );
+    column_body(ui, &painter.with_clip_rect(body_clip), body_clip, span, bands, column, progress, id, state, actions);
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
     let mixer_painter = painter.with_clip_rect(bands.mixer.intersect(clip));
     mixer_strip(ui, &mixer_painter, mixer_rect, column, track_number, state, id, actions);
@@ -523,7 +512,13 @@ fn column_body(
                 state.launch_keys.pick(target);
             }
             slot_cell(painter, rect, column, slot, 0.0, 1.0, progress, false);
-            crate::launch_keys::overlay(painter, rect, label(target), state.launch_keys.mode.selected == Some(target), 0.0);
+            crate::launch_keys::overlay(
+                painter,
+                rect,
+                label(target),
+                state.launch_keys.mode.selected == Some(target),
+                0.0,
+            );
             painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
             continue;
         }
@@ -649,7 +644,13 @@ fn column_body(
     let color = if column.stop_queued { theme::accent() } else { theme::text_secondary() };
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
     if mapping {
-        crate::launch_keys::overlay(painter, stop_rect, label(target), state.launch_keys.mode.selected == Some(target), 0.0);
+        crate::launch_keys::overlay(
+            painter,
+            stop_rect,
+            label(target),
+            state.launch_keys.mode.selected == Some(target),
+            0.0,
+        );
     }
 }
 

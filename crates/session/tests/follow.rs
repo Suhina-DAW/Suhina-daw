@@ -24,7 +24,8 @@ fn project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(), launch: Default::default(),
+        extensions: Extensions::default(),
+        launch: Default::default(),
     };
     let content = |id: u32, key: u8| ClipContent {
         id: ContentId(id),
@@ -51,7 +52,9 @@ fn project() -> Project {
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
             parent: None,
-            extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+            extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),
@@ -77,7 +80,8 @@ fn project() -> Project {
                     Slot { clip: Some(clip(2)), has_stop: true },
                     Slot { clip: None, has_stop: true },
                 ],
-            }], mappings: Default::default(),
+            }],
+            mappings: Default::default(),
         },
         ..Project::default()
     }

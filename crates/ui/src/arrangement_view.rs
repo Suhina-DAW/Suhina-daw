@@ -762,7 +762,11 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         actions.push(Action::new("transport.setPosition", json!({ "beats": ruler_beat(raw, grid, free) })));
     }
     let beat_at = |x: f32, free: bool, state: &ArrangementViewState| {
-        ruler_beat(f64::from((x - time.left() + state.scroll.x) / state.beat_width), Grid::new(state.grid, state.beat_width, bar_beats), free)
+        ruler_beat(
+            f64::from((x - time.left() + state.scroll.x) / state.beat_width),
+            Grid::new(state.grid, state.beat_width, bar_beats),
+            free,
+        )
     };
     // A right-click on the ruler or the marker row offers a marker there.
     let row_response = ui.interact(marker_row, Id::new("arrangement-marker-row"), Sense::click());

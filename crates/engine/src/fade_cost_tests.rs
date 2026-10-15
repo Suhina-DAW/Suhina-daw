@@ -43,7 +43,8 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
         fade_in_curve: curve,
         fade_out_curve: curve,
         follow_action: Default::default(),
-        extensions: Extensions::default(), launch: Default::default(),
+        extensions: Extensions::default(),
+        launch: Default::default(),
     };
     let region = AudioRegion {
         file: "noise.wav".into(),
@@ -67,7 +68,9 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
                 content: ContentKinds { notes: false, audio: true },
                 channel: Some(ChannelId(t)),
                 parent: None,
-                extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+                extensions: Extensions::default(),
+                audio_input: Default::default(),
+                midi_input: Default::default(),
             })
             .collect(),
         channels: (1..=TRACKS)

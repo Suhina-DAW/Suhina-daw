@@ -497,7 +497,8 @@ fn playing_with_clips() -> (Session, Renderer) {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(), launch: Default::default(),
+        extensions: Extensions::default(),
+        launch: Default::default(),
     };
     let lane =
         |track: u32, clips: Vec<Clip>| ArrangementLane { name: String::new(), track: Some(TrackId(track)), clips };

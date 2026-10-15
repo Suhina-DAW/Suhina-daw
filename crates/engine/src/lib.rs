@@ -25,14 +25,14 @@ mod input;
 #[cfg(test)]
 mod input_tests;
 mod launcher;
+mod live;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod loop_tests;
 mod meters;
 #[cfg(test)]
 mod meters_tests;
-mod live;
-#[cfg(test)]
-mod live_tests;
 mod metronome;
 mod plugin;
 mod plugin_params;
@@ -65,8 +65,8 @@ use launcher::Launcher;
 pub use launcher::{
     ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
 };
-pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 pub use live::{LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, port_id};
+pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
     Followed, Joint, MAX_JOINED, OFFLINE_TIMEOUT, PluginDevice, PluginProcessor, PluginSlotInfo, Plugins, Sent,

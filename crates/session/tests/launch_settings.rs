@@ -21,7 +21,9 @@ fn project() -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
-        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+        extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     };
     let channel = |id: u32| Channel {
         id: ChannelId(id),
@@ -34,7 +36,8 @@ fn project() -> Project {
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
-        extensions: Extensions::default(), automation: Vec::new(),
+        extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let content = |id: u32| ClipContent {
         id: ContentId(id),
@@ -65,7 +68,8 @@ fn project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         launch: Default::default(),
-        extensions: Extensions::default(), follow_action: Default::default(),
+        extensions: Extensions::default(),
+        follow_action: Default::default(),
     };
     Project {
         tracks: vec![track(1, "Drums"), track(2, "Bass")],

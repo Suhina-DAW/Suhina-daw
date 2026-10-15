@@ -65,7 +65,8 @@ impl Default for About {
             graphics_now: None,
             editors_embeddable: false,
             projects_default: String::new(),
-            templates_default: String::new(), last_backup: Default::default(),
+            templates_default: String::new(),
+            last_backup: Default::default(),
         }
     }
 }

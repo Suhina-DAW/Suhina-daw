@@ -189,7 +189,8 @@ mod tests {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             launch: LaunchSettings { mode, ..LaunchSettings::default() },
-            extensions: Extensions::default(), follow_action: Default::default(),
+            extensions: Extensions::default(),
+            follow_action: Default::default(),
         };
         project.launcher.scenes.push(Scene::default());
         project

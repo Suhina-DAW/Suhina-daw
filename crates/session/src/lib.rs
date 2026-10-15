@@ -12,11 +12,11 @@ mod files;
 mod follow;
 mod launch;
 mod library;
+mod mapping;
 mod meters;
+mod midi;
 mod notes;
 mod plugin_edits;
-mod midi;
-mod mapping;
 mod plugins;
 mod preview;
 mod projects;
@@ -37,9 +37,9 @@ pub use blank::blank_project;
 pub use commands::{CommandKind, CommandSpec, Param, ParamType, Run, commands, parse_quantization};
 pub use files::{MAX_FILES, file_tempo};
 pub use library::{Category, Found, file_info, library_commands, search_items};
-pub use notes::{MAX_NOTES_PER_CLIP, MAX_NOTES_PER_COMMAND, midi_velocity};
-pub use midi::{LiveInput, MidiSystem, midi_commands};
 pub use mapping::{MAX_MAPPINGS, mapped_command, target_exists};
+pub use midi::{LiveInput, MidiSystem, midi_commands};
+pub use notes::{MAX_NOTES_PER_CLIP, MAX_NOTES_PER_COMMAND, midi_velocity};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{
@@ -911,6 +911,21 @@ fn unknown_command(id: &str) -> CommandError {
     }
 }
 
+/// What `track` hears while armed, for the engine: its MIDI input, by port id (ADR 0017).
+fn live_filter(project: &Project, track: suhina_model::TrackId) -> suhina_engine::LiveFilter {
+    use suhina_engine::{LiveFilter, LivePorts};
+    use suhina_model::MidiPort;
+    let Some(input) = project.tracks.iter().find(|t| t.id == track).map(|t| &t.midi_input) else {
+        return LiveFilter::default();
+    };
+    let ports = match &input.port {
+        MidiPort::All => LivePorts::All,
+        MidiPort::Named(name) => LivePorts::One(suhina_engine::port_id(name)),
+        MidiPort::Nothing => LivePorts::Nothing,
+    };
+    LiveFilter { ports, channel: input.channel.and_then(|c| c.checked_sub(1)) }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -948,19 +963,4 @@ mod tests {
         assert!(!session.has_unsaved_changes());
         let _clean = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// What `track` hears while armed, for the engine: its MIDI input, by port id (ADR 0017).
-fn live_filter(project: &Project, track: suhina_model::TrackId) -> suhina_engine::LiveFilter {
-    use suhina_engine::{LiveFilter, LivePorts};
-    use suhina_model::MidiPort;
-    let Some(input) = project.tracks.iter().find(|t| t.id == track).map(|t| &t.midi_input) else {
-        return LiveFilter::default();
-    };
-    let ports = match &input.port {
-        MidiPort::All => LivePorts::All,
-        MidiPort::Named(name) => LivePorts::One(suhina_engine::port_id(name)),
-        MidiPort::Nothing => LivePorts::Nothing,
-    };
-    LiveFilter { ports, channel: input.channel.and_then(|c| c.checked_sub(1)) }
 }

@@ -82,7 +82,9 @@ fn project() -> Project {
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
             parent: None,
-            extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+            extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),

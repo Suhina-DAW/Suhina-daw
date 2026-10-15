@@ -18,7 +18,9 @@ fn project(volume: f64) -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
-        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+        extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     };
     let channel = |id: u32, volume: f64| Channel {
         id: ChannelId(id),
@@ -47,7 +49,8 @@ fn project(volume: f64) -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(), launch: Default::default(),
+        extensions: Extensions::default(),
+        launch: Default::default(),
     };
     Project {
         tracks: vec![track(1, "Lead"), track(2, "Quiet")],

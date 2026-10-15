@@ -28,7 +28,8 @@ fn slot(content: u32, length: f64, looping: bool, follow: FollowAction) -> Slot 
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: follow,
-            extensions: Extensions::default(), launch: Default::default(),
+            extensions: Extensions::default(),
+            launch: Default::default(),
         }),
         has_stop: true,
     }
@@ -44,7 +45,9 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             content: ContentKinds { notes: true, audio: true },
             channel: Some(ChannelId(1)),
             parent: None,
-            extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+            extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),
@@ -73,7 +76,8 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             .collect(),
         launcher: Launcher {
             scenes: vec![Scene::default(); slots.len()],
-            columns: vec![LauncherColumn { track: TrackId(1), slots }], mappings: Default::default(),
+            columns: vec![LauncherColumn { track: TrackId(1), slots }],
+            mappings: Default::default(),
         },
         ..Project::default()
     }

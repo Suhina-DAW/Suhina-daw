@@ -19,7 +19,9 @@ fn project() -> Project {
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
-        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+        extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     };
     let channel = |id: u32| Channel {
         id: ChannelId(id),
@@ -64,7 +66,8 @@ fn project() -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
-        extensions: Extensions::default(), launch: Default::default(),
+        extensions: Extensions::default(),
+        launch: Default::default(),
     };
     let slot = |content: Option<u32>| Slot { clip: content.map(clip), has_stop: true };
     Project {
@@ -79,7 +82,8 @@ fn project() -> Project {
             columns: vec![
                 LauncherColumn { track: TrackId(1), slots: vec![slot(Some(1)), slot(Some(2))] },
                 LauncherColumn { track: TrackId(2), slots: vec![slot(None), slot(Some(3))] },
-            ], mappings: Default::default(),
+            ],
+            mappings: Default::default(),
         },
         ..Project::default()
     }

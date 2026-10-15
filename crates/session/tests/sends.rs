@@ -15,7 +15,9 @@ fn project() -> Project {
         content: ContentKinds { notes, audio: false },
         channel: Some(ChannelId(id)),
         parent: None,
-        extensions: Extensions::default(), audio_input: Default::default(), midi_input: Default::default(),
+        extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     };
     let channel = |id: u32, role: ChannelRole, output: Option<u32>| Channel {
         id: ChannelId(id),
@@ -82,7 +84,8 @@ fn project() -> Project {
                     fade_in_curve: Default::default(),
                     fade_out_curve: Default::default(),
                     follow_action: Default::default(),
-                    extensions: Extensions::default(), launch: Default::default(),
+                    extensions: Extensions::default(),
+                    launch: Default::default(),
                 }],
             }],
             markers: Vec::new(),

@@ -42,7 +42,8 @@ fn tracks_with_inputs(tracks: &[(u32, InputChannels, Monitor)]) -> Project {
                 output: None,
                 sends: Vec::new(),
                 devices: Vec::new(),
-                extensions: Extensions::default(), automation: Vec::new(),
+                extensions: Extensions::default(),
+                automation: Vec::new(),
             })
             .collect(),
         ..Project::default()
