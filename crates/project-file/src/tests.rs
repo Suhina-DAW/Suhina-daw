@@ -70,8 +70,15 @@ fn everything() -> Project {
             kind: DeviceKind::Clap { id: "com.example.clap".into() },
             enabled: true,
             state: None,
-            params: Vec::new(),
-            automation: Vec::new(),
+            params: vec![DeviceParam::new("3", 0.25)],
+            automation: vec![AutomationLane {
+                param: "3".into(),
+                points: vec![
+                    AutomationPoint { beat: 0.0, value: 0.0 },
+                    AutomationPoint { beat: 4.0, value: 1.0 },
+                    AutomationPoint { beat: 4.0, value: 0.5 },
+                ],
+            }],
             extensions: Extensions::default(),
         },
         Device {
@@ -265,6 +272,9 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "channels": [ { "id": 1, "role": "boss" } ] }"#,
         r#"{ "channels": [ { "id": 1, "pan": 3 } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst9" } } ] } ] }"#,
+        r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" }, "automation": [ { "points": [] } ] } ] } ] }"#,
+        r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" }, "automation": [ { "param": "1", "points": [ { "beat": "one", "value": 1 } ] } ] } ] } ] }"#,
+        r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" }, "automation": 5 } ] } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst3", "id": "x" }, "state": "***" } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 200 } ] } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { } ] } ] }"#,
@@ -276,6 +286,19 @@ fn hostile_values_are_errors_not_crashes() {
     ] {
         assert!(with(bad).is_err(), "{bad} was read");
     }
+}
+
+/// A lane's points are read in beat order, points at one beat in the order written.
+#[test]
+fn automation_points_are_read_in_beat_order() {
+    let project = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" },
+            "automation": [ { "param": "2", "points": [ { "beat": 4, "value": 1 }, { "beat": 0, "value": 0 }, { "beat": 4, "value": 0.5 } ] } ] } ] } ] } }"#,
+    )
+    .unwrap();
+    let points = &project.channels[0].devices[0].automation[0].points;
+    let read: Vec<(f64, f64)> = points.iter().map(|p| (p.beat, p.value)).collect();
+    assert_eq!(read, [(0.0, 0.0), (4.0, 1.0), (4.0, 0.5)]);
 }
 
 /// A clip written before fade shapes existed has linear, unbent fades, so it sounds the same.

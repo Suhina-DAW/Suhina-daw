@@ -3,7 +3,7 @@ description: Why tracks and mixer channels are separate and clips place shared c
 read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/model/src/lib.rs
 ---
@@ -94,6 +94,17 @@ defaults, and the device limits each value to its range when it loads it, so a p
 by an older or newer Suhina still opens. Plug-ins keep using `state`; placeholders have
 neither. Importers fill `params` when they map another DAW's device onto a Suhina device
 (first: Live's Utility, `docs/spec/als-format.md` › Devices).
+
+## Amendment: plug-in parameters and automation lanes (2026-10-15)
+
+`params` also holds values set on a plug-in device: by the plug-in's parameter id written in
+decimal, in the plug-in's own range (a VST3 plug-in's normalized, a CLAP plug-in's plain), set
+over the `state` it loads with. A `Device` also holds `automation`: one `AutomationLane` per
+parameter (by the same id as `params`), points of an arrangement beat and a value in beat order,
+the value moving in a straight line from one to the next and holding before the first and after
+the last; two points at one beat make a jump. Lanes play on plug-in devices first (#109); built-in
+effects and instruments follow with LOOP-39. A lane belongs to its device, so it moves, copies and
+goes with it.
 
 ## Amendment: fade shapes and curves (2026-10-13)
 

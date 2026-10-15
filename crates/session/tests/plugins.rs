@@ -109,6 +109,7 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
         enabled: true,
         state: Some(vec![1, 2, 3]),
         params: Vec::new(),
+        automation: Vec::new(),
         extensions: Extensions::default(),
     };
     let mut project = Project::default();

@@ -96,7 +96,7 @@ def headline(devices) -> str:
         f"{len(devices['instruments'])} instruments) |",
         f"| Commands | **{score.COMMANDS}**, every one reachable from the UI, the CLI and MCP |",
         "| Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, "
-        "Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |",
+        "Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |",
     ]
     return block("\n".join(lines))
 

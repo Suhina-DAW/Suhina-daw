@@ -3,7 +3,7 @@ description: Why every action is a command with an id, typed params and snapshot
 read_when: adding a command, undo, redo, command registry, params, CommandSpec
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/session/src/lib.rs
@@ -80,7 +80,8 @@ code a scan runs.
 ## Amendment: running plug-ins (2026-10-12)
 
 A seventh kind, **plugin**, acts on one of the project's running plug-ins:
-`device.openEditor`, `device.closeEditor` and `device.restart` ([ADR 0006](0006-plug-in-hosting.md)).
+`device.openEditor`, `device.closeEditor`, `device.restart` and `device.pluginParams`, which asks
+the plug-in for its parameters ([ADR 0006](0006-plug-in-hosting.md)).
 They run on the session, never change the project and record no undo step. Adding a plug-in
 (`device.addPlugin`) is an edit like `device.add`; `device.plugin` reads where a plug-in device
 stands. `plugins.setHosting` (kind plugins) chooses how a plug-in shares host processes.
@@ -107,7 +108,10 @@ Devices on tracks are edited with ordinary **edit** commands, one undo step each
 `device.add`, `device.remove`, `device.setEnabled`, `device.setParam`; `devices.list` and
 `track.devices` read. A device is addressed by its track and its index in the track's chain
 (`device`, from 0, as `track.devices` lists them), and a parameter by its stable id
-([ADR 0004](0004-built-in-devices.md)). Agents may run all of them.
+([ADR 0004](0004-built-in-devices.md)), or a plug-in's by its parameter id. `device.setAutomation`
+(also an edit) sets or removes a plug-in parameter's automation lane; its `points` are a list of
+numbers (`ParamType::Numbers`, beat and value in turn), shown to agents as an array of numbers.
+Agents may run all of them.
 
 ## Consequences
 

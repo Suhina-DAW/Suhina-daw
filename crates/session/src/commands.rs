@@ -48,6 +48,7 @@ impl ParamType {
             Self::Text => "text",
             Self::Tracks => "tracks",
             Self::Texts => "texts",
+            Self::Numbers => "numbers",
         }
     }
 }
@@ -85,6 +86,8 @@ pub enum ParamType {
     Tracks,
     /// A list of texts (file paths).
     Texts,
+    /// A list of numbers.
+    Numbers,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,17 +125,17 @@ impl<T> CommandSpec<T> {
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
         for p in self.params {
-            if matches!(p.ty, ParamType::Tracks | ParamType::Texts) {
-                let items = if p.ty == ParamType::Tracks {
-                    json!({ "type": ["integer", "string"] })
-                } else {
-                    json!({ "type": "string" })
+            if matches!(p.ty, ParamType::Tracks | ParamType::Texts | ParamType::Numbers) {
+                let items = match p.ty {
+                    ParamType::Tracks => json!({ "type": ["integer", "string"] }),
+                    ParamType::Numbers => json!({ "type": "number" }),
+                    _ => json!({ "type": "string" }),
                 };
                 properties.insert(p.name.to_string(), json!({ "type": "array", "items": items, "description": p.doc }));
                 continue;
             }
             let ty = match p.ty {
-                ParamType::Tracks | ParamType::Texts => json!("array"),
+                ParamType::Tracks | ParamType::Texts | ParamType::Numbers => json!("array"),
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -651,19 +654,46 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "device.setParam",
-        label: "Set a parameter of a built-in effect or instrument on a track; the value is limited to the parameter's range",
+        label: "Set a parameter of a device on a track, heard from the next block; the value is limited to the parameter's range",
         params: &[
             TRACK,
             DEVICE,
-            param("param", ParamType::Text, "parameter id, from devices.list"),
+            param(
+                "param",
+                ParamType::Text,
+                "parameter id: a built-in effect or instrument's from devices.list, a plug-in's (a number) from device.pluginParams",
+            ),
             param(
                 "value",
                 ParamType::Number,
-                "value in the parameter's unit (dB, Hz, 0..1 for percentages, option index for choices)",
+                "value in the parameter's unit (dB, Hz, 0..1 for percentages, option index for choices); a plug-in's in its own range, from device.pluginParams",
             ),
         ],
         kind: CommandKind::Edit,
         run: devices::set_param,
+    },
+    CommandSpec {
+        id: "device.setAutomation",
+        label: "Automate a parameter of a plug-in device over the arrangement: points of beat and value, a straight line between them; no points removes the automation",
+        params: &[
+            TRACK,
+            DEVICE,
+            param("param", ParamType::Text, "the plug-in's parameter id, from device.pluginParams"),
+            param(
+                "points",
+                ParamType::Numbers,
+                "a beat then a value for each point, in the parameter's range: [0, 0.2, 4, 0.8] moves from 0.2 at beat 0 to 0.8 at beat 4; two points at one beat jump; [] removes the lane",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: devices::set_automation,
+    },
+    CommandSpec {
+        id: "device.pluginParams",
+        label: "List the parameters of a running plug-in device: id, name, range, default, current value and the plug-in's own text for it",
+        params: &[TRACK, DEVICE],
+        kind: CommandKind::Plugin,
+        run: devices::plugin_params,
     },
     CommandSpec {
         id: "device.addPlugin",

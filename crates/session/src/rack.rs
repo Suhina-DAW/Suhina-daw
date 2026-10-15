@@ -16,7 +16,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use suhina_engine::{
-    DeviceEvent, MAX_BLOCK_FRAMES, PluginProcessor, PluginSlotInfo, Plugins, Sent, model::DeviceKind, plugin_devices,
+    DeviceEvent, MAX_BLOCK_FRAMES, MAX_BLOCK_PARAMS, ParamEvent, PluginProcessor, PluginSlotInfo, Plugins, Sent,
+    model::DeviceKind, plugin_devices,
 };
 use suhina_model::{Device, Project};
 use suhina_plugins::library::{Hosting, group_for};
@@ -192,9 +193,16 @@ pub struct Hosted {
     audio: PluginAudio,
     input: Vec<f32>,
     output: Vec<f32>,
+    /// The block's events as sent: parameter values and notes merged in frame order.
     events: Vec<Event>,
-    /// Releases from blocks that were not sent (the host still busy with an earlier one),
-    /// sent at the start of the next block that is, so no note is left hanging.
+    /// The block's notes and its parameter values, before they are merged.
+    notes: Vec<Event>,
+    params: Vec<Event>,
+    /// The parameter values the engine gave for the next block ([`PluginProcessor::automate`]).
+    automated: Vec<Event>,
+    /// Releases and parameter values (the latest of each) from blocks that were not sent (the
+    /// host still busy with an earlier one), sent at the start of the next block that is, so
+    /// no note is left hanging and no automation is lost.
     carried: Vec<Event>,
     counts: Arc<BlockCounts>,
 }
@@ -206,6 +214,9 @@ impl Hosted {
             input: vec![0.0; MAX_BLOCK_FRAMES * 2],
             output: vec![0.0; MAX_BLOCK_FRAMES * 2],
             events: Vec::with_capacity(MAX_EVENTS),
+            notes: Vec::with_capacity(MAX_EVENTS),
+            params: Vec::with_capacity(MAX_EVENTS),
+            automated: Vec::with_capacity(MAX_BLOCK_PARAMS),
             carried: Vec::with_capacity(MAX_EVENTS),
             counts: Arc::new(BlockCounts::default()),
         }
@@ -217,12 +228,39 @@ impl Hosted {
     }
 }
 
-/// Keeps the releases among `events` in `carried`, within its capacity. Never allocates.
+/// Keeps the releases among `events` in `carried`, and the latest value of each parameter,
+/// within its capacity. Never allocates.
 fn carry_releases(events: &[Event], carried: &mut Vec<Event>) {
     let room = carried.capacity();
-    for event in events.iter().filter(|e| releases(e)) {
+    for event in events.iter().filter(|e| releases(e) || matches!(e.kind, EventKind::Param { .. })) {
+        if let EventKind::Param { id, .. } = event.kind
+            && let Some(older) =
+                carried.iter_mut().find(|c| matches!(c.kind, EventKind::Param { id: other, .. } if other == id))
+        {
+            *older = *event;
+            continue;
+        }
         if carried.len() < room {
             carried.push(*event);
+        }
+    }
+}
+
+/// `params` and `notes`, each in frame order, into `out` in frame order, a parameter value
+/// before a note at the same frame (so a note starts with the sound it is set to), within
+/// `out`'s capacity. Never allocates.
+fn merge(params: &[Event], notes: &[Event], out: &mut Vec<Event>) {
+    let room = out.capacity().min(MAX_EVENTS);
+    let (mut params, mut notes) = (params.iter().peekable(), notes.iter().peekable());
+    while out.len() < room {
+        let next = match (params.peek(), notes.peek()) {
+            (Some(p), Some(n)) if p.frame <= n.frame => params.next(),
+            (_, Some(_)) => notes.next(),
+            (Some(_), None) => params.next(),
+            (None, None) => break,
+        };
+        if let Some(event) = next {
+            out.push(*event);
         }
     }
 }
@@ -271,12 +309,25 @@ impl Hosted {
     fn take(&mut self, buffer: &[f32], events: &[(usize, DeviceEvent)]) -> bool {
         let Some(input) = self.input.get_mut(..buffer.len()) else { return false };
         input.copy_from_slice(buffer);
-        self.events.clear();
+        self.notes.clear();
+        self.params.clear();
         // What earlier blocks could not send goes first.
-        self.events.extend(self.carried.drain(..).map(|e| Event { frame: 0, ..e }));
-        for &(frame, event) in events {
-            push_event(&mut self.events, u32::try_from(frame).unwrap_or(u32::MAX), event);
+        for event in self.carried.drain(..) {
+            let event = Event { frame: 0, ..event };
+            match event.kind {
+                EventKind::Param { .. } => self.params.push(event),
+                _ => self.notes.push(event),
+            }
         }
+        for &(frame, event) in events {
+            push_event(&mut self.notes, u32::try_from(frame).unwrap_or(u32::MAX), event);
+        }
+        let room = self.params.capacity().saturating_sub(self.params.len());
+        let automated = self.automated.len().min(room);
+        self.params.extend(self.automated.drain(..automated));
+        self.automated.clear();
+        self.events.clear();
+        merge(&self.params, &self.notes, &mut self.events);
         self.counts.blocks.fetch_add(1, Ordering::Relaxed);
         true
     }
@@ -351,6 +402,21 @@ impl PluginProcessor for Hosted {
     fn wait(&mut self, buffer: &mut [f32], timeout: Duration) -> bool {
         self.wait_for(buffer, timeout)
     }
+
+    fn automate(&mut self, params: &[ParamEvent]) {
+        self.automated.clear();
+        let room = self.automated.capacity();
+        for param in params.iter().take(room) {
+            let frame = u32::try_from(param.frame).unwrap_or(u32::MAX);
+            // Kept finite: the host hands no plug-in a value that is not a number.
+            let value = if param.value.is_finite() {
+                param.value.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32
+            } else {
+                0.0
+            };
+            self.automated.push(Event::param(frame, param.id, value));
+        }
+    }
 }
 
 /// The installed plug-in for `device` and whether it is an instrument; `None` when nothing
@@ -421,6 +487,8 @@ struct Instance {
     reopen_editor: bool,
     /// How it keeps up with the engine, while its audio half runs there.
     counts: Option<Arc<BlockCounts>>,
+    /// Its parameters' ids and ranges (lowest, highest), once listed ([`Rack::params`]).
+    ranges: Option<Vec<(u32, f64, f64)>>,
 }
 
 impl Instance {
@@ -429,6 +497,7 @@ impl Instance {
             status,
             plugin,
             info: PluginSlotInfo::default(),
+            ranges: None,
             control: None,
             generation,
             state_refused: None,
@@ -919,6 +988,24 @@ impl Rack {
     /// at once: the host making a window that the app's window owns waits for the app's window
     /// thread, which must not be waiting for the host meanwhile. Embedded (the setting), it
     /// opens hidden inside that window until [`Rack::place_editor`] puts it somewhere.
+    /// The parameters of the plug-in device `key` as its plug-in lists them now (it waits for
+    /// the host's answer), remembered so values set later can be kept in range.
+    pub fn params(&mut self, key: u64) -> Result<Vec<suhina_plugins::ParamInfo>, CommandError> {
+        let list = self.running(key)?.params().map_err(|e| CommandError(e.to_string()))?;
+        if let Some(instance) = self.instances.get_mut(&key) {
+            let ranges = list.iter().map(|p| (p.id, p.min.min(p.max), p.max.max(p.min))).collect();
+            instance.ranges = Some(ranges);
+        }
+        Ok(list)
+    }
+
+    /// The range of parameter `id` of the plug-in device `key`: `None` when its parameters
+    /// have not been listed, `Some(None)` when they have and it has no such parameter.
+    pub fn param_range(&self, key: u64, id: u32) -> Option<Option<(f64, f64)>> {
+        let ranges = self.instances.get(&key)?.ranges.as_ref()?;
+        Some(ranges.iter().find(|(i, _, _)| *i == id).map(|&(_, min, max)| (min, max)))
+    }
+
     pub fn open_editor(&mut self, key: u64) -> Result<Option<(u32, u32)>, CommandError> {
         self.running(key)?;
         match self.owner {
@@ -1172,6 +1259,28 @@ mod tests {
         // Never past the room made for them.
         carry_releases(&events, &mut carried);
         assert_eq!(carried.len(), 2);
+    }
+
+    #[test]
+    fn parameter_values_of_a_block_not_sent_are_kept_the_latest_of_each() {
+        let events =
+            [Event::param(0, 3, 0.1), Event::note_on(1, 0, 60, 1.0), Event::param(5, 3, 0.2), Event::param(6, 4, 1.0)];
+        let mut carried = Vec::with_capacity(4);
+        carry_releases(&events, &mut carried);
+        assert_eq!(carried, [Event::param(5, 3, 0.2), Event::param(6, 4, 1.0)]);
+    }
+
+    #[test]
+    fn parameter_values_and_notes_merge_in_frame_order() {
+        let params = [Event::param(0, 1, 0.5), Event::param(4, 1, 0.75)];
+        let notes = [Event::note_on(0, 0, 60, 1.0), Event::note_off(2, 0, 60, 0.5), Event::note_on(4, 0, 62, 1.0)];
+        let mut out = Vec::with_capacity(8);
+        merge(&params, &notes, &mut out);
+        assert_eq!(out, [params[0], notes[0], notes[1], params[1], notes[2]]);
+        // Never past the room made for them.
+        let mut short = Vec::with_capacity(2);
+        merge(&params, &notes, &mut short);
+        assert_eq!(short, [params[0], notes[0]]);
     }
 
     #[test]

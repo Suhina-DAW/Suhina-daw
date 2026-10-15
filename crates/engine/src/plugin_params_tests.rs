@@ -15,18 +15,21 @@ use crate::{
     render_offline_with_plugins,
 };
 
+/// The parameter values a stand-in got: frame in the output, id, value.
+type Seen = Arc<Mutex<Vec<(usize, u32, f64)>>>;
+
 /// A stand-in plug-in that plays its parameter 0 as a constant on both sides, changing it at
 /// the frame each value arrives: what it plays is what the engine automated, frame by frame.
 struct Level {
     value: f32,
     pending: Vec<ParamEvent>,
     /// Every parameter value it got, at its frame in the output.
-    seen: Arc<Mutex<Vec<(usize, u32, f64)>>>,
+    seen: Seen,
     frames: usize,
 }
 
 impl Level {
-    fn new() -> (Self, Arc<Mutex<Vec<(usize, u32, f64)>>>) {
+    fn new() -> (Self, Seen) {
         let seen = Arc::default();
         (Self { value: 1.0, pending: Vec::new(), seen: Arc::clone(&seen), frames: 0 }, seen)
     }
@@ -74,7 +77,7 @@ fn automated(beats: f64, params: &[(&str, f64)], lane: &[(f64, f64)]) -> Project
     project(vec![note(0.0, beats, 69)], beats, vec![plug])
 }
 
-fn with_level(project: &Project) -> (Plugins, Arc<Mutex<Vec<(usize, u32, f64)>>>) {
+fn with_level(project: &Project) -> (Plugins, Seen) {
     let (level, seen) = Level::new();
     let mut plugins = Plugins::new();
     if let Some(found) = plugin_devices(project).first() {

@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 94
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -99,15 +99,18 @@ CHAPTERS = [
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
-    (24, "Using Plug-Ins", 12, 0.55, "partial",
+    (24, "Using Plug-Ins", 12, 0.60, "partial",
      "CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency "
-     "compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, "
+     "compensation, saved state, VST2 read and matched to VST3, parameters set and automated from "
+     "the engine. Missing AU, VST2 hosting, "
      "configure mode, VST preset banks, sidechain parameters."),
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
      "A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/"
      "chain zones, drum pads or rack presets."),
-    (26, "Automation and Editing Envelopes", 22, 0.00, "absent",
-     "No automation lanes, no recording or drawing of automation."),
+    (26, "Automation and Editing Envelopes", 22, 0.08, "partial",
+     "Automation lanes of plug-in parameters (breakpoints, straight lines, jumps), set by command "
+     "and played to the frame in playback and renders. Missing drawing, recording and editing "
+     "lanes in the UI, curved segments, built-in device and mixer automation, locking."),
     (27, "Clip Envelopes", 13, 0.00, "absent", "No clip envelopes."),
     (28, "Working with Video", 6, 0.00, "absent", "No video import or window."),
     (29, "Live Audio Effect Reference", 139, 0.15, "partial",

@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -106,6 +106,20 @@ workspace forbids.
      gives a plug-in without audio inputs (an instrument) no input port. A parameter event
      (automation) reaches a VST3 processor as a parameter change at its frame and a CLAP plug-in
      as a parameter event at its frame.
+     *Built (#109):* the engine sends them. A plug-in slot plans each block's parameter events
+     before any of the block runs (`crates/engine/src/plugin_params.rs`): the values the project
+     sets on the device (`Device::params`, by parameter id, in the plug-in's own range) at the
+     start of the first blocks a processor runs and again after a restart, over the state it
+     loaded; a value `device.setParam` sets while it plays, at the start of the next block
+     (the same parameter message as a built-in device's, ADR 0005); and, while the transport
+     runs, each automation lane's value at the block's first frame, at each point inside it and
+     every 64 frames while it moves (a VST3 plug-in ramps between them, a CLAP plug-in steps).
+     The slot hands each span it runs its share through `PluginProcessor::automate`, and the
+     session's processor merges them with the notes in frame order, a value before a note at
+     the same frame; a block the host could not take carries the latest value of each
+     parameter to the next. Nothing allocates on the audio thread: each slot has room for 512
+     events a block. Values go to the processor only, so a VST3 plug-in's editor does not move
+     with its automation yet.
    - **Messages** over a local socket or pipe, with a versioned protocol: load and unload,
      state save and load, latency changes, editor open and close, ping. *Built:* protocol
      version 7 (`open_editor` says whether the editor is `embedded` in the engine's window,

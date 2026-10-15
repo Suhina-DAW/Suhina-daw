@@ -138,13 +138,23 @@ impl SlotParams {
     }
 
     /// Takes the values and lanes of `fresh` (the same device in a graph built after an edit)
-    /// while keeping what this one sent: values that changed go at the start of the next
-    /// block. Never allocates.
+    /// while keeping what this one sent: values that changed, and the set values of
+    /// parameters whose lane is gone, go at the start of the next block. Never allocates.
     pub(crate) fn adopt(&mut self, fresh: &mut SlotParams) {
         let all_sent = self.base_sent >= self.base.len();
         for &(id, value) in &fresh.base {
             let same = self.base.iter().any(|&(i, v)| i == id && v == value);
             if !same && self.queued.len() < self.queued.capacity().min(MAX_QUEUED) {
+                set_in(&mut self.queued, id, value);
+            }
+        }
+        // A parameter whose lane is gone goes back to its set value.
+        for lane in &self.lanes {
+            let kept = fresh.lanes.iter().any(|l| l.id == lane.id);
+            let set = fresh.base.iter().find(|(id, _)| *id == lane.id);
+            if let (false, Some(&(id, value))) = (kept, set)
+                && self.queued.len() < self.queued.capacity().min(MAX_QUEUED)
+            {
                 set_in(&mut self.queued, id, value);
             }
         }

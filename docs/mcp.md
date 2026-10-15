@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -129,6 +129,12 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   default, unit, options); `track.devices` lists a track's devices with their values;
   `device.add`, `device.remove`, `device.setEnabled` and `device.setParam` (through
   `command_run`) edit a track's chain, one undo step each ([ADR 0004](decisions/0004-built-in-devices.md)).
+  `device.setParam` sets a plug-in device's parameter too, by the id `device.pluginParams` lists
+  (a running plug-in's parameters with their ranges, default, value and the plug-in's own
+  text), heard from the next block; `device.setAutomation {param, points}` automates one over the
+  arrangement, `points` a flat list of beat and value (`[0, 0.2, 4, 0.8]`), `[]` removing it.
+  Values are kept in the parameter's range once `device.pluginParams` has listed them.
+  `track.devices` gives a plug-in's set values and any device's lanes (`automation`).
   An instrument (`fm-synth`) goes first, on a MIDI track, and plays the track's notes; effects
   follow. `device.add {preset, voice?}` adds the FM synth playing a DX7 voice from a `.syx` file. Renders and
   the playing engine run the chains.

@@ -3,7 +3,7 @@ description: How the crates, threads and commands fit together, from a file to t
 read_when: adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - Cargo.toml
   - crates/*/Cargo.toml
@@ -189,7 +189,15 @@ thread swaps it in at the start of the next block (0.15 s ahead when stretched a
 need their voices moved first), carrying over the playhead (on the same beat when the tempo
 changed), the transport, sounding notes (which take their track's new mix), device chains and
 the launcher's playing and queued clips. A device parameter is not a new graph: it goes to the
-audio thread as a message, applied at the next block (ADR 0005, amendment).
+audio thread as a message, applied at the next block (ADR 0005, amendment); a plug-in's goes
+to its slot, which sends it to the plug-in as a parameter event.
+
+**Plug-in parameters and automation** (#109, ADR 0006 › 3): each block, before any of it runs,
+every plug-in slot plans its parameter events (`engine::plugin_params`): the project's values
+for the device when its processor starts, values set while playing, and its automation lanes'
+values at their frames while the transport runs. Each span the slot runs hands its share to
+the processor (`PluginProcessor::automate`), and the session's `Hosted` merges them with the
+block's notes for the host, which applies them sample-accurately.
 
 **Plug-ins** (ADR 0006): `Projects::poll_plugins` (the window calls it every frame, commands
 call it too) keeps the active project's running plug-ins in line with it. A new plug-in device
@@ -225,11 +233,12 @@ renderer without a deadline.
   launched clips' stretch voices still run on the audio thread.
 - **Project files:** autosave, and a
   package that carries its audio ([ADR 0010](decisions/0010-project-files.md) › Not decided yet).
-- **Device automation and more chains:** automation of device parameters, and chains on return
+- **Device automation and more chains:** automation of built-in devices' parameters (plug-in
+  devices' play since #109), drawing lanes in the UI, and chains on return
   and master channels ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet).
   Chains on tracks and groups run, with plug-ins and latency compensation, and `device.*`
   commands edit them.
 - **Plug-ins:** consecutive plug-ins of a chain that share a host process in one round trip per
-  block; plug-in parameters as automation; editors on Wayland and macOS (ADR 0006).
+  block; a VST3 editor that follows automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, clip editor), meters, and the commands they still
   need (arm, sends) (M8). The browser's open questions are in its spec › Not decided yet.

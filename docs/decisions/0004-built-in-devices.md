@@ -3,7 +3,7 @@ description: The interface of built-in effects and instruments (Device trait, pa
 read_when: device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/dsp/**
   - crates/device-api/**
@@ -129,7 +129,9 @@ decision 9.
 
 ## Not decided yet
 
-- **Automation lanes** for device parameters (LOOP-39).
+- **Automation lanes** for device parameters (LOOP-39): the model's lanes
+  (`Device::automation`, ADR 0001) play on plug-in devices since #109; how a built-in device's
+  chain splits at their points is still open.
 - **Chains on return and master channels, and sends into chains:** how they run and how latency
   compensation (built for track and group chains, 10 above) extends to them.
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
