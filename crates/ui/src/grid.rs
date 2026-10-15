@@ -2,7 +2,7 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, LaunchSettings, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, LaunchSettings, MappingTarget, Project, Rgb, TrackId};
 use suhina_engine::{LauncherMonitor, Queued};
 
 use crate::theme;
@@ -102,6 +102,9 @@ pub struct Grid {
     pub tempo_bpm: f64,
     /// Beats per bar, from the time signature.
     pub bar_beats: f64,
+    /// The keys and notes mapped to slots, scenes and stop buttons that still exist, with the
+    /// label the mapping mode shows (`docs/spec/ui-session-view.md` › Launch keys).
+    pub mapped: Vec<(MappingTarget, String)>,
 }
 
 impl Grid {
@@ -203,7 +206,19 @@ impl Grid {
             None => (false, 0.0, project.transport.tempo_bpm),
         };
         let beat = if beat.is_finite() { beat.max(0.0) } else { 0.0 };
-        Self { columns, scenes, running, beat, tempo_bpm, bar_beats }
+        let mut mapped: Vec<(MappingTarget, String)> = Vec::new();
+        for m in project.launcher.mappings.iter().filter(|m| suhina_session::target_exists(project, &m.target)) {
+            match mapped.iter_mut().find(|(t, _)| *t == m.target) {
+                Some((_, label)) => *label = format!("{label} {}", m.source.label()),
+                None => mapped.push((m.target, m.source.label())),
+            }
+        }
+        Self { columns, scenes, running, beat, tempo_bpm, bar_beats, mapped }
+    }
+
+    /// The keys and notes mapped to `target`, as the mapping mode shows them.
+    pub fn mapped_to(&self, target: MappingTarget) -> Option<&str> {
+        self.mapped.iter().find(|(t, _)| *t == target).map(|(_, label)| label.as_str())
     }
 
     /// The transport position as bar.beat.sixteenth, counted from 1.

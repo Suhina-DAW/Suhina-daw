@@ -160,7 +160,8 @@ pub fn overlay(painter: &Painter, rect: Rect, label: Option<&str>, picked: bool)
     if let Some(label) = label {
         let font = theme::mono_font(theme::TEXT_SMALL);
         let width = (rect.width() * 0.6).max(0.0);
-        let area = Rect::from_min_max(egui::pos2(rect.right() - width - PAD, rect.top()), rect.max - Vec2::new(PAD, 0.0));
+        let area =
+            Rect::from_min_max(egui::pos2(rect.right() - width - PAD, rect.top()), rect.max - Vec2::new(PAD, 0.0));
         widgets::text_in(painter, area, Align2::RIGHT_CENTER, label, font, theme::text_primary());
     }
 }
@@ -190,7 +191,10 @@ mod tests {
             extensions: Extensions::default(),
         };
         project.launcher.scenes.push(Scene::default());
-        project.launcher.columns.push(LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(clip), has_stop: true }] });
+        project
+            .launcher
+            .columns
+            .push(LauncherColumn { track: TrackId(1), slots: vec![Slot { clip: Some(clip), has_stop: true }] });
         project.launcher.mappings.push(LaunchMapping {
             source: MappingSource::key("Q").unwrap(),
             target: MappingTarget::Slot { track: TrackId(1), scene: 0 },
