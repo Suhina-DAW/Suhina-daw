@@ -241,24 +241,35 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     }
 }
 
-/// The menu of an arrangement clip; `stack` is true when the stacking setting for the clip's
-/// kind is on, so its copy leaves the clips it lands on as they are.
-pub fn clip_menu(ui: &mut Ui, track: TrackId, index: usize, stack: bool, actions: &mut Vec<Action>) {
+/// The menu of arrangement clips; `stack` is true when the stacking setting for the clips' kind
+/// is on, so their copies leave the clips they land on as they are. `clips` is the selection the
+/// click fell in, or the one clip it fell on; `enabled` is whether the clicked clip plays now.
+pub fn clip_menu(ui: &mut Ui, clips: &[(TrackId, usize)], stack: bool, enabled: bool, actions: &mut Vec<Action>) {
+    if clips.is_empty() {
+        return;
+    }
+    let list: Vec<serde_json::Value> =
+        clips.iter().map(|(track, index)| json!({ "track": track.0, "index": index })).collect();
     ui.set_min_width(140.0);
     if ui.add(egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
-        actions.push(Action::new("clip.copy", json!({ "track": track.0, "index": index })));
+        actions.push(Action::new("clip.copy", json!({ "clips": list.clone() })));
         ui.close();
     }
     if ui.add(egui::Button::new("Duplicate").shortcut_text("Ctrl+D")).clicked() {
-        let mut params = json!({ "track": track.0, "index": index });
+        let mut params = json!({ "clips": list.clone() });
         if stack {
             params["stack"] = json!(true);
         }
         actions.push(Action::new("clip.duplicate", params));
         ui.close();
     }
+    let mute = if enabled { "Mute" } else { "Unmute" };
+    if ui.add(egui::Button::new(mute).shortcut_text("0")).clicked() {
+        actions.push(Action::new("clip.setEnabled", json!({ "clips": list.clone(), "enabled": !enabled })));
+        ui.close();
+    }
     if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() {
-        actions.push(Action::new("clip.delete", json!({ "track": track.0, "index": index })));
+        actions.push(Action::new("clip.delete", json!({ "clips": list })));
         ui.close();
     }
 }

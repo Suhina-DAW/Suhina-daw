@@ -41,6 +41,10 @@ replaces them.
 
 - Radius 0 everywhere. No shadows, gradients or cards.
 - Regions are separated by 1 px gaps that show `border` beneath them.
+- **One frame after an edit.** The window draws a view from the state at the start of the frame, and
+  the commands of a click, a drag that ended and a drop run after it: when a command changed the
+  project, the window asks for one more frame, so what the user did is on screen at once instead of
+  waiting for another click or pointer move.
 - Parts marked **(planned)** are designed but not built yet; everything else is what the app
   draws today.
 - Type, by role:
@@ -196,6 +200,7 @@ track along the bottom edge.
 | Fade curve handle | A 7 px circle on the fade's line half-way through the fade, on fades at least 21 px wide, drawn and hit (11 × 11 px) like the fade handles. A vertical drag moves it with the pointer and bends the curve so the line passes through it (`clip.setFades` `inCurve`/`outCurve`): up towards +1, down towards −1, stopping at either; double-click sets it to 0. The line is drawn with at most 256 points |
 | Playhead | 1 px `accent` through the ruler and all lanes while playing; while stopped, at the play start marker once it is past beat 0 |
 | Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `panel.background` (`control.background` when selected), 5 px top/bottom and 6 px side padding (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
+| Group fold triangle | 12 px at the start of a group's first row, before the track number, on a group that holds tracks: a 7 × 4 px triangle, `text.hint` (`text.primary` under the pointer), pointing right while the group is folded and down while it is open. A click folds the group's tracks away or opens it ([spec](../spec/arrangement-editing.md) › Folded groups); a folded group's row then draws the clips of the track it stands in for |
 | Automation lanes | Under a track while its envelope button (an 18 × 15 px button at the end of the header's first row: `control.background`, `control.activeBackground` while lanes are shown, a small envelope line in `text.secondary`, `text.primary` when shown) has them open: 40 px each, a 1 px `border` under each. The envelope is a 1.5 px line in the track colour (`text.hint` while a manual change has it off), 4 px from the lane's top and bottom; points are 3.5 px circles (4.5 px hovered) in the same colour, `text.primary` when selected, with a 1 px `window.background` outline; an 11 × 11 px area takes the pointer. A selection box is `accent` at 15 % with a 1 px `accent` line. The lane's header (`panel.background`, 5 px top and 6 px side padding): a dropdown of the parameter, the 30 × 15 px On/Off toggle (as the track-on toggle; off has a 1 px `accent` inset), 16 × 15 px **+** and **×** buttons (`control.background`, 11 px `text.secondary`), and under them a 10 px line: the number of points in `text.hint`, "Off: set by hand" in `text.secondary`, or "Click the lane to add a point". Gestures: [automation spec](../spec/automation.md#in-the-arrangement-view) |
 | Return and main rows | 20 px each along the bottom, `panel.background` headers: the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only); between them the meter lying down, 48 px long, 6 px left of the volume, its clip light at the right end |
 | Header meter | The track's meter (Session view › Meter) standing at the header's right edge, 6 px in, its rows 6 px clear of it; from the top of row 1 to the bottom of row 2 once row 2 shows, row 1's height before |
@@ -283,6 +288,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
+| Interface › Arrangement | Mixer controls | Field (default): the volume bar and the pan centre bar; Knob: a knob with its value beside it, in the Arrangement headers and the Session mixer ([spec](../spec/arrangement-editing.md) › Volume, pan, mute and solo) |
 | Interface › Detail area | Device chain | Row (default), Stack |
 | Interface › Detail area | Select on launch | On (default), Off: launching a clip in the Session view selects it, so the detail area shows it ([spec](../spec/ui-session-view.md)) |
 | Interface › Browser | Side | Left (default), Right |

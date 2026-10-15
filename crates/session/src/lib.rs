@@ -240,8 +240,8 @@ pub struct Session {
     /// The grid launches wait for, which the Arrangement view's grid follows too. Kept here,
     /// not in the project: it reaches a player when one is attached (`launcher.setQuantization`).
     quantization: Quantization,
-    /// A copied arrangement clip and the content it plays, for `clip.paste`.
-    clipboard: Option<(suhina_model::Clip, suhina_model::ClipContent)>,
+    /// The arrangement clips copied for `clip.paste`, with the content each plays.
+    clipboard: Vec<(suhina_model::Clip, suhina_model::ClipContent)>,
     /// Notes copied from a MIDI clip, for `note.paste`.
     note_clipboard: Option<notes::NoteClipboard>,
     /// Set by an edit command whose only change is one device parameter.
@@ -282,7 +282,7 @@ impl Session {
             redo: Vec::new(),
             player: None,
             quantization: Quantization::Bars(1),
-            clipboard: None,
+            clipboard: Vec::new(),
             note_clipboard: None,
             param_edit: None,
             plugins: rack::Rack::default(),
@@ -296,11 +296,11 @@ impl Session {
         }
     }
 
-    /// Whether the clip copied for `clip.paste` plays audio: `Some(true)` for audio, `Some(false)`
+    /// Whether the clips copied for `clip.paste` play audio: `Some(true)` for audio, `Some(false)`
     /// for notes, `None` when nothing has been copied. The window uses it to pick the stacking
     /// setting a paste follows.
     pub fn copied_clip_is_audio(&self) -> Option<bool> {
-        let (_, content) = self.clipboard.as_ref()?;
+        let (_, content) = self.clipboard.first()?;
         Some(content.lanes.iter().any(|l| matches!(l.data, suhina_model::LaneData::Audio(_))))
     }
 
@@ -308,6 +308,11 @@ impl Session {
     /// roll uses it to select the pasted notes.
     pub fn copied_notes(&self) -> Option<usize> {
         self.note_clipboard.as_ref().map(notes::NoteClipboard::len)
+    }
+
+    /// How many arrangement clips are copied for `clip.paste`.
+    pub fn copied_clips(&self) -> usize {
+        self.clipboard.len()
     }
 
     /// The project's decoded audio, which players are started with (ADR 0011).
@@ -792,7 +797,12 @@ impl Session {
                     .params
                     .iter()
                     .any(|p| p.name == "continue")
-                    .then(|| commands::track_id(&self.project, params).ok())
+                    .then(|| {
+                        // A command over several tracks continues on its first one.
+                        commands::track_id(&self.project, params).ok().or_else(|| {
+                            commands::track_list(&self.project, params).ok().and_then(|l| l.first().copied())
+                        })
+                    })
                     .flatten()
                     .map(|track| (spec.id, track));
                 let continued = params.get("continue").and_then(Value::as_bool) == Some(true);

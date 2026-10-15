@@ -305,6 +305,108 @@ impl Timeline {
     }
 }
 
+/// Which groups the Arrangement view has folded, and the track each folded group's row stands in
+/// for (`docs/spec/arrangement-editing.md` › Folded groups). View state: a project does not keep
+/// it, so opening a project shows every group open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Folds {
+    /// The groups whose tracks are folded away.
+    folded: Vec<TrackId>,
+    /// What each of them shows, in the same order: the track whose clips and colour its row
+    /// takes. Worked out by [`Folds::reconcile`], never set by a click.
+    shown: Vec<(TrackId, TrackId)>,
+}
+
+impl Folds {
+    /// Whether `group`'s tracks are folded away.
+    pub fn is_folded(&self, group: TrackId) -> bool {
+        self.folded.contains(&group)
+    }
+
+    /// The track the folded `group`'s row shows; `None` while the group is open.
+    pub fn shown(&self, group: TrackId) -> Option<TrackId> {
+        self.shown.iter().find(|(g, _)| *g == group).map(|(_, track)| *track)
+    }
+
+    /// Folds `group`'s tracks away, or opens the group again.
+    pub fn toggle(&mut self, group: TrackId) {
+        match self.folded.iter().position(|g| *g == group) {
+            Some(at) => {
+                self.folded.remove(at);
+            }
+            None => self.folded.push(group),
+        }
+    }
+
+    /// The folded groups as a set, for the views that share them (the Session view's columns,
+    /// the track list's drop targets).
+    pub fn groups(&self) -> std::collections::BTreeSet<TrackId> {
+        self.folded.iter().copied().collect()
+    }
+
+    /// Folds exactly `groups`: what another view folded or opened. Groups folded already keep
+    /// their place; what each shows is worked out again by [`Folds::reconcile`].
+    pub fn set_groups(&mut self, groups: &std::collections::BTreeSet<TrackId>) {
+        self.folded.retain(|g| groups.contains(g));
+        for group in groups {
+            self.fold(*group);
+        }
+    }
+
+    /// Folds `group`'s tracks away, as the group a Stems file arrives in does.
+    pub fn fold(&mut self, group: TrackId) {
+        if !self.is_folded(group) {
+            self.folded.push(group);
+        }
+    }
+
+    /// Brings the folds in line with the project: groups it no longer has are forgotten (a group
+    /// whose tracks are all gone stops being folded), and every folded group shows `targeted`
+    /// while that is one of its own tracks, else the first track inside it.
+    pub fn reconcile(&mut self, project: &Project, targeted: Option<TrackId>) {
+        self.folded.retain(|group| first_inside(project, *group).is_some());
+        self.shown = self
+            .folded
+            .iter()
+            .filter_map(|group| {
+                let first = first_inside(project, *group)?;
+                let show = targeted.filter(|track| holds(project, *group, *track)).unwrap_or(first);
+                Some((*group, show))
+            })
+            .collect();
+    }
+}
+
+/// The first track inside `group` in project order, when the project has one.
+fn first_inside(project: &Project, group: TrackId) -> Option<TrackId> {
+    project.tracks.iter().find(|t| t.parent == Some(group)).map(|t| t.id)
+}
+
+/// Whether `track` is inside `group`: one of its own tracks, or of a group inside it. A broken
+/// parent chain stops the walk.
+fn holds(project: &Project, group: TrackId, track: TrackId) -> bool {
+    let mut parent = project.tracks.iter().find(|t| t.id == track).and_then(|t| t.parent);
+    let mut hops = 0;
+    while let Some(id) = parent {
+        if id == group {
+            return true;
+        }
+        hops += 1;
+        if hops > project.tracks.len() {
+            break;
+        }
+        parent = project.tracks.iter().find(|t| t.id == id).and_then(|t| t.parent);
+    }
+    false
+}
+
+/// How many lanes follow the lane at `index` inside it. A project keeps a group's tracks next to
+/// the group, so that run is its family.
+pub(crate) fn inside_lanes<T: std::borrow::Borrow<Lane>>(lanes: &[T], index: usize) -> usize {
+    let depth = lanes.get(index).map_or(0, |l| l.borrow().depth);
+    lanes.iter().skip(index.saturating_add(1)).take_while(|l| l.borrow().depth > depth).count()
+}
+
 /// What an audio clip needs to draw its waveform: the engine's mapping from beats to the file.
 fn audio_view(content: &ClipContent, clip: &Clip, tempo_bpm: f64) -> Option<AudioView> {
     let region = content.lanes.iter().find_map(|l| match &l.data {
@@ -485,5 +587,63 @@ mod tests {
         let content = project.content(clip.content).unwrap();
         let starts: Vec<f64> = note_marks(content, &clip).iter().map(|m| m.start).collect();
         assert_eq!(starts, [0.0, 1.0]);
+    }
+
+    /// The demo project with Drums and Bass inside a group, "Group", in front of them, as
+    /// `track.group` leaves them.
+    fn grouped_project() -> Project {
+        crate::demo::grouped_project()
+    }
+
+    #[test]
+    fn a_folded_group_shows_its_first_track_and_follows_the_one_being_worked_on() {
+        let project = grouped_project();
+        let group = TrackId(50);
+        let (drums, bass) = (TrackId(1), TrackId(2));
+        let mut folds = Folds::default();
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+
+        folds.toggle(group);
+        folds.reconcile(&project, None);
+        assert!(folds.is_folded(group));
+        assert_eq!(folds.shown(group), Some(drums), "the first track inside the group");
+
+        // Working on a track of the group's own: the row follows it.
+        folds.reconcile(&project, Some(bass));
+        assert_eq!(folds.shown(group), Some(bass));
+        // A track outside it leaves the row on the first one, and a click opens the group again.
+        folds.reconcile(&project, Some(TrackId(3)));
+        assert_eq!(folds.shown(group), Some(drums));
+        folds.toggle(group);
+        folds.reconcile(&project, None);
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+    }
+
+    #[test]
+    fn a_fold_forgets_groups_the_project_no_longer_has() {
+        let mut project = grouped_project();
+        let group = TrackId(50);
+        let mut folds = Folds::default();
+        folds.fold(group);
+        folds.reconcile(&project, None);
+        assert!(folds.is_folded(group));
+        // The group's tracks are gone: the fold goes with them.
+        project.tracks.retain(|t| t.parent != Some(group));
+        folds.reconcile(&project, None);
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+    }
+
+    #[test]
+    fn inside_lanes_counts_the_tracks_a_group_holds() {
+        let timeline = Timeline::build(&grouped_project(), None);
+        let lanes: Vec<&Lane> = timeline.lanes.iter().collect();
+        let group = lanes.iter().position(|l| l.track == TrackId(50)).unwrap();
+        assert_eq!(inside_lanes(&lanes, group), 2);
+        // A track holds nothing, and the last lane has nothing after it.
+        assert_eq!(inside_lanes(&lanes, group + 1), 0);
+        assert_eq!(inside_lanes(&lanes, lanes.len() + 5), 0);
     }
 }

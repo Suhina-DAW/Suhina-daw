@@ -233,13 +233,13 @@ fn a_send_set_by_command_is_heard_through_the_return() {
     let peak =
         |p: &Project| suhina_engine::render_offline(p, 48_000, 512).unwrap().iter().fold(0.0f32, |m, s| m.max(s.abs()));
     let mut session = Session::new(project());
-    run(&mut session, "track.setVolume", json!({ "track": "Bass", "db": "-inf" })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Bass"], "db": "-inf" })).unwrap();
     assert!(peak(session.project()) < 1e-6);
     run(&mut session, "track.setSend", json!({ "track": "Bass", "return": "A Return", "level": 0 })).unwrap();
     // After the fader, a send follows the track's silent volume.
     assert!(peak(session.project()) < 1e-6);
     run(&mut session, "track.setSendMode", json!({ "track": "Bass", "return": "A Return", "mode": "pre" })).unwrap();
     assert!(peak(session.project()) > 0.1);
-    run(&mut session, "track.setMute", json!({ "track": "A Return", "mute": true })).unwrap();
+    run(&mut session, "track.setMute", json!({ "tracks": ["A Return"], "mute": true })).unwrap();
     assert!(peak(session.project()) < 1e-6);
 }

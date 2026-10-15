@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 50] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 52] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -102,15 +102,17 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 50] = [
     ("view.zoomIn", "Make the whole window larger", "View"),
     ("view.zoomOut", "Make the whole window smaller", "View"),
     ("view.zoomReset", "Make the whole window its normal size", "View"),
-    ("selection.copy", "Copy the selected clip, or the selected notes in the piano roll", "Edit"),
-    ("selection.cut", "Cut the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.copy", "Copy the selected clips, or the selected notes in the piano roll", "Edit"),
+    ("selection.cut", "Cut the selected clips, or the selected notes in the piano roll", "Edit"),
     (
         "selection.paste",
         "Paste after the selected clip, or at the playhead on the selected track; notes in the piano roll",
         "Edit",
     ),
-    ("selection.duplicate", "Duplicate the selected clip, or the selected notes in the piano roll", "Edit"),
-    ("selection.delete", "Delete the selected clip, or the selected notes in the piano roll", "Edit"),
+    ("selection.duplicate", "Duplicate the selected clips, or the selected notes in the piano roll", "Edit"),
+    ("selection.delete", "Delete the selected clips, or the selected notes in the piano roll", "Edit"),
+    ("selection.mute", "Mute or unmute the selected clips", "Edit"),
+    ("selection.selectAll", "Select every clip in the arrangement", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
     ("selection.launch", "Launch the selected clip slot", "Session"),
     ("selection.up", "Select the clip slot above", "Session"),
@@ -155,9 +157,15 @@ pub fn slot_only(action: &str) -> bool {
     matches!(action, "selection.launch" | "selection.up" | "selection.down" | "selection.left" | "selection.right")
 }
 
+/// Whether `action` is left alone while the piano roll has the keyboard: the selected slot's keys,
+/// and selecting every arrangement clip, whose key selects every note there instead.
+pub fn not_in_piano_roll(action: &str) -> bool {
+    slot_only(action) || action == "selection.selectAll"
+}
+
 /// Whether `a` and `b` can both run on the same key press, so one key for both is a conflict.
 fn overlap(a: &str, b: &str) -> bool {
-    !((piano_roll_only(a) && slot_only(b)) || (slot_only(a) && piano_roll_only(b)))
+    !((piano_roll_only(a) && not_in_piano_roll(b)) || (not_in_piano_roll(a) && piano_roll_only(b)))
 }
 
 /// Every action a key can be bound to: the window's, then each command that needs no
@@ -239,7 +247,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 51] = [
+const DEFAULTS: [(&str, &[&str]); 53] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -264,6 +272,8 @@ const DEFAULTS: [(&str, &[&str]); 51] = [
     ("selection.paste", &["Ctrl+V"]),
     ("selection.duplicate", &["Ctrl+D"]),
     ("selection.delete", &["Delete", "Backspace"]),
+    ("selection.mute", &["0"]),
+    ("selection.selectAll", &["Ctrl+A"]),
     ("selection.group", &["Ctrl+G"]),
     ("selection.launch", &["Enter"]),
     ("selection.up", &["Up"]),

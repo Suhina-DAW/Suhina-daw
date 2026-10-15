@@ -59,6 +59,12 @@ pub struct SessionViewState {
     /// Group tracks folded shut: their tracks' columns are hidden. The arrangement view's,
     /// copied in while this view shows.
     pub folded: BTreeSet<TrackId>,
+    /// Where the mixer strip's pan and volume controls were drawn last frame: the wheel over one
+    /// changes its value instead of scrolling the view.
+    value_areas: Vec<Rect>,
+    /// The volume as a knob beside the pan knob instead of a plain value
+    /// (Settings › Interface › Arrangement › Mixer controls).
+    pub knobs: bool,
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
@@ -150,7 +156,8 @@ pub fn show(
     let tracks_clip = Rect::from_min_max(area.min, Pos2::new(returns_x - 1.0, area.bottom()));
     let returns_clip = Rect::from_min_max(Pos2::new(returns_x, area.top()), Pos2::new(scenes_x - 1.0, area.bottom()));
 
-    // Scrolling: the body scrolls both ways; header and mixer follow the tracks sideways.
+    // Scrolling: the body scrolls both ways; header and mixer follow the tracks sideways. The
+    // wheel over a mixer value is that value's, so the view leaves it alone.
     // The tracks in their groups, and those a folded group hides.
     let places: Vec<Place> = grid.columns.iter().filter(|c| c.kind != ColumnKind::Return).map(Column::place).collect();
     let hidden = nesting::hidden(&places, &state.folded);
@@ -161,9 +168,14 @@ pub fn show(
         .map(|c| column_width(c) + 1.0)
         .sum();
     let content_height = (grid.scenes.len() as f32 + 1.0) * PITCH;
+    let fields = std::mem::take(&mut state.value_areas);
     if ui.rect_contains_pointer(area) {
-        let delta = ui.input(|i| i.smooth_scroll_delta());
-        state.scroll -= delta;
+        let over_field =
+            ui.ctx().pointer_hover_pos().is_some_and(|pointer| fields.iter().any(|rect| rect.contains(pointer)));
+        if !over_field {
+            let delta = ui.input(|i| i.smooth_scroll_delta());
+            state.scroll -= delta;
+        }
     }
     state.scroll.x = state.scroll.x.clamp(0.0, (content_width - tracks_clip.width()).max(0.0));
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - body.height()).max(0.0));
@@ -744,6 +756,7 @@ fn mixer_strip(
         _ => column.pan,
     };
     let knob_rect = Rect::from_min_size(inner.min, Vec2::splat(theme::KNOB));
+    state.value_areas.push(knob_rect);
     let pan_response = widgets::value_area(
         ui,
         knob_rect,
@@ -762,10 +775,10 @@ fn mixer_strip(
     let set_pan = |v: f64| {
         Action::new(
             "track.setPan",
-            json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+            json!({ "tracks": [track.0], "pan": (v * 100.0).round() / 100.0, "continue": continued }),
         )
     };
-    match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, (-1.0, 1.0), 0.0) {
+    match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, 0.02, (-1.0, 1.0), 0.0) {
         Drag::Moving(v) => {
             state.drag = Some((track, Control::Pan, v));
             actions.push(set_pan(v));
@@ -802,6 +815,7 @@ fn mixer_strip(
     let volume_top = if column.sends.is_empty() { inner.top() } else { values.top() };
     let volume_rect =
         Rect::from_min_max(Pos2::new(inner.center().x, volume_top), Pos2::new(inner.right(), values.bottom()));
+    state.value_areas.push(volume_rect);
     let volume_response = widgets::value_area(
         ui,
         volume_rect,
@@ -817,9 +831,9 @@ fn mixer_strip(
     let continued = preview.is_some();
     let set_volume = |v: f64| {
         let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-        Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+        Action::new("track.setVolume", json!({ "tracks": [track.0], "db": db, "continue": continued }))
     };
-    match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, VOLUME_RANGE, 0.0) {
+    match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, 1.0, VOLUME_RANGE, 0.0) {
         Drag::Moving(v) => {
             state.drag = Some((track, Control::Volume, v));
             actions.push(set_volume(v));
@@ -837,6 +851,12 @@ fn mixer_strip(
     };
     let volume_color = motion::mix(theme::text_value(), theme::text_primary(), widgets::hover(ui, &volume_response));
     widgets::text_in(painter, values, Align2::RIGHT_CENTER, &widgets::format_db(volume_shown), mono, volume_color);
+    // With knobs asked for, the volume gets one of its own beside the pan knob.
+    if state.knobs {
+        let center = Pos2::new(knob_rect.right() + 6.0 + theme::KNOB / 2.0, knob_rect.center().y);
+        let position = crate::arrangement_view::volume_position(volume_shown);
+        widgets::knob(painter, center, theme::KNOB, position, volume_color);
+    }
 
     // Toggle row: track on, showing the track number.
     let toggle = Rect::from_min_size(
@@ -867,12 +887,14 @@ fn mixer_strip(
     };
     let solo = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
     let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
-    if let Some(action) = widgets::solo_button(ui, painter, solo, id.with("solo"), track.0, &column.name, column.solo) {
+    if let Some(action) =
+        widgets::solo_button(ui, painter, solo, id.with("solo"), &[track.0], &column.name, column.solo)
+    {
         actions.push(action);
     }
     let response = widgets::button_area(ui, toggle, id.with("on"), label);
     if response.clicked() {
-        actions.push(Action::new("track.setMute", json!({ "track": track.0, "mute": !column.mute })));
+        actions.push(Action::new("track.setMute", json!({ "tracks": [track.0], "mute": !column.mute })));
     }
     let (fill, text) = widgets::toggle_colors(ui, &response, !column.mute);
     painter.rect_filled(toggle, 0.0, fill);
@@ -923,7 +945,7 @@ fn send_knobs(
         };
         let level = if send.level_db.is_finite() { send.level_db } else { VOLUME_RANGE.0 };
         let mut committed = None;
-        match widgets::drag_value(ui, &response, &mut preview, level, 0.25, VOLUME_RANGE, VOLUME_RANGE.0) {
+        match widgets::drag_value(ui, &response, &mut preview, level, 0.25, 1.0, VOLUME_RANGE, VOLUME_RANGE.0) {
             Drag::Moving(v) => state.drag = Some((track, control, v)),
             Drag::Done(v) => {
                 state.drag = None;

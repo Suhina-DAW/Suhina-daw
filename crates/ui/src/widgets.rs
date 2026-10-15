@@ -86,13 +86,14 @@ pub fn toggle_colors(ui: &Ui, response: &Response, on: bool) -> (Color32, Color3
 }
 
 /// A track's solo button: draws it in `rect` and returns the command a click asks for. A click
-/// solos the track alone; with Ctrl (Cmd) held it is added to the tracks already soloed.
+/// solos the tracks named in `tracks` alone — one track, or the whole selection the clicked one
+/// is part of; with Ctrl (Cmd) held they are added to the tracks already soloed.
 pub fn solo_button(
     ui: &Ui,
     painter: &Painter,
     rect: Rect,
     id: egui::Id,
-    track: u32,
+    tracks: &[u32],
     name: &str,
     solo: bool,
 ) -> Option<Action> {
@@ -109,7 +110,7 @@ pub fn solo_button(
     let adding = ui.input(|i| i.modifiers.command);
     Some(Action::new(
         "track.setSolo",
-        serde_json::json!({ "track": track, "solo": !solo, "exclusive": !solo && !adding }),
+        serde_json::json!({ "tracks": tracks, "solo": !solo, "exclusive": !solo && !adding }),
     ))
 }
 
@@ -174,21 +175,58 @@ pub enum Drag {
     None,
     /// Being dragged: the value to show.
     Moving(f64),
-    /// Released, or reset by a double-click: the value to commit.
+    /// Released, reset by a double-click or moved by the wheel: the value to commit.
     Done(f64),
 }
 
-/// A number changed by dragging vertically (up raises it) and reset by a double-click.
-/// `per_point` is the change per point of drag; Shift makes it ten times finer.
+/// The points one tick of a wheel scrolls, which is one step of a value control (egui reports a
+/// line of a wheel as this many points on most platforms).
+const WHEEL_TICK: f64 = 50.0;
+
+/// How far the wheel turned this frame, in points, read from the events themselves rather than
+/// from egui's smoothed scroll, so one tick of a wheel is one step and not a run of them.
+fn wheel_points(ui: &Ui) -> f32 {
+    ui.input(|i| {
+        i.raw
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel { unit, delta, .. } => Some(match unit {
+                    egui::MouseWheelUnit::Point => delta.y,
+                    egui::MouseWheelUnit::Line => delta.y * WHEEL_TICK as f32,
+                    egui::MouseWheelUnit::Page => delta.y * 400.0,
+                }),
+                _ => None,
+            })
+            .sum()
+    })
+}
+
+/// A number changed by dragging vertically (up raises it), by the wheel over it and by a
+/// double-click. `per_point` is the change per point of drag and `per_tick` the change per wheel
+/// tick; Shift makes both ten times finer.
+#[allow(clippy::too_many_arguments)]
 pub fn drag_value(
     ui: &Ui,
     response: &Response,
     preview: &mut Option<f64>,
     value: f64,
     per_point: f64,
+    per_tick: f64,
     range: (f64, f64),
     default: f64,
 ) -> Drag {
+    // The wheel over the control moves it, as a drag would; the caller commits what it is given.
+    // Scrolling up raises the value, as dragging up does.
+    if response.hovered() {
+        let points = wheel_points(ui);
+        if points != 0.0 {
+            let fine = if ui.input(|i| i.modifiers.shift) { 0.1 } else { 1.0 };
+            let step = -f64::from(points) / WHEEL_TICK * per_tick * fine;
+            *preview = None;
+            return Drag::Done((value + step).clamp(range.0, range.1));
+        }
+    }
     if response.double_clicked() {
         *preview = None;
         return Drag::Done(default);

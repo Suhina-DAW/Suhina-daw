@@ -293,7 +293,7 @@ fn edits_and_undo_are_heard_while_playing() {
     assert!(loud > 0.05);
 
     // -12 dB is a quarter of the level, from the next note on.
-    run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": -12 })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Drums"], "db": -12 })).unwrap();
     let quieter = beat_peaks(&mut renderer, 2)[1];
     assert!((quieter / loud - 0.25).abs() < 0.01, "{loud} -> {quieter}");
     // The clip kept playing: the launcher still reports it.
@@ -314,14 +314,14 @@ fn a_drag_that_outruns_the_engine_is_kept_and_heard_once_it_catches_up() {
     let mut full = None;
     for i in 0..64 {
         let db = -f64::from(i % 2 + 1);
-        if let Err(e) = run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": db })) {
+        if let Err(e) = run(&mut session, "track.setVolume", json!({ "tracks": ["Drums"], "db": db })) {
             full = Some(e);
             break;
         }
     }
     assert!(full.is_some_and(|e| e.contains("could not follow")));
     // A continued edit (a drag) is not an error then: the project has it, the engine catches up.
-    run(&mut session, "track.setVolume", json!({ "track": "Drums", "db": -12, "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Drums"], "db": -12, "continue": true })).unwrap();
     assert!((session.project().channels[0].volume - 0.2512).abs() < 1e-3);
     beat_peaks(&mut renderer, 1);
     session.catch_up_player();

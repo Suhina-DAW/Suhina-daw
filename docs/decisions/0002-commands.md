@@ -114,6 +114,19 @@ and `midi.setInput` turns one on or off, through the `MidiSystem` trait the MIDI
 implements. Arming a track (`track.setArm`) is a transport command that, unlike the others, works
 without an engine: the session keeps the armed tracks and tells each new player.
 
+## Amendment: lists of tracks and clips (2026-10-15)
+
+A command that acts on mixer strips or on arrangement clips takes a list. Tracks are named the way
+`track.group` names them: `tracks`, a list of one or more ids or names. Clips take `clips`
+(`ParamType::Clips`), each entry `{ "track": id or name, "index": n }` as `project.clips` lists
+them, at least one. So a selection is one command and one undo step, not one command per item:
+`track.setVolume`, `track.adjustVolume`, `track.setPan`, `track.adjustPan`, `track.setMute`,
+`track.setSolo`, `clip.delete`, `clip.copy`, `clip.cut`, `clip.duplicate` and `clip.setEnabled` all
+take it ([arrangement editing](../spec/arrangement-editing.md) › Selecting clips and Volume, pan,
+mute and solo). The `set` commands take the value each item gets; the `adjust` commands take how far
+each moves, so a selection keeps what is between its members. Naming the item by its track and, for
+a clip, its index keeps the front ends alike: the window, the CLI and MCP pass the same list.
+
 ## Amendment: device commands (2026-10-12)
 
 Devices on tracks are edited with ordinary **edit** commands, one undo step each:

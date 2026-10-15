@@ -161,6 +161,36 @@ fn clip_of(content: ContentId) -> Clip {
     }
 }
 
+/// The demo project with Drums and Bass inside a group, "Group", standing in front of them, as
+/// `track.group` leaves them. The view tests that fold or route a group build on it.
+#[cfg(test)]
+pub(crate) fn grouped_project() -> Project {
+    use suhina_engine::model::{Channel, ChannelId, ChannelRole, Track, TrackId};
+    let mut project = demo_project();
+    let (group, channel) = (TrackId(50), ChannelId(150));
+    project.channels.push(Channel {
+        id: channel,
+        name: "Group".into(),
+        role: ChannelRole::Submix,
+        sends: Vec::new(),
+        ..project.channels[0].clone()
+    });
+    let mut group_track = project.tracks[0].clone();
+    group_track.id = group;
+    group_track.name = "Group".into();
+    group_track.channel = Some(channel);
+    group_track.parent = None;
+    group_track.content = Default::default();
+    let held: Vec<Track> = project.tracks.iter().take(2).cloned().collect();
+    project.tracks.retain(|t| !held.iter().any(|h| h.id == t.id));
+    project.tracks.insert(0, group_track);
+    for (at, mut track) in held.into_iter().enumerate() {
+        track.parent = Some(group);
+        project.tracks.insert(1 + at, track);
+    }
+    project
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

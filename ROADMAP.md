@@ -476,6 +476,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
   double-click for off, right-click for before or after the fader.
+- Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
+  `track.adjustPan` move each track by the same amount, keeping what is between them, and
+  `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
+  volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
+  tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
+  volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
@@ -486,12 +492,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Groups inside groups, up to 16 levels ([#209](https://github.com/suhina-daw/suhina-daw/issues/209)):
   the sound goes through every group's volume, mute and devices to the output, solo follows the
-  nesting, and a fold arrow on a group's header hides its tracks in both views. Drag a header
+  nesting, and the fold triangle on a group's header hides its tracks in both views. Drag a header
   into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
   groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
 - A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
   makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
   the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
+- Clips: Ctrl-click adds one to the selection and Shift-click takes the run up to one, Ctrl+A
+  selects the lot, and Ctrl+C, Ctrl+X, Ctrl+D, Delete and 0 (clip mute) act on the whole
+  selection as one undo step ([spec](docs/spec/arrangement-editing.md#selecting-clips)). Header
+  clicks take a run of tracks the same way.
+- A group's triangle folds its tracks away into one lane, which stands in for the track being
+  worked on (its clips, waveform and colour), or the first track inside it; a Stems file's group
+  arrives folded ([spec](docs/spec/arrangement-editing.md#folded-groups)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right

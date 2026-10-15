@@ -1,9 +1,9 @@
 ---
 description: Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter
-read_when: stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix
+read_when: stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix, folded group
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/media/src/stems.rs
   - crates/session/src/files.rs
@@ -89,6 +89,11 @@ as a disabled device, so it can be switched on.
 | compressor `dry_wet` | `mix` | percent / 100 (a value ≤ 1 is taken as a fraction), 0..1 |
 | limiter `threshold`, `ceiling` | limiter `threshold`, `ceiling` | dB, kept to −30..0 and −12..0 |
 | limiter `release` | `release` | seconds, kept to 1 ms–1 s |
+
+In the Arrangement view the group arrives **folded**: one lane named after the file, showing the
+clips of the master track, with the stems' lanes folded away until the group's triangle is clicked
+([arrangement editing](arrangement-editing.md) › Folded groups). The master track is muted so the
+file does not sound twice; it is there to hear the whole mix and to compare with.
 
 ## Limits
 
