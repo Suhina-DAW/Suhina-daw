@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -167,7 +167,9 @@ workspace forbids.
    once (`Plugin::health` keeps what it found last, and a restart sets that), not as the
    instance it replaced.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
-   the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
+   the saved project keeps it in `Device::state` (a VST3 controller's in an extension), and the
+   open project keeps what it was opened with, so reading it is neither a change nor an undo
+   step. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it
    is then, each on a thread of its own, waits at most a second for the answers (the last state
    read stands in for one that has not answered) and writes that, with the last state of
