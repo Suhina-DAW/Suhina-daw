@@ -34,8 +34,7 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
-7. **Launch modes, legato and per-clip quantisation** (the rest of M4), and controls for follow
-   actions in the detail area.
+7. **Launch modes, legato and per-clip quantisation** (the rest of M4).
 
 Finishing what is in flight (M3's commands, M6's automation and editors, M7, M8's installers and
 detail area) goes alongside this list, not after it.
@@ -208,8 +207,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   agents, and `project_render` renders a script of them offline.
 - Follow actions: after its follow time (beats, or the clip's length) a slot clip runs action A
   or B, picked by chance: stop, play again, previous, next, first, last, any, other, or jump to
-  a scene's slot, on the exact frame, saved in the project (`clip.setFollowAction`; controls in
-  the detail area to come, [#408](https://github.com/suhina-daw/suhina-daw/issues/408)).
+  a scene's slot, on the exact frame, saved in the project (`clip.setFollowAction`).
+- Launching a slot clip selects it, and the detail area shows its follow action: an on switch,
+  the follow time and a switch that links it to the clip's length, actions A and B (a jump picks
+  its scene) and their chances, each change one undo step (`clip.setFollowAction`).
 - Still to do: launch modes, per-clip quantisation, fades on launched clips
   ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec

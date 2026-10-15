@@ -56,10 +56,10 @@ CHAPTERS = [
      "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
      "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.50, "partial",
+    (7, "Session View", 13, 0.52, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
-     "Follow actions are set by command only (clip.setFollowAction). Missing scene view/editing "
-     "depth, select-on-launch options, follow-action controls in the view."),
+     "A launched clip is selected and the detail area shows its follow-action controls. Missing "
+     "scene view/editing depth, select-on-launch options."),
     (8, "Clip View", 34, 0.08, "started",
      "Detail area shows clip properties; the MIDI clip editor is a spec only "
      "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),
@@ -81,7 +81,7 @@ CHAPTERS = [
     (16, "Launching Clips", 12, 0.48, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, "
      "warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by "
-     "command, no controls in the detail area yet). Missing launch modes, legato, velocity amount, "
+     "command and in the detail area). Missing launch modes, legato, velocity amount, "
      "clip offset/nudge, follow-action multiplier and scene follow actions."),
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
