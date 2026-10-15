@@ -316,6 +316,7 @@ the CLI can do the same.
 | `library.setTag` | `name?`, `color?`, `rename?`, `limit?` | adds a tag, or changes one's colour or name; `limit` sets the most tags there may be |
 | `library.removeTag` | `name` | removes a tag from the list and every item |
 | `library.tag` | `item`, `tag`, `on` | sets or clears a tag on an item |
+| `library.setPluginsView` | `view` | how the browser shows the installed plug-ins: `grouped` (default), `type` or `flat` ([plug-in browsing](plugin-browsing.md)) |
 | `library.findFiles` | `names`, `folder?` | finds files by name for missing files: in the folders' index and the active project's folder, or by walking `folder` ([missing files](missing-files.md)) |
 
 **Project** (on the active project, one undo step each):
