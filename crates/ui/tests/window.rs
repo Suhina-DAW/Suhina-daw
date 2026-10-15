@@ -9,7 +9,7 @@ use suhina_engine::model::TrackId;
 use suhina_session::Session;
 use suhina_ui::arrangement_view::{self, ArrangementViewState};
 use suhina_ui::demo::demo_project;
-use suhina_ui::grid::Grid;
+use suhina_ui::grid::{Grid, SlotState};
 use suhina_ui::session_view::{self, SessionViewState};
 use suhina_ui::themes::FileAction;
 use suhina_ui::timeline::Timeline;
@@ -3108,6 +3108,19 @@ fn a_slots_menu_copies_its_clip_and_pastes_once_something_is_copied() {
     harness.get_by_label_contains("Paste").click();
     harness.run();
     assert_eq!(harness.state().actions, [Action::new("clip.paste", json!({ "track": 3, "scene": 1 }))]);
+}
+
+#[test]
+fn a_playing_trigger_clips_click_stops_it() {
+    let mut harness = view();
+    // Walk's slot in scene 2, playing: its mark is the stop square, and the click stops the
+    // track (a trigger clip listens for no release, so the press stops instead of relaunching).
+    harness.state_mut().grid.columns[1].slots[1].state = SlotState::Playing;
+    harness.run();
+    assert_eq!(
+        clicked(&mut harness, "Stop Walk on Bass (scene 2)"),
+        [Action::new("track.stop", json!({ "track": 2 }))]
+    );
 }
 
 #[test]

@@ -146,9 +146,9 @@ Track colours: the track's own colour if it has one, else `track.1`–`track.4` 
 |---|---|---|---|
 | Empty without a stop button | `window.background` | none | |
 | Empty with a stop button | `window.background` | 3 × 3 `#4A4743` | |
-| Stopped | `control.background`, text `#C9C4BB` | 6 × 6 track colour | |
-| Queued | `control.background` | 6 × 6 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
-| Playing | `control.playingBackground`, text `#FFFFFF` | 6 × 6 track colour | 2 px `accent` progress line along the bottom |
+| Stopped | `control.background`, text `#C9C4BB` | a 8 × 10 px play triangle in the track colour (its tip right), the click's shape | |
+| Queued | `control.background` | 10 × 10 track colour at 50 % with 1 px `accent` outline | 1 px inset `accent` outline on the cell |
+| Playing | `control.playingBackground`, text `#FFFFFF` | an 8 × 8 px square in the track colour, the click's shape | 2 px `accent` progress line along the bottom |
 | Selected | `control.activeBackground` (playing keeps `control.playingBackground`) | as its state | 1 px inset `text.primary` outline (a queued clip keeps its `accent` outline) |
 | Recording | (planned) `#3A2B2A`, text `#FFFFFF` | 6 px red dot | 2 px red progress line |
 

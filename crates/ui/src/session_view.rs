@@ -22,7 +22,7 @@ const PITCH: f32 = ROW + 1.0;
 /// Width of a group header's fold arrow.
 const FOLD_ARROW: f32 = 12.0;
 /// Mark sizes inside a slot.
-const CLIP_MARK: f32 = 6.0;
+const CLIP_MARK: f32 = 10.0;
 /// The part of a clip's slot that launches it: the mark and the padding around it.
 const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
@@ -553,7 +553,8 @@ fn column_body(
                 format!("Stop {} (scene {number})", column.name),
             )),
             _ => {
-                let label = format!("Launch {name} on {} (scene {number})", column.name);
+                let verb = if slot.state == SlotState::Playing { "Stop" } else { "Launch" };
+                let label = format!("{verb} {name} on {} (scene {number})", column.name);
                 let response = ui.interact(launch_rect.intersect(clip), id.with(scene), sense);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                 Some(response)
@@ -569,10 +570,18 @@ fn column_body(
         let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         // The launch button launches as the pointer goes down, and releases a gate or repeat
-        // clip as it goes up.
+        // clip as it goes up. A playing trigger clip's press stops it instead.
         if slot.state != SlotState::Empty
             && let Some(response) = &launch
-            && crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions)
+            && crate::slot_launch::press_and_release(
+                ui,
+                response,
+                column.track,
+                number,
+                slot.launch,
+                slot.state == SlotState::Playing,
+                actions,
+            )
             && selectable
             && !state.keep_selection_on_launch
         {
@@ -700,14 +709,30 @@ fn slot_cell(
                 painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(accent), StrokeKind::Outside);
                 painter.rect_stroke(rect, 0.0, theme::hairline(accent), StrokeKind::Inside);
             } else {
-                painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(mark, column.mute));
+                // The mark is the shape its click does: a play triangle while stopped.
+                let box_rect = mark_rect(CLIP_MARK);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        box_rect.center() + Vec2::new(-3.0, -5.0),
+                        box_rect.center() + Vec2::new(5.0, 0.0),
+                        box_rect.center() + Vec2::new(-3.0, 5.0),
+                    ],
+                    lane(mark, column.mute),
+                    egui::Stroke::NONE,
+                ));
             }
             let text = if column.mute { theme::text_hint() } else { text };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
         }
         SlotState::Playing => {
             painter.rect_filled(rect, 0.0, lane(theme::control_playing(), column.mute));
-            painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(track_color, column.mute));
+            // The mark is the shape its click does: a stop square while playing. A stopped
+            // clip's mark is the play triangle the same way, for its click's launch.
+            painter.rect_filled(
+                Rect::from_center_size(mark_rect(CLIP_MARK).center(), Vec2::splat(CLIP_MARK - 2.0)),
+                0.0,
+                lane(track_color, column.mute),
+            );
             let text = if column.mute { theme::text_hint() } else { theme::text_playing() };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
             let done = progress.unwrap_or(1.0).clamp(0.0, 1.0);
