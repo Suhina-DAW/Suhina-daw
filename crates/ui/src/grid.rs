@@ -2,7 +2,7 @@
 //! (tracks, then return tracks), scenes and the state of every slot. Pure data, so the view and
 //! its tests share one source of truth.
 
-use suhina_engine::model::{ChannelRole, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Project, Rgb, Track, TrackId};
 use suhina_engine::{LauncherMonitor, Queued};
 
 use crate::theme;
@@ -78,6 +78,19 @@ pub struct Column {
     pub depth: usize,
     /// -1 is full left, 1 full right.
     pub pan: f64,
+    /// One per return track, in their order, for a track or group column; empty for a return.
+    pub sends: Vec<SendKnob>,
+}
+
+/// A track's send to one return track, as the mixer strip shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SendKnob {
+    /// The return track.
+    pub target: TrackId,
+    pub name: String,
+    /// Minus infinity without a send.
+    pub level_db: f64,
+    pub pre_fader: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +125,14 @@ impl Grid {
 
         let mut columns = Vec::new();
         let mut returns = Vec::new();
+        let return_tracks: Vec<&Track> = project
+            .tracks
+            .iter()
+            .filter(|t| {
+                let channel = t.channel.and_then(|id| project.channels.iter().find(|c| c.id == id));
+                channel.is_some_and(|c| c.role == ChannelRole::Effect)
+            })
+            .collect();
         for (index, track) in project.tracks.iter().enumerate() {
             let channel = track.channel.and_then(|id| project.channels.iter().find(|c| c.id == id));
             let role = channel.map_or(ChannelRole::Regular, |c| c.role);
@@ -169,6 +190,21 @@ impl Grid {
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
                 pan: channel.map_or(0.0, |c| c.pan),
+                sends: match (kind, channel) {
+                    (ColumnKind::Return, _) | (_, None) => Vec::new(),
+                    (_, Some(channel)) => return_tracks
+                        .iter()
+                        .map(|r| {
+                            let send = channel.sends.iter().find(|s| Some(s.target) == r.channel);
+                            SendKnob {
+                                target: r.id,
+                                name: r.name.clone(),
+                                level_db: send.map_or(f64::NEG_INFINITY, |s| gain_to_db(s.level)),
+                                pre_fader: send.is_some_and(|s| s.pre_fader),
+                            }
+                        })
+                        .collect(),
+                },
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }
         }
