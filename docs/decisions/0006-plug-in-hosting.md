@@ -193,7 +193,13 @@ workspace forbids.
     in a bundle, the executable is looked up per system: `Contents/<arch>-win/<name>` on Windows,
     `Contents/x86_64-linux/<stem>.so` on Linux, and on macOS in `Contents/MacOS` (the file named
     after the bundle without the extension, or else the first non-hidden file in the folder, as
-    the bundle format lets the executable be named anything).
+    the bundle format lets the executable be named anything). The module's entry is called the
+    same way per system, and it is optional: `InitDll`/`ExitDll` on Windows,
+    `ModuleEntry`/`ModuleExit` on Linux, `bundleEntry`/`bundleExit` on macOS, all called only
+    when the module exports them. The entry matters where modules build the plugin their class
+    information is read from in it, as DPF-built modules (Cardinal, plugdata) do on macOS:
+    answering a class query before the entry has run crashes them (a null dereference in the
+    module), which a scan would then report as a crash while loading.
    the state handed to the engine is the component's. `test:vst3`, a gain with a separate
    controller built into the host, plays the part of `test:clap`. **Class ids** are written as
    the SDK writes them (`moduleinfo.json`, the model): on Windows the first three fields of the
