@@ -36,16 +36,21 @@ COMMANDS = 95
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
 CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
-    (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.50, "partial",
-     "Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), "
+    (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
+     "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
+     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
      "Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer "
      "concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin."),
-    (4, "Working with the Browser", 60, 0.45, "partial",
+    (4, "Working with the Browser", 60, 0.49, "partial",
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
-     "engine, sample map by sound similarity. Missing collections/tag editor depth, packs, Splice, "
+     "engine, sample map by sound similarity; samples and MIDI files dragged from the system's file "
+     "manager land like a browser drag (exact placement waits for pointer positions from the "
+     "windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups "
+     "from the formats' own categories) or in a flat list sortable by name, vendor, type, format "
+     "and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.35, "partial",
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
@@ -101,8 +106,9 @@ CHAPTERS = [
      "SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, "
      "graphs and custom panels, and support explicit revision updates. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
-    (24, "Using Plug-Ins", 12, 0.55, "partial",
-     "CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency "
+    (24, "Using Plug-Ins", 12, 0.57, "partial",
+     "CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, "
+     "editors (Windows/X11), scans, latency "
      "compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, "
      "configure mode, VST preset banks, sidechain parameters."),
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
@@ -134,8 +140,8 @@ CHAPTERS = [
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",
      "No Link, no Tempo Follower, no MIDI clock sync."),
     (38, "Computer Audio Resources and Strategies", 7, 0.35, "partial",
-     "CPU-load meter, buffer-size choice, render-ahead engine, plug-in deadline reporting, an "
-     "80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter."),
+     "CPU-load meter, the program's RAM in the control bar, buffer-size choice, render-ahead "
+     "engine, plug-in deadline reporting, an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter."),
     (39, "Audio Fact Sheet", 8, None, "n/a",
      "Not a feature list. Suhina renders 32-bit float and does not dither; no neutrality test suite."),
     (40, "MIDI Fact Sheet", 6, None, "n/a",

@@ -125,8 +125,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 ## What works now
 
 ### M0 Foundation
-- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
-  Windows and macOS when started by hand and in every release build.
+- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux, Windows and
+  macOS for every change; macOS does not block merging yet.
 - A nightly build of `main` for Linux, Windows and macOS, with the desktop app, the CLI and the
   plug-in host, published every night as the `nightly` release
   ([`docs/releasing.md`](docs/releasing.md#nightly)).
@@ -300,6 +300,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- Samples, Stems files and MIDI files dragged from the system's file manager land like a drag
+  from the browser: on the slot, lane or empty space under the pointer, outlined while they hover
+  (`clip.addFiles`). Where the system reports no pointer position during the drag, they go where
+  Enter puts them ([spec](docs/spec/browser.md#files-from-the-system)).
+- The browser's **plug-ins in three views** (the Plug-ins category): grouped by vendor as
+  ever, grouped by type (Instruments and Effects, Suhina's groups from the formats' own
+  sub-categories), or one flat list whose columns (name, vendor, type, format, date modified)
+  sort by clicking their headings; the choice is kept with the library, and pins and tags work
+  on plug-in rows like on files
+  ([spec](docs/spec/plugin-browsing.md)).
 - **Missing files**: a project whose audio files cannot be found says so in a bar when it opens
   (Find…, Later; View › Missing files). The panel lists them with the clips that use them, finds
   them by name in the browser's folders and the project's folder at once, or in a folder typed or
@@ -321,6 +331,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
+- **Help › About Suhina** says which build this is: the version (a nightly's names its night and
+  commit), the platform and the licence, and copies one line naming the build for a bug report
+  ([spec](docs/spec/about.md)).
 - The whole window zooms from 50 % to 200 % (Ctrl and + or -, Cmd on macOS; Ctrl and 0 for
   100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
   ([spec](docs/spec/window-zoom.md)).
@@ -334,10 +347,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
-- The control bar has tempo, launch quantisation, play, stop, the position and the CPU load
+- The control bar has tempo, launch quantisation, play, stop, the position, the CPU load
   (how much of the time the audio engine spends rendering, from the engine's monitor; hidden
-  while no engine plays); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every
-  click is a command, the same the CLI and MCP run.
+  while no engine plays) and the program's RAM in megabytes or gigabytes (its resident
+  memory, measured once a second); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and
+  redo. Every click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - A track header 70 px or taller shows where the track plays: the main output or a group

@@ -158,6 +158,13 @@ static LIBRARY_COMMANDS: &[CommandSpec<Projects>] = &[
         kind: CommandKind::Library,
         run: crate::relink::find_files,
     },
+    CommandSpec {
+        id: "library.setPluginsView",
+        label: "Choose how the browser shows the installed plug-ins, kept for the next start: grouped by vendor (the default), by type, or as one flat list",
+        params: &[param("view", ParamType::Text, "grouped (default), type or flat")],
+        kind: CommandKind::Library,
+        run: set_plugins_view,
+    },
 ];
 
 /// The library commands, as `commands.list` shows them.
@@ -616,6 +623,14 @@ fn pin(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
     let item = Item::parse(key).ok_or("item must be a path or an item key")?;
     let pinned = projects.file_library_mut().pin(&item.key()).map_err(CommandError)?;
     Ok(json!({ "item": item.key(), "pinned": true, "changed": pinned }))
+}
+
+fn set_plugins_view(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {
+    let name = text(params, "view")?;
+    let view = suhina_library::store::PluginsView::parse(name)
+        .ok_or_else(|| CommandError("view must be grouped, type or flat".into()))?;
+    projects.file_library_mut().set_plugins_view(view).map_err(CommandError)?;
+    Ok(json!({ "view": view.name() }))
 }
 
 fn unpin(projects: &mut Projects, params: &Value) -> Result<Value, CommandError> {

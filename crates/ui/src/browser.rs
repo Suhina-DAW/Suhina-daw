@@ -55,6 +55,21 @@ pub struct Row {
     pub open: bool,
     /// What it is shown under in a flat list (the folder a search found it in).
     pub context: Option<String>,
+    /// The columns the plug-ins' flat list shows, for a plug-in row there.
+    pub columns: Option<PluginColumns>,
+}
+
+/// The columns of one row of the plug-ins' flat list
+/// ([the plug-in browsing spec](../../docs/spec/plugin-browsing.md) › The three views).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginColumns {
+    pub vendor: String,
+    /// `instrument` or `effect`.
+    pub kind: &'static str,
+    /// `vst3`, `clap`, …
+    pub format: &'static str,
+    /// When the scan read the plug-in's file, as seconds since 1970; `None` when unknown.
+    pub modified: Option<u64>,
 }
 
 /// What is known about a file, as it is read in the background.
@@ -200,6 +215,9 @@ pub struct BrowserState {
     pub anchor: Option<usize>,
     /// Only items carrying any of these tags.
     pub tag_filter: Vec<String>,
+    /// The plug-ins' flat list sorts by this column (0 name, 1 vendor, 2 type, 3 format,
+    /// 4 modified), `true` descending. The window's own, not kept between runs.
+    pub plugin_sort: (u8, bool),
     /// Put the cursor in the search field on the next frame.
     pub focus_search: bool,
     /// The search field had the keyboard last frame.
@@ -243,6 +261,7 @@ impl Default for BrowserState {
             selected: Vec::new(),
             anchor: None,
             tag_filter: Vec::new(),
+            plugin_sort: (0, false),
             focus_search: false,
             search_focused: false,
             stop_preview: false,
@@ -337,9 +356,16 @@ impl BrowserState {
     /// Builds the rows when what they come from changed.
     pub fn refresh_rows(&mut self, projects: &mut Projects) -> Result<(), String> {
         let revision = projects.file_library_mut().revision();
+        let plugins_view = projects.file_library_mut().plugins_view();
         let key = format!(
-            "{}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{revision}\u{1}{}",
-            self.search, self.category, self.place, self.tag_filter, self.generation
+            "{}\u{1}{:?}\u{1}{:?}\u{1}{:?}\u{1}{revision}\u{1}{}\u{1}{}\u{1}{:?}",
+            self.search,
+            self.category,
+            self.place,
+            self.tag_filter,
+            self.generation,
+            plugins_view.name(),
+            self.plugin_sort
         );
         if self.rows_key.as_deref() == Some(key.as_str()) {
             return Ok(());
@@ -378,7 +404,7 @@ impl BrowserState {
                 let context = context.or_else(|| f.detail.clone());
                 let item =
                     BrowserItem { key: f.item.key(), name: f.name.clone(), kind: item_kind(&f), plugin: f.plugin };
-                Row { item, depth: 0, opens: false, open: false, context }
+                Row { item, depth: 0, opens: false, open: false, context, columns: None }
             })
             .collect())
     }
@@ -409,7 +435,7 @@ impl BrowserState {
                         let key = folder.display().to_string();
                         let open = self.open.contains(&key);
                         let item = BrowserItem { key: key.clone(), name, kind: ItemKind::Folder, plugin: false };
-                        rows.push(Row { item, depth: 0, opens: true, open, context: None });
+                        rows.push(Row { item, depth: 0, opens: true, open, context: None, columns: None });
                         if open {
                             self.folder_rows(projects, &folder, 1, &mut rows);
                         }
@@ -422,7 +448,7 @@ impl BrowserState {
 
     fn device_rows(&self, node: &str, name: &str, instruments: bool, rows: &mut Vec<Row>) {
         let open = self.open.contains(node);
-        rows.push(Row { item: heading(node, name), depth: 0, opens: true, open, context: None });
+        rows.push(Row { item: heading(node, name), depth: 0, opens: true, open, context: None, columns: None });
         if !open {
             return;
         }
@@ -433,23 +459,43 @@ impl BrowserState {
             }
             let kind = if is_instrument { ItemKind::Instrument } else { ItemKind::Effect };
             let item = BrowserItem { key: format!("device:{}", info.id), name: info.name.into(), kind, plugin: false };
-            rows.push(Row { item, depth: 1, opens: false, open: false, context: None });
+            rows.push(Row { item, depth: 1, opens: false, open: false, context: None, columns: None });
         }
     }
 
     fn plugin_rows(&self, projects: &mut Projects, rows: &mut Vec<Row>) {
+        match projects.file_library_mut().plugins_view() {
+            suhina_library::store::PluginsView::Grouped => self.plugin_rows_grouped(projects, rows),
+            suhina_library::store::PluginsView::Type => self.plugin_rows_type(projects, rows),
+            suhina_library::store::PluginsView::Flat => self.plugin_rows_flat(projects, rows),
+        }
+    }
+
+    /// The plug-ins the category asks for, with their type and when their file was read.
+    fn listed_plugins(&self, projects: &mut Projects) -> Vec<(suhina_plugins::scan::PluginInfo, bool, Option<u64>)> {
         let env = projects.plugin_env();
         let wanted = |instrument: bool| match self.category {
             Category::Instruments => instrument,
             Category::Effects => !instrument,
             _ => true,
         };
+        // When the scan read each plug-in's file, from the catalog's entries.
+        let modified: HashMap<&Path, u64> =
+            env.catalog.entries().iter().map(|e| (e.path.as_path(), e.modified)).collect();
+        env.catalog
+            .plugins()
+            .filter(|p| wanted(suhina_session::is_instrument(p)))
+            .map(|p| (p.clone(), suhina_session::is_instrument(p), modified.get(p.path.as_path()).copied()))
+            .collect()
+    }
+
+    fn plugin_row(item: BrowserItem, depth: usize, columns: Option<PluginColumns>) -> Row {
+        Row { item, depth, opens: false, open: false, context: None, columns }
+    }
+
+    fn plugin_rows_grouped(&self, projects: &mut Projects, rows: &mut Vec<Row>) {
         let mut vendors: Vec<(String, Vec<BrowserItem>)> = Vec::new();
-        for plugin in env.catalog.plugins() {
-            let instrument = suhina_session::is_instrument(plugin);
-            if !wanted(instrument) {
-                continue;
-            }
+        for (plugin, instrument, _) in self.listed_plugins(projects) {
             let vendor = if plugin.vendor.trim().is_empty() {
                 "Unknown vendor".to_string()
             } else {
@@ -468,20 +514,138 @@ impl BrowserState {
         });
         let node = "group:plugins";
         let open = self.open.contains(node);
-        rows.push(Row { item: heading(node, "Plug-ins"), depth: 0, opens: true, open, context: None });
+        rows.push(Row { item: heading(node, "Plug-ins"), depth: 0, opens: true, open, context: None, columns: None });
         if !open {
             return;
         }
         for (vendor, mut list) in vendors {
             let key = format!("vendor:{vendor}");
             let vendor_open = self.open.contains(&key);
-            rows.push(Row { item: heading(&key, &vendor), depth: 1, opens: true, open: vendor_open, context: None });
+            rows.push(Row {
+                item: heading(&key, &vendor),
+                depth: 1,
+                opens: true,
+                open: vendor_open,
+                context: None,
+                columns: None,
+            });
             if vendor_open {
                 list.sort_by(|a, b| suhina_library::natural_cmp(&a.name, &b.name));
                 for item in list {
-                    rows.push(Row { item, depth: 2, opens: false, open: false, context: None });
+                    rows.push(Self::plugin_row(item, 2, None));
                 }
             }
+        }
+    }
+
+    fn plugin_rows_type(&self, projects: &mut Projects, rows: &mut Vec<Row>) {
+        // The type's plug-ins under Suhina's groups, in the spec's order, Other last. A
+        // plug-in sits under the first of its groups.
+        for (instruments, title) in [(true, "Instruments"), (false, "Effects")] {
+            let node = if instruments { "group:plugins-instruments" } else { "group:plugins-effects" };
+            let open = self.open.contains(node);
+            rows.push(Row { item: heading(node, title), depth: 0, opens: true, open, context: None, columns: None });
+            if !open {
+                continue;
+            }
+            let mut groups: Vec<(&str, Vec<BrowserItem>)> = Vec::new();
+            for (plugin, instrument, _) in self.listed_plugins(projects) {
+                if instrument != instruments {
+                    continue;
+                }
+                let group = suhina_session::plugin_group(&plugin).unwrap_or("Other");
+                let kind = if instrument { ItemKind::Instrument } else { ItemKind::Effect };
+                let item = BrowserItem {
+                    key: format!("plugin:{}", plugin.spec()),
+                    name: plugin.name.clone(),
+                    kind,
+                    plugin: true,
+                };
+                match groups.iter_mut().find(|(g, _)| *g == group) {
+                    Some((_, list)) => list.push(item),
+                    None => groups.push((group, vec![item])),
+                }
+            }
+            groups.sort_by_key(|(g, _)| {
+                let order = [
+                    "Synth",
+                    "Sampler",
+                    "Drums",
+                    "Reverb",
+                    "Delay",
+                    "EQ",
+                    "Filter",
+                    "Dynamics",
+                    "Distortion",
+                    "Modulation",
+                    "Analyzer",
+                    "Utility",
+                ];
+                order.iter().position(|o| o == g).unwrap_or(order.len())
+            });
+            for (group, mut list) in groups {
+                let key = format!("{node}:{group}");
+                let group_open = self.open.contains(&key);
+                rows.push(Row {
+                    item: heading(&key, group),
+                    depth: 1,
+                    opens: true,
+                    open: group_open,
+                    context: None,
+                    columns: None,
+                });
+                if group_open {
+                    list.sort_by(|a, b| suhina_library::natural_cmp(&a.name, &b.name));
+                    for item in list {
+                        rows.push(Self::plugin_row(item, 2, None));
+                    }
+                }
+            }
+        }
+    }
+
+    fn plugin_rows_flat(&self, projects: &mut Projects, rows: &mut Vec<Row>) {
+        let mut list: Vec<(BrowserItem, PluginColumns)> = self
+            .listed_plugins(projects)
+            .into_iter()
+            .map(|(plugin, instrument, modified)| {
+                let kind = if instrument { ItemKind::Instrument } else { ItemKind::Effect };
+                (
+                    BrowserItem {
+                        key: format!("plugin:{}", plugin.spec()),
+                        name: plugin.name.clone(),
+                        kind,
+                        plugin: true,
+                    },
+                    PluginColumns {
+                        vendor: if plugin.vendor.trim().is_empty() {
+                            "Unknown vendor".into()
+                        } else {
+                            plugin.vendor.trim().to_string()
+                        },
+                        kind: if instrument { "instrument" } else { "effect" },
+                        format: plugin.format(),
+                        modified,
+                    },
+                )
+            })
+            .collect();
+        let (column, descending) = self.plugin_sort;
+        list.sort_by(|a, b| {
+            let order = match column {
+                1 => a.1.vendor.to_lowercase().cmp(&b.1.vendor.to_lowercase()),
+                2 => (a.1.kind == "effect").cmp(&(b.1.kind == "effect")),
+                3 => a.1.format.to_lowercase().cmp(&b.1.format.to_lowercase()),
+                4 => a.1.modified.unwrap_or(0).cmp(&b.1.modified.unwrap_or(0)),
+                _ => suhina_library::natural_cmp(&a.0.name, &b.0.name),
+            };
+            order.then_with(|| suhina_library::natural_cmp(&a.0.name, &b.0.name)).then_with(|| a.0.key.cmp(&b.0.key))
+        });
+        if descending {
+            list.reverse();
+        }
+        for (item, columns) in list {
+            rows.push(Self::plugin_row(item, 0, Some(columns)));
         }
     }
 
@@ -515,7 +679,7 @@ impl BrowserState {
                         kind: ItemKind::Folder,
                         plugin: false,
                     };
-                    rows.push(Row { item, depth, opens: true, open, context: None });
+                    rows.push(Row { item, depth, opens: true, open, context: None, columns: None });
                     if open {
                         self.folder_rows(projects, &entry.path, depth + 1, rows);
                     }
@@ -529,7 +693,7 @@ impl BrowserState {
                         kind: file_kind_item(kind),
                         plugin: false,
                     };
-                    rows.push(Row { item, depth, opens: bank, open, context: None });
+                    rows.push(Row { item, depth, opens: bank, open, context: None, columns: None });
                     if open {
                         for (voice, name) in self.preset_voices(&entry.path).iter() {
                             let item = BrowserItem {
@@ -538,7 +702,14 @@ impl BrowserState {
                                 kind: ItemKind::Preset,
                                 plugin: false,
                             };
-                            rows.push(Row { item, depth: depth + 1, opens: false, open: false, context: None });
+                            rows.push(Row {
+                                item,
+                                depth: depth + 1,
+                                opens: false,
+                                open: false,
+                                context: None,
+                                columns: None,
+                            });
                         }
                     }
                 }

@@ -23,6 +23,12 @@ pub const SEARCH: f32 = 26.0;
 pub const FILTER: f32 = 16.0;
 pub const SIDEBAR: f32 = 104.0;
 pub const INDENT: f32 = 12.0;
+
+/// Clicks left of this on a row that opens are its chevron: the triangle sits 10 pt wide,
+/// 4 pt in from the row's indent.
+fn chevron_zone(left: f32, depth: usize) -> f32 {
+    left + 16.0 + depth as f32 * INDENT
+}
 pub const PREVIEW: f32 = 54.0;
 pub const FOOTER: f32 = 20.0;
 const FILTER_PAD: f32 = 7.0;
@@ -486,7 +492,7 @@ fn sidebar_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mu
 
 fn results_view(
     ui: &mut Ui,
-    area: Rect,
+    mut area: Rect,
     state: &mut BrowserState,
     projects: &mut Projects,
     settings: &Settings,
@@ -495,6 +501,23 @@ fn results_view(
 ) {
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::panel_background());
+    // The plug-ins' view switch takes the results' top when the plug-ins are listed alone.
+    let plugins_view = projects.file_library_mut().plugins_view();
+    let flat = if state.mode == crate::browser::ResultsMode::List && state.category == Category::Plugins {
+        let strip = Rect::from_min_size(area.min, Vec2::new(area.width(), MODE_SWITCH));
+        plugins_view_switch(ui, strip, projects, plugins_view, out);
+        area = area.intersect(Rect::from_min_max(Pos2::new(area.left(), strip.bottom() + 2.0), area.max));
+        plugins_view == suhina_library::store::PluginsView::Flat
+    } else {
+        false
+    };
+    if flat {
+        // The columns' header row, its headings clickable to sort.
+        let strip = Rect::from_min_size(area.min, Vec2::new(area.width(), MODE_SWITCH));
+        columns_header(ui, strip, state);
+        area = area.intersect(Rect::from_min_max(Pos2::new(area.left(), strip.bottom() + 2.0), area.max));
+    }
+    let painter = ui.painter_at(area);
     let rows: Vec<Row> = state.rows().to_vec();
     if rows.is_empty() {
         let text = if state.search.trim().is_empty() && projects.file_library_mut().folders().is_empty() {
@@ -576,9 +599,24 @@ fn results_view(
         let icon_rect = Rect::from_min_size(Pos2::new(x, rect.top() + 2.5), Vec2::splat(12.0));
         icon(&painter, icon_rect, row.item.kind, icon_color(row.item.kind));
         x = icon_rect.right() + 5.0;
+        // The flat list's columns, where they are drawn.
+        if let Some(columns) = &row.columns {
+            let small = theme::ui_font(theme::TEXT_TINY);
+            let modified = columns.modified.map(date).unwrap_or_default();
+            let texts = [(1, columns.vendor.as_str()), (2, columns.kind), (3, columns.format), (4, modified.as_str())];
+            for (index, text) in texts {
+                let (left, right) = column_span(area, index);
+                if right <= left || text.is_empty() {
+                    continue;
+                }
+                let span = Rect::from_min_max(Pos2::new(left, rect.top()), Pos2::new(right, rect.bottom()));
+                let align = if index == 1 { Align2::LEFT_CENTER } else { Align2::RIGHT_CENTER };
+                widgets::text_in(&painter, span, align, text, small.clone(), theme::text_hint());
+            }
+        }
         // On the right: a sample's length, a device's kind, where a search found it.
         let meta = match row.item.kind {
-            ItemKind::Sample | ItemKind::Midi => {
+            ItemKind::Sample | ItemKind::Midi if row.columns.is_none() => {
                 row.item.path().and_then(|p| state.info(&p, false).and_then(|i| i.seconds)).map(duration_text)
             }
             ItemKind::Instrument if row.item.plugin => Some("plug-in".into()),
@@ -586,14 +624,14 @@ fn results_view(
             ItemKind::AudioEffect => Some("AudioEffect".into()),
             _ => None,
         }
-        .or_else(|| row.context.clone())
         .unwrap_or_default();
+        let name_right = if row.columns.is_some() { column_span(area, 0).1 } else { rect.right() - PAD };
         let meta_width = if meta.is_empty() {
             0.0
         } else {
             widgets::text_width(ui, &meta, mono.clone()).min(area.width() * 0.4) + PAD
         };
-        let name_space = (rect.right() - PAD - meta_width - x).max(0.0);
+        let name_space = (name_right - meta_width - x).max(0.0);
         let item_tags = projects.file_library_mut().item_tags(&row.item.key);
         let dots = item_tags.len() as f32 * (DOT + 2.0);
         let color = if selected { theme::text_primary() } else { theme::text_value() };
@@ -626,7 +664,11 @@ fn results_view(
             state.handled_press = None;
         }
         let item = row.item.clone();
-        response.context_menu(|ui| row_menu(ui, &item, &tags, state, projects, out));
+        // Clicks inside the menu do not close it: its Tag submenu holds the field a new tag
+        // is typed into (egui's default closes a menu on a click inside it too).
+        egui::Popup::context_menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| row_menu(ui, &item, &tags, state, projects, out));
     }
     // A row is selected (and previews) when the button goes down, not when it comes up, so a
     // preview starts at once. A row already in a selection of several waits for the release, so
@@ -646,11 +688,26 @@ fn results_view(
         if state.handled_press.take() != key {
             click_row(state, &rows, index, modifiers);
         }
+        // A heading opens with a click on its name: the same rules as its chevron (right
+        // below), which takes the clicks in the chevron zone instead of this one.
+        if let Some(row) = rows.get(index)
+            && row.item.kind == ItemKind::Heading
+            && !ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary))
+            && !ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth))
+        {
+            state.toggle(&row.item.key);
+        }
     }
     if let Some(index) = double
         && let Some(row) = rows.get(index)
     {
-        if row.opens {
+        // A double-click on the row itself opens it — but not on its chevron: the gesture's
+        // two clicks are within egui's double-click window (0.3 s, 6 pt) and its first one
+        // toggled already, so the double would open and close the folder again (#293); and
+        // not on a heading, whose single clicks toggle above.
+        let on_chevron = row.opens
+            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth));
+        if row.opens && !on_chevron && row.item.kind != ItemKind::Heading {
             state.toggle(&row.item.key);
         } else if row.item.kind == ItemKind::Project {
             out.open_project = row.item.path();
@@ -658,11 +715,14 @@ fn results_view(
             out.add = vec![row.item.clone()];
         }
     }
-    // A click on a chevron opens; a click elsewhere on a folder only selects it.
+    // A click on a chevron opens; a click elsewhere on a folder only selects it. The second
+    // click of a rapid pair on the same chevron is a double and does not toggle: the first
+    // click of the gesture did, so the two together open the folder once (#293).
     if let Some((index, _)) = clicked
         && let Some(row) = rows.get(index)
         && row.opens
-        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < area.left() + 16.0 + row.depth as f32 * INDENT)
+        && !ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary))
+        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth))
     {
         state.toggle(&row.item.key);
     }
@@ -704,8 +764,10 @@ fn results_view(
 
 fn click_row(state: &mut BrowserState, rows: &[Row], index: usize, modifiers: Modifiers) {
     let Some(row) = rows.get(index) else { return };
+    // A heading toggles in the click handling below, through the same paths a folder's
+    // chevron takes, so that a click toggles it once however the pointer counts it; it never
+    // selects.
     if row.item.kind == ItemKind::Heading {
-        state.toggle(&row.item.key);
         return;
     }
     if modifiers.command {
@@ -855,6 +917,99 @@ fn mode_switch(ui: &mut Ui, area: Rect, state: &mut BrowserState) {
         widgets::text_in(&painter, rect, Align2::CENTER_CENTER, name, small.clone(), text);
         x = rect.right() + FILTER_GAP;
     }
+}
+
+/// The Grouped | By type | All switch above the results, when the plug-ins are listed alone;
+/// the choice is a library command, kept for the next start
+/// ([the plug-in browsing spec](../../docs/spec/plugin-browsing.md)).
+fn plugins_view_switch(
+    ui: &mut Ui,
+    area: Rect,
+    projects: &mut Projects,
+    chosen: suhina_library::store::PluginsView,
+    out: &mut BrowserOut,
+) {
+    let painter = ui.painter_at(area);
+    painter.hline(area.x_range(), area.bottom() - 0.5, theme::hairline(theme::border()));
+    let small = theme::ui_font(theme::TEXT_SMALL);
+    let mut x = area.left() + PAD;
+    for view in suhina_library::store::PluginsView::ALL {
+        let name = match view {
+            suhina_library::store::PluginsView::Grouped => "Grouped",
+            suhina_library::store::PluginsView::Type => "By type",
+            suhina_library::store::PluginsView::Flat => "All",
+        };
+        let width = widgets::text_width(ui, name, small.clone()) + FILTER_PAD * 2.0;
+        let rect = Rect::from_min_size(Pos2::new(x, area.top() + 2.0), Vec2::new(width, FILTER));
+        let response = widgets::button_area(
+            ui,
+            rect,
+            Id::new(("browser-plugins-view", view.name())),
+            format!("Show plug-ins {name}"),
+        );
+        if response.clicked() && chosen != view {
+            run(projects, "library.setPluginsView", json!({ "view": view.name() }), out);
+        }
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, if chosen == view { theme::text_value() } else { idle });
+        let text = if chosen == view { theme::window_background() } else { theme::text_secondary() };
+        widgets::text_in(&painter, rect, Align2::CENTER_CENTER, name, small.clone(), text);
+        x = rect.right() + FILTER_GAP;
+    }
+}
+
+/// The flat list's columns' widths, by column index: the name (0) takes what is left, then
+/// vendor, type, format and modified, all from the right edge. A narrow panel squeezes the
+/// name; below the columns' total the header and the rows show the name alone.
+const COLUMN_WIDTHS: [f32; 5] = [0.0, 160.0, 70.0, 52.0, 74.0];
+
+/// The left and right edge of the flat list's column `index` (0 name … 4 modified).
+fn column_span(area: Rect, index: usize) -> (f32, f32) {
+    let right = area.right() - PAD - COLUMN_WIDTHS[index + 1..].iter().sum::<f32>();
+    match index {
+        0 => (area.left() + PAD, right),
+        _ => (right - COLUMN_WIDTHS[index], right),
+    }
+}
+
+/// The flat list's column headings; clicking one sorts by it, again for the other direction.
+fn columns_header(ui: &mut Ui, area: Rect, state: &mut BrowserState) {
+    let painter = ui.painter_at(area);
+    painter.hline(area.x_range(), area.bottom() - 0.5, theme::hairline(theme::border()));
+    let small = theme::ui_font(theme::TEXT_SMALL);
+    let (sorted, descending) = state.plugin_sort;
+    for (index, name) in ["Name", "Vendor", "Type", "Format", "Modified"].into_iter().enumerate() {
+        let (left, right) = column_span(area, index);
+        if right <= left {
+            continue;
+        }
+        let rect = Rect::from_min_size(Pos2::new(left, area.top() + 2.0), Vec2::new(right - left, FILTER));
+        let response = widgets::button_area(ui, rect, Id::new(("browser-column", index)), format!("Sort by {name}"));
+        if response.clicked() {
+            state.plugin_sort = (index as u8, if sorted == index as u8 { !descending } else { false });
+        }
+        let chosen = sorted == index as u8;
+        let label =
+            if chosen { format!("{name} {}", if descending { "▼" } else { "▲" }) } else { name.to_string() };
+        let color = if chosen { theme::text_primary() } else { theme::text_hint() };
+        let hover = motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(rect, 0.0, hover);
+        widgets::text_in(&painter, rect, Align2::RIGHT_CENTER, &label, small.clone(), color);
+    }
+}
+
+/// A unix time in seconds as a date, `YYYY-MM-DD`.
+fn date(seconds: u64) -> String {
+    // Howard Hinnant's civil_from_days.
+    let z = (seconds / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let (m, d) = (if mp < 10 { mp + 3 } else { mp - 9 }, doy - (153 * mp + 2) / 5 + 1);
+    let y = if m <= 2 { yoe + era * 400 + 1 } else { yoe + era * 400 };
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// Why nothing can preview now, if so: previews play through the active project's audio output.
@@ -1064,8 +1219,9 @@ fn footer_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mut
                 state.tag_filter.push(tag.name.clone());
             }
         }
-        // Right-click: rename, recolour or remove the tag.
-        response.context_menu(|ui| {
+        // Right-click: rename, recolour or remove the tag. Clicks inside do not close it: a
+        // tag's new name is typed here (egui's default closes a menu on a click inside it).
+        egui::Popup::context_menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             let id = Id::new(("browser-rename-tag", &tag.name));
             let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_else(|| tag.name.clone());
             let field = ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0));

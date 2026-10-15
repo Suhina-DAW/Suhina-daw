@@ -1384,6 +1384,21 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     assert!(harness.query_by_label("CPU load").is_none());
 }
 
+#[test]
+fn the_control_bar_shows_the_ram_usage_whether_or_not_an_engine_plays() {
+    // The program's own RAM is shown without an engine too: it is the process's, not the
+    // engine's.
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.query_by_label_contains("RAM usage");
+    assert!(ram.is_some(), "the RAM shows next to the CPU's place");
+    // In megabytes or gigabytes, as the issue asks.
+    let text = format!("{:?}", ram.unwrap());
+    assert!(text.contains("MB") || text.contains("GB"), "{text}");
+}
+
 /// The label of the active project's Close button in the tab row.
 fn active_close_label(harness: &Harness<'static, App>) -> String {
     let projects = harness.state().projects();
@@ -1577,4 +1592,25 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+#[test]
+fn help_about_shows_the_version_and_copies_it() {
+    let mut harness = window(demo_app());
+    let version = suhina_ui::project_dialog::VERSION;
+    assert!(harness.query_by_label_contains(version).is_none());
+    harness.get_by_label("Help").click();
+    harness.run();
+    harness.get_by_label_contains("About Suhina").click();
+    harness.run();
+    let line = suhina_ui::project_dialog::version_line();
+    assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
+    harness.get_by_label(&format!("Copy version: {line}")).click();
+    harness.run();
+    assert_eq!(harness.state().status(), &Status::Done(format!("Copied {line}")));
+    // Still open after copying; Escape closes it.
+    assert!(harness.query_by_label_contains(version).is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label_contains(version).is_none());
 }

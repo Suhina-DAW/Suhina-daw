@@ -1,13 +1,15 @@
-//! Dragging from the browser into the project (`docs/spec/browser.md` › Dragging into the
-//! project): what is dragged, where it can land, and the commands a drop runs. The views say
-//! which target is under the pointer; this module turns a drop on it into `clip.addFiles`,
-//! `track.add` and `device.add`/`device.addPlugin`, so a drop is the same commands agents use.
+//! Dragging from the browser, or files from the system, into the project
+//! (`docs/spec/browser.md` › Dragging into the project): what is dragged, where it can land,
+//! and the commands a drop runs. The views say which target is under the pointer; this module
+//! turns a drop on it into `clip.addFiles`, `track.add` and `device.add`/`device.addPlugin`, so
+//! a drop is the same commands agents use.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use suhina_engine::model::TrackId;
 use suhina_library::Item;
+use suhina_media::info::FileKind;
 
 /// What a dragged browser item is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,18 @@ impl BrowserItem {
             _ => None,
         }
     }
+}
+
+/// A file dragged from the system as the browser item it would be, when it becomes clips: a
+/// sample, a Stems file or a MIDI file. Projects, themes and folders have drops of their own.
+pub fn system_file(path: &Path) -> Option<BrowserItem> {
+    let kind = match suhina_media::info::kind_of(path)? {
+        FileKind::Sample | FileKind::Stems => ItemKind::Sample,
+        FileKind::Midi => ItemKind::Midi,
+        FileKind::Preset | FileKind::Project => return None,
+    };
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    Some(BrowserItem { key: Item::File(path.to_path_buf()).key(), name, kind, plugin: false })
 }
 
 /// Where a drag from the browser can land, as the view under the pointer says.
@@ -279,6 +293,24 @@ mod tests {
             plan(&items, DropTarget::Track(TrackId(1)), false, "rhythmic", false, &name).is_none(),
             "a file needs a place"
         );
+    }
+
+    #[test]
+    fn system_files_that_become_clips_are_items_and_the_rest_are_not() {
+        let wav = system_file(Path::new("/s/Kick.WAV")).unwrap();
+        assert_eq!(
+            (wav.kind, wav.name.as_str(), wav.path()),
+            (ItemKind::Sample, "Kick.WAV", Some("/s/Kick.WAV".into()))
+        );
+        assert_eq!(system_file(Path::new("/s/groove.mid")).map(|i| i.kind), Some(ItemKind::Midi));
+        assert_eq!(system_file(Path::new("/s/song.stem.mp4")).map(|i| i.kind), Some(ItemKind::Sample));
+        for other in ["/s/song.suhina", "/s/set.als", "/s/theme.json", "/s/bank.syx", "/s/notes.txt", "/s/noext", ""] {
+            assert!(system_file(Path::new(other)).is_none(), "{other}");
+        }
+        // The same plan as a browser drag of that file.
+        let plan =
+            plan(&[wav], DropTarget::Slot { track: TrackId(1), scene: 0 }, false, "rhythmic", false, &name).unwrap();
+        assert_eq!(plan.commands[0].1["paths"], json!(["/s/Kick.WAV"]));
     }
 
     #[test]
