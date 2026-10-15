@@ -75,6 +75,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip(0.0, false)] }],
         },
         launcher: Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default()],
             columns: vec![LauncherColumn {
                 track: TrackId(1),

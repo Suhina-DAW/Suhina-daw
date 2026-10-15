@@ -11,6 +11,7 @@ pub mod detail_view;
 pub mod drop;
 pub mod grid;
 pub mod keymap;
+pub mod launch_keys;
 pub mod loading_dialog;
 pub mod menus;
 pub mod missing_files;

@@ -8,7 +8,9 @@ use std::collections::HashSet;
 use std::fmt;
 
 mod launch;
+mod mapping;
 pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
+pub use mapping::{KEY_NAME_MAX, LaunchMapping, MappingSource, MappingTarget};
 
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -466,6 +468,9 @@ pub struct ArrangementLane {
 pub struct Launcher {
     pub scenes: Vec<Scene>,
     pub columns: Vec<LauncherColumn>,
+    /// Keys and MIDI notes that launch slots, scenes and stop buttons. A mapping whose track or
+    /// scene is gone stays, unused, so an undo brings it back working.
+    pub mappings: Vec<LaunchMapping>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -729,6 +734,7 @@ mod tests {
                 }],
             },
             launcher: Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default(), Scene::default()],
                 columns: vec![LauncherColumn {
                     track: TrackId(1),

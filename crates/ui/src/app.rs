@@ -901,6 +901,7 @@ impl App {
         self.projects.poll_sound_map();
         self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
+        self.launch_keys(ui, &mut actions);
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
         self.sample_map_window(ui.ctx(), &mut actions);
@@ -1605,6 +1606,64 @@ impl App {
         }
     }
 
+    /// Keys mapped to slots, scenes and stop buttons, and the keys of the mapping mode, before
+    /// the shortcuts see them: only while the Session view is shown and nothing else has the
+    /// keyboard (`docs/spec/ui-session-view.md` › Launch keys). A key held when that ends, or
+    /// when the window loses focus, is released.
+    fn launch_keys(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
+        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
+        let session_view = self.shown == View::Session && !self.sample_map.view.large;
+        // A clicked slot or button keeps the focus; only a text field takes the keys away.
+        let focused = session_view && !dialog && !self.settings_open && !ui.ctx().text_edit_focused();
+        let lost = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))));
+        let Some(project) = self.projects.active().and_then(|id| self.projects.get(id)).map(Session::project) else {
+            return;
+        };
+        let keys = &mut self.view.launch_keys;
+        if !focused || lost {
+            keys.release_all(project, actions);
+        }
+        if !session_view && keys.mode.on {
+            keys.toggle_mode();
+        }
+        if !focused {
+            return;
+        }
+        let events = ui.input(|i| crate::launch_keys::key_events(&i.events));
+        let mut taken = Vec::new();
+        for (index, event) in events {
+            if keys.handle(project, &event, actions) == crate::launch_keys::Outcome::Taken {
+                taken.push(index);
+            }
+        }
+        if !taken.is_empty() {
+            ui.input_mut(|i| {
+                let mut index = 0;
+                i.events.retain(|_| {
+                    let keep = !taken.contains(&index);
+                    index += 1;
+                    keep
+                });
+            });
+        }
+    }
+
+    /// Turns the mapping mode on (showing the Session view) or off.
+    fn toggle_mapping_mode(&mut self) {
+        let keys = &mut self.view.launch_keys;
+        keys.toggle_mode();
+        if keys.mode.on {
+            self.shown = View::Session;
+            self.close_large_map();
+            self.status = Status::Hint(
+                "Mapping keys: click a slot, a scene or a stop button, then press a key. Delete removes, Escape leaves"
+                    .into(),
+            );
+        } else {
+            self.status = Status::Hint("Mapping keys off".into());
+        }
+    }
+
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
@@ -1662,6 +1721,7 @@ impl App {
                 self.close_large_map();
             }
             "view.detail" => self.detail_open = !self.detail_open,
+            "view.mappingMode" => self.toggle_mapping_mode(),
             "view.arrangement" => {
                 self.shown = View::Arrangement;
                 self.close_large_map();
@@ -2407,6 +2467,21 @@ impl App {
             });
             right = rect.left() - PAD;
         }
+        if !self.projects.is_empty() {
+            // The mapping mode's button, lit while the mode is on.
+            let on = self.view.launch_keys.mode.on;
+            let color = if on { theme::accent() } else { theme::text_secondary() };
+            let galley = widgets::fitted(&painter, "Map keys", theme::ui_font(theme::TEXT), color, 80.0);
+            let size = galley.size();
+            let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
+            let response = widgets::button_area(ui, rect, Id::new("map-keys"), "Map keys to slots and scenes");
+            if response.clicked() {
+                self.toggle_mapping_mode();
+            }
+            let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
+            painter.galley(Pos2::new(rect.left(), rect.center().y - size.y / 2.0), galley, color);
+            right = rect.left() - 12.0;
+        }
         let mut underline_at = None;
         for (view, name) in [(View::Arrangement, "Arrangement"), (View::Session, "Session")] {
             let color = if self.shown == view { theme::text_primary() } else { theme::text_secondary() };
@@ -2569,6 +2644,15 @@ fn empty(ui: &mut Ui) {
 }
 
 /// What the status bar says after a command ran, or nothing for silent ones.
+/// A mapping command's target in words: "track 2 scene 1", "scene 3", "the stop button of track 2".
+fn mapping_target(p: &serde_json::Value) -> String {
+    match p["target"].as_str() {
+        Some("slot") => format!("track {} scene {}", p["track"], p["scene"]),
+        Some("scene") => format!("scene {}", p["scene"]),
+        _ => format!("the stop button of track {}", p["track"]),
+    }
+}
+
 fn describe(action: &Action) -> Option<String> {
     let p = &action.params;
     Some(match action.id {
@@ -2576,6 +2660,12 @@ fn describe(action: &Action) -> Option<String> {
         "scene.launch" => format!("Launched scene {}", p["scene"]),
         "track.stop" => format!("Stopping track {}", p["track"]),
         "launcher.stopAll" => "Stopping all clips".into(),
+        "launcher.addMapping" => format!(
+            "Mapped {} to {}",
+            p["source"].as_str().unwrap_or_default().trim_start_matches("key:"),
+            mapping_target(p)
+        ),
+        "launcher.removeMapping" => format!("Removed the keys of {}", mapping_target(p)),
         "launcher.setQuantization" => format!("Launch quantisation {}", p["value"].as_str().unwrap_or_default()),
         "clip.setLaunchMode" => format!("Launch mode {}", p["mode"].as_str().unwrap_or_default()),
         "clip.setQuantization" => format!("Clip launch quantisation {}", p["value"].as_str().unwrap_or_default()),
