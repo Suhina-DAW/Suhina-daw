@@ -7,7 +7,7 @@ use suhina_model::{
     ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, Project, Track, TrackId,
 };
 
-use crate::{CommandError, Session, devices, files, preview};
+use crate::{CommandError, Session, devices, files, follow, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -104,6 +104,13 @@ pub(crate) const fn optional(name: &'static str, ty: ParamType, doc: &'static st
 }
 
 const TRACK: Param = param("track", ParamType::Track, "track id or name, from project.tracks");
+/// Lets the calls of one drag make one undo step.
+const CONTINUE: Param = optional(
+    "continue",
+    ParamType::Bool,
+    "true adds the change to the undo step of the previous call of this command on this track, \
+     when no other edit came between (one drag, one step)",
+);
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
 
@@ -228,6 +235,7 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[
             TRACK,
             param("db", ParamType::Decibels, "level in dB, at most +6; \"-inf\" or below -150 is silence"),
+            CONTINUE,
         ],
         kind: CommandKind::Edit,
         run: set_volume,
@@ -235,7 +243,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "track.setPan",
         label: "Set a track's pan",
-        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right")],
+        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right"), CONTINUE],
         kind: CommandKind::Edit,
         run: set_pan,
     },
@@ -414,7 +422,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "project.launcher",
-        label: "List the clip launcher: scenes (name, tempo) and each track's slots (clip name, stop button)",
+        label: "List the clip launcher: scenes (name, tempo) and each track's slots (clip name, follow action, stop button)",
         params: &[],
         kind: CommandKind::Read,
         run: launcher_grid,
@@ -510,6 +518,31 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[],
         kind: CommandKind::Transport,
         run: back_to_arrangement,
+    },
+    CommandSpec {
+        id: "clip.setFollowAction",
+        label: "Set what a slot clip does after it has played for a while: action A or B, by chance",
+        params: &[
+            TRACK,
+            SCENE,
+            optional("enabled", ParamType::Bool, "whether the clip runs its follow action"),
+            optional(
+                "time",
+                ParamType::Number,
+                "beats from the launch to the action, more than 0; used when not linked",
+            ),
+            optional("linked", ParamType::Bool, "true: the time is the clip's length"),
+            optional(
+                "actionA",
+                ParamType::Text,
+                "nothing, stop, again, previous, next, first, last, any, other, or \"jump N\" for the slot of scene N",
+            ),
+            optional("actionB", ParamType::Text, "like actionA"),
+            optional("chanceA", ParamType::Integer, "weight of action A, 0 to 100"),
+            optional("chanceB", ParamType::Integer, "weight of action B, 0 to 100"),
+        ],
+        kind: CommandKind::Edit,
+        run: follow::set_follow_action,
     },
     CommandSpec {
         id: "devices.list",
@@ -1491,6 +1524,7 @@ fn launcher_grid(session: &mut Session, _: &Value) -> Result<Value, CommandError
                         "length": clip.length,
                         "loop": clip.loop_range.is_some(),
                         "enabled": clip.enabled,
+                        "follow_action": follow::describe(&clip.follow_action),
                     }),
                     None => json!({ "scene": number, "clip": null, "stop_button": slot.has_stop }),
                 })
@@ -1664,7 +1698,7 @@ pub fn parse_quantization(text: &str) -> Result<Quantization, CommandError> {
 }
 
 /// The launcher column of `params.track`.
-fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+pub(crate) fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
     let track = track_id(p, params)?;
     p.launcher
         .columns
@@ -1674,7 +1708,7 @@ fn column_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
 }
 
 /// The 0-based scene index of the 1-based `params.scene`.
-fn scene_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
+pub(crate) fn scene_index(p: &Project, params: &Value) -> Result<usize, CommandError> {
     let count = p.launcher.scenes.len();
     let number = params.get("scene").and_then(Value::as_u64).ok_or("scene must be a whole number from 1")?;
     usize::try_from(number)

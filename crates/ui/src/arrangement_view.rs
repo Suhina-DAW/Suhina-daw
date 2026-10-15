@@ -1450,20 +1450,28 @@ fn value_control(
         };
         let response = widgets::value_area(ui, rect.intersect(clip), id.with(label.as_str()), &label, text);
         hover = widgets::hover(ui, &response);
+        // Every frame of a drag sets the value, so it is heard while dragging; all but the first
+        // continue its undo step, so the drag is one step.
+        let continued = preview.is_some();
+        let set = |v: f64| match control {
+            Control::Volume => {
+                let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
+                Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+            }
+            Control::Pan => Action::new(
+                "track.setPan",
+                json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+            ),
+        };
         match widgets::drag_value(ui, &response, &mut preview, value, per_point, range, default) {
-            Drag::Moving(v) => state.value_drag = Some((track, control, v)),
+            Drag::Moving(v) => {
+                state.value_drag = Some((track, control, v));
+                actions.push(set(v));
+            }
             Drag::Done(v) => {
                 state.value_drag = None;
                 committed = Some(v);
-                actions.push(match control {
-                    Control::Volume => {
-                        let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-                        Action::new("track.setVolume", json!({ "track": track.0, "db": db }))
-                    }
-                    Control::Pan => {
-                        Action::new("track.setPan", json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0 }))
-                    }
-                });
+                actions.push(set(v));
             }
             Drag::None => {}
         }
