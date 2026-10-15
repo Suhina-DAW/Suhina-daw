@@ -388,6 +388,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   going back to the chosen device when it returns
   ([#177](https://github.com/suhina-daw/suhina-daw/issues/177)), the ASIO driver's control panel
   ([#176](https://github.com/suhina-daw/suhina-daw/issues/176)).
+- A buffer size is never asked of a driver that did not declare it: the dropdown lists the sizes
+  the device's own range allows, a range holding none of the engine's sizes (or no range at all)
+  leaves the driver its own buffer size and the notice says which size plays, and on WASAPI shared
+  mode the row is *Engine block* — Windows sets the device's buffer there, so the number is
+  Suhina's render block and the note names the period Windows gives the device, in milliseconds.
+  A device is not given up over a size its driver refuses: the same output is tried without one
+  before anything falls back.
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command

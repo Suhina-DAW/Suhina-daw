@@ -1037,18 +1037,53 @@ fn audio_page(
     if let Some(rate) = choice_dropdown(ui, painter, r, "Sample rate", &options, &choice.sample_rate) {
         picked = choice.with_params(&serde_json::json!({ "sample_rate": rate.unwrap_or(0) })).ok();
     }
-    // Buffer size.
+    // The buffer row says what the number is, and it is the device's own buffer only where it is
+    // asked of the driver: ASIO (when its driver declared a size the engine can render in) and
+    // WASAPI exclusive mode. Everywhere else it is Suhina's render block alone: WASAPI shared
+    // mode plays the period Windows gives the device, whatever is asked, and a driver that
+    // declared no size Suhina can render in keeps its own (ADR 0006). The exclusive row below is
+    // WASAPI's alone.
+    let wasapi = host.is_some_and(|h| h.name == "WASAPI");
+    let sizes = device.map_or_else(Vec::new, |d| d.buffer_sizes.clone());
+    let declares = device.and_then(|d| d.buffer_range);
+    let exclusive = wasapi && choice.exclusive && device.is_some_and(|d| d.exclusive);
+    // The number is the device's own only where one of its declared sizes is asked of it.
+    let device_sets = exclusive || (!wasapi && declares.is_some() && !sizes.is_empty());
+    // The period Windows gives the device is a duration, but WASAPI reports it in frames at the
+    // device's own rate, so it is said in milliseconds: the same duration at any rate.
+    let period_ms = device
+        .and_then(|d| Some((d.buffer_range?, d.default_sample_rate?)))
+        .filter(|((min, max), _)| min == max)
+        .map(|((min, _), rate)| f64::from(min) * 1000.0 / f64::from(rate.max(1)));
     let r = row(y);
     let rate = f64::from(choice.sample_rate.or(default_rate).unwrap_or(48_000));
-    label(painter, r, "Buffer size", "The engine renders in blocks of it; smaller is quicker, larger is safer");
+    let (name, note) = if exclusive {
+        ("Buffer size", "The device's own buffer; Windows asks the device for it".to_string())
+    } else if device_sets {
+        let note = match declares {
+            Some((min, max)) if min < max => {
+                format!("The device's own buffer, from its driver: {min} to {max} frames")
+            }
+            Some((min, _)) => format!("The device's own buffer; its driver allows {min} frames only"),
+            None => "The device's own buffer; its driver sets the size".to_string(),
+        };
+        ("Buffer size", note)
+    } else if wasapi {
+        let note = match period_ms {
+            Some(ms) => format!("Suhina's render block; Windows plays this device in {ms:.1} ms periods"),
+            None => "Suhina's render block; Windows sets the device's buffer".to_string(),
+        };
+        ("Engine block", note)
+    } else {
+        ("Engine block", "Suhina's render block; the driver keeps its own buffer size".to_string())
+    };
+    label(painter, r, name, &note);
     let mut options: Vec<(String, Option<u32>)> = vec![("Default (1024 frames)".to_string(), None)];
-    let sizes = device.map_or_else(Vec::new, |d| d.buffer_sizes.clone());
     options.extend(sizes.iter().map(|n| (format!("{n} frames ({:.1} ms)", f64::from(*n) * 1000.0 / rate), Some(*n))));
-    if let Some(frames) = choice_dropdown(ui, painter, r, "Buffer size", &options, &choice.buffer_frames) {
+    if let Some(frames) = choice_dropdown(ui, painter, r, name, &options, &choice.buffer_frames) {
         picked = choice.with_params(&serde_json::json!({ "buffer_frames": frames.unwrap_or(0) })).ok();
     }
     // Exclusive mode, WASAPI only.
-    let wasapi = host.is_some_and(|h| h.name == "WASAPI");
     let r = row(y);
     let note = if !wasapi {
         "WASAPI only; ASIO always has the device to itself"

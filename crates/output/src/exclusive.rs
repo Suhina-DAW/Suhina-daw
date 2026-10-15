@@ -128,6 +128,12 @@ struct Ready {
 /// Opens `device` (by its name; the default output when `None`) for Suhina alone at
 /// `sample_rate`, with a buffer near `buffer_frames` (the device's default period when `None`),
 /// reading from `ring`.
+///
+/// WASAPI tells us the device's minimum and default period, never the largest one its driver
+/// takes, so a period past what the device does cannot be fitted here: the device refuses it in
+/// `IAudioClient::Initialize`, [`reason`] says why in words, and the output plays shared instead
+/// (`crate::open_fitting`). A buffer the device cannot align is the documented exception: it
+/// says the size it wants and the client is set up again with that.
 pub(crate) fn open(
     device: Option<String>,
     sample_rate: u32,

@@ -15,7 +15,10 @@ const SAMPLE_RATES: [u32; 13] =
 
 /// The buffer sizes a device with the driver range `range` can be asked for: the powers of two
 /// inside it, and its ends, within [`MIN_BUFFER_FRAMES`] … [`MAX_BUFFER_FRAMES`]. A range that
-/// makes no sense (empty, reversed) counts as none.
+/// makes no sense (empty, reversed) counts as none, and the device is then asked for no size at
+/// all. So does a range the engine has no size in — a driver whose smallest buffer is past what
+/// the engine renders in — and it holds nothing on purpose: a driver is never asked for a size
+/// outside the range it declared ([`fit_for_host`] then leaves the size to the driver).
 pub fn allowed_buffers(range: Option<(u32, u32)>) -> Vec<u32> {
     let Some((min, max)) = range.filter(|(min, max)| *min > 0 && min <= max) else {
         return BUFFER_SIZES.to_vec();
@@ -24,11 +27,12 @@ pub fn allowed_buffers(range: Option<(u32, u32)>) -> Vec<u32> {
     let mut sizes: Vec<u32> = BUFFER_SIZES.iter().copied().chain([min, max]).filter(|n| inside(*n)).collect();
     sizes.sort_unstable();
     sizes.dedup();
-    if sizes.is_empty() {
-        // The driver only does sizes outside the engine's; the closest end the engine can use.
-        sizes.push(min.clamp(MIN_BUFFER_FRAMES, MAX_BUFFER_FRAMES));
-    }
     sizes
+}
+
+/// Whether the driver's declared `range` holds `frames`: only such a size may be asked for.
+pub fn within(range: Option<(u32, u32)>, frames: u32) -> bool {
+    range.is_some_and(|(min, max)| min > 0 && min <= max && (min..=max).contains(&frames))
 }
 
 /// The allowed size nearest to `wanted` (the larger of two as near).
@@ -63,13 +67,56 @@ pub fn offered_buffers(host: &str, range: Option<(u32, u32)>) -> Vec<u32> {
 }
 
 /// Fits a wanted buffer size to `host` and the driver's `range`: the frames the engine renders
-/// per block, and the size to ask the device for (none where the driver decides).
+/// per block, and the size to ask the device for (none where the driver decides, or where the
+/// range it declared holds no size the engine can render in).
 pub fn fit_for_host(host: &str, wanted: u32, range: Option<(u32, u32)>) -> (u32, Option<u32>) {
     if host == "WASAPI" {
+        // Windows plays a shared-mode stream in its own period and takes any positive duration
+        // asked for, so the number is the engine's block alone and the device is asked for none
+        // of it (cpal's WASAPI stream; `exclusive` mode, which does ask the device, is fitted
+        // separately). See `docs/decisions/0006-plug-in-hosting.md` › the block.
         return (wanted.clamp(MIN_BUFFER_FRAMES, MAX_BUFFER_FRAMES), None);
     }
     let fitted = fit_buffer(wanted, &allowed_buffers(range));
-    (fitted, range.map(|_| fitted))
+    // Only a size the driver declared is ever asked for: a fit outside its range (a range with
+    // no size the engine renders in) leaves the size with the driver, which keeps its own —
+    // `cpal::BufferSize::Default`.
+    let device = within(range, fitted).then_some(fitted);
+    (fitted, device)
+}
+
+/// What to tell the user when the size they asked for is not the one that plays: the range the
+/// driver declared and the size it fitted to, or that its sizes are outside what the engine
+/// renders in and it keeps its own. `None` when they got what they asked for, when the driver
+/// sets no size of its own (`host` WASAPI, where Windows owns the device's buffer), or when it
+/// declared no range and the block became what was asked for anyway.
+pub fn buffer_notice(
+    host: &str,
+    device: &str,
+    wanted: u32,
+    block: u32,
+    asked: Option<u32>,
+    range: Option<(u32, u32)>,
+) -> Option<String> {
+    if host == "WASAPI" {
+        return None;
+    }
+    // A range that makes no sense counts as none, as it does everywhere else.
+    let declared = range.filter(|(min, max)| *min > 0 && min <= max);
+    match (declared, asked) {
+        // Nothing of the driver's fits what the engine renders in: it keeps its own size.
+        (Some((min, max)), None) => Some(format!(
+            "{device} takes {min} to {max} frames, which Suhina cannot render in; it keeps its own buffer size"
+        )),
+        (Some((min, max)), Some(_)) if block != wanted => {
+            Some(format!("{device} takes {min} to {max} frames; {block} frames play"))
+        }
+        // A driver that declared no range keeps its own size too, so the block is the engine's.
+        (None, _) if block != wanted => {
+            Some(format!("{device} sets its own buffer size; the engine renders in {block}-frame blocks"))
+        }
+        _ => None,
+    }
 }
 
 /// Whether two names are the same, ignoring case and the space around them.
@@ -83,6 +130,15 @@ pub fn buffer_range(size: &cpal::SupportedBufferSize) -> Option<(u32, u32)> {
         cpal::SupportedBufferSize::Range { min, max } if min > 0 && min <= max => Some((min, max)),
         _ => None,
     }
+}
+
+/// The buffer range to report for a device: its default config's own first, then a supported
+/// config's. WASAPI reports the device period in frames *at each config's sample rate*, lowest
+/// rate first, so the default config is the one whose numbers belong to the device's own rate —
+/// the same period is 80 frames at 8 kHz and 480 at 48 kHz. A device whose default config says
+/// nothing keeps a supported config's range.
+fn declared_range(default: Option<(u32, u32)>, supported: impl IntoIterator<Item = (u32, u32)>) -> Option<(u32, u32)> {
+    default.or_else(|| supported.into_iter().next())
 }
 
 /// Lists every host cpal offers here and each one's output devices.
@@ -120,18 +176,25 @@ fn list_devices(host: &cpal::Host, host_name: &str) -> Result<Vec<DeviceInfo>, S
             let name = device.to_string();
             let mut info = DeviceInfo { default: default.as_deref() == Some(name.as_str()), ..DeviceInfo::default() };
             let mut ranges = Vec::new();
+            let mut buffer_ranges = Vec::new();
             if let Ok(configs) = device.supported_output_configs() {
                 for config in configs {
                     ranges.push((config.min_sample_rate(), config.max_sample_rate()));
                     info.channels = info.channels.max(config.channels());
-                    info.buffer_range = info.buffer_range.or_else(|| buffer_range(config.buffer_size()));
+                    if let Some(range) = buffer_range(config.buffer_size()) {
+                        buffer_ranges.push(range);
+                    }
                 }
             }
-            if let Ok(config) = device.default_output_config() {
+            let default_config = device.default_output_config().ok();
+            if let Some(config) = &default_config {
                 info.default_sample_rate = Some(config.sample_rate()).filter(|r| *r > 0 && *r <= MAX_SAMPLE_RATE);
                 info.channels = info.channels.max(config.channels());
-                info.buffer_range = info.buffer_range.or_else(|| buffer_range(config.buffer_size()));
             }
+            info.buffer_range = declared_range(
+                default_config.as_ref().and_then(|config| buffer_range(config.buffer_size())),
+                buffer_ranges,
+            );
             info.sample_rates = sample_rates(&ranges);
             info.buffer_sizes = offered_buffers(host_name, info.buffer_range);
             info.name = name;
@@ -152,9 +215,22 @@ mod tests {
         // Nonsense from a driver: as if it said nothing.
         assert_eq!(allowed_buffers(Some((0, 0))), BUFFER_SIZES.to_vec());
         assert_eq!(allowed_buffers(Some((2048, 64))), BUFFER_SIZES.to_vec());
-        // Only sizes the engine cannot use: the nearest it can.
-        assert_eq!(allowed_buffers(Some((8, 32))), vec![64]);
-        assert_eq!(allowed_buffers(Some((8192, 16384))), vec![4096]);
+        // A range the engine has no size in holds nothing: no size of it is offered, and none
+        // of it is ever asked for.
+        assert!(allowed_buffers(Some((8, 32))).is_empty());
+        assert!(allowed_buffers(Some((8192, 16384))).is_empty());
+    }
+
+    #[test]
+    fn the_default_configs_range_is_the_one_reported() {
+        // WASAPI gives the device period in frames at each config's rate, lowest first: the
+        // default config is the one whose numbers are in the device's own rate.
+        assert_eq!(declared_range(Some((480, 480)), [(80, 80), (480, 480)]), Some((480, 480)));
+        // A device whose default config says nothing keeps a supported config's range, and one
+        // that says nothing anywhere reports none.
+        assert_eq!(declared_range(None, [(80, 80)]), Some((80, 80)));
+        assert_eq!(declared_range(None, []), None);
+        assert_eq!(declared_range(Some((256, 512)), []), Some((256, 512)));
     }
 
     #[test]
@@ -179,6 +255,43 @@ mod tests {
         assert_eq!(fit_for_host("ASIO", 300, Some((64, 2048))), (256, Some(256)));
         assert_eq!(fit_for_host("ASIO", 300, None), (256, None));
         assert_eq!(offered_buffers("ASIO", Some((256, 512))), vec![256, 512]);
+    }
+
+    #[test]
+    fn a_driver_is_never_asked_for_a_size_outside_its_range() {
+        // The driver's own range caps what is asked for, and what is offered.
+        assert_eq!(fit_for_host("ASIO", 4096, Some((32, 2048))), (2048, Some(2048)));
+        assert_eq!(offered_buffers("ASIO", Some((32, 2048))), vec![64, 128, 256, 512, 1024, 2048]);
+        // A driver that declares nothing keeps its own size; the engine's block is ours.
+        assert_eq!(fit_for_host("ASIO", 512, Some((0, 0))), (512, None));
+        assert_eq!(fit_for_host("ASIO", 512, Some((2048, 64))), (512, None));
+        // A declared range the engine cannot render in: nothing is asked for, the block is ours.
+        assert_eq!(fit_for_host("ASIO", 4096, Some((8192, 16384))), (4096, None));
+        assert_eq!(fit_for_host("ASIO", 4096, Some((8, 32))), (4096, None));
+        assert!(offered_buffers("ASIO", Some((8192, 16384))).is_empty());
+    }
+
+    #[test]
+    fn a_size_the_driver_will_not_take_is_said_out_loud() {
+        let range = Some((32, 2048));
+        // Fitted to the driver's range: the range and the size that plays are said.
+        let notice = buffer_notice("ASIO", "Apollo", 4096, 2048, Some(2048), range).unwrap();
+        assert!(notice.contains("32 to 2048") && notice.contains("2048 frames play"), "{notice}");
+        // Had as asked: nothing to say.
+        assert_eq!(buffer_notice("ASIO", "Apollo", 2048, 2048, Some(2048), range), None);
+        // Sizes the engine cannot render in: the driver keeps its own.
+        let notice = buffer_notice("ASIO", "Apollo", 4096, 4096, None, Some((8192, 16384))).unwrap();
+        assert!(notice.contains("8192 to 16384") && notice.contains("keeps its own"), "{notice}");
+        // A driver that declared nothing was asked for nothing; Windows sets WASAPI's buffer.
+        assert_eq!(buffer_notice("ASIO", "Apollo", 4096, 4096, None, None), None);
+        assert_eq!(buffer_notice("WASAPI", "Apollo", 4096, 4096, None, Some((480, 480))), None);
+        // A driver that declared no range keeps its own size, so a block fitted to something
+        // else than was asked for is said too, and a nonsense range is not quoted.
+        let notice = buffer_notice("ASIO", "Apollo", 300, 256, None, None).unwrap();
+        assert!(notice.contains("its own buffer size") && notice.contains("256-frame blocks"), "{notice}");
+        assert_eq!(buffer_notice("ASIO", "Apollo", 256, 256, None, None), None);
+        let notice = buffer_notice("ASIO", "Apollo", 300, 256, None, Some((0, 0))).unwrap();
+        assert!(!notice.contains("0 to 0") && notice.contains("256-frame blocks"), "{notice}");
     }
 
     #[test]
@@ -207,8 +320,25 @@ mod tests {
         for host in &hosts {
             assert!(!host.name.is_empty());
             for device in &host.devices {
-                assert!(!device.buffer_sizes.is_empty(), "{}", device.name);
-                assert!(device.buffer_sizes.windows(2).all(|w| w[0] < w[1]));
+                assert!(device.buffer_sizes.windows(2).all(|w| w[0] < w[1]), "{}", device.name);
+                assert!(
+                    device.buffer_sizes.iter().all(|n| (MIN_BUFFER_FRAMES..=MAX_BUFFER_FRAMES).contains(n)),
+                    "{}",
+                    device.name
+                );
+                // Where the host asks the driver for the size — every host but WASAPI, whose
+                // shared mode plays the period Windows gives the device, so its list is the
+                // engine's own sizes and no claim about the device — every size offered sits
+                // inside the range the driver declared. A driver that declared nothing offered
+                // the engine's own sizes instead, and none is asked of it.
+                if host.name != "WASAPI" {
+                    assert!(
+                        device.buffer_range.is_none()
+                            || device.buffer_sizes.iter().all(|n| within(device.buffer_range, *n)),
+                        "{}",
+                        device.name
+                    );
+                }
             }
         }
         assert!(hosts.iter().filter(|h| h.default).count() <= 1);

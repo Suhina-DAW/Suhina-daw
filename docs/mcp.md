@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -65,7 +65,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   the transport where it was (while playing, the play start marker moves to the playhead) and the
   plug-ins running on when the sample rate stays the same; a device that is not there plays the
   default output and the result's `notice` says so. The engine renders in blocks of
-  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
+  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. A size is fitted to what the
+  device's driver declared, and a driver is never asked for one outside that range: a range
+  holding no size the engine renders in leaves the driver its own size, and `notice` says which
+  size plays. On WASAPI shared mode Windows sets the device's buffer, so there `buffer_frames` is
+  the engine's block alone and `buffer_sizes` the engine's own sizes. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns` and
   `failed`. Without `--audio`, `audio.devices` returns an error.

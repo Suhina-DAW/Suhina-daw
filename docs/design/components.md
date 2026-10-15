@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -271,6 +271,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Audio › Output | Device | Default (the host's default device), then the host's devices; a saved device that is gone says so and the default plays |
 | Audio › Output | Sample rate | The device's own (default), then the rates the device offers |
 | Audio › Output | Buffer size | Default (1024 frames), then the device's sizes with their length in ms |
+| Audio › Output | Engine block | Where the device's buffer is not Suhina's to set — WASAPI shared mode, or a driver whose declared sizes the engine cannot render in — the row says *Engine block*, and on WASAPI its note names the period Windows gives the device in milliseconds (WASAPI reports that period in frames at each sample rate, lowest first); ASIO says *Buffer size*, with the driver's declared range in the note; WASAPI exclusive mode says *Buffer size* too, and asks the device for the period |
 | Audio › Output | Exclusive mode | On, Off (default): WASAPI only; the note says when the device does not allow it |
 | Audio › Now | Output, Latency | Read only: the device in use, and its measured latency and underruns; "List devices again" (120 px) on the Output row. Changes on this page run `audio.setOutput` |
 

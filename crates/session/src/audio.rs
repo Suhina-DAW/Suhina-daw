@@ -14,7 +14,11 @@ use crate::commands::{CommandKind, CommandSpec, ParamType, optional};
 use crate::{CommandError, Player, Projects};
 
 /// Smallest and largest buffer size, in frames, a choice may ask for; the engine renders in
-/// blocks of the chosen size (`docs/architecture.md` › Threads).
+/// blocks of the chosen size (`docs/architecture.md` › Threads). The output layer fits the
+/// choice to what the device declares and asks the device for one of those sizes only: a
+/// driver whose sizes all fall outside this span is asked for none and keeps its own
+/// (`suhina-output` › `devices`), and WASAPI shared mode, where Windows sets the device's
+/// buffer, renders in blocks of the chosen size alone.
 pub const MIN_BUFFER_FRAMES: u32 = 64;
 pub const MAX_BUFFER_FRAMES: u32 = 4096;
 /// Highest sample rate a choice may ask for.
@@ -29,7 +33,10 @@ pub struct OutputChoice {
     /// An output device's name on that host.
     pub device: Option<String>,
     pub sample_rate: Option<u32>,
-    /// Frames per buffer; the engine renders in blocks of this size.
+    /// Frames per buffer; the engine renders in blocks of this size. The output layer fits it
+    /// to the sizes the device allows and asks the device for one of those only, saying so in a
+    /// notice when that is not the size asked for; where the device's own buffer is not ours to
+    /// set (WASAPI shared mode) it is the engine's block alone.
     pub buffer_frames: Option<u32>,
     /// WASAPI only: take the device for Suhina alone (exclusive mode) when it allows it.
     /// Other programs are not heard on it meanwhile, so it is off unless asked for.
@@ -117,7 +124,10 @@ pub struct DeviceInfo {
     pub sample_rates: Vec<u32>,
     pub default_sample_rate: Option<u32>,
     /// The buffer sizes it can be asked for, smallest first (the driver's allowed values,
-    /// within [`MIN_BUFFER_FRAMES`] … [`MAX_BUFFER_FRAMES`]).
+    /// within [`MIN_BUFFER_FRAMES`] … [`MAX_BUFFER_FRAMES`]). Empty when the driver declared a
+    /// range with no size in that span: it is then asked for no size and keeps its own. On
+    /// WASAPI shared mode these are the engine's own sizes, since Windows sets the device's
+    /// buffer there.
     pub buffer_sizes: Vec<u32>,
     /// The driver's own range, when it reports one.
     pub buffer_range: Option<(u32, u32)>,
@@ -217,12 +227,16 @@ static AUDIO_COMMANDS: &[CommandSpec<Projects>] = &[
     },
     CommandSpec {
         id: "audio.setOutput",
-        label: "Choose the audio output: host, device, sample rate, buffer size (the engine renders in blocks of it) and WASAPI exclusive mode; parts left out stay, an empty text or 0 goes back to the default. Reopens the active project's output, keeping the transport where it is",
+        label: "Choose the audio output: host, device, sample rate, buffer size (the block the engine renders in, fitted to the sizes the device allows; on WASAPI shared mode the engine's block alone, since Windows sets the device's buffer) and WASAPI exclusive mode; parts left out stay, an empty text or 0 goes back to the default. Reopens the active project's output, keeping the transport where it is",
         params: &[
             optional("host", ParamType::Text, "a host from audio.devices, \"\" for the default"),
             optional("device", ParamType::Text, "an output device of that host, \"\" for its default"),
             optional("sample_rate", ParamType::Integer, "Hz, one the device lists; 0 for its default"),
-            optional("buffer_frames", ParamType::Integer, "frames per buffer, 64 to 4096; 0 for the default"),
+            optional(
+                "buffer_frames",
+                ParamType::Integer,
+                "frames per buffer, 64 to 4096, fitted to the sizes the device allows; 0 for the default",
+            ),
             optional("exclusive", ParamType::Bool, "WASAPI: open the device for Suhina alone (default false)"),
         ],
         kind: CommandKind::Audio,
