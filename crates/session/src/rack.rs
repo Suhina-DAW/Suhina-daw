@@ -433,6 +433,68 @@ pub fn is_instrument(plugin: &PluginInfo) -> bool {
     plugin.features.iter().any(|f| f.to_ascii_lowercase().contains("instrument"))
 }
 
+/// Suhina's group for the plug-in, from the format's own sub-categories, as the browser's
+/// group-by-type view shows it ([the plug-in browsing spec](../docs/spec/plugin-browsing.md)):
+/// `None` is the type's **Other**. The first of the spec's tables that matches wins, so a
+/// VST3's `Fx|Dynamics|Compressor` is Dynamics, not one group per word.
+pub fn plugin_group(plugin: &PluginInfo) -> Option<&'static str> {
+    // The words one format or the other uses for each group, lower-cased, whole words.
+    const GROUPS: [(&str, &[&str]); 12] = [
+        ("Synth", &["synth", "synthesizer"]),
+        ("Sampler", &["sampler"]),
+        ("Drums", &["drum", "drum-machine"]),
+        ("Reverb", &["reverb"]),
+        ("Delay", &["delay"]),
+        ("EQ", &["eq"]),
+        ("Filter", &["filter"]),
+        ("Dynamics", &["dynamics", "compressor", "limiter", "gate"]),
+        ("Distortion", &["distortion", "saturation"]),
+        ("Modulation", &["modulator", "chorus", "flanger", "phaser", "tremolo", "vibrato"]),
+        ("Analyzer", &["analyzer"]),
+        ("Utility", &["utility", "spatial"]),
+    ];
+    // The features arrive as separate words already (a VST3's sub-categories are split on
+    // their `|` in the scan, a CLAP's features are one word each); they are matched whole,
+    // case-insensitively. The type words ("Fx", "Instrument", "audio-effect") name no group.
+    let features: Vec<String> = plugin.features.iter().map(|f| f.to_ascii_lowercase()).collect();
+    GROUPS.iter().find_map(|(group, words)| features.iter().any(|f| words.contains(&f.as_str())).then_some(*group))
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    fn plugin(features: &[&str]) -> PluginInfo {
+        PluginInfo {
+            path: PathBuf::from("/vst3/Thing.vst3"),
+            id: "00000000000000000000000000000000".into(),
+            name: "Thing".into(),
+            vendor: "Maker".into(),
+            version: "1".into(),
+            features: features.iter().map(|f| (*f).into()).collect(),
+            replaces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_plugins_group_comes_from_its_formats_categories() {
+        // A VST3's sub-categories, as the scan splits them; the first group in the table wins.
+        assert_eq!(plugin_group(&plugin(&["Fx", "Dynamics", "Compressor"])), Some("Dynamics"));
+        assert_eq!(plugin_group(&plugin(&["Instrument", "Synth"])), Some("Synth"));
+        // Case-insensitive, whole words: "Spectrum" is no group, so Other.
+        assert_eq!(plugin_group(&plugin(&["Fx", "Spectrum"])), None);
+        assert_eq!(plugin_group(&plugin(&["ANALYZER"])), Some("Analyzer"));
+        // A CLAP's features.
+        assert_eq!(plugin_group(&plugin(&["audio-effect", "reverb"])), Some("Reverb"));
+        assert_eq!(plugin_group(&plugin(&["instrument", "synthesizer"])), Some("Synth"));
+        assert_eq!(plugin_group(&plugin(&["instrument", "drum-machine"])), Some("Drums"));
+        // The type words name no group; a plug-in with none is Other.
+        assert_eq!(plugin_group(&plugin(&["audio-effect"])), None);
+        assert_eq!(plugin_group(&plugin(&["Instrument", "External"])), None);
+        assert_eq!(plugin_group(&plugin(&[])), None);
+    }
+}
+
 /// The state the project saved for `device`, with a VST3 controller's own state.
 fn saved_state(device: &Device) -> Option<SavedState> {
     let controller = device.extensions.0.iter().find(|e| e.key == "Vst3ControllerState").map(|e| e.data.clone());

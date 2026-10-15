@@ -201,7 +201,7 @@ Stop returns to the marker.
 | `track.rename`, `track.setColor`, `track.delete` | Name (not empty), colour (`#rrggbb` or `none`), and deleting a track with its clips and slots; deleting a group ungroups it. |
 | `track.add {kind?, name?, after?, device?, preset?, voice?}` | A new audio or MIDI track with its channel, slots and lane, after `after` or after the last regular track ([browser](browser.md) › Commands). |
 
-Clips placed from the browser (`clip.addFiles`) replace what they cover in the Arrangement like a
+Clips placed from the browser or dropped from the system's file manager (`clip.addFiles`) replace what they cover in the Arrangement like a
 moved clip; they stack when either stacking setting is on (one `stack` flag for the whole drop,
 not per kind) ([browser](browser.md) › Files).
 
