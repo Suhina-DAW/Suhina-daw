@@ -26,6 +26,7 @@ pub fn blank_project() -> Project {
         sends: Vec::new(),
         devices: Vec::new(),
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let mut project = Project { transport: Transport::default(), ..Project::default() };
     let mut lanes = Vec::new();

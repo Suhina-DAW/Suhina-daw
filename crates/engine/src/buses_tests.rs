@@ -21,6 +21,7 @@ fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         sends: Vec::new(),
         devices,
         extensions: Extensions::default(),
+        automation: Vec::new(),
     };
     let track = |id: u32, parent: Option<u32>| Track {
         id: TrackId(id),

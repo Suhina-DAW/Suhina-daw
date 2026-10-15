@@ -3,7 +3,7 @@ description: How edits reach an engine that is already playing — a new graph b
 read_when: edit while playing, graph swap, renderer rebuild, Controller::update, live edits, volume change not heard, LOOP-26
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/lib.rs
   - crates/engine/src/swap.rs
@@ -108,7 +108,10 @@ klingt and JUCE's graph do), now:
    (the project is updated and an undo step recorded as for any edit). Each graph records the
    number of the last message its project already held; when a graph built before newer
    messages takes over, the renderer applies those again (it keeps the last 256), so an older
-   graph never undoes a newer value.
+   graph never undoes a newer value. A plug-in device's parameter takes the same message, with
+   its parameter id for `param`; its slot sends the value to the plug-in at the start of the
+   next block (ADR 0006, decision 3), and a graph built after it sends only the values that
+   changed.
 4. **Sounding notes follow their track's mix.** Each sine voice remembers its track and
    velocity; at a swap it takes the new graph's volume, pan and mute (and bus, if the track's
    chain changed) at once instead of keeping them until the note ends.

@@ -58,6 +58,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             sends: Vec::new(),
             devices: Vec::new(),
             extensions: Extensions::default(),
+            automation: Vec::new(),
         }],
         contents: notes
             .into_iter()
