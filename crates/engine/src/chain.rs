@@ -480,7 +480,6 @@ impl Chain {
     /// Runs the devices over the rest of a block of `frames` frames; [`Chain::mix`] then adds
     /// the result to where the track plays into, and the sends read it before that.
     pub(crate) fn complete(&mut self, frames: usize, context: &ProcessContext) {
->>>>>>> merge-419
         self.context = *context;
         self.run(frames);
     }
