@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, chords, shortcuts, and the note.* commands
-read_when: piano roll, clip editor, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes
+read_when: piano roll, clip editor, toolbar, draw tool, paint tool, erase tool, B key, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -63,8 +63,10 @@ lane, the grid and zoom, and the `note.*` commands.
 From left to right: the clip properties column (exists), the MIDI tools column (later), the editor.
 The editor, top to bottom:
 
-1. **Toolbar** (later): tabs for Notes, Envelopes and Expression; Fold; Scale with the scale name;
-   the grid value.
+1. **Toolbar** (built, [#442](https://github.com/suhina-daw/suhina-daw/issues/442)): the tools
+   (Select, Draw, Paint, Erase, › Tools) and, at the right end, the piano roll's grid value (›
+   Grid and snapping). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale with the
+   scale name.
 2. **Ruler** (built): bar numbers and bar lines. **Later ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)):** the
    clip's loop region with draggable start and end, the clip's start and end markers.
 3. **Key column and note grid** (built): one row per key, black-key rows darker than white-key
@@ -82,10 +84,34 @@ Everything scales with the detail area: the detail area's splitter (exists) make
 or shorter, and the key rows and the velocity lane keep their own heights while the visible range
 of keys grows and shrinks.
 
+### Pulled to the top
+
+**Built ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)):** while the piano roll shows a
+clip under the Arrangement view, its splitter can be dragged all the way up. Past the view's least
+height (160 px) the piano roll snaps to the top; dragged down again past that height, the view comes
+back at the height the drag reaches. A double-click on the splitter takes it to the top and back.
+What stays above it is a setting, Settings › General › Piano roll › **Pulled to the top**:
+
+- **Edited track** (default): the Arrangement view keeps its ruler and the lane of the track whose
+  clip is edited, lit (a lighter lane, an accent edge, its header shown as selected); no other
+  track, no return tracks and no main track. The view's scroll position is kept for when it comes
+  back.
+- **Whole window**: the piano roll fills the whole area under the control bar.
+
+It stays pulled up while MIDI clips are edited; selecting something else (an audio clip, a track,
+nothing), hiding the detail area (Shift+Tab) or the Session view shows the view as before. With the
+device chain as a column beside the view (Settings › Interface › Detail area) there is nothing to
+pull up.
+
 ## Grid and snapping
 
-- **Built:** the grid follows the grid value chosen in the control bar (the launch quantisation
-  menu: 1 bar, 1/4, 1/16, 1/8T and so on; `launcher.setQuantization`). The same value draws the
+- **Built ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)):** the piano roll has its own
+  grid value, the menu at the right end of its toolbar (none, 8 bars to 1 bar, 1/2 to 1/32 and the
+  triplets), 1/16 until another is picked; it lives in the window, not the project. The control
+  bar's grid value (the launch quantisation, `launcher.setQuantization`) then applies to the
+  Arrangement view only. Settings › General › Piano roll › **Piano roll grid** set to **Control
+  bar** makes the piano roll use the control bar's value instead, and its menu then sets the
+  control bar's. The same value draws the
   vertical lines and is the step that notes snap to. When lines would be closer than a few pixels,
   every second line is left out until they are far enough apart (snapping uses the same, coarser
   step, so what snaps is what is drawn). `none` draws beats and bars and does not snap.
@@ -103,8 +129,8 @@ of keys grows and shrinks.
 ## Zoom and scroll
 
 - **Built:** the mouse wheel scrolls up and down through keys; **Shift**+wheel scrolls in time;
-  **Ctrl**+wheel zooms time around the pointer; **Ctrl+Shift**+wheel zooms key height around the
-  pointer. Dragging with the middle mouse button pans both ways. A newly shown clip opens scrolled
+  **Ctrl**+wheel zooms time around the pointer; **Ctrl+Shift**+wheel or **Alt**+wheel (Option on
+  macOS, as in the Arrangement view) zooms key height around the pointer. Dragging with the middle mouse button pans both ways. A newly shown clip opens scrolled
   so its notes are in view (the middle of its lowest and highest note; C3 for an empty clip) and
   zoomed so the whole clip fits the width.
 - **Built:** key rows are 6 to 32 px tall (default 12 px); time is 4 to 400 px per beat.
@@ -118,10 +144,24 @@ of keys grows and shrinks.
   down to the grid line before the pointer (Alt: where the pointer is), its key the row under the
   pointer, its length one grid step (a quarter beat with `none`), velocity 100. The new note is
   selected. A double-click on a note deletes it.
-- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a draw mode (B toggles it): a click adds a
-  note, and dragging sideways while drawing paints notes one grid step apart in the same row;
-  dragging up or down while drawing sets the length. A new note takes the length and velocity of
-  the note last edited, so repeated drawing keeps one feel.
+- **Built:** the toolbar's tools ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)) decide
+  what a press in the grid does (the velocity lane works the same with every tool):
+  - **Select** (default): as above and in the sections below.
+  - **Draw**: a click on an empty spot adds a note there; pressing and dragging sideways sets its
+    length, its end on the grid (Alt: free), at least one grid step. A click on a note selects it,
+    and dragging a note moves or resizes it as with Select. A double-click does nothing more.
+  - **Paint**: pressing and dragging paints notes one note length apart, each in the row under the
+    pointer at that moment, from where the press was in both directions; a slot already painted
+    in the stroke, or holding a note of the same key at the same start, is skipped. The stroke is
+    one `note.add`, one undo step, and the painted notes are selected. A click adds one note.
+  - **Erase**: a click on a note deletes it; dragging deletes every note the pointer passes over
+    (they fade while the drag lasts), one `note.delete`, one undo step.
+  - **B** (`pianoRoll.draw`, after a click in the piano roll) switches between Select and Draw.
+  - A new note takes the length and velocity of the note last drawn or clicked (one grid step and
+    100 until then), so repeated drawing keeps one feel. The cursor shows the tool: a crosshair to
+    draw or paint, a no-entry sign to erase.
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** dragging up or down while
+  drawing sets the length.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** clicking a key in the key column plays it (audition, through the track's instrument)
   and selects every note of that key; while notes are drawn, moved or transposed they sound once
   (preview, with a toggle in the toolbar).
@@ -218,8 +258,8 @@ of keys grows and shrinks.
   between two lines goes to the later one. Without ends a note keeps its length; with ends its
   end moves towards the nearest line the same way, and when that line is on or before the
   quantised start, to the first line after it, so a note never becomes zero long.
-- The panel's grid is its own and does not follow the control bar's grid value, so snapping
-  while drawing and quantising can differ. Bars are as long as the project's time signature
+- The panel's grid is its own and does not follow the piano roll's grid value (nor the control
+  bar's), so snapping while drawing and quantising can differ. Bars are as long as the project's time signature
   makes them.
 - The edit is `note.quantize` (see Commands), one undo step, so it also runs from the CLI and MCP.
 - **Later:** the panel moves into the MIDI tools column when that is built
@@ -286,16 +326,17 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D | Copies, cuts, pastes, duplicates notes |
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo (as everywhere) |
 | Wheel, Shift+wheel | Scroll keys, scroll time |
-| Ctrl+wheel, Ctrl+Shift+wheel | Zoom time, zoom key height |
+| Ctrl+wheel; Ctrl+Shift+wheel or Alt+wheel | Zoom time; zoom key height |
+| B | Switches between the Select and Draw tools (after a click in the piano roll) |
 | Middle-button drag | Pan |
 
 The keys after a click in the piano roll are keymap actions ([`docs/shortcuts.md`](../shortcuts.md)):
 the `selection.*` ones the window has anyway, and `pianoRoll.selectAll`, `.deselect`, `.earlier`,
-`.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter` and `.longer`, which are read only
+`.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter`, `.longer` and `.draw`, which are read only
 while the piano roll has the keyboard, so they can be changed like the rest. `pianoRoll.quantize`
 (Ctrl+U) means nothing elsewhere, so it works whenever the piano roll shows a clip.
 
-Later: B (draw mode), Ctrl+J (glue), Ctrl+1 to Ctrl+4 (grid), Z (zoom to
+Later: Ctrl+J (glue), Ctrl+1 to Ctrl+4 (grid), Z (zoom to
 selection), added to the keymap when built.
 
 ## Commands

@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -50,7 +50,9 @@ From top to bottom:
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
-   the selected clip's editor.
+   the selected clip's editor. **Suhina:** a splitter above it sets its height; under the
+   Arrangement view, while the piano roll shows a clip, the splitter pulls it all the way up
+   ([clip editor](ui-clip-editor.md) › Pulled to the top).
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
 6. **Status bar:** messages, the selected track's name and a mini overview.
 

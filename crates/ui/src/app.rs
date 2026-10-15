@@ -23,7 +23,7 @@ use crate::motion;
 use crate::piano_roll::{self, PianoRollState};
 use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
+use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
@@ -36,11 +36,15 @@ const QUANTIZATION: [&str; 14] = [
 ];
 /// The engine's quantisation before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
+/// The piano roll's own grid value before one is picked.
+const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
 /// The detail area's height in a row, by default, and the splitter between it and the view.
 const DETAIL_HEIGHT: f32 = 200.0;
+/// The least the view keeps above the detail area; pulled past it, the piano roll goes to the top.
+const MIN_VIEW: f32 = 160.0;
 const SPLITTER: f32 = 6.0;
 
 /// How dark the window gets while a project file is dragged over it.
@@ -178,6 +182,12 @@ pub struct App {
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
+    /// The piano roll is pulled to the top (`docs/spec/ui-clip-editor.md` › Pulled to the top),
+    /// and the detail area's height a splitter drag has reached so far, unclamped.
+    detail_max: bool,
+    detail_drag: Option<f32>,
+    /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
+    piano_grid: &'static str,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -258,6 +268,9 @@ impl App {
             keymap_changed: false,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
+            detail_max: false,
+            detail_drag: None,
+            piano_grid: DEFAULT_PIANO_GRID,
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -957,8 +970,9 @@ impl App {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
-                // A hidden piano roll does not keep the keyboard.
+                // A hidden piano roll does not keep the keyboard, nor the view to one track.
                 self.piano_roll.focused = false;
+                self.arrangement.focus = None;
                 inner
             };
             // A drag from the browser: the views say what is under the pointer.
@@ -979,6 +993,8 @@ impl App {
                 }
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| match (&grid, self.shown) {
+                    // The piano roll pulled to the top over the whole window: no view.
+                    _ if inner.height() < 1.0 => {}
                     (Some(grid), View::Session) => {
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions)
                     }
@@ -1086,6 +1102,13 @@ impl App {
                 .fold(0.0, f32::max);
             self.detail_height = self.detail_height.max(needed);
         }
+        // A MIDI clip shows its notes in the piano roll beside its properties; under the
+        // Arrangement view it can be pulled to the top.
+        let piano = self.piano_clip(clip);
+        let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
+        let pulled = pullable && self.detail_max;
+        let focus = clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
             let x = area.right() - self.detail_width;
@@ -1095,25 +1118,45 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, area.top()), area.max),
             )
         } else {
-            self.detail_height = self.detail_height.clamp(80.0, (area.height() - 160.0).max(80.0));
-            let y = area.bottom() - self.detail_height;
+            self.detail_height = self.detail_height.clamp(80.0, (area.height() - MIN_VIEW).max(80.0));
+            let y = if pulled {
+                // Above it only the edited track, or nothing.
+                let above = focus.map_or(0.0, |t| self.arrangement.focus_height(t));
+                (area.top() + above.min(area.height() - 80.0) + SPLITTER).min(area.bottom() - 80.0)
+            } else {
+                area.bottom() - self.detail_height
+            };
             (
-                Rect::from_min_max(area.min, Pos2::new(area.right(), y - SPLITTER)),
+                Rect::from_min_max(area.min, Pos2::new(area.right(), (y - SPLITTER).max(area.top()))),
                 Rect::from_min_max(Pos2::new(area.left(), y - SPLITTER), Pos2::new(area.right(), y)),
                 Rect::from_min_max(Pos2::new(area.left(), y), area.max),
             )
         };
 
-        // The splitter: dragged to make the detail area bigger or smaller.
+        // The splitter: dragged to make the detail area bigger or smaller; under the
+        // Arrangement view, past the view's least height the piano roll goes to the top, and a
+        // double-click takes it there and back.
         let cursor = if stacked { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical };
-        let response = ui.interact(splitter, Id::new("detail-splitter"), Sense::drag()).on_hover_cursor(cursor);
+        let response =
+            ui.interact(splitter, Id::new("detail-splitter"), Sense::click_and_drag()).on_hover_cursor(cursor);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Detail area splitter"));
+        if response.double_clicked() && pullable {
+            self.detail_max = !self.detail_max;
+        }
         if response.dragged_by(egui::PointerButton::Primary) {
             let delta = response.drag_delta();
             if stacked {
                 self.detail_width -= delta.x;
             } else {
-                self.detail_height -= delta.y;
+                let height = self.detail_drag.unwrap_or(detail.height()) - delta.y;
+                self.detail_drag = Some(height);
+                self.detail_max = pullable && height > area.height() - MIN_VIEW;
+                if !self.detail_max {
+                    self.detail_height = height;
+                }
             }
+        } else {
+            self.detail_drag = None;
         }
         let painter = ui.painter_at(splitter);
         painter.rect_filled(splitter, 0.0, theme::control_background());
@@ -1126,8 +1169,6 @@ impl App {
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
-        // A MIDI clip shows its notes in the piano roll beside its properties.
-        let piano = self.piano_clip(clip);
         if piano.is_none() {
             self.piano_roll.hide();
         }
@@ -1144,15 +1185,40 @@ impl App {
             }
         });
         self.place_editors(&places);
+        // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
+        // the piano roll follows it.
+        if let Some(picked) = self.piano_roll.grid_picked.take() {
+            if self.settings.piano_grid_follows {
+                actions.push(Action::new("launcher.setQuantization", json!({ "value": picked })));
+            } else {
+                self.piano_grid = picked;
+            }
+        }
         view
     }
 
-    /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is the
-    /// control bar's grid value.
+    /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is its
+    /// own grid value, or the control bar's when Settings says so.
     fn piano_clip(&self, clip: Option<(TrackId, usize)>) -> Option<piano_roll::PianoClip> {
         let (track, index) = clip?;
-        let quantization = suhina_session::parse_quantization(self.quantization).ok()?;
-        piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)
+        let grid = self.piano_grid_name();
+        let quantization = suhina_session::parse_quantization(grid).ok()?;
+        let mut clip = piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?;
+        clip.grid_name = grid;
+        Some(clip)
+    }
+
+    /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
+    pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
+        if self.shown != View::Arrangement {
+            return None;
+        }
+        self.piano_clip(self.arrangement.selected_clip()).map(|c| c.address)
+    }
+
+    /// The grid value the piano roll uses.
+    fn piano_grid_name(&self) -> &'static str {
+        if self.settings.piano_grid_follows { self.quantization } else { self.piano_grid }
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.

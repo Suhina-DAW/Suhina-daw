@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -371,14 +371,23 @@ key column, the note rows, notes and the velocity lane (72 px, or 30 % of the de
 when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
 (`panel.background`) and black-key rows (`window.background`) until the clip has a scale; the
 grid's lines are `border`, bar lines `border.strong`; the grid past the clip's end is darkened.
-A rectangle being dragged is a 1 px `text.secondary` outline. The rest of this table is planned.
+A rectangle being dragged is a 1 px `text.secondary` outline. The toolbar is built too
+([#442](https://github.com/suhina-daw/suhina-daw/issues/442)): 22 px on `panel.background` with a
+1 px `border` under it; from where the grid starts (36 px in), the tools Select, Draw, Paint and
+Erase as 16 px buttons 1 px apart, their text in 10 px, the chosen one `control.activeBackground`
+with `text.primary`, the others `control.background` with `text.secondary`; at the right end
+"Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`). Notes a draw or
+paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
+drag has passed over fade to 0.12. Pulled to the top with **Edited track**, the Arrangement view's
+one lane is `panel.hoverBackground` with a 2 px `accent` edge on its left, its header
+`control.background` as a selected one. The rest of this table is planned.
 
 | Part | Spec |
 |---|---|
 | Columns | Clip properties 196 px · tools 112 px · editor |
 | Clip properties | 20 px title with 2 px clip-colour strip; 6 px padding and group gap; each pair = labels row (10 px `text.secondary`) and values row (15 px mono fields); Loop as a 15 px toggle |
 | Tools | Transpose field, then a two-column grid of 18 px buttons (×2, ÷2, Fit scale, Invert, Humanize, Quantize, Reverse, Legato) |
-| Toolbar | 20 px: tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name, grid value right |
+| Toolbar | 22 px (built: tools and grid value); later also tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name |
 | Ruler | 16 px; bar numbers `#C9C4BB`, beats `text.hint`; bar lines `#5A5751`, beat lines `#34332F` |
 | Clip loop | 8 px row, 4 px bar `control.activeBackground`, 2 × 8 handles `text.primary` |
 | Key column | 36 px; white keys `control.background`, black keys `window.background`; 2 px scale mark `#6E6A63`; C labels with octave (C3 = MIDI 60) |

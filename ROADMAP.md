@@ -381,11 +381,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
 - A first **piano roll** ([#200](https://github.com/suhina-daw/suhina-daw/issues/200),
   [spec](docs/spec/ui-clip-editor.md)): selecting a MIDI clip in the Arrangement view shows its
-  notes in the detail area beside its properties, with a keyboard, a grid that follows the control
-  bar's grid value, and a velocity lane. A double-click draws or deletes a note; a click,
+  notes in the detail area beside its properties, with a keyboard, a grid with its own grid value,
+  and a velocity lane. A double-click draws or deletes a note; a click,
   Shift+click or a rectangle selects; dragging moves notes (by grid steps, Alt for free) or their
   right end resizes them; Delete deletes the selected notes; dragging a stem changes velocity;
-  the wheel scrolls and Ctrl (with Shift for key height) zooms. Every edit is a `note.*` command
+  the wheel scrolls and Ctrl (with Shift, or Alt alone, for key height) zooms. Every edit is a `note.*` command
   (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
   the CLI and MCP run too.
 - Editing the notes of a **duplicated clip** changes that clip only: its first note edit gives
@@ -400,6 +400,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   (Shift+Up and Down by an octave), Shift+Left and Right change their length, Ctrl+A selects every
   note and Escape clears; Ctrl+C, X, V and D copy, cut, paste and duplicate notes (`note.copy`,
   `.cut`, `.paste`, `.duplicate`), pasting after the selection or at the playhead.
+- **Piano roll, step 2** ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)): its
+  splitter pulls it all the way up (a double-click too), leaving only the edited track above it,
+  lit, or nothing (Settings › General › Piano roll); Alt+wheel zooms its key rows; a toolbar with
+  the tools Select, Draw (B), Paint and Erase, each stroke one undo step; and its own grid value,
+  so the control bar's sets the Arrangement view's only, unless Settings links the two.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

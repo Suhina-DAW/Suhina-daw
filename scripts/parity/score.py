@@ -69,9 +69,10 @@ CHAPTERS = [
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
      "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
      "of long samples, warp-marker editing, quantise audio, tempo automation."),
-    (10, "Editing MIDI", 41, 0.29, "started",
+    (10, "Editing MIDI", 41, 0.33, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
-     "on the grid (Alt off-grid), by mouse or by arrow keys, copies, cuts, pastes and duplicates them, "
+     "on the grid (Alt off-grid), by mouse or by arrow keys, with Draw, Paint and Erase tools and "
+     "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
      "quantises them (Ctrl+U, a panel with grid, amount and ends) and edits velocity in a lane, "
      "through note.* commands with undo; a duplicated clip's notes are its own once edited. No "
      "transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes."),

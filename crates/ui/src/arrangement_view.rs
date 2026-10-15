@@ -169,6 +169,9 @@ pub struct ArrangementViewState {
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
+    /// The piano roll is pulled to the top: the view shows only this track, highlighted, and
+    /// no return tracks or main track (`docs/spec/ui-clip-editor.md` › Pulled to the top).
+    pub focus: Option<TrackId>,
 }
 
 impl Default for ArrangementViewState {
@@ -192,6 +195,7 @@ impl Default for ArrangementViewState {
             track_drop: None,
             panning: false,
             drop: None,
+            focus: None,
         }
     }
 }
@@ -261,7 +265,17 @@ impl ArrangementViewState {
     }
 
     fn height(&self, lane: &Lane) -> f32 {
-        self.heights.get(&lane.track).copied().unwrap_or(DEFAULT_LANE)
+        self.lane_height(lane.track)
+    }
+
+    /// How tall `track`'s lane is.
+    pub fn lane_height(&self, track: TrackId) -> f32 {
+        self.heights.get(&track).copied().unwrap_or(DEFAULT_LANE)
+    }
+
+    /// How tall the view is when it shows only `track` ([`Self::focus`]): the ruler and its lane.
+    pub fn focus_height(&self, track: TrackId) -> f32 {
+        RULER + 1.0 + self.lane_height(track) + 1.0
     }
 }
 
@@ -380,6 +394,21 @@ fn rgb(color: suhina_engine::model::Rgb) -> Color32 {
 /// Draws the Arrangement view in the space left in `ui` and adds what the user asked for to
 /// `actions`.
 pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, actions: &mut Vec<Action>) {
+    // Showing one track, the view is not scrolled down; where it was is kept for later.
+    let scrolled = state.scroll.y;
+    if state.focus.is_some() {
+        state.scroll.y = 0.0;
+    }
+    show_lanes(ui, timeline, state, actions);
+    if state.focus.is_some() {
+        state.scroll.y = scrolled;
+    }
+}
+
+fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, actions: &mut Vec<Action>) {
+    // The track lanes shown: every one but the return tracks, or only the focused one.
+    let focus = state.focus;
+    let in_view = |l: &&Lane| l.kind != ColumnKind::Return && focus.is_none_or(|f| f == l.track);
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
@@ -398,8 +427,10 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     let time = Rect::from_x_y_ranges(time_x, area.y_range());
     let ruler = Rect::from_min_size(time.min, Vec2::new(time.width(), RULER));
     // Return tracks and the main track are fixed rows along the bottom.
-    let returns: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return).collect();
-    let fixed_rows = returns.len() + usize::from(timeline.main_volume_db.is_some());
+    let returns: Vec<&Lane> =
+        timeline.lanes.iter().filter(|l| l.kind == ColumnKind::Return && focus.is_none()).collect();
+    let main_volume_db = timeline.main_volume_db.filter(|_| focus.is_none());
+    let fixed_rows = returns.len() + usize::from(main_volume_db.is_some());
     let fixed_height = fixed_rows as f32 * (ROW + 1.0);
     let fixed_top = (area.bottom() - fixed_height).max(ruler.bottom() + 1.0);
     let fixed = Rect::from_min_max(Pos2::new(area.left(), fixed_top), area.max);
@@ -446,8 +477,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
     let content_width = ((timeline.end + TAIL_BARS * bar_beats) as f32) * state.beat_width;
-    let content_height: f32 =
-        timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).map(|l| state.height(l) + 1.0).sum();
+    let content_height: f32 = timeline.lanes.iter().filter(in_view).map(|l| state.height(l) + 1.0).sum();
     state.scroll.x = state.scroll.x.clamp(0.0, (content_width - time.width()).max(0.0));
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - lanes_area.height()).max(0.0));
 
@@ -540,7 +570,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
     // Where every lane is this frame, so a dragged clip can find the lane under the pointer.
     let mut rows = Vec::new();
     let mut y = lanes_area.top() - state.scroll.y;
-    for lane in timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return) {
+    for lane in timeline.lanes.iter().filter(in_view) {
         let height = state.height(lane);
         let lane_time = Rect::from_x_y_ranges(time.x_range(), egui::Rangef::new(y, y + height));
         rows.push(Row { track: lane.track, time: lane_time, clip: lane_time.intersect(lanes_area) });
@@ -570,6 +600,12 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         if lane_rect.bottom() < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
         }
+        // The track the piano roll edits, alone in the view: lit, so it is clear which it is.
+        if focus == Some(lane.track) {
+            lanes_painter.rect_filled(row.time, 0.0, theme::panel_hover());
+            let edge = Rect::from_min_size(row.time.min, Vec2::new(2.0, row.time.height()));
+            lanes_painter.rect_filled(edge, 0.0, theme::accent());
+        }
         for clip in &lane.clips {
             if clip.start + clip.length >= first_beat && clip.start <= last_beat {
                 let found = clip_box(
@@ -595,7 +631,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
 
     // A track header let go over a lane moves the track (and a group's tracks) there: above the
     // lane under the pointer, or below it from its lower half.
-    let tracks: Vec<&Lane> = timeline.lanes.iter().filter(|l| l.kind != ColumnKind::Return).collect();
+    let tracks: Vec<&Lane> = timeline.lanes.iter().filter(in_view).collect();
     let target_of = |y: f32| {
         let lane = tracks.iter().find(|l| row_of(l.track).is_some_and(|r| r.time.y_range().contains(y)))?;
         let row = row_of(lane.track)?;
@@ -655,7 +691,7 @@ pub fn show(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState, 
         fixed_row(ui, &fixed_painter, header, fixed, lane, state, actions);
         fixed_painter.hline(area.x_range(), row.time.bottom() + 0.5, theme::hairline(theme::border()));
     }
-    if let Some(db) = timeline.main_volume_db {
+    if let Some(db) = main_volume_db {
         let y = fixed.bottom() - ROW;
         let header = Rect::from_x_y_ranges(headers, egui::Rangef::new(y, y + ROW));
         fixed_painter.rect_filled(header, 0.0, theme::panel_background());
@@ -1340,7 +1376,7 @@ fn track_header(
         };
         menus::track_menu(ui, &menu, actions);
     });
-    let selected = state.selected_tracks.contains(&lane.track);
+    let selected = state.selected_tracks.contains(&lane.track) || state.focus == Some(lane.track);
     painter.rect_filled(rect, 0.0, if selected { theme::control_background() } else { theme::panel_background() });
     let inner = Rect::from_min_max(
         Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),

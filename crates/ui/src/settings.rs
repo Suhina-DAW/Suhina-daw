@@ -41,6 +41,16 @@ impl StopReturn {
     }
 }
 
+/// What stays above the piano roll when its splitter is pulled to the top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PianoRollTop {
+    /// The Arrangement view's ruler and the track whose clip is edited.
+    #[default]
+    Track,
+    /// Nothing: the piano roll fills the area under the control bar.
+    Window,
+}
+
 /// How the detail area lays out a device chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceLayout {
@@ -146,6 +156,11 @@ pub struct Settings {
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
     pub device_layout: DeviceLayout,
+    /// What stays above the piano roll pulled to the top.
+    pub piano_roll_top: PianoRollTop,
+    /// The control bar's grid value sets the piano roll's too; otherwise the piano roll keeps
+    /// its own.
+    pub piano_grid_follows: bool,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
     /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
@@ -202,6 +217,8 @@ impl Default for Settings {
             on_open: OnOpen::Ask,
             stop: StopReturn::Marker,
             device_layout: DeviceLayout::Row,
+            piano_roll_top: PianoRollTop::Track,
+            piano_grid_follows: false,
             plugin_editors: EditorPlacement::Window,
             theme: crate::theme::BUILT_IN.into(),
             projects_folder: String::new(),
@@ -299,7 +316,7 @@ impl Settings {
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
@@ -329,6 +346,11 @@ impl Settings {
                 Side::Right => "right",
             },
             drop = if self.drop_separate { "separate" } else { "one_track" },
+            piano_top = match self.piano_roll_top {
+                PianoRollTop::Track => "track",
+                PianoRollTop::Window => "window",
+            },
+            piano_grid = if self.piano_grid_follows { "control_bar" } else { "own" },
         )
     }
 
@@ -414,6 +436,9 @@ impl Settings {
                     settings.audio_buffer = frames.parse().unwrap_or(0);
                 }
                 ("audio_exclusive", "on" | "off") => settings.audio_exclusive = value == "on",
+                ("piano_roll_top", "track") => settings.piano_roll_top = PianoRollTop::Track,
+                ("piano_roll_top", "window") => settings.piano_roll_top = PianoRollTop::Window,
+                ("piano_roll_grid", "own" | "control_bar") => settings.piano_grid_follows = value == "control_bar",
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -460,6 +485,8 @@ mod tests {
             on_open: OnOpen::Replace,
             stop: StopReturn::Here,
             device_layout: DeviceLayout::Stack,
+            piano_roll_top: PianoRollTop::Window,
+            piano_grid_follows: true,
             plugin_editors: EditorPlacement::DeviceView,
             theme: "Night blue".into(),
             projects_folder: "C:/Music/Songs = mine".into(),

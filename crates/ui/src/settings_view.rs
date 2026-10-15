@@ -6,7 +6,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
 use crate::keymap::{Keymap, Shortcut, actions};
 use crate::motion;
-use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, Settings, Side, StopReturn};
+use crate::settings::{DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, Settings, Side, StopReturn};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
 
@@ -347,6 +347,36 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             let options = [("Marker", StopReturn::Marker), ("Stay", StopReturn::Here)];
             if let Some(choice) = segmented(ui, &painter, control_rect(r, 2), "Stop", &options, settings.stop) {
                 settings.stop = choice;
+                outcome.changed = true;
+            }
+            y += 8.0;
+            section(&mut y, "Piano roll");
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Pulled to the top",
+                "What stays above the piano roll when its splitter is dragged all the way up",
+            );
+            let options = [("Edited track", PianoRollTop::Track), ("Whole window", PianoRollTop::Window)];
+            if let Some(choice) =
+                segmented(ui, &painter, control_rect(r, 2), "Pulled to the top", &options, settings.piano_roll_top)
+            {
+                settings.piano_roll_top = choice;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Piano roll grid",
+                "Its own grid value, or the one in the control bar, which otherwise sets the Arrangement view's only",
+            );
+            let options = [("Its own", false), ("Control bar", true)];
+            if let Some(choice) =
+                segmented(ui, &painter, control_rect(r, 2), "Piano roll grid", &options, settings.piano_grid_follows)
+            {
+                settings.piano_grid_follows = choice;
                 outcome.changed = true;
             }
         }

@@ -12,6 +12,7 @@ use suhina_engine::model::{LaneData, Note};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
 use suhina_ui::piano_roll::key_name;
+use suhina_ui::settings::Settings;
 use suhina_ui::widgets::Action;
 use suhina_ui::{App, theme};
 
@@ -36,6 +37,11 @@ fn piano_app(renderer: &mut suhina_engine::Renderer) -> Harness<'static, App> {
         .with_max_steps(20)
         .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
     theme::install(&harness.ctx);
+    // These tests set the grid in the control bar, so the piano roll follows it (Settings ›
+    // General › Piano roll grid); its own grid value has tests of its own.
+    let settings = Settings { piano_grid_follows: true, ..Settings::default() };
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_settings(&ctx, settings);
     harness.run();
     harness.get_by_label("Arrangement view").click();
     harness.run();

@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 35] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 36] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -120,6 +120,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 35] = [
     ("pianoRoll.octaveDown", "Move the selected notes an octave down", PIANO_ROLL),
     ("pianoRoll.shorter", "Make the selected notes one grid step shorter", PIANO_ROLL),
     ("pianoRoll.longer", "Make the selected notes one grid step longer", PIANO_ROLL),
+    ("pianoRoll.draw", "Switch the piano roll between the Select and Draw tools", PIANO_ROLL),
 ];
 
 /// The Shortcuts list's group for the piano roll's own actions.
@@ -158,7 +159,7 @@ pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
 }
 
-const DEFAULTS: [(&str, &[&str]); 36] = [
+const DEFAULTS: [(&str, &[&str]); 37] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -195,6 +196,7 @@ const DEFAULTS: [(&str, &[&str]); 36] = [
     ("pianoRoll.octaveDown", &["Shift+Down"]),
     ("pianoRoll.shorter", &["Shift+Left"]),
     ("pianoRoll.longer", &["Shift+Right"]),
+    ("pianoRoll.draw", &["B"]),
 ];
 
 impl Default for Keymap {

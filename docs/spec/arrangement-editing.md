@@ -3,7 +3,7 @@ description: How arrangement clips behave when moved (along a lane, to another t
 read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -200,6 +200,11 @@ In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G group
 dragging a header moves the track above the lane under the pointer (below it from its lower half),
 and a right-click opens the track's menu: name, colour, group, ungroup, delete. The Session view's
 column headers have the same menu.
+
+While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
+the view shows only its ruler and the edited track's lane, lit, with no return tracks and no main
+track, and is not scrolled; its scroll position is back when the view is whole again
+([clip editor](ui-clip-editor.md) › Pulled to the top).
 
 ## Over other clips
 
