@@ -46,7 +46,7 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
 
 | Part | Fields |
 |---|---|
-| `transport` | `tempo_bpm` (1–999, default 120); `time_signature` `[numerator, denominator]`, each 1–255 (default `[4, 4]`) |
+| `transport` | `tempo_bpm` (1–999, default 120); `time_signature` `[numerator, denominator]`, each 1–255 (default `[4, 4]`); `loop` (optional, left out without a loop region): `{ "start", "end", "enabled" }`, beats with `start` from 0 and `end` after it, `enabled` true or false (default false) ([loop region](arrangement-editing.md#loop-region)) |
 | track | `id`; `name`; `color` `"#RRGGBB"` or `null`; `notes`, `audio` (what it plays); `channel` (its mixer channel) and `parent` (its group) or `null` |
 | channel | `id`; `name`; `role` `regular`, `master`, `effect` (a return) or `submix`; `volume` (linear, not negative, default 1), `pan` (−1 to 1); `mute`, `solo`; `output` (a channel, `null` for the audio output); `sends` `[{ target, level, pre_fader }]`; `devices` |
 | device | `name`; `kind` `{ "type": "builtin", "id" }`, `clap`, `vst3` (32 hex digits), `vst2` (a whole number) or `foreign` `{ format, id }`; `enabled` (default true); `state` (base64, plug-ins); `params` `[{ id, value }]` (built-in effects and instruments). A VST3 controller's state is the extension `Vst3ControllerState` |

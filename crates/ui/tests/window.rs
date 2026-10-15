@@ -373,6 +373,58 @@ fn markers_are_added_jumped_to_and_deleted_from_the_marker_row() {
     assert_eq!(markers(&harness)[0], (24.0, "Marker 1".to_string()));
 }
 
+/// The loop brace row under the ruler: a drag draws a region on the bar grid and turns looping
+/// on, Ctrl+L and a click on the brace turn it off and on, its end and its middle are dragged,
+/// and undo takes an edit back (`docs/spec/arrangement-editing.md` › Loop region).
+#[test]
+fn a_loop_region_is_drawn_resized_moved_and_toggled_in_the_loop_brace_row() {
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let looped = |h: &Harness<'static, App>| {
+        let transport = h.state().session().map(|s| s.project().transport.clone()).unwrap_or_default();
+        (transport.loop_range.map(|r| (r.start, r.end)), transport.loop_enabled)
+    };
+    let drag = |h: &mut Harness<'static, App>, from: egui::Pos2, by: f32| {
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        h.hover_at(from + egui::vec2(by / 2.0, 0.0));
+        h.run();
+        h.hover_at(from + egui::vec2(by, 0.0));
+        h.run();
+        h.drop_at(from + egui::vec2(by, 0.0));
+        h.run();
+    };
+    // 8 points a beat: from beat 4 to beat 12, a little off the bars, lands on them.
+    let row = harness.get_by_label("Loop brace").rect();
+    let at_beat = |beat: f32| egui::pos2(row.left() + beat * 8.0, row.center().y);
+    drag(&mut harness, at_beat(4.0) + egui::vec2(3.0, 0.0), 8.0 * 8.0 - 5.0);
+    assert_eq!(looped(&harness), (Some((4.0, 12.0)), true));
+
+    // Ctrl+L turns it off, a click on the brace on again.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    harness.run();
+    assert_eq!(looped(&harness), (Some((4.0, 12.0)), false));
+    harness.hover_at(at_beat(8.0));
+    harness.run();
+    harness.drag_at(at_beat(8.0));
+    harness.drop_at(at_beat(8.0));
+    harness.run();
+    assert_eq!(looped(&harness), (Some((4.0, 12.0)), true));
+
+    // The end dragged two bars right, then the whole brace one bar right.
+    drag(&mut harness, at_beat(12.0), 64.0);
+    assert_eq!(looped(&harness), (Some((4.0, 20.0)), true));
+    drag(&mut harness, at_beat(10.0), 32.0);
+    assert_eq!(looped(&harness), (Some((8.0, 24.0)), true));
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(looped(&harness), (Some((4.0, 20.0)), true));
+}
+
 #[test]
 fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     let mut renderer =

@@ -517,6 +517,31 @@ what each one holds, so the importer can read them into arrangement markers. Unt
 `corpus/als/README.md`, as in the Log section at the end, plus the default name Live gave each new
 locator.
 
+## Series 11: arrangement loop
+
+Shows where a Live Set stores the arrangement's loop region and whether it is on, so the
+importer can read them into the transport's loop region. Until then `als-format.md` › Arrangement
+loop lists the structure as a hypothesis.
+
+### Setup
+
+1. Start from `00-base.als` (series 1) and Save As `corpus/als/700-loop-base.als`.
+2. Switch to Arrangement View. Set the arrangement grid to one bar.
+
+### Files (700–703)
+
+| # | File name | Edit from the previous file |
+|---|---|---|
+| 700 | `700-loop-base.als` | No edit. |
+| 701 | `701-loop-bars-5-9.als` | Set the loop brace to start at bar 5 and end at bar 9 (four bars), and turn the loop on. |
+| 702 | `702-loop-off.als` | Turn the loop off; leave the brace where it is. |
+| 703 | `703-loop-bars-3-4.als` | Drag the brace to start at bar 3 and set its length to one bar; turn the loop on again. |
+
+### Log
+
+`corpus/als/README.md`, as in the Log section at the end, plus the loop start and length the
+transport bar showed for each file.
+
 ## Tips from the first run
 
 - Live's default new set already has two MIDI tracks, two audio tracks, two returns and eight
