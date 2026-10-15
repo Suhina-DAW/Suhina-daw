@@ -24,7 +24,7 @@ Items marked **(to observe)** still need checking in Live.
 From top to bottom:
 
 1. **Menu bar:** File, Edit, Create, View, Playback, Navigate, Options, Help. (Suhina has File,
-   Edit, View, Projects and Options so far; components.md lists what is built.)
+   Edit, View, Projects, Options and Help so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
    - groove amount, metronome, global launch quantisation
@@ -35,7 +35,8 @@ From top to bottom:
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`
-      reports it as `cpu`; the rest is not)
+      reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM
+      (its resident memory, in MB or GB), shown always
     - view switches (Session / Arrangement)
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of
@@ -72,7 +73,9 @@ Double-clicking to rename is planned.
 Dropping a device or file from the browser on the empty area right of the last track creates a
 new track; the area also has **+ MIDI track** and **+ Audio track** buttons ([browser](browser.md) ›
 Files). A file dropped on a slot or below the stop row becomes a clip in that slot (scenes are
-added below when needed); a device dropped on a column joins the track's chain.
+added below when needed); a device dropped on a column joins the track's chain. Samples and MIDI
+files dragged from the system's file manager land the same way ([browser](browser.md) › Files
+from the system).
 
 ### Clip slots
 

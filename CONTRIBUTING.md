@@ -55,6 +55,11 @@ assigns you, and refuses the claim when the work is not free. Without the bot, a
 ("I'd like to take this. Plan: …") is the claim, and the first one wins: a bot that is down never
 means the issue is free.
 
+A maintainer who hands an issue to someone writes `/claim @their-login`, with the plan after it if
+there is one: the bot makes the same checks for that person, assigns them and moves the card, also
+when they were assigned by hand and the card was never moved. Only a maintainer may claim for
+someone else.
+
 **Show the work within 48 hours.** Open a draft pull request that says `Closes #N` as soon as you
 have a first commit. A claim with no pull request after 48 hours lapses, and the next `/claim`
 takes it over. If you stop, comment `/unclaim`, so the card goes back to `Ready`.
@@ -87,6 +92,16 @@ links the downloads from the pull request in a comment, updated with every new b
 built on every push. A contributor's pull request is built once a maintainer has read the diff and
 added the `test-build` label; a later push takes the label off, and the new commits are built when
 the label is added again.
+
+## Merging many pull requests
+
+For maintainers. Merge through the merge queue: on each green pull request press **Merge when
+ready**, and the queue tests the queued pull requests together on top of `main`, in groups, and
+merges them in order, so no one presses *Update branch* by hand. To try several pull requests in
+one build before they merge, run Actions › Test build › Run workflow with their numbers
+(`302 303 304`). A push that only merges `main` into a pull request is not built again; its last
+test build stays linked. [`docs/releasing.md` › Merging many pull requests](docs/releasing.md#merging-many-pull-requests)
+says how the queue is set up and what runs in it.
 
 ## Clean-room
 
@@ -181,6 +196,9 @@ AI coding agents are welcome, under these rules:
 
 - **Credit the model.** Keep the `Co-Authored-By:` trailer your tool adds (for example
   `Co-Authored-By: Claude <noreply@anthropic.com>`), so the history shows how each change was made.
+- **No session links.** The repository is public: leave out links to your agent's own session
+  (such as `https://claude.ai/code/session_...`) from commit messages, pull requests, issues and
+  comments, even when the tool adds one by default.
 - **Steps anyone can follow.** A change in what Suhina does, in the app, its sound, the files it
   reads and writes, the CLI or MCP, comes with a *How to check it* section in the pull request:
   numbered steps from opening Suhina with nothing loaded, every control named as it reads on

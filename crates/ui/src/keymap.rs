@@ -80,7 +80,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 25] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -105,6 +105,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 24] = [
     ("selection.duplicate", "Duplicate the selected clip", "Edit"),
     ("selection.delete", "Delete the selected clip", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
 /// Every action a key can be bound to: the window's, then each command that needs no
