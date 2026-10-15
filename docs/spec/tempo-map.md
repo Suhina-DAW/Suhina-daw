@@ -9,7 +9,7 @@ covers:
   - crates/engine/src/tempo.rs
   - crates/session/src/tempo.rs
   - crates/session/tests/tempo.rs
-  - crates/engine/tests/tempo_map.rs
+  - crates/engine/src/tempo_tests.rs
 ---
 
 # Tempo map

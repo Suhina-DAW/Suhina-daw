@@ -121,7 +121,7 @@ impl TempoMap {
             if point.ramp && point.bpm != current.bpm {
                 current.slope = (point.bpm - current.bpm) / (point.beat - current.beat);
             }
-            let at = current.units_after(point.beat - current.beat, units_per_second);
+            let at = current.at + current.units_after(point.beat - current.beat, units_per_second);
             segments.push(current);
             // Constant until a ramp into the next point says otherwise; the last stays constant.
             current = Segment { beat: point.beat, at, bpm: point.bpm, per_beat: per_beat(point.bpm), slope: 0.0 };
@@ -400,6 +400,28 @@ mod tests {
         let map = TempoMap::new(140.0, &[point(4.0, 70.0, true)], 48_000.0);
         for beat in [0.1, 2.0, 3.9, 4.0, 5.0] {
             assert!((map.beat_at(map.time_at(beat)) - beat).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn several_changes_add_up() {
+        // 120 for 4 beats (2 s), 60 for 2 (2 s), then a ramp from 60 to 120 over 4 beats and a
+        // step down to 30.
+        let changes =
+            [point(4.0, 60.0, false), point(10.0, 120.0, true), point(6.0, 60.0, false), point(12.0, 30.0, false)];
+        let map = TempoMap::new(120.0, &changes, 1.0);
+        let ramp = 60.0 / 15.0 * 2f64.ln();
+        assert_eq!(map.time_at(6.0), 4.0);
+        assert!((map.time_at(10.0) - (4.0 + ramp)).abs() < 1e-12);
+        assert!((map.time_at(11.0) - (4.0 + ramp + 0.5)).abs() < 1e-12);
+        assert!((map.time_at(13.0) - (4.0 + ramp + 1.0 + 2.0)).abs() < 1e-12);
+        let mut last = -1.0;
+        for i in 0..200 {
+            let beat = f64::from(i) * 0.1;
+            let time = map.time_at(beat);
+            assert!(time > last, "time goes backwards at beat {beat}");
+            assert!((map.beat_at(time) - beat).abs() < 1e-9);
+            last = time;
         }
     }
 

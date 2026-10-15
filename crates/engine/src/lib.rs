@@ -24,6 +24,8 @@ mod preview_tests;
 mod stretch;
 mod swap;
 mod tempo;
+#[cfg(test)]
+mod tempo_tests;
 
 use std::collections::HashMap;
 use std::fmt;
