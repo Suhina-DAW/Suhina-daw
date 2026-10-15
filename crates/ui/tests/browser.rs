@@ -185,6 +185,39 @@ fn a_double_click_on_a_folders_chevron_opens_it_and_stays_open() {
 }
 
 #[test]
+fn a_click_on_a_headings_chevron_opens_it_and_stays_open() {
+    let (settings, folder) = (temp("heading-chevron-settings"), temp("heading-chevron"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    let at = harness.get_by_label(&row("Instruments")).rect();
+    let chevron = Pos2::new(at.left() + 8.0, at.center().y);
+    // A single click on a heading's chevron opens it and it stays open: the press and the
+    // release of the click must not each toggle it (#293).
+    click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some(), "a click on the heading's chevron opens it");
+    // Past the double-click window (eight frames is 0.4 s, the window is 0.3 s), the next
+    // click closes it again.
+    for _ in 0..8 {
+        harness.step();
+    }
+    click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_none(), "a click after the window closes it");
+    // A rapid double-click on the chevron opens it once: the second click of the pair is a
+    // double and does not toggle again.
+    for _ in 0..8 {
+        harness.step();
+    }
+    click_at(&mut harness, chevron);
+    click_at(&mut harness, chevron);
+    harness.run();
+    assert!(harness.query_by_label(&row("FM Synth")).is_some(), "a double-click on the chevron opens it once");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn search_and_the_category_filters_narrow_the_results() {
     let (settings, folder) = (temp("search-settings"), temp("search"));
     pack(&folder);

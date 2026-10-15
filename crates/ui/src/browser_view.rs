@@ -651,16 +651,26 @@ fn results_view(
         if state.handled_press.take() != key {
             click_row(state, &rows, index, modifiers);
         }
+        // A heading opens with a click on its name: the same rules as its chevron (right
+        // below), which takes the clicks in the chevron zone instead of this one.
+        if let Some(row) = rows.get(index)
+            && row.item.kind == ItemKind::Heading
+            && !ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary))
+            && !ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth))
+        {
+            state.toggle(&row.item.key);
+        }
     }
     if let Some(index) = double
         && let Some(row) = rows.get(index)
     {
         // A double-click on the row itself opens it — but not on its chevron: the gesture's
         // two clicks are within egui's double-click window (0.3 s, 6 pt) and its first one
-        // toggled already, so the double would open and close the folder again (#293).
+        // toggled already, so the double would open and close the folder again (#293); and
+        // not on a heading, whose single clicks toggle above.
         let on_chevron = row.opens
             && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x < chevron_zone(area.left(), row.depth));
-        if row.opens && !on_chevron {
+        if row.opens && !on_chevron && row.item.kind != ItemKind::Heading {
             state.toggle(&row.item.key);
         } else if row.item.kind == ItemKind::Project {
             out.open_project = row.item.path();
@@ -717,8 +727,10 @@ fn results_view(
 
 fn click_row(state: &mut BrowserState, rows: &[Row], index: usize, modifiers: Modifiers) {
     let Some(row) = rows.get(index) else { return };
+    // A heading toggles in the click handling below, through the same paths a folder's
+    // chevron takes, so that a click toggles it once however the pointer counts it; it never
+    // selects.
     if row.item.kind == ItemKind::Heading {
-        state.toggle(&row.item.key);
         return;
     }
     if modifiers.command {

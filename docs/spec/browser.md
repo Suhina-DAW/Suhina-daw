@@ -118,10 +118,10 @@ then by name. Each row shows the folder it is in after the name.
 
 **Rows:** a chevron for what opens, the type icon, the name, the colour tag dots after it and
 on the right the duration of a sample (`0:04.2`, read when the row is first shown) or the kind
-of a device ("instrument", "effect", the plug-in's format). A folder opens and closes with a
-click on its chevron (every click toggles; the second click of a rapid pair is a double and is
-absorbed, so a double-click on the chevron opens the folder once) or with a double-click on the
-row itself; its contents are read from disk when it opens, sorted
+of a device ("instrument", "effect", the plug-in's format). A folder or a heading opens and
+closes with a click on its chevron (every click toggles; the second click of a rapid pair is a
+double and is absorbed, so a double-click on the chevron opens it once), a folder also with a
+double-click on the row itself; a folder's contents are read from disk when it opens, sorted
 folders first then by name (natural order: "Kick 2" before "Kick 10"). A preset bank opens
 into its 32 voices.
 
