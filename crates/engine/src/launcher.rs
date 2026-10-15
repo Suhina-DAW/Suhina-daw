@@ -115,6 +115,13 @@ pub enum LaunchCommand {
     SetLaunchTempo {
         bpm: f64,
     },
+    /// Sets the cue volume (`gain`, linear, 0 to `MAX_CUE_GAIN`) and whether the cue has an
+    /// output pair of its own (`separate`: the preview is then not heard on the main output),
+    /// each when given.
+    SetCue {
+        gain: Option<f32>,
+        separate: Option<bool>,
+    },
     /// Seeds the random numbers that follow actions are picked with; the same seed picks the
     /// same actions in the same playback.
     SeedRandom(u64),
@@ -929,6 +936,7 @@ impl Renderer {
                 self.metronome.set(on, gain);
                 self.graph.launcher.monitor.metronome.store(self.metronome.on(), Ordering::Relaxed);
             }
+            LaunchCommand::SetCue { gain, separate } => self.cue.set(gain, separate),
             LaunchCommand::LaunchClip { column, slot } => {
                 let Some(target) = self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(slot)) else {
                     return;
@@ -1512,6 +1520,7 @@ mod tests {
                     pan: 0.0,
                     mute: false,
                     solo: false,
+                    cue: false,
                     output: None,
                     sends: Vec::new(),
                     devices: Vec::new(),

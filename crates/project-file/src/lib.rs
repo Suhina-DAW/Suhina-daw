@@ -270,6 +270,10 @@ fn channel_value(c: &Channel) -> Value {
         "devices": c.devices.iter().map(device_value).collect::<Vec<_>>(),
     });
     if let Some(map) = out.as_object_mut() {
+        // Written only when on, so a project without a cued track reads as it did before.
+        if c.cue {
+            map.insert("cue".into(), json!(true));
+        }
         if !c.automation.is_empty() {
             map.insert("automation".into(), lanes_value(&c.automation));
         }
@@ -734,6 +738,7 @@ fn read_channel(value: &Value, at: &str) -> Result<Channel, ProjectFileError> {
         pan,
         mute: flag(c, "mute", false, at)?,
         solo: flag(c, "solo", false, at)?,
+        cue: flag(c, "cue", false, at)?,
         output: optional_whole(c, "output", at)?.map(ChannelId),
         sends,
         devices,

@@ -1680,8 +1680,39 @@ impl App {
     }
 
     /// Plays on the output `choice` names from now on (`audio.setOutput`): the active project's
-    /// output opens again there, the transport where it was.
+    /// output opens again there, the transport where it was. When only the cue changed, the
+    /// cue's command runs instead (`output.setCuePair`, `output.setCueVolume`).
     fn choose_output(&mut self, choice: &suhina_session::OutputChoice) {
+        let current = self.projects.output_choice().clone();
+        if choice.device_only() == current.device_only() && choice.cue_pair == current.cue_pair {
+            let db =
+                if choice.cue_gain > 0.0 { json!(20.0 * f64::from(choice.cue_gain).log10()) } else { json!("-inf") };
+            match self.projects.execute("output.setCueVolume", &json!({ "db": db })) {
+                Ok(result) => {
+                    let db =
+                        result["cue_db"].as_f64().map_or_else(|| "silent".to_string(), |db| format!("{db:+.0} dB"));
+                    self.status = Status::Done(format!("Cue volume: {db}"));
+                }
+                Err(e) => self.status = Status::Error(e.0),
+            }
+            return;
+        }
+        if choice.device_only() == current.device_only() {
+            match self.projects.execute("output.setCuePair", &json!({ "pair": choice.cue_pair.unwrap_or(0) })) {
+                Ok(result) => {
+                    self.status = match (result["notice"].as_str(), choice.cue_pair) {
+                        (Some(notice), _) => Status::Hint(notice.to_string()),
+                        (None, Some(pair)) => {
+                            let (first, second) = suhina_session::audio::cue_channels(pair);
+                            Status::Done(format!("Cue: outputs {first}/{second}"))
+                        }
+                        (None, None) => Status::Done("Cue: with the main output".to_string()),
+                    };
+                }
+                Err(e) => self.status = Status::Error(e.0),
+            }
+            return;
+        }
         let params = choice.to_json();
         let params = json!({
             "host": params["host"].as_str().unwrap_or(""),

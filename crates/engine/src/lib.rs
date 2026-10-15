@@ -14,6 +14,9 @@ mod chain;
 #[cfg(test)]
 mod chain_tests;
 mod cpu;
+mod cue;
+#[cfg(test)]
+mod cue_tests;
 #[cfg(test)]
 mod fade_tests;
 mod follow;
@@ -52,6 +55,7 @@ pub use audio::{AudioData, AudioPool};
 use audio::{AudioEvent, Fades};
 use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
 pub use cpu::CpuMonitor;
+pub use cue::MAX_CUE_GAIN;
 use launcher::Launcher;
 pub use launcher::{
     ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, Meter, Quantization, Queued, SceneShift,
@@ -257,6 +261,8 @@ pub struct Renderer {
     plugin_info: HashMap<u64, PluginSlotInfo>,
     /// The browser's preview voice (ADR 0011).
     preview: preview::Preview,
+    /// The cue bus: cued tracks and the preview, for headphones (`cue.rs`).
+    cue: cue::Cue,
     /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
     cpu: cpu::CpuMeter,
     /// The level meters, published to the controller's `MeterMonitor`.
@@ -315,6 +321,7 @@ impl Renderer {
             offline: false,
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
+            cue: cue::Cue::new(),
             cpu: cpu::CpuMeter::new(),
             meters,
             follow_loop: true,
@@ -409,13 +416,26 @@ impl Renderer {
     }
 
     /// Renders the next `out.len() / 2` frames of interleaved stereo into `out`, overwriting it.
-    /// Commands from a [`Controller`] are applied first. Never allocates.
+    /// Commands from a [`Controller`] are applied first. Never allocates. The cue bus is
+    /// rendered too but not given out; see [`Renderer::process_with_cue`].
     pub fn process(&mut self, out: &mut [f32]) {
+        self.process_parts(out, None);
+    }
+
+    /// Like [`Renderer::process`], and writes the cue bus, the same number of frames of
+    /// interleaved stereo, into `cue` (overwriting it; frames `cue` has no room for are not
+    /// written, and frames past `out`'s are left alone). Never allocates.
+    pub fn process_with_cue(&mut self, out: &mut [f32], cue: &mut [f32]) {
+        self.process_parts(out, Some(cue));
+    }
+
+    fn process_parts(&mut self, out: &mut [f32], cue: Option<&mut [f32]>) {
         // The CPU load is measured only in real time: an offline render runs flat out.
         let measured = if self.offline { None } else { Some(Instant::now()) };
         self.receive_swap();
         self.receive_plugins();
         let mut rest = out;
+        let mut cue_rest = cue;
         // Every new graph whose frame falls in this block takes over at its frame: the frames
         // before it are the previous graph's. The queue is bounded, so this ends.
         loop {
@@ -424,17 +444,19 @@ impl Renderer {
                 Some(at) if at < self.position + frames => {
                     let split = ((at.saturating_sub(self.position) * 2) as usize).min(rest.len());
                     let (before, after) = rest.split_at_mut(split);
+                    let (cue_before, cue_after) = split_cue(cue_rest, split);
                     if !before.is_empty() {
-                        self.process_block(before);
+                        self.process_block(before, cue_before);
                     }
                     self.apply_swap();
                     rest = after;
+                    cue_rest = cue_after;
                 }
                 _ => break,
             }
         }
         if !rest.is_empty() {
-            self.process_block(rest);
+            self.process_block(rest, cue_rest);
         }
         self.publish_position();
         if let Some(started) = measured {
@@ -442,7 +464,7 @@ impl Renderer {
         }
     }
 
-    fn process_block(&mut self, mut out: &mut [f32]) {
+    fn process_block(&mut self, mut out: &mut [f32], mut cue: Option<&mut [f32]>) {
         // Device chains hold at most MAX_BLOCK frames; longer blocks are rendered in pieces. A
         // piece also ends at the loop end, where the transport wraps to the loop start, so the
         // wrap lands on its exact frame. Commands are applied first: they can start the
@@ -453,7 +475,9 @@ impl Renderer {
             let frames = (out.len() / 2).min(MAX_BLOCK);
             let frames = self.frames_to_loop_end().map_or(frames, |to_end| frames.min(to_end.max(1)));
             let (chunk, rest) = std::mem::take(&mut out).split_at_mut(frames * 2);
-            self.process_chunk(chunk);
+            let (cue_chunk, cue_after) = split_cue(cue, chunk.len());
+            self.process_chunk(chunk, cue_chunk);
+            cue = cue_after;
             out = rest;
         }
     }
@@ -469,8 +493,9 @@ impl Renderer {
         Some(Instant::now() + Duration::from_secs_f64(seconds))
     }
 
-    fn process_chunk(&mut self, out: &mut [f32]) {
+    fn process_chunk(&mut self, out: &mut [f32], cue: Option<&mut [f32]>) {
         let frames = out.len() / 2;
+        self.cue.begin(frames);
         let deadline = if self.graph.chains.is_empty() { None } else { self.deadline(frames) };
         for chain in &mut self.graph.chains {
             chain.begin(frames, deadline);
@@ -595,10 +620,21 @@ impl Renderer {
             }
         }
         // In order, so a bus or a return has every chain that plays into it before it runs.
-        sends::finish(&mut self.graph.chains, out, frames, &context);
+        sends::finish(&mut self.graph.chains, out, &mut self.cue.bus, frames, &context);
         self.graph.levels.finish(&self.graph.chains, frames, &mut self.meters);
-        // The preview comes after every track and the main channel's mix (ADR 0011).
-        self.preview.finish(out, frames, &mut self.graph.chains);
+        // The preview comes after every track and the main channel's mix (ADR 0011), into the
+        // cue bus, and into the main output too while the cue plays with it.
+        if let Some(preview) = self.cue.preview.get_mut(..frames * 2) {
+            self.preview.finish(preview, frames, &mut self.graph.chains);
+        }
+        self.cue.finish(out, frames);
+        if let Some(cue) = cue
+            && let Some(bus) = self.cue.bus.get(..frames * 2)
+        {
+            for (to, from) in cue.iter_mut().zip(bus) {
+                *to = *from;
+            }
+        }
         self.meters.measure(meters::Meter::Main, out, frames);
         self.block_frame = 0;
     }
@@ -877,7 +913,12 @@ impl Graph {
             .max()
             .unwrap_or(0)
             .max(notes_end);
-        let tail = if chains.is_empty() { 0 } else { (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64 };
+        // A passthrough chain (a cued track's, or one into a bus) adds no tail of its own.
+        let tail = if chains.iter().all(|c| !c.has_devices()) {
+            0
+        } else {
+            (CHAIN_TAIL_SECONDS * f64::from(sample_rate)) as u64
+        };
         let length = if length > 0 { length + tail + u64::from(latency) } else { 0 };
         let seconds = length as f64 / f64::from(sample_rate);
         if seconds > MAX_RENDER_SECONDS {
@@ -906,6 +947,18 @@ impl Graph {
             latency,
             direct_delay: Delay::new(latency as usize),
         }))
+    }
+}
+
+/// Splits an optional cue buffer at `at` samples, as the main buffer is split; past its end
+/// both parts are empty.
+fn split_cue(cue: Option<&mut [f32]>, at: usize) -> (Option<&mut [f32]>, Option<&mut [f32]>) {
+    match cue {
+        Some(cue) => {
+            let (before, after) = cue.split_at_mut(at.min(cue.len()));
+            (Some(before), Some(after))
+        }
+        None => (None, None),
     }
 }
 
@@ -947,6 +1000,35 @@ pub fn render_offline_with_plugins(
         renderer.process(block);
     }
     Ok(out)
+}
+
+/// Renders the whole arrangement offline like [`render_offline_with_plugins`], and the cue bus
+/// beside it: the main mix and the cue, both interleaved stereo of the same length. `cue_gain`
+/// is the cue volume (linear) and `separate` whether the cue has outputs of its own (then the
+/// preview is heard only on the cue, as on the device).
+pub fn render_offline_with_cue(
+    project: &Project,
+    audio: &AudioPool,
+    sample_rate: u32,
+    block_frames: usize,
+    plugins: Plugins,
+    cue_gain: f32,
+    separate: bool,
+) -> Result<(Vec<f32>, Vec<f32>), RenderError> {
+    let mut renderer = Renderer::with_plugins(project, audio, sample_rate, plugins)?;
+    renderer.set_offline(true);
+    renderer.handle(LaunchCommand::SetCue { gain: Some(cue_gain), separate: Some(separate) });
+    let total = usize::try_from(renderer.length())
+        .ok()
+        .and_then(|frames| frames.checked_mul(2))
+        .ok_or(RenderError::TooLong { seconds: renderer.length() as f64 / f64::from(sample_rate) })?;
+    let mut out = vec![0.0f32; total];
+    let mut cue = vec![0.0f32; total];
+    let block = block_frames.max(1).saturating_mul(2);
+    for (main, cued) in out.chunks_mut(block).zip(cue.chunks_mut(block)) {
+        renderer.process_with_cue(main, cued);
+    }
+    Ok((out, cue))
 }
 
 /// Renders `seconds` of the project offline, starting with the transport stopped and applying
@@ -1157,6 +1239,7 @@ mod tests {
                     pan: 0.0,
                     mute: false,
                     solo: false,
+                    cue: false,
                     output: None,
                     sends: Vec::new(),
                     devices: Vec::new(),

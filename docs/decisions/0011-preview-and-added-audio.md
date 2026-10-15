@@ -3,7 +3,7 @@ description: How a sample added while the project plays reaches the engine, and 
 read_when: preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, preview.noteOn, preview.noteOff, held preview note, key column, MIDI preview, browser sound
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/engine/src/preview.rs
   - crates/engine/src/swap.rs
@@ -56,7 +56,9 @@ run the same code.
    on the controller's thread, as retired graphs are; when that queue is full the voice keeps
    the old one and takes nothing new until it can. The voice is mixed into the output after the
    track chains, so the project's main volume does not change it, and it plays whether the
-   transport runs or not. `PreviewMonitor` (`Controller::preview_monitor`) publishes whether it plays and its position.
+   transport runs or not. *Amended 2026-10-15:* the voice plays into the cue bus, at the cue
+   volume; when the cue has an output pair of its own the preview is heard only there, and
+   otherwise also on the main output, as before ([cue spec](../spec/cue-output.md)). `PreviewMonitor` (`Controller::preview_monitor`) publishes whether it plays and its position.
 5. **A sample preview reads the file at its own rate,** stepping by file rate / engine rate with
    linear interpolation, as an unwarped clip does, with the click guard at its start and end.
 6. **A MIDI preview plays through the chosen track's chain** when that chain starts with an
@@ -89,7 +91,8 @@ run the same code.
 - A sample dropped while playing is heard from the next graph on; the window never waits for
   decoding.
 - Previews use the same output device as the project (no second stream to open, which some
-  drivers refuse), and are heard after the main channel.
+  drivers refuse), and are heard after the main channel, or on the cue pair of that device when
+  one is chosen.
 - The key column's notes are previews like any other: they never touch the project, the undo
   history or the transport, and an agent can play a track's instrument over MCP with the same
   commands the UI uses.

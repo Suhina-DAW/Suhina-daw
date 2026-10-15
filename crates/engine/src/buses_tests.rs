@@ -17,6 +17,7 @@ pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: output.map(ChannelId),
         sends: Vec::new(),
         devices,

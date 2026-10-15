@@ -22,6 +22,7 @@ pub fn blank_project() -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output,
         sends: Vec::new(),
         devices: Vec::new(),

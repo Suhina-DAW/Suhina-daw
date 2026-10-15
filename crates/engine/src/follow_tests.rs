@@ -54,6 +54,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: Vec::new(),

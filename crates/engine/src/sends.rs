@@ -155,8 +155,8 @@ pub(crate) fn order(chains: Vec<Chain>, after: impl Fn(&Chain) -> Vec<TrackId>) 
 
 /// Runs every chain over the rest of a block of `frames` frames, in order, so a bus or a
 /// return has everything that plays into it before it runs: each chain adds its sound to its
-/// returns, then to its bus or `out`. Never allocates.
-pub(crate) fn finish(chains: &mut [Chain], out: &mut [f32], frames: usize, context: &ProcessContext) {
+/// returns, then to its bus or `out`, and, when its cue is on, to the cue bus. Never allocates.
+pub(crate) fn finish(chains: &mut [Chain], out: &mut [f32], cue: &mut [f32], frames: usize, context: &ProcessContext) {
     for i in 0..chains.len() {
         let (done, later) = chains.split_at_mut(i + 1);
         let Some(chain) = done.last_mut() else { continue };
@@ -168,8 +168,8 @@ pub(crate) fn finish(chains: &mut [Chain], out: &mut [f32], frames: usize, conte
             }
         }
         match chain.target.and_then(|t| t.checked_sub(i + 1)).and_then(|t| later.get_mut(t)) {
-            Some(bus) => chain.mix(bus.input(frames), frames),
-            None => chain.mix(out, frames),
+            Some(bus) => chain.mix(bus.input(frames), cue, frames),
+            None => chain.mix(out, cue, frames),
         }
     }
 }

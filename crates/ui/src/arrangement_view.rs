@@ -1791,7 +1791,8 @@ fn track_header(
     let row = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEADER_ROW));
     let toggle = Rect::from_min_size(row.min, Vec2::new(ON_TOGGLE, HEADER_ROW));
     let solo = Rect::from_min_size(Pos2::new(toggle.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
-    let square = Rect::from_min_size(Pos2::new(solo.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
+    let cue = Rect::from_min_size(Pos2::new(solo.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW));
+    let square = Rect::from_min_size(Pos2::new(cue.right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
     let color = if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) };
     if lane.kind == ColumnKind::Group {
         // A group's colour mark is its fold arrow.
@@ -1824,6 +1825,11 @@ fn track_header(
     if solo.intersects(clip)
         && let Some(action) =
             widgets::solo_button(ui, painter, solo, id.with("solo"), lane.track.0, &lane.name, lane.solo)
+    {
+        actions.push(action);
+    }
+    if cue.intersects(clip)
+        && let Some(action) = widgets::cue_button(ui, painter, cue, id.with("cue"), lane.track.0, &lane.name, lane.cue)
     {
         actions.push(action);
     }

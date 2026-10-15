@@ -97,6 +97,8 @@ pub struct Lane {
     pub position: usize,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (`track.setCue`).
+    pub cue: bool,
     pub volume_db: f64,
     pub pan: f64,
     /// The group track this track plays into; `None` is the main output.
@@ -217,6 +219,7 @@ impl Timeline {
                 position,
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
+                cue: channel.is_some_and(|c| c.cue),
                 volume_db: channel.map_or(0.0, |c| gain_to_db(c.volume)),
                 pan: channel.map_or(0.0, |c| c.pan),
                 output: channel

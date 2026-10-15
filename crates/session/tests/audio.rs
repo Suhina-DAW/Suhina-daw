@@ -125,7 +125,7 @@ fn with_stand(missing: Option<&str>) -> (Projects, Arc<Stand>) {
 #[test]
 fn audio_commands_are_listed_with_their_kind() {
     let ids: Vec<&str> = audio_commands().iter().map(|c| c.id).collect();
-    assert_eq!(ids, ["audio.devices", "audio.setOutput", "audio.info"]);
+    assert_eq!(ids, ["audio.devices", "audio.setOutput", "output.setCuePair", "output.setCueVolume", "audio.info"]);
     assert!(audio_commands().iter().all(|c| c.kind == CommandKind::Audio));
     let listed = suhina_session::all_commands();
     assert!(listed.as_array().unwrap().iter().any(|c| c["id"] == "audio.setOutput"));

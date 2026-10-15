@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 143
+COMMANDS = 146
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -38,7 +38,7 @@ CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
      "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
-     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive; "
+     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; "
      "a change or a device back after unplugging keeps playback and launched clips going), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
@@ -110,14 +110,14 @@ CHAPTERS = [
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.52, "partial",
+    (18, "Mixing", 18, 0.57, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
-     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level "
-     "meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks "
-     "imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement "
-     "headers."),
+     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level "
+     "meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output "
+     "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
+     "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
      "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",

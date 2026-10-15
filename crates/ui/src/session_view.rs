@@ -714,9 +714,18 @@ fn mixer_strip(
         Vec2::new(inner.width(), theme::TOGGLE),
     );
     let label = if column.mute { format!("Turn {} on", column.name) } else { format!("Turn {} off", column.name) };
-    let solo = Rect::from_min_max(Pos2::new(toggle.right() - (toggle.width() - 2.0) / 3.0, toggle.top()), toggle.max);
+    // Track on (half), solo and cue (a quarter each), 2 px apart.
+    let quarter = (toggle.width() - 4.0) / 4.0;
+    let cue = Rect::from_min_max(Pos2::new(toggle.right() - quarter, toggle.top()), toggle.max);
+    let solo = Rect::from_min_max(
+        Pos2::new(cue.left() - 2.0 - quarter, toggle.top()),
+        Pos2::new(cue.left() - 2.0, toggle.bottom()),
+    );
     let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
     if let Some(action) = widgets::solo_button(ui, painter, solo, id.with("solo"), track.0, &column.name, column.solo) {
+        actions.push(action);
+    }
+    if let Some(action) = widgets::cue_button(ui, painter, cue, id.with("cue"), track.0, &column.name, column.cue) {
         actions.push(action);
     }
     let response = widgets::button_area(ui, toggle, id.with("on"), label);

@@ -71,6 +71,7 @@ fn channel(lanes: Vec<AutomationLane>) -> Channel {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),

@@ -30,8 +30,8 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 2. **Automation:** device, plug-in and mixer parameters first, then tempo
    ([#109](https://github.com/suhina-daw/suhina-daw/issues/109) for plug-in parameters).
 3. **Recording and inputs:** audio and MIDI recording, arming, monitoring, count-in.
-4. **Cue, and the rest of the mixer:** sends and return tracks play and level meters are done;
-   the cue output follows.
+4. **The crossfader and track delay:** sends and return tracks play, level meters are done and
+   the cue output works.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
@@ -443,6 +443,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
   double-click for off, right-click for before or after the fader.
+- A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
+  **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
+  up, `output.setCuePair`) at their own volume (`output.setCueVolume`), while the main outputs
+  stay as they are; `suhina-cli render --cue` writes the cue beside the mix
+  ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
