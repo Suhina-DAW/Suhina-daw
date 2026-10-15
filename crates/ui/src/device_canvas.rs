@@ -641,8 +641,19 @@ mod tests {
         });
         time_harness.run();
         time_harness.render().unwrap().save("../../target/delay-time-panel.png").unwrap();
-        let offset = click(&canvas, &parameters, Pos2::new(108., 102.));
-        assert!(offset.iter().any(|a| a.params["param"]=="offset_left" && (a.params["value"].as_f64().unwrap()-0.1).abs()<1e-6));
+        let start = Pos2::new(64., 110.);
+        let clicked = click(&canvas, &parameters, start);
+        assert!(
+            clicked.iter().all(|a| a.params["param"] == "offset_left" && a.params["value"] == 0.0),
+            "clicking a drag field must preserve its value"
+        );
+        let offset = pointer_gesture(&canvas, &parameters, start, Some(start - Vec2::new(0., 12.)));
+        assert!(
+            offset.iter().any(
+                |a| a.params["param"] == "offset_left" && (a.params["value"].as_f64().unwrap() - 33.3).abs() < 1e-6
+            )
+        );
+        assert!(offset.iter().any(|a| a.params["param"] == "offset_left" && a.params["continuous"] == false));
         let actions = click(&canvas, &parameters, Pos2::new(100., 151.));
         assert!(actions.iter().any(|a| a.params["param"] == "mode" && a.params["value"] == 1.0));
         let mut time_parameters = parameters.clone();
@@ -778,20 +789,36 @@ mod tests {
         harness.render().unwrap().save("../../target/delay-motion.png").unwrap();
     }
     fn click(canvas: &Arc<DeviceUi>, parameters: &[GraphParameter], position: Pos2) -> Vec<Action> {
+        pointer_gesture(canvas, parameters, position, None)
+    }
+    fn pointer_gesture(
+        canvas: &Arc<DeviceUi>,
+        parameters: &[GraphParameter],
+        position: Pos2,
+        drag_to: Option<Pos2>,
+    ) -> Vec<Action> {
         let ctx = egui::Context::default();
         let mut actions = Vec::new();
-        for pressed in [None, Some(true), Some(false)] {
-            let events = pressed.map_or_else(Vec::new, |pressed| {
-                vec![
-                    egui::Event::PointerMoved(position),
-                    egui::Event::PointerButton {
-                        pos: position,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: Default::default(),
-                    },
-                ]
-            });
+        let mut frames = vec![(position, None), (position, Some(true))];
+        if let Some(end) = drag_to {
+            frames.push((end, None));
+        }
+        frames.push((drag_to.unwrap_or(position), Some(false)));
+        for (position, pressed) in frames {
+            let events = pressed.map_or_else(
+                || vec![egui::Event::PointerMoved(position)],
+                |pressed| {
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ]
+                },
+            );
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(956., 180.))),
