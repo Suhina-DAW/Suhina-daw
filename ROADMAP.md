@@ -281,6 +281,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- A track's pan and volume (the mixer strip in the Session view, the track headers in the
+  Arrangement view) are heard while they are dragged, and one drag is one undo step
+  (`track.setPan`, `track.setVolume` with `continue`;
+  [#313](https://github.com/suhina-daw/suhina-daw/issues/313)).
 - A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
