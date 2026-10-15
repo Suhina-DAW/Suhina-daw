@@ -1,6 +1,8 @@
 //! The `note.*` commands: editing a MIDI clip's notes, one undo step each, and refusing bad input
 //! (`docs/spec/ui-clip-editor.md` › Commands).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers outside #[test] functions
+
 use serde_json::{Value, json};
 use suhina_model::*;
 use suhina_session::{MAX_NOTES_PER_COMMAND, Session};

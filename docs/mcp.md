@@ -89,6 +89,14 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `inShape`/`outShape` and `inCurve`/`outCurve`) edit them through
   `command_run` ([arrangement editing](spec/arrangement-editing.md)).
 
+- **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
+  in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
+  velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
+  semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
+  `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
+  deleted stay valid; each is one undo step and fails as a whole on a bad value
+  ([clip editor spec](spec/ui-clip-editor.md) › Commands).
+
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
   scene?, separate?, stack?, warp?}` places samples and MIDI files as clips, on a track or on new

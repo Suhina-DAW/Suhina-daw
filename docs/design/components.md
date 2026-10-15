@@ -361,9 +361,17 @@ The detail area for a selected arrangement clip: a 196 px `panel.background` col
 `#C9C4BB`): Track, Start (bar.beat), Length (bars.beats), Loop, then Gain, Fade in and Fade out (beats,
 "-" for none) for an audio clip, or Notes for a MIDI clip; a value keeps 52 px clear of its label, so a long track name is shortened
 rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
-the column is then as tall as its rows). Editing them, and the clip editor beside them, are planned.
+the column is then as tall as its rows). For a MIDI clip the piano roll (below) takes the place of the
+device chain. Editing the properties is planned.
 
-## Clip editor (MIDI, planned)
+## Clip editor (MIDI)
+
+Built so far (`crates/ui/src/piano_roll.rs`): the 16 px ruler with bar numbers and lines, the 36 px
+key column, the note rows, notes and the velocity lane (72 px, or 30 % of the detail area's height
+when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
+(`panel.background`) and black-key rows (`window.background`) until the clip has a scale; the
+grid's lines are `border`, bar lines `border.strong`; the grid past the clip's end is darkened.
+A rectangle being dragged is a 1 px `text.secondary` outline. The rest of this table is planned.
 
 | Part | Spec |
 |---|---|

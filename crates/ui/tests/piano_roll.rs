@@ -1,0 +1,312 @@
+//! The piano roll in the window, driven like a user would: a selected MIDI clip shows its notes
+//! in the detail area, and drawing, selecting, moving, resizing, deleting and velocity changes
+//! become `note.*` commands (`docs/spec/ui-clip-editor.md`).
+
+#![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
+
+use egui::{Key, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use serde_json::json;
+use suhina_engine::model::{LaneData, Note};
+use suhina_session::Session;
+use suhina_ui::demo::demo_project;
+use suhina_ui::piano_roll::key_name;
+use suhina_ui::widgets::Action;
+use suhina_ui::{App, theme};
+
+const SIZE: (f32, f32) = (1280.0, 800.0);
+/// The demo clip the tests edit: on Drums, at bar 17 (beat 64).
+const CLIP: &str = "Clip Beat B on Drums at bar 17";
+const CLIP_START: f64 = 64.0;
+
+/// The demo project in the Arrangement view, the grid at an eighth (half a beat), and the clip selected so
+/// the piano roll shows it. Frames are 50 ms apart, close enough for a double-click.
+fn piano_app(renderer: &mut suhina_engine::Renderer) -> Harness<'static, App> {
+    let mut session = Session::new(demo_project());
+    // The grid value is the launch quantisation, which needs an engine to take it.
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(session, &[]);
+    app.run(&Action::new("launcher.setQuantization", json!({ "value": "1/8" })));
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(0.05)
+        .with_max_steps(20)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label(CLIP).click();
+    harness.run();
+    harness
+}
+
+fn engine() -> suhina_engine::Renderer {
+    suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap()
+}
+
+/// The edited clip's notes in the project.
+fn notes(h: &Harness<'static, App>) -> Vec<Note> {
+    let session = h.state().session().unwrap();
+    let project = session.project();
+    let clip = project.arrangement.lanes[0].clips.iter().find(|c| c.start == CLIP_START).unwrap();
+    match &project.content(clip.content).unwrap().lanes[0].data {
+        LaneData::Notes(notes) => notes.clone(),
+        LaneData::Audio(_) => Vec::new(),
+    }
+}
+
+fn note_label(note: &Note) -> String {
+    format!("Note {} at beat {}", key_name(note.key), note.time)
+}
+
+fn note_rect(h: &Harness<'static, App>, note: &Note) -> Rect {
+    h.get_by_label(&note_label(note)).rect()
+}
+
+/// Points per beat and per key row, measured from two notes on screen.
+fn scale(h: &Harness<'static, App>) -> (f32, f32) {
+    let n = notes(h);
+    let (a, b) = (note_rect(h, &n[0]), note_rect(h, &n[1]));
+    let beat = (b.left() - a.left()) / (n[1].time - n[0].time) as f32;
+    let row = (a.top() - b.top()) / (f32::from(n[1].key) - f32::from(n[0].key));
+    (beat, row)
+}
+
+fn button(h: &mut Harness<'static, App>, pos: Pos2, pressed: bool, modifiers: Modifiers) {
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    });
+    h.step();
+}
+
+fn click(h: &mut Harness<'static, App>, pos: Pos2, modifiers: Modifiers) {
+    h.input_mut().events.push(egui::Event::ModifiersChanged(modifiers));
+    h.hover_at(pos);
+    h.step();
+    button(h, pos, true, modifiers);
+    button(h, pos, false, modifiers);
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+}
+
+/// Presses and releases in one frame each, a few frames apart: a double-click.
+fn double_click(h: &mut Harness<'static, App>, pos: Pos2) {
+    h.hover_at(pos);
+    h.run();
+    for _ in 0..2 {
+        h.hover_at(pos);
+        h.drag_at(pos);
+        h.drop_at(pos);
+        h.step();
+    }
+    h.run();
+}
+
+/// Presses at `from`, moves to `to` in a few frames and lets go, holding `modifiers`.
+fn drag(h: &mut Harness<'static, App>, from: Pos2, to: Pos2, modifiers: Modifiers) {
+    h.input_mut().events.push(egui::Event::ModifiersChanged(modifiers));
+    h.hover_at(from);
+    h.step();
+    button(h, from, true, modifiers);
+    for step in 1..=4 {
+        h.hover_at(from + (to - from) * (step as f32 / 4.0));
+        h.step();
+    }
+    button(h, to, false, modifiers);
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
+}
+
+fn selected(h: &Harness<'static, App>) -> Vec<usize> {
+    h.state().piano_roll().selected.iter().copied().collect()
+}
+
+fn undo(h: &mut Harness<'static, App>) {
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+}
+
+#[test]
+fn a_selected_midi_clip_shows_its_notes_in_the_piano_roll() {
+    let mut renderer = engine();
+    let h = piano_app(&mut renderer);
+    let count = notes(&h).len();
+    assert!(count > 0);
+    assert!(h.query_by_label(&format!("Piano roll, {count} notes")).is_some());
+    for note in notes(&h) {
+        assert!(h.query_by_label(&note_label(&note)).is_some(), "{}", note_label(&note));
+    }
+    // Every note has its velocity stem in the lane.
+    assert_eq!(h.query_all_by_label_contains("Velocity of note").count(), count);
+}
+
+#[test]
+fn a_double_click_draws_a_note_on_the_grid_and_another_deletes_it() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let (beat, row) = scale(&h);
+    let first = note_rect(&h, &before[0]);
+    // Half a beat and a bit after the first note, in its row: the note starts on the eighth
+    // before the pointer, an eighth long.
+    let at = pos2(first.left() + beat * 0.6, first.center().y);
+    double_click(&mut h, at);
+    let after = notes(&h);
+    assert_eq!(after.len(), before.len() + 1);
+    let added = after.last().unwrap();
+    assert_eq!((added.time, added.duration, added.key), (before[0].time + 0.5, 0.5, before[0].key));
+    assert_eq!(suhina_session::midi_velocity(added.velocity), 100);
+    assert_eq!(selected(&h), [before.len()]);
+    // A double-click on it deletes it again; a row higher is a key higher.
+    let at = note_rect(&h, added).center();
+    double_click(&mut h, at);
+    assert_eq!(notes(&h), before);
+    double_click(&mut h, at - vec2(0.0, row));
+    assert_eq!(notes(&h).last().unwrap().key, before[0].key + 1);
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+}
+
+#[test]
+fn clicks_and_a_rectangle_select_notes() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let n = notes(&h);
+    let at = note_rect(&h, &n[1]).center();
+    click(&mut h, at, Modifiers::NONE);
+    h.run();
+    assert_eq!(selected(&h), [1]);
+    let at = note_rect(&h, &n[2]).center();
+    click(&mut h, at, Modifiers::SHIFT);
+    h.run();
+    assert_eq!(selected(&h), [1, 2]);
+    let at = note_rect(&h, &n[1]).center();
+    click(&mut h, at, Modifiers::SHIFT);
+    h.run();
+    assert_eq!(selected(&h), [2]);
+    // A click on an empty spot clears; a rectangle around the first two notes selects them.
+    let (a, b) = (note_rect(&h, &n[0]), note_rect(&h, &n[1]));
+    let grid = h.get_by_label_contains("Piano roll,").rect();
+    let empty = pos2(a.left() - 2.0, grid.top() + 2.0);
+    click(&mut h, empty, Modifiers::NONE);
+    h.run();
+    assert!(selected(&h).is_empty());
+    let around = a.union(b).expand(3.0);
+    drag(&mut h, around.left_top(), around.right_bottom(), Modifiers::NONE);
+    assert_eq!(selected(&h), [0, 1]);
+    // Nothing in the project changed.
+    assert_eq!(notes(&h), n);
+}
+
+#[test]
+fn dragging_a_note_moves_the_selection_by_grid_steps_and_alt_moves_freely() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let (beat, row) = scale(&h);
+    let from = note_rect(&h, &before[0]).left_center() + vec2(4.0, 0.0);
+    // 1.3 beats right and one row up: an eighth grid makes it 1.5 beats, three steps.
+    drag(&mut h, from, from + vec2(beat * 1.3, -row), Modifiers::NONE);
+    let moved = notes(&h)[0];
+    assert_eq!((moved.time, moved.key), (before[0].time + 1.5, before[0].key + 1));
+    assert_eq!(&notes(&h)[1..], &before[1..]);
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+    // With Alt the drag is not snapped.
+    let from = note_rect(&h, &before[0]).left_center() + vec2(4.0, 0.0);
+    drag(&mut h, from, from + vec2(beat * 1.3, 0.0), Modifiers::ALT);
+    let free = notes(&h)[0].time - before[0].time;
+    assert!((free - 1.3).abs() < 0.05, "{free}");
+}
+
+#[test]
+fn dragging_a_notes_end_resizes_the_selection_on_the_grid() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let (beat, _) = scale(&h);
+    let at = note_rect(&h, &before[0]).center();
+    click(&mut h, at, Modifiers::NONE);
+    let at = note_rect(&h, &before[1]).center();
+    click(&mut h, at, Modifiers::SHIFT);
+    h.run();
+    let end = note_rect(&h, &before[0]).right_center() - vec2(2.0, 0.0);
+    drag(&mut h, end, end + vec2(beat * 0.3, 0.0), Modifiers::NONE);
+    let after = notes(&h);
+    // The end, half a beat after the start, goes 0.3 beats on: onto the line at beat 1.
+    let grown = after[0].duration - before[0].duration;
+    assert!((grown - 0.5).abs() < 1e-9, "{grown}");
+    assert!((after[1].duration - before[1].duration - 0.5).abs() < 1e-9);
+    assert_eq!(after[2], before[2]);
+}
+
+#[test]
+fn delete_removes_the_selected_notes_and_not_the_clip() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let clips = |h: &Harness<'static, App>| h.state().session().unwrap().project().arrangement.lanes[0].clips.len();
+    let count = clips(&h);
+    let at = note_rect(&h, &before[1]).center();
+    click(&mut h, at, Modifiers::NONE);
+    h.run();
+    h.key_press(Key::Delete);
+    h.run();
+    assert_eq!(notes(&h).len(), before.len() - 1);
+    assert_eq!(clips(&h), count);
+    assert!(selected(&h).is_empty());
+    undo(&mut h);
+    assert_eq!(notes(&h), before);
+}
+
+#[test]
+fn dragging_a_velocity_stem_changes_the_selections_velocity() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let before = notes(&h);
+    let velocity = |n: &Note| suhina_session::midi_velocity(n.velocity);
+    let label =
+        format!("Velocity of note {} at beat {}: {}", key_name(before[0].key), before[0].time, velocity(&before[0]));
+    let stem = h.get_by_label(&label).rect();
+    let from = pos2(stem.center().x, stem.bottom() - 10.0);
+    drag(&mut h, from, from - vec2(0.0, 30.0), Modifiers::NONE);
+    let after = notes(&h);
+    assert!(velocity(&after[0]) > velocity(&before[0]), "{} {}", velocity(&after[0]), velocity(&before[0]));
+    assert_eq!(after[1], before[1]);
+    assert_eq!(selected(&h), [0]);
+}
+
+#[test]
+fn the_wheel_scrolls_and_ctrl_zooms() {
+    let mut renderer = engine();
+    let mut h = piano_app(&mut renderer);
+    let grid = h.get_by_label_contains("Piano roll,").rect();
+    let wheel = |h: &mut Harness<'static, App>, delta: Vec2, modifiers: Modifiers| {
+        h.hover_at(grid.center());
+        h.step();
+        h.input_mut().events.push(egui::Event::ModifiersChanged(modifiers));
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers,
+            phase: egui::TouchPhase::Move,
+        });
+        h.run();
+        h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+        h.run();
+    };
+    let (width, scroll) = (h.state().piano_roll().beat_width, h.state().piano_roll().scroll.y);
+    wheel(&mut h, vec2(0.0, -60.0), Modifiers::NONE);
+    assert_ne!(h.state().piano_roll().scroll.y, scroll);
+    wheel(&mut h, vec2(0.0, 60.0), Modifiers::COMMAND);
+    assert!(h.state().piano_roll().beat_width > width);
+    let height = h.state().piano_roll().key_height;
+    wheel(&mut h, vec2(0.0, 60.0), Modifiers::COMMAND | Modifiers::SHIFT);
+    assert!(h.state().piano_roll().key_height > height);
+}

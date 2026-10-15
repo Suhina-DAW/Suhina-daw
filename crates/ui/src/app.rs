@@ -20,6 +20,7 @@ use crate::grid::{Grid, SlotState};
 use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
+use crate::piano_roll::{self, PianoRollState};
 use crate::project_dialog::{self, Choice, DialogState, Lists, SaveChoice, SavePrompt, UnsavedChoice};
 use crate::session_view::{self, SessionViewState};
 use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, Settings, Side};
@@ -214,6 +215,8 @@ pub struct App {
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
+    /// The piano roll a selected MIDI clip shows in the detail area.
+    piano_roll: PianoRollState,
 }
 
 impl Default for App {
@@ -276,6 +279,7 @@ impl App {
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
+            piano_roll: PianoRollState::default(),
         }
     }
 
@@ -1120,9 +1124,18 @@ impl App {
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // A MIDI clip shows its notes in the piano roll beside its properties.
+        let piano = self.piano_clip(clip);
+        if piano.is_none() {
+            self.piano_roll.hide();
+        }
         let mut places = Vec::new();
+        let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
-            if stacked {
+            if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
+                let rest = detail_view::show_clip_column(ui, info, stacked);
+                piano_roll::show(ui, rest, piano, piano_roll, actions);
+            } else if stacked {
                 detail_view::show_stack(ui, &shown, actions, &mut places);
             } else {
                 detail_view::show_row(ui, &shown, actions, &mut places);
@@ -1130,6 +1143,19 @@ impl App {
         });
         self.place_editors(&places);
         view
+    }
+
+    /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is the
+    /// control bar's grid value.
+    fn piano_clip(&self, clip: Option<(TrackId, usize)>) -> Option<piano_roll::PianoClip> {
+        let (track, index) = clip?;
+        let quantization = suhina_session::parse_quantization(self.quantization).ok()?;
+        piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)
+    }
+
+    /// The piano roll's state: its zoom, scroll and selected notes.
+    pub fn piano_roll(&self) -> &PianoRollState {
+        &self.piano_roll
     }
 
     /// Tells the active project where the panel shows its embedded plug-in editors this frame
@@ -1670,6 +1696,8 @@ impl App {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
             }
+            // Delete in the piano roll deletes its selected notes, not the clip.
+            "selection.delete" if let Some(delete) = self.piano_roll.delete_selected() => actions.push(delete),
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
                 let Some((track, index)) = self.arrangement.selected_clip() else { return };
                 let id = match action {

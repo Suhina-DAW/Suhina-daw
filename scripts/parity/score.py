@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 98
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -59,18 +59,21 @@ CHAPTERS = [
     (7, "Session View", 13, 0.50, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
      "Missing scene view/editing depth, select-on-launch options, follow actions."),
-    (8, "Clip View", 34, 0.08, "started",
-     "Detail area shows clip properties; the MIDI clip editor is a spec only "
-     "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),
+    (8, "Clip View", 34, 0.15, "started",
+     "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
+     "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll. No loop "
+     "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
     (9, "Audio Clips, Tempo, and Warping", 18, 0.35, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
      "six warp modes in the model, tempo detect for the browser. One stretch algorithm serves "
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
      "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
      "of long samples, warp-marker editing, quantise audio, tempo automation."),
-    (10, "Editing MIDI", 41, 0.05, "started",
-     "Notes are in the model (velocity, release velocity) and import from .als; there is no note "
-     "editor, no note commands beyond what a clip holds, no quantise, probability or MPE lanes."),
+    (10, "Editing MIDI", 41, 0.20, "started",
+     "A first piano roll draws, selects (click, rectangle), moves, resizes and deletes notes on the "
+     "grid (Alt off-grid) and edits velocity in a lane, through note.* commands with undo. No "
+     "copy/paste of notes, quantise, transpose tools, fold, scales, chords, deactivated notes, "
+     "probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
     (13, "Converting Audio to MIDI", 5, 0.05, "planned",

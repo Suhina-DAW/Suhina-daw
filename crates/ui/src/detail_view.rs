@@ -340,6 +340,21 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
     }
 }
 
+/// The clip's properties column for a clip whose editor fills the rest of the detail area (the
+/// piano roll): on the left in a row, on top when `stacked`. Returns the rest.
+pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> Rect {
+    let area = ui.available_rect_before_wrap();
+    ui.allocate_rect(area, Sense::hover());
+    let painter = ui.painter_at(area);
+    painter.rect_filled(area, 0.0, theme::window_background());
+    let column = clip_properties(&painter, area, info, stacked);
+    if stacked {
+        Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
+    } else {
+        Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max)
+    }
+}
+
 /// A chain's devices one under another in `area`; one with an embedded editor is as tall as
 /// it needs (the editor is cut off at the column's right edge when it is wider).
 fn chain_stack(

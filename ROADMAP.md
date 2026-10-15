@@ -379,12 +379,21 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
   that needs no parameters, the actions on the selection (copy, cut, paste, duplicate, delete,
   group) and the window's own ([shortcuts](docs/shortcuts.md)).
+- A first **piano roll** ([#200](https://github.com/suhina-daw/suhina-daw/issues/200),
+  [spec](docs/spec/ui-clip-editor.md)): selecting a MIDI clip in the Arrangement view shows its
+  notes in the detail area beside its properties, with a keyboard, a grid that follows the control
+  bar's grid value, and a velocity lane. A double-click draws or deletes a note; a click,
+  Shift+click or a rectangle selects; dragging moves notes (by grid steps, Alt for free) or their
+  right end resizes them; Delete deletes the selected notes; dragging a stem changes velocity;
+  the wheel scrolls and Ctrl (with Shift for key height) zooms. Every edit is a `note.*` command
+  (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
+  the CLI and MCP run too.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
   input routing and sends, arm, level meters, device editing
-  ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the clip editor
+  ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)) and the rest of the clip editor
   ([#200](https://github.com/suhina-daw/suhina-daw/issues/200)) in the detail area, installers and
   signed builds ([#180](https://github.com/suhina-daw/suhina-daw/issues/180)).
