@@ -1,6 +1,6 @@
 ---
-description: How a sample added while the project plays reaches the engine, and how the browser previews samples and MIDI files through the engine without locks or allocation on the audio thread
-read_when: preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, MIDI preview, browser sound
+description: How a sample added while the project plays reaches the engine, and how the browser and the piano roll's key column preview sound through the engine without locks or allocation on the audio thread
+read_when: preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, preview.noteOn, preview.noteOff, held preview note, key column, MIDI preview, browser sound
 type: decision
 status: current
 last_verified: 2026-10-13
@@ -71,7 +71,15 @@ run the same code.
    mixed with the sample preview.
 7. **Offline renders include the preview voice** like everything else, so tests render previews
    through the same `process`.
-8. **Commands:** `preview.play {path, from?, gain?, track?}` and `preview.stop` are Transport commands;
+8. **A note can be held until it is let go**, which is how the piano roll's key column plays
+   ([spec](../spec/ui-clip-editor.md) › Playing the keys): the controller sends the preview voice
+   a note whose end is "until `preview.noteOff`" (its own marker in the voice's held keys, so the
+   block loop never releases it), and a release command names one key or every held key. A key
+   the voice holds through a track's chain is held there too, so the chain does not release it at
+   the frame it started with; letting the last key go ends the preview and sends what it holds
+   back to the controller's thread, as a stop does.
+9. **Commands:** `preview.play {path, from?, gain?, track?}`, `preview.noteOn {track, key,
+   velocity?}`, `preview.noteOff {track, key?}` and `preview.stop` are Transport commands;
    they fail when no player is attached, like `transport.play`. The window decodes a preview
    on a thread and passes it with `Session::provide_audio` first, so the command finds it
    decoded.
@@ -82,6 +90,9 @@ run the same code.
   decoding.
 - Previews use the same output device as the project (no second stream to open, which some
   drivers refuse), and are heard after the main channel.
+- The key column's notes are previews like any other: they never touch the project, the undo
+  history or the transport, and an agent can play a track's instrument over MCP with the same
+  commands the UI uses.
 - Undo of an added clip does not free its audio until the project closes.
 - `Session` gains the pool, so the window no longer keeps one per project.
 

@@ -1,6 +1,6 @@
 ---
-description: Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them
-read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys, quantise, Ctrl+U, piano roll keys, arrow keys, select all
+description: Keyboard shortcuts in the desktop app: the default keys, the keymap presets, the keymap file and how to change them
+read_when: shortcuts, keys, keymap, keymap.json, keymap preset, Draw-first, Select-first, rebind, cut copy paste, duplicate, hotkeys, quantise, Ctrl+U, piano roll keys, tool keys, number keys choose a tool, arrow keys, select all
 type: howto
 status: current
 last_verified: 2026-10-15
@@ -33,14 +33,31 @@ key pressed, with its modifiers, and makes it the action's key (Escape cancels);
 the action; **Reset all** goes back to the defaults. A key bound to two actions is shown in red
 above the list.
 
+## Presets
+
+The **Preset** row above the list offers two sets of keys, for two ways of working. Choosing one
+sets the defaults of the keys it names and leaves every other key as it is; single keys can still
+be changed afterwards, and **Reset all** goes back to the preset the keymap was on.
+
+| Preset | For | What it changes |
+|---|---|---|
+| **Select-first** (default) | selecting and moving notes first | duplicate is **Ctrl+D**; a right-click on a note in the piano roll does nothing |
+| **Draw-first** | drawing notes first | duplicate is **Ctrl+B**, and the browser gives it up for **Ctrl+Shift+B**; in the piano roll's Draw and Paint tools a right-click on a note deletes it |
+
+The names describe the habit they suit. The choice is kept with the keys (see below) and read
+back when Suhina starts; a `preset` naming something Suhina does not know leaves Select-first and
+says so in the status bar.
+
 ## The keymap file
 
 The keys are kept in `keymap.json` beside `settings.txt`, in Suhina's folder of the user's app
 data (`%APPDATA%\Suhina\data` on Windows, `~/.local/share/suhina` on Linux,
-`~/Library/Application Support/Suhina` on macOS). It maps action ids to lists of keys:
+`~/Library/Application Support/Suhina` on macOS). It maps action ids to lists of keys, and names
+the preset they came from:
 
 ```json
 {
+  "preset": "Select-first",
   "transport.toggle": ["Space"],
   "edit.redo": ["Ctrl+Shift+Z", "Ctrl+Y"],
   "selection.delete": []
@@ -50,7 +67,7 @@ data (`%APPDATA%\Suhina\data` on Windows, `~/.local/share/suhina` on Linux,
 A key is its modifiers and its name joined with `+`: `Ctrl` (Cmd on macOS), `Shift`, `Alt`, then
 a key such as `Z`, `Space`, `Delete`, `Backspace`, `Tab`, `Comma`, `Plus`, `Minus`, `0`, `F4`. An action the file lists
 takes exactly the keys listed (an empty list unbinds it); actions it leaves out keep their default
-keys. Unknown actions and keys are skipped with a warning in the status bar.
+keys. Unknown actions, keys and presets are skipped with a warning in the status bar.
 
 ## Default keys
 
@@ -67,15 +84,17 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Make the whole window larger, smaller, its normal size (`view.zoomIn`, `view.zoomOut`, `view.zoomReset`; 50–200 % in 10 % steps, kept in `settings.txt`, [spec](spec/window-zoom.md)) | Ctrl+Plus, Ctrl+Equals; Ctrl+Minus; Ctrl+0 |
 | Undo, redo (`edit.undo`, `edit.redo`) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y |
 | Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
-| Duplicate, delete the selected clip (`selection.duplicate`, `.delete`); in the piano roll, after a click in it, Delete deletes the selected notes instead | Ctrl+D; Delete, Backspace |
-| In the piano roll, after a click in it: copy, cut, paste, duplicate the selected notes (the same `selection.*` keys; with no note selected, or nothing copied for a paste, they act on the clip) | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D |
+| Duplicate, delete the selected clip (`selection.duplicate`, `.delete`); in the piano roll, after a click in it, Delete deletes the selected notes instead. The duplicate key is Ctrl+D, or Ctrl+B with the Draw-first preset | Ctrl+D; Delete, Backspace |
+| In the piano roll, after a click in it: copy, cut, paste, duplicate the selected notes (the same `selection.*` keys; with no note selected, or nothing copied for a paste, they act on the clip) | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D (Ctrl+B with Draw-first) |
+| In the piano roll: choose the Select, Draw, Paint, Erase, Slice tool (`pianoRoll.tool1` … `.tool5`, [spec](spec/ui-clip-editor.md) › Drawing notes) | 1, 2, 3, 4, 5 |
 | In the piano roll: select every note, clear the selection (`pianoRoll.selectAll`, `.deselect`) | Ctrl+A; Escape |
 | In the piano roll: move the selected notes one grid step earlier, later (`pianoRoll.earlier`, `.later`) | Left; Right |
 | In the piano roll: move the selected notes a semitone, an octave up or down (`pianoRoll.up`, `.down`, `.octaveUp`, `.octaveDown`) | Up, Down; Shift+Up, Shift+Down |
 | In the piano roll: make the selected notes a grid step shorter, longer (`pianoRoll.shorter`, `.longer`; never shorter than a step) | Shift+Left; Shift+Right |
 | In the piano roll: switch between the Select and Draw tools (`pianoRoll.draw`, [spec](spec/ui-clip-editor.md) › Drawing notes) | B |
+| In the piano roll: play a key of the key column through the track's instrument while it is held; Ctrl+click, Ctrl+drag select the notes of that pitch or those pitches ([spec](spec/ui-clip-editor.md) › Playing the keys) | click, drag on the key column; Ctrl+click, Ctrl+drag |
 | Group the selected tracks (`selection.group`) | Ctrl+G |
-| Quantise the piano roll's selected notes, or all its notes, with the Quantise panel's settings (`pianoRoll.quantize`, [spec](spec/ui-clip-editor.md) › Quantise) | Ctrl+U |
+| Quantise the piano roll's selected notes, or all its notes, with the settings the quantise block in the clip column keeps (`pianoRoll.quantize`, [spec](spec/ui-clip-editor.md) › Quantise) | Ctrl+U |
 | Next, previous project (`projects.next`, `projects.previous`) | Ctrl+Tab, Ctrl+Shift+Tab |
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |
@@ -85,7 +104,8 @@ moved clip, it replaces what it covers unless the stacking setting for its kind 
 ([arrangement editing](spec/arrangement-editing.md)). Duplicate does the same.
 
 The piano roll's own keys (`pianoRoll.*`) work only after a click in it; anywhere else Escape and
-the arrows keep their other uses (the sample map, the browser's search). In the piano roll, paste
+the arrows keep their other uses (the sample map, the browser's search), and the number keys
+(1 to 5) with them. In the piano roll, paste
 puts the copied notes right after the selected notes, or at the playhead when it is inside the
 clip, else right after where they were copied from; pasted and duplicated notes are selected
 ([clip editor spec](spec/ui-clip-editor.md) › Shortcuts).

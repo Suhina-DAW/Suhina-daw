@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
+read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
 type: system
 status: current
 last_verified: 2026-10-15
@@ -108,6 +108,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
   right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
   copy right after the notes' end. The note clipboard is apart from the clip clipboard.
+- **Splitting notes.** `note.split {track, index | scene, notes, at}` splits each named note that
+  spans the beat `at` into two at `at` (the first keeps the start, the second the end); a note
+  that starts or ends exactly at `at` is left alone, so a second split at the same beat changes
+  nothing. One undo step; it returns the indices of the notes it made, and `at` is a beat from 0
+  to 120 000.
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
@@ -121,7 +126,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`.
+  `preview.stop` stops it; `launcher.state` reports `preview`. `preview.noteOn {track, key,
+  velocity?}` plays one key through the track's instrument and holds it, as the piano roll's key
+  column does, until `preview.noteOff {track, key?}` lets that key go, or every held preview note
+  when `key` is left out. Both are transport commands: the project, its undo history and the
+  transport are untouched.
 
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about

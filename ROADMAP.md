@@ -416,6 +416,18 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   lit, or nothing (Settings › General › Piano roll); Alt+wheel zooms its key rows; a toolbar with
   the tools Select, Draw (B), Paint and Erase, each stroke one undo step; and its own grid value,
   so the control bar's sets the Arrangement view's only, unless Settings links the two.
+- **Piano roll, step 3** ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)): the
+  toolbar's tools are icons drawn in code, with Cut, Copy, Paste, Duplicate (the same as Ctrl+X,
+  C, V and the duplicate key) beside them and the keys 1 to 5 choosing Select, Draw, Paint, Erase
+  and **Slice**; a slice drag splits every note it crosses (`note.split`, one undo step, in the
+  CLI and MCP too); with the right button held the wheel steps through the tools; Shift and Draw
+  lays notes back to back at the last note's length; the quantise controls moved into the clip
+  column on the left (nothing floats over the grid) and Ctrl+U still quantises at once; the key
+  column plays through the track's instrument while a key is held (`preview.noteOn`,
+  `preview.noteOff`), with Ctrl+click and Ctrl+drag selecting the notes of a pitch or a range of
+  them; and Settings › Shortcuts has the presets **Select-first** (Ctrl+D duplicates) and
+  **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
+  `keymap.json`.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
