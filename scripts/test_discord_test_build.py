@@ -1,5 +1,8 @@
 """Tests for discord_test_build.py: python3 -m unittest discover -s scripts -p 'test_*.py'"""
 
+import json
+import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -103,6 +106,33 @@ class Posting(unittest.TestCase):
     def test_refused_post_is_logged(self):
         error = discord_api.DiscordError("webhook: 400", 400)
         self.assertEqual(len(self.run_post({"id": "9", "name": "#7 x"}, error=error)), 1)
+
+
+class Urls(unittest.TestCase):
+    def test_a_malformed_webhook_is_never_in_the_error(self):
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            with self.assertRaises(discord_api.DiscordError) as caught:
+                discord_api.send("POST", "discord.com/api/webhooks/1/secret-token?wait=true", "webhook", {})
+            urlopen.assert_not_called()
+        self.assertEqual(str(caught.exception), "webhook: the URL does not start with https://")
+
+    def test_main_logs_it_and_exits_0(self):
+        env = {
+            "DISCORD_WEBHOOK_TESTING": "secret-token",
+            "DISCORD_BOT_TOKEN": "t",
+            "DISCORD_GUILD_ID": "1",
+            "DISCORD_TESTING_FORUM_ID": "500",
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "build.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data(), f)
+            with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(dt, "locate", return_value=None), \
+                    mock.patch("builtins.print") as printed:
+                self.assertEqual(dt.main([path]), 0)
+        text = " ".join(str(call) for call in printed.call_args_list)
+        self.assertIn("does not start with https://", text)
+        self.assertNotIn("secret-token", text)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
     Arrangement, ArrangementLane, AudioRegion, Channel, ChannelId, ChannelRole, Clip, ClipContent, ContentId,
-    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape, LaneData,
-    Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot, StretchMode, TimeSignature, Track,
-    TrackId, Transport, WarpMarker,
+    ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions, FadeCurve, FadeShape,
+    FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, Note, Project, Rgb, Scene, Send, Slot,
+    StretchMode, TimeSignature, Track, TrackId, Transport, WarpMarker,
 };
 
 /// The file extension, without the dot.
@@ -269,6 +269,18 @@ fn channel_value(c: &Channel) -> Value {
     out
 }
 
+fn follow_value(f: &FollowAction) -> Value {
+    json!({
+        "enabled": f.enabled,
+        "time": number(f.time),
+        "linked": f.linked,
+        "a": f.action_a.name(),
+        "b": f.action_b.name(),
+        "chance_a": f.chance_a,
+        "chance_b": f.chance_b,
+    })
+}
+
 fn device_value(d: &Device) -> Value {
     let kind = match &d.kind {
         DeviceKind::Builtin(id) => json!({ "type": "builtin", "id": id }),
@@ -349,6 +361,9 @@ fn clip_value(c: &Clip) -> Value {
         "fade_out_curve": number(c.fade_out_curve.curve),
     });
     if let Some(map) = out.as_object_mut() {
+        if c.follow_action != FollowAction::default() {
+            map.insert("follow".into(), follow_value(&c.follow_action));
+        }
         with_extensions(map, &c.extensions);
     }
     out
@@ -783,8 +798,50 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
         fade_out: float_or(c, "fade_out", 0.0, at)?,
         fade_in_curve: fade_curve(c, "fade_in", at)?,
         fade_out_curve: fade_curve(c, "fade_out", at)?,
+        follow_action: read_follow(c, at)?,
         extensions: extensions(c, at)?,
     })
+}
+
+/// A clip's follow action, `follow`: off when missing (files written before follow actions).
+fn read_follow(c: &Obj, at: &str) -> Result<FollowAction, ProjectFileError> {
+    let at = format!("{at}.follow");
+    let f = match c.get("follow") {
+        None | Some(Value::Null) => return Ok(FollowAction::default()),
+        Some(value) => object(value, &at)?,
+    };
+    let default = FollowAction::default();
+    let kind = |key: &str, default: FollowKind| -> Result<FollowKind, ProjectFileError> {
+        match f.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(Value::String(name)) => FollowKind::from_name(name)
+                .ok_or_else(|| ProjectFileError(format!("{at}.{key}: unknown follow action {name:?}"))),
+            Some(_) => Err(format!("{at}.{key}: expected a follow action name").into()),
+        }
+    };
+    let chance = |key: &str, default: u32| -> Result<u32, ProjectFileError> {
+        match f.get(key) {
+            None | Some(Value::Null) => Ok(default),
+            Some(value) => value
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .filter(|v| *v <= FollowAction::MAX_CHANCE)
+                .ok_or_else(|| ProjectFileError(format!("{at}.{key}: expected a whole number from 0 to 100"))),
+        }
+    };
+    let follow = FollowAction {
+        enabled: flag(f, "enabled", default.enabled, &at)?,
+        time: float_or(f, "time", default.time, &at)?,
+        linked: flag(f, "linked", default.linked, &at)?,
+        action_a: kind("a", default.action_a)?,
+        action_b: kind("b", default.action_b)?,
+        chance_a: chance("chance_a", default.chance_a)?,
+        chance_b: chance("chance_b", default.chance_b)?,
+    };
+    if !follow.is_valid() {
+        return Err(format!("{at}.time: expected more than 0 and at most {} beats", FollowAction::MAX_TIME).into());
+    }
+    Ok(follow)
 }
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files
