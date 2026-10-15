@@ -4,10 +4,11 @@
 //! Every message has an `op`. Engine to host: `hello`, `load`, `unload`, `ping`, `get_state`,
 //! `set_state`, `get_params`, `set_param`, `open_editor`, `place_editor`, `close_editor`,
 //! `quit`. Host to engine: `hello`, `loaded`, `unloaded`, `pong`, `state`, `params`, `param`,
-//! `editor_opened`, `editor_closed`, `editor_resized`, `error`. Every message is answered,
-//! except `place_editor` and `quit` (so the engine never waits on them). `editor_closed` also
-//! comes unasked, when the user closes an editor's window, and `editor_resized` only comes
-//! unasked, when a plug-in gives its editor a new size.
+//! `editor_opened`, `editor_closed`, `editor_resized`, `latency_changed`, `error`. Every
+//! message is answered, except `place_editor` and `quit` (so the engine never waits on them).
+//! `editor_closed` also comes unasked, when the user closes an editor's window; `editor_resized`
+//! only comes unasked, when a plug-in gives its editor a new size, and `latency_changed` only
+//! comes unasked, when a running plug-in reports another latency.
 //!
 //! One host process runs several plug-in instances. The engine names each with an `instance`
 //! number when it loads it; every message about one instance, and its reply, carries that
@@ -17,7 +18,7 @@
 use serde_json::{Value, json};
 
 /// Bumped whenever a message changes; both sides refuse a different version.
-pub const VERSION: u64 = 7;
+pub const VERSION: u64 = 8;
 /// Longest line either side accepts; state blobs are hex, so this bounds them at 32 MiB.
 pub const MAX_LINE: usize = 64 * 1024 * 1024;
 
@@ -204,6 +205,12 @@ pub enum Message {
         width: u32,
         height: u32,
     },
+    /// The plug-in reports another latency, in frames, while it runs (unasked): the host
+    /// restarted its processing as its format asks, and blocks come back that much later.
+    LatencyChanged {
+        instance: u32,
+        latency: u32,
+    },
     CloseEditor {
         instance: u32,
     },
@@ -237,6 +244,7 @@ impl Message {
             | Self::EditorOpened { instance, .. }
             | Self::PlaceEditor { instance, .. }
             | Self::EditorResized { instance, .. }
+            | Self::LatencyChanged { instance, .. }
             | Self::CloseEditor { instance }
             | Self::EditorClosed { instance } => Some(*instance),
             Self::Error { instance, .. } => *instance,
@@ -283,6 +291,9 @@ impl Message {
             }
             Self::EditorResized { instance, width, height } => {
                 json!({ "op": "editor_resized", "instance": instance, "width": width, "height": height })
+            }
+            Self::LatencyChanged { instance, latency } => {
+                json!({ "op": "latency_changed", "instance": instance, "latency": latency })
             }
             Self::CloseEditor { instance } => json!({ "op": "close_editor", "instance": instance }),
             Self::EditorClosed { instance } => json!({ "op": "editor_closed", "instance": instance }),
@@ -371,6 +382,7 @@ impl Message {
             "editor_resized" => {
                 Self::EditorResized { instance: instance()?, width: small("width")?, height: small("height")? }
             }
+            "latency_changed" => Self::LatencyChanged { instance: instance()?, latency: small("latency")? },
             "close_editor" => Self::CloseEditor { instance: instance()? },
             "editor_closed" => Self::EditorClosed { instance: instance()? },
             "quit" => Self::Quit,
@@ -415,7 +427,7 @@ mod tests {
 
     #[test]
     fn every_message_round_trips() {
-        assert_eq!(VERSION, 7);
+        assert_eq!(VERSION, 8);
         let messages = [
             Message::Hello { version: VERSION },
             Message::Load { instance: 3, plugin: "test:gain".into(), link: "/dev/shm/x".into(), sample_rate: 44_100.0 },
@@ -445,6 +457,8 @@ mod tests {
                 placement: Placement { x: -40, y: 620, clip_x: 0, clip_y: 600, clip_width: 1280, clip_height: 0 },
             },
             Message::EditorResized { instance: 6, width: 1, height: 16_384 },
+            Message::LatencyChanged { instance: 6, latency: 0 },
+            Message::LatencyChanged { instance: u32::MAX, latency: u32::MAX },
             Message::CloseEditor { instance: 6 },
             Message::EditorClosed { instance: 6 },
             Message::Error { instance: None, message: "no such plug-in: \"x\"\n".into() },
@@ -462,6 +476,7 @@ mod tests {
     fn messages_name_their_instance() {
         assert_eq!(Message::Unload { instance: 4 }.instance(), Some(4));
         assert_eq!(Message::EditorClosed { instance: 2 }.instance(), Some(2));
+        assert_eq!(Message::LatencyChanged { instance: 3, latency: 64 }.instance(), Some(3));
         assert_eq!(Message::Error { instance: Some(1), message: String::new() }.instance(), Some(1));
         assert_eq!(Message::Error { instance: None, message: String::new() }.instance(), None);
         assert_eq!(Message::Ping { id: 1 }.instance(), None);
@@ -506,6 +521,10 @@ mod tests {
             r#"{"op":"place_editor","instance":1,"placement":{"x":3000000000,"y":0,"clip_x":0,"clip_y":0,"clip_width":1,"clip_height":1}}"#,
             r#"{"op":"editor_resized","instance":1,"height":2}"#,
             r#"{"op":"close_editor","instance":"1"}"#,
+            r#"{"op":"latency_changed","instance":1}"#,
+            r#"{"op":"latency_changed","latency":64}"#,
+            r#"{"op":"latency_changed","instance":1,"latency":-1}"#,
+            r#"{"op":"latency_changed","instance":1,"latency":5000000000}"#,
             r#"{"op":"editor_closed"}"#,
             r#"{"op":"unload"}"#,
             r#"{"op":"unloaded","instance":1.5}"#,

@@ -47,7 +47,7 @@ pub use protocol::{ParamInfo, Placement};
 /// Blocks in a row without an answer after which a running host counts as hung.
 pub const HUNG_AFTER: u32 = 32;
 
-/// Editor closings remembered for instances that have not asked yet.
+/// Editor closings (and sizes, and latencies) remembered for instances that have not asked yet.
 const MAX_CLOSED_EDITORS: usize = 4096;
 
 #[derive(Debug)]
@@ -288,12 +288,21 @@ struct Group {
     closed_editors: Vec<u32>,
     /// Instances whose editor the host said got a new size (the latest), not yet taken in.
     resized_editors: Vec<(u32, (u32, u32))>,
+    /// Instances whose plug-in reported another latency (the latest), not yet taken in.
+    latencies: Vec<(u32, u32)>,
     next_ping: u64,
 }
 
 impl Group {
     fn new() -> Self {
-        Self { process: None, generation: 0, closed_editors: Vec::new(), resized_editors: Vec::new(), next_ping: 0 }
+        Self {
+            process: None,
+            generation: 0,
+            closed_editors: Vec::new(),
+            resized_editors: Vec::new(),
+            latencies: Vec::new(),
+            next_ping: 0,
+        }
     }
 
     fn alive(&mut self) -> bool {
@@ -307,6 +316,7 @@ impl Group {
         }
         self.closed_editors.clear();
         self.resized_editors.clear();
+        self.latencies.clear();
     }
 
     /// Ends the current process and starts a new one for the group.
@@ -344,6 +354,12 @@ impl Group {
                     self.resized_editors.push((*instance, (*width, *height)));
                 }
             }
+            Message::LatencyChanged { instance, latency } => {
+                self.latencies.retain(|(i, _)| i != instance);
+                if self.latencies.len() < MAX_CLOSED_EDITORS {
+                    self.latencies.push((*instance, *latency));
+                }
+            }
             _ => {}
         }
     }
@@ -372,6 +388,12 @@ impl Group {
     fn take_resized(&mut self, instance: u32) -> Option<(u32, u32)> {
         let at = self.resized_editors.iter().position(|(i, _)| *i == instance)?;
         Some(self.resized_editors.swap_remove(at).1)
+    }
+
+    /// The latency the host said `instance`'s plug-in now has, if any (and forgets it).
+    fn take_latency(&mut self, instance: u32) -> Option<u32> {
+        let at = self.latencies.iter().position(|(i, _)| *i == instance)?;
+        Some(self.latencies.swap_remove(at).1)
     }
 
     /// Sends `message` (about `instance`, or the process) and waits for the reply `wanted`
@@ -527,8 +549,24 @@ impl Plugin {
         Ok((plugin, PluginAudio { link, unanswered }))
     }
 
-    /// Delay the plug-in adds, in frames, as it reported when it loaded.
+    /// Delay the plug-in adds, in frames, as it last reported: when it loaded, or since (see
+    /// [`Plugin::follow_latency`]).
     pub fn latency(&self) -> u32 {
+        self.latency
+    }
+
+    /// Takes in a latency the plug-in reported while it runs (a lookahead it was given, say:
+    /// the host sends it unasked) and returns the latency as it is now. Never waits: while the
+    /// process is busy with another request, the answer is the last one known.
+    pub fn follow_latency(&mut self) -> u32 {
+        if let Some(mut group) = try_lock(&self.group)
+            && group.generation == self.generation
+        {
+            group.drain();
+            if let Some(latency) = group.take_latency(self.instance) {
+                self.latency = latency;
+            }
+        }
         self.latency
     }
 
@@ -575,6 +613,9 @@ impl Plugin {
             return Err(PluginError::Protocol("the host process was replaced; restart the plug-in".into()));
         }
         let reply = group.request(Some(self.instance), message, what, self.launch.timeout, wanted);
+        if let Some(latency) = group.take_latency(self.instance) {
+            self.latency = latency;
+        }
         if let Some(size) = group.take_resized(self.instance) {
             self.editor_size = Some(size);
         }
@@ -739,6 +780,9 @@ impl Plugin {
             return;
         }
         group.drain();
+        if let Some(latency) = group.take_latency(self.instance) {
+            self.latency = latency;
+        }
         if let Some(size) = group.take_resized(self.instance) {
             self.editor_size = Some(size);
         }
@@ -779,6 +823,7 @@ impl Plugin {
                 |m| matches!(m, Message::Unloaded { instance: i } if *i == instance),
             );
             locked.take_closed(instance);
+            locked.take_latency(instance);
         }
         let instance = next_instance();
         let (generation, latency, link) = locked.load(&self.launch, instance)?;
@@ -820,6 +865,7 @@ impl Drop for Plugin {
             |m| matches!(m, Message::Unloaded { instance: i } if *i == instance),
         );
         group.take_closed(instance);
+        group.take_latency(instance);
         if matches!(unloaded, Err(PluginError::Timeout(_))) {
             // A process that does not answer is no use to the other instances either.
             group.end();

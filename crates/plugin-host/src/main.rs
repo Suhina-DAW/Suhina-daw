@@ -7,13 +7,18 @@
 //! its own link and a thread of its own that serves its audio blocks through `suhina-ipc`.
 //! When the control connection closes, the engine is gone and the process exits.
 //!
-//! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-in built in for tests
-//! ([`test_clap`]), and simple test processors ([`processors`]) that crash or hang on purpose.
+//! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-ins built in for tests
+//! ([`test_clap`], [`test_clap_delay`]), and simple test processors ([`processors`]) that crash or hang on purpose.
+//!
+//! A plug-in may report another latency while it runs. Between messages the main thread asks
+//! each instance whether it did (restarting its processing first where the format asks for
+//! that) and tells the engine unasked (`latency_changed`).
 
 mod clap;
 mod processors;
 mod run_loop;
 mod test_clap;
+mod test_clap_delay;
 mod test_vst3;
 mod vst3;
 mod vst3_editor;
@@ -47,7 +52,7 @@ const TICK: Duration = Duration::from_millis(10);
 const EDITOR_TICK: Duration = Duration::from_millis(1);
 /// How long unloading waits for an instance's audio thread to stop; one still running then is
 /// stuck in the plug-in, and the instance is left behind rather than taking the process with it.
-const UNLOAD_WAIT: Duration = Duration::from_secs(1);
+pub(crate) const UNLOAD_WAIT: Duration = Duration::from_secs(1);
 /// Most instances one process runs.
 const MAX_INSTANCES: usize = 1024;
 
@@ -142,7 +147,7 @@ fn describe(file: &str) -> Result<Vec<suhina_plugins::scan::PluginInfo>, String>
         "test:hang" => loop {
             thread::sleep(Duration::from_secs(60));
         },
-        "test:clap" => clap::describe(file),
+        "test:clap" | "test:clap-delay" => clap::describe(file),
         "test:vst3" => vst3::describe(file),
         _ if file.to_ascii_lowercase().ends_with(".vst3") => vst3::describe(&format!("vst3:{file}")),
         _ => clap::describe(&format!("clap:{file}")),
@@ -174,7 +179,13 @@ fn scan_worker() -> ! {
 enum Loaded {
     Clap(clap::ClapPlugin),
     Vst3(vst3::Vst3Plugin),
-    Test { processor: Arc<dyn Processor>, stop: Arc<AtomicBool>, audio: thread::JoinHandle<()> },
+    /// `reported` is the latency the engine was last told.
+    Test {
+        processor: Arc<dyn Processor>,
+        stop: Arc<AtomicBool>,
+        audio: thread::JoinHandle<()>,
+        reported: u32,
+    },
 }
 
 impl Loaded {
@@ -183,6 +194,22 @@ impl Loaded {
             Self::Clap(plugin) => plugin.latency(),
             Self::Vst3(plugin) => plugin.latency(),
             Self::Test { processor, .. } => processor.latency(),
+        }
+    }
+
+    /// A latency the plug-in reported since this was last asked, after restarting its
+    /// processing where its format asks for that: the engine is to be told.
+    fn latency_changed(&mut self) -> Option<u32> {
+        match self {
+            Self::Clap(plugin) => plugin.latency_changed(),
+            Self::Vst3(plugin) => plugin.latency_changed(),
+            Self::Test { processor, reported, .. } => {
+                let now = processor.latency();
+                (now != *reported).then(|| {
+                    *reported = now;
+                    now
+                })
+            }
         }
     }
 
@@ -300,7 +327,7 @@ impl Loaded {
 
 fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let served = Served::open(link).map_err(|e| e.to_string())?;
-    if plugin.starts_with("clap:") || plugin == "test:clap" {
+    if plugin.starts_with("clap:") || plugin == "test:clap" || plugin == "test:clap-delay" {
         return clap::ClapPlugin::load(plugin, served, sample_rate).map(Loaded::Clap);
     }
     if plugin.starts_with("vst3:") || plugin == "test:vst3" {
@@ -318,7 +345,8 @@ fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
             }
         })
         .map_err(|e| e.to_string())?;
-    Ok(Loaded::Test { processor, stop, audio })
+    let reported = processor.latency();
+    Ok(Loaded::Test { processor, stop, audio, reported })
 }
 
 /// Writes one message to the engine.
@@ -389,6 +417,9 @@ fn run(address: &str) -> Result<(), Box<dyn std::error::Error>> {
         window::pump();
         for (instance, loaded) in &mut instances {
             loaded.tick();
+            if let Some(latency) = loaded.latency_changed() {
+                send(&mut writer, &Message::LatencyChanged { instance: *instance, latency })?;
+            }
             if loaded.editor_tick() {
                 send(&mut writer, &Message::EditorClosed { instance: *instance })?;
             } else if let Some(size) = loaded.editor_resized() {
