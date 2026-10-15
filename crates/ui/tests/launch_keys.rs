@@ -112,3 +112,21 @@ fn delete_in_the_mapping_mode_removes_the_keys_of_the_picked_control() {
     press(&mut harness, Key::Delete);
     assert!(mappings(&harness).is_empty());
 }
+
+#[test]
+fn a_text_field_keeps_a_mapped_key() {
+    let (mut harness, _renderer) = window();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run();
+    harness.get_by_label("Map a key to Drums scene 1").click();
+    harness.run();
+    press(&mut harness, Key::Q);
+    press(&mut harness, Key::Escape);
+    // Ctrl+F shows the browser and puts the keys in its search field: Q is typed, not launched.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::F);
+    harness.run();
+    assert!(harness.ctx.text_edit_focused());
+    let before = status(&harness);
+    press(&mut harness, Key::Q);
+    assert_eq!(status(&harness), before);
+}

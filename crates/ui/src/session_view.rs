@@ -407,7 +407,7 @@ fn column_body(
                 keys.pick(target);
             }
             slot_cell(painter, rect, column, slot, 0.0, 1.0, progress);
-            crate::launch_keys::overlay(painter, rect, label(target), keys.mode.selected == Some(target));
+            crate::launch_keys::overlay(painter, rect, label(target), keys.mode.selected == Some(target), 0.0);
             painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
             continue;
         }
@@ -470,7 +470,7 @@ fn column_body(
     let color = if column.stop_queued { theme::accent() } else { theme::text_secondary() };
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
     if mapping {
-        crate::launch_keys::overlay(painter, stop_rect, label(target), keys.mode.selected == Some(target));
+        crate::launch_keys::overlay(painter, stop_rect, label(target), keys.mode.selected == Some(target), 0.0);
     }
 }
 
@@ -710,7 +710,13 @@ fn scene_column(
             theme::text_primary(),
         );
         if keys.mode.on {
-            crate::launch_keys::overlay(painter, rect, grid.mapped_to(target), keys.mode.selected == Some(target));
+            crate::launch_keys::overlay(
+                painter,
+                rect,
+                grid.mapped_to(target),
+                keys.mode.selected == Some(target),
+                18.0,
+            );
         }
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }

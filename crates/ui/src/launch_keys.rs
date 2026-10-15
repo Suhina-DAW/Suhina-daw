@@ -4,7 +4,7 @@
 //! mapped key wins over a shortcut while the Session view is shown and no text field has the
 //! keyboard; the window decides that and calls [`handle`] only then.
 
-use egui::{Align2, Event, Key, Painter, Rect, StrokeKind, Vec2};
+use egui::{Align2, Event, Key, Painter, Rect, StrokeKind};
 use serde_json::json;
 use suhina_engine::model::{MappingSource, MappingTarget, Project};
 
@@ -151,8 +151,9 @@ pub fn key_events(events: &[Event]) -> Vec<(usize, KeyEvent)> {
 }
 
 /// Draws the mapping mode over a control: a tint, an outline when it is picked, and the keys
-/// mapped to it in small text at its right edge.
-pub fn overlay(painter: &Painter, rect: Rect, label: Option<&str>, picked: bool) {
+/// mapped to it in small text at its right edge, `inset` points in from it (a scene keeps its
+/// number visible).
+pub fn overlay(painter: &Painter, rect: Rect, label: Option<&str>, picked: bool, inset: f32) {
     painter.rect_filled(rect, 0.0, theme::accent().gamma_multiply(if picked { 0.30 } else { 0.12 }));
     if picked {
         painter.rect_stroke(rect.shrink(0.5), 0.0, egui::Stroke::new(1.5, theme::accent()), StrokeKind::Inside);
@@ -160,8 +161,8 @@ pub fn overlay(painter: &Painter, rect: Rect, label: Option<&str>, picked: bool)
     if let Some(label) = label {
         let font = theme::mono_font(theme::TEXT_SMALL);
         let width = (rect.width() * 0.6).max(0.0);
-        let area =
-            Rect::from_min_max(egui::pos2(rect.right() - width - PAD, rect.top()), rect.max - Vec2::new(PAD, 0.0));
+        let right = rect.right() - PAD - inset;
+        let area = Rect::from_min_max(egui::pos2(right - width, rect.top()), egui::pos2(right, rect.bottom()));
         widgets::text_in(painter, area, Align2::RIGHT_CENTER, label, font, theme::text_primary());
     }
 }

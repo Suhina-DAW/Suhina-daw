@@ -1613,7 +1613,8 @@ impl App {
     fn launch_keys(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
         let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
         let session_view = self.shown == View::Session && !self.sample_map.view.large;
-        let focused = session_view && !dialog && !self.settings_open && !ui.ctx().egui_wants_keyboard_input();
+        // A clicked slot or button keeps the focus; only a text field takes the keys away.
+        let focused = session_view && !dialog && !self.settings_open && !ui.ctx().text_edit_focused();
         let lost = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))));
         let Some(project) = self.projects.active().and_then(|id| self.projects.get(id)).map(Session::project) else {
             return;
@@ -2470,7 +2471,7 @@ impl App {
             // The mapping mode's button, lit while the mode is on.
             let on = self.view.launch_keys.mode.on;
             let color = if on { theme::accent() } else { theme::text_secondary() };
-            let galley = widgets::fitted(&painter, "Map", theme::ui_font(theme::TEXT), color, 60.0);
+            let galley = widgets::fitted(&painter, "Map keys", theme::ui_font(theme::TEXT), color, 80.0);
             let size = galley.size();
             let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
             let response = widgets::button_area(ui, rect, Id::new("map-keys"), "Map keys to slots and scenes");
