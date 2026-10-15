@@ -8,7 +8,7 @@ use suhina_model::{
     TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, meters, preview};
+use crate::{CommandError, Session, automation, devices, files, follow, meters, notes, preview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -49,6 +49,8 @@ impl ParamType {
             Self::Text => "text",
             Self::Tracks => "tracks",
             Self::Texts => "texts",
+            Self::Integers => "integers",
+            Self::Notes => "notes",
             Self::Numbers => "numbers",
         }
     }
@@ -87,6 +89,10 @@ pub enum ParamType {
     Tracks,
     /// A list of texts (file paths).
     Texts,
+    /// A list of whole numbers (note indices).
+    Integers,
+    /// A list of new notes, each `{time, length, key, velocity?}`.
+    Notes,
     /// A list of numbers.
     Numbers,
 }
@@ -118,6 +124,12 @@ const CONTINUE: Param = optional(
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const RETURN: Param = param("return", ParamType::Track, "return track id or name, from project.tracks");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
+/// A note command's clip: an arrangement clip by index, or a launcher clip by scene.
+const CLIP_INDEX: Param =
+    optional("index", ParamType::Integer, "an arrangement clip's index on the track, from project.clips");
+const CLIP_SCENE: Param =
+    optional("scene", ParamType::Integer, "instead of index: the clip in the track's slot of this scene, from 1");
+const NOTES: Param = param("notes", ParamType::Integers, "note indices, from note.list; at most 10000");
 const AUTOMATED: Param = param(
     "param",
     ParamType::Text,
@@ -151,9 +163,24 @@ impl<T> CommandSpec<T> {
     pub fn input_schema(&self) -> Value {
         let mut properties = serde_json::Map::new();
         for p in self.params {
-            if matches!(p.ty, ParamType::Tracks | ParamType::Texts | ParamType::Numbers) {
+            if matches!(
+                p.ty,
+                ParamType::Tracks | ParamType::Texts | ParamType::Integers | ParamType::Notes | ParamType::Numbers
+            ) {
                 let items = match p.ty {
                     ParamType::Tracks => json!({ "type": ["integer", "string"] }),
+                    ParamType::Integers => json!({ "type": "integer", "minimum": 0 }),
+                    ParamType::Notes => json!({
+                        "type": "object",
+                        "properties": {
+                            "time": { "type": "number", "description": "start in beats from the clip's start" },
+                            "length": { "type": "number", "description": "length in beats, above 0" },
+                            "key": { "type": "integer", "description": "MIDI key 0 to 127; 60 is C3" },
+                            "velocity": { "type": "number", "description": "1 to 127 (default 100)" },
+                        },
+                        "required": ["time", "length", "key"],
+                        "additionalProperties": false,
+                    }),
                     ParamType::Numbers => json!({ "type": "number" }),
                     _ => json!({ "type": "string" }),
                 };
@@ -161,7 +188,9 @@ impl<T> CommandSpec<T> {
                 continue;
             }
             let ty = match p.ty {
-                ParamType::Tracks | ParamType::Texts | ParamType::Numbers => json!("array"),
+                ParamType::Tracks | ParamType::Texts | ParamType::Integers | ParamType::Notes | ParamType::Numbers => {
+                    json!("array")
+                }
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -776,6 +805,24 @@ static COMMANDS: &[CommandSpec] = &[
         run: preview::stop,
     },
     CommandSpec {
+        id: "preview.noteOn",
+        label: "Play a note through a track's instrument and hold it until preview.noteOff, as the piano roll's key column does",
+        params: &[
+            TRACK,
+            param("key", ParamType::Integer, "the key to play, 0 to 127 (60 is C3)"),
+            optional("velocity", ParamType::Number, "how hard, 1 to 127 (default 100)"),
+        ],
+        kind: CommandKind::Transport,
+        run: preview::note_on,
+    },
+    CommandSpec {
+        id: "preview.noteOff",
+        label: "Let go of the note preview.noteOn started on a track, or of every held preview note",
+        params: &[TRACK, optional("key", ParamType::Integer, "the key to let go of; every held key when left out")],
+        kind: CommandKind::Transport,
+        run: preview::note_off,
+    },
+    CommandSpec {
         id: "device.remove",
         label: "Remove a device from a track",
         params: &[TRACK, DEVICE],
@@ -1030,6 +1077,139 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[RETURN, param("name", ParamType::Text, "the new name, not empty")],
         kind: CommandKind::Edit,
         run: crate::sends::rename_return,
+    },
+    CommandSpec {
+        id: "note.list",
+        label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
+        kind: CommandKind::Read,
+        run: notes::list,
+    },
+    CommandSpec {
+        id: "note.add",
+        label: "Add notes to a MIDI clip; they go after its other notes, and the result gives their indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            param("notes", ParamType::Notes, "the notes, each {time, length, key, velocity?}; at most 10000"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::add,
+    },
+    CommandSpec {
+        id: "note.delete",
+        label: "Delete notes of a MIDI clip; later notes move up in the list",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Edit,
+        run: notes::delete,
+    },
+    CommandSpec {
+        id: "note.move",
+        label: "Move notes of a MIDI clip in time and in pitch; fails if any note would start before 0 or leave keys 0 to 127",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("beats", ParamType::Number, "beats to move by, later when positive"),
+            optional("semitones", ParamType::Integer, "semitones to move by, higher when positive"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::move_notes,
+    },
+    CommandSpec {
+        id: "note.resize",
+        label: "Set the length of notes of a MIDI clip, or change it by a number of beats",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("length", ParamType::Number, "the new length in beats, above 0"),
+            optional("by", ParamType::Number, "instead: beats to add to each length (negative shortens)"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::resize,
+    },
+    CommandSpec {
+        id: "note.setVelocity",
+        label: "Set the velocity of notes of a MIDI clip, or change it by an amount, each kept within 1 to 127",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("velocity", ParamType::Number, "the new velocity, 1 to 127"),
+            optional("by", ParamType::Number, "instead: an amount to add to each velocity (negative lowers)"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::set_velocity,
+    },
+    CommandSpec {
+        id: "note.quantize",
+        label: "Quantise notes of a MIDI clip: move their starts, and with ends their ends, towards the nearest grid line",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            optional("notes", ParamType::Integers, "note indices, from note.list; every note when left out"),
+            param("grid", ParamType::Text, "the grid, as launcher.setQuantization takes it: 1/16, 1/8T, 1 bar, ..."),
+            optional("amount", ParamType::Number, "how far towards the line, 0 to 100 percent (default 100: onto it)"),
+            optional("ends", ParamType::Bool, "also move each note's end to the nearest line (default false)"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::quantize,
+    },
+    CommandSpec {
+        id: "note.copy",
+        label: "Copy notes of a MIDI clip for note.paste; changes nothing",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Read,
+        run: notes::copy,
+    },
+    CommandSpec {
+        id: "note.cut",
+        label: "Copy notes of a MIDI clip for note.paste and delete them",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Edit,
+        run: notes::cut,
+    },
+    CommandSpec {
+        id: "note.paste",
+        label: "Add the copied notes to a MIDI clip, keeping their spacing; the result gives their indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            optional(
+                "time",
+                ParamType::Number,
+                "where the first copied note starts, in beats; default: right after the copied notes",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::paste,
+    },
+    CommandSpec {
+        id: "note.duplicate",
+        label: "Add a copy of notes of a MIDI clip right after their end; the result gives the copies' indices",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        kind: CommandKind::Edit,
+        run: notes::duplicate,
+    },
+    CommandSpec {
+        id: "note.split",
+        label: "Split notes of a MIDI clip at a beat, each note that spans it into two; the result gives the new notes' indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            param("at", ParamType::Number, "the beat to split at, in beats from the content's start"),
+        ],
+        kind: CommandKind::Edit,
+        run: notes::split,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {

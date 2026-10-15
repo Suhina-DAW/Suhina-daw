@@ -91,7 +91,10 @@ search, pins, recent items and colour tags (`library.*`, [ADR 0012](0012-file-li
 never changes a project. A successful edit that adds something from the browser (`clip.addFiles`,
 `track.add`, `device.add`, `device.addPlugin`) is recorded among the library's recent items by
 `Projects`, so the CLI, MCP and the window all keep them. Parameters may also be a list of
-texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings.
+texts (`ParamType::Texts`, `clip.addFiles`' `paths`), shown to agents as an array of strings,
+a list of whole numbers (`ParamType::Integers`, the note indices of `note.delete` and the other
+`note.*` edits), or a list of new notes (`ParamType::Notes`, `note.add`'s `notes`, each an object
+`{time, length, key, velocity?}` whose fields the JSON Schema spells out).
 The sample map's commands (`soundmap.*`, [ADR 0013](0013-sample-map-analysis.md)) are of the
 library kind too: they read the library's samples and the analysis `Projects` keeps beside it.
 

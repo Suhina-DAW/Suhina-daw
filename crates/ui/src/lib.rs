@@ -18,6 +18,7 @@ pub mod menus;
 pub mod meter;
 pub mod missing_files;
 pub mod motion;
+pub mod piano_roll;
 pub mod project_dialog;
 pub mod sample_map;
 mod sample_map_crowd;
