@@ -122,7 +122,7 @@ documented behaviour that exists today.
 | # | Chapter | Manual pages | Suhina covers | Status | What exists / what is missing |
 |---|---|---|---|---|---|
 | 1 | Welcome to Live | 1 | — | n/a | Front matter. |
-| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 50 % | partial | Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
+| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 52 % | partial | Release and nightly packages for Windows, macOS and Linux; Help > About names the build (version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 47 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity; samples and MIDI files dragged from the system's file manager land like a browser drag (exact placement waits for pointer positions from the windowing layer). Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
 | 5 | Managing Files and Sets | 43 | 35 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
@@ -179,7 +179,7 @@ documented behaviour that exists today.
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
 | Outside scope (ch 28, 32-37, 41) | 175 | 1 % |
-| Setup, shortcuts (ch 2, 3, 42) | 61 | 42 % |
+| Setup, shortcuts (ch 2, 3, 42) | 61 | 43 % |
 <!-- parity:end -->
 
 ## 5. Devices
