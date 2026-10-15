@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **92**, every one reachable from the UI, the CLI and MCP |
+| Commands | **97**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -97,7 +97,7 @@ Suhina is pre-alpha with milestones M0-M2, M5 done and M3, M4, M6, M8 in progres
   beyond moving and fading clips, and the browser's non-core parts (packs, collections, cloud, the
   tag editor).
 
-### Three places the repository's own docs read better than the code
+### Places the repository's own docs read better than the code
 
 Checked while writing this, from the code rather than from `ROADMAP.md`:
 
@@ -106,10 +106,8 @@ Checked while writing this, from the code rather than from `ROADMAP.md`:
   Re-pitch and runs every other mode through the same Signalsmith port
   (`crates/engine/src/stretch.rs`), falling back to Re-pitch outside 0.25x-4x. Six mode names, one
   algorithm.
-- **Return tracks are silent.** `Channel::sends` is filled by the `.als` importer and stored, but no
-  command sets a send and the engine never reads one (`crates/engine/src/buses.rs` handles the
-  master and groups only). An imported set with return tracks shows them and plays nothing through
-  them.
+- **Return tracks were silent** until October 2026: sends were imported and stored but not played.
+  They now play (`crates/engine/src/sends.rs`, [spec](../spec/sends-and-returns.md)).
 - **The presets folder holds only a README.** [ADR 0014](../decisions/0014-stock-presets.md)
   proposes the preset format; no preset ships yet, so DX7 voice files are the only presets.
 
@@ -138,7 +136,7 @@ documented behaviour that exists today.
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
 | 16 | Launching Clips | 12 | 35 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, warped launched clips. Missing launch modes, legato, velocity amount, clip offset/nudge, follow actions. |
 | 17 | Routing and I/O | 22 | 10 % | absent | Only track output to main or a group (track.setOutput); track input is a model field read from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral. |
-| 18 | Mixing | 18 | 30 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, return tracks imported and drawn. Return tracks are silent: sends live in the model and in the .als importer only, so nothing feeds them. Missing crossfader, cue, meters, track delay. |
+| 18 | Mixing | 18 | 45 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer). Missing crossfader, cue, meters, track delay, send fields in the Arrangement headers. |
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP); no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
@@ -174,7 +172,7 @@ documented behaviour that exists today.
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
 | Devices (ch 23-25, 29-31) | 338 | 14 % |
-| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
+| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 27 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
@@ -349,7 +347,7 @@ or does something Live does not:
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
-| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 21 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
+| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 27 % | crossfader, cue, meters, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 1 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
 
@@ -373,7 +371,8 @@ Two observations the numbers make plain:
 | CLAP and VST3 hosting, latency, editors | M6 |
 | Other formats (DAWproject, `.flp`) | M7 |
 | Session and Arrangement views, browser, sample map, settings, installers | M8 |
-| Sends and returns, automation, MIDI controllers and Push, patch devices, ARA | "Later, not ordered" |
+| Automation, MIDI controllers and Push, patch devices, ARA | "Later, not ordered" |
+| Sends and returns | done (Next, item 4, with cue and meters to follow) |
 | Audio to MIDI, stem separation | own section of the roadmap |
 | **Recording (ch 19), comping (ch 21), bounce (ch 20), racks (ch 25), automation (ch 26), clip envelopes (ch 27), MIDI effects (ch 30), MIDI tools (ch 11), MPE (ch 12), grooves (ch 14), tuning (ch 15), MIDI remote (ch 34), Link and sync (ch 37), video (ch 28), accessibility (ch 41)** | **nothing, or "later, not ordered" at best** |
 
@@ -399,9 +398,8 @@ whether a DAW is usable without it.
    reverb - the four the roadmap already names - then a decision about the rest.
 4. **Automation** (ch 26-27): device and mixer parameters first (the command layer
    and the model make this cheap), then tempo.
-5. **Sends and returns into the engine** (part of ch 18): the model already holds the
-   sends, so this is engine and command work, and it makes imported sets sound like their author
-   meant them. Meters belong here too.
+5. **Meters and cue** (part of ch 18): sends and returns play since October 2026; meters and
+   cue are the rest of this item.
 6. **Arrangement editing: locators, the loop brace, split, consolidate** (ch 6):
    small commands, large workflow gain, and two of them are already open issues (#98, #99).
 

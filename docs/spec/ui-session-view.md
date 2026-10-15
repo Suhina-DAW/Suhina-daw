@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -111,6 +111,11 @@ tempo and time signature that apply when launched.
 ### Sends (toggleable)
 
 One knob per return track (A, B, …). Return tracks show pre/post toggles on the main column.
+
+**Built:** the send knobs sit in the mixer strip's knob row beside the pan knob, as many as fit
+(three in a track column; none in a return column); the pre/post choice is in each knob's
+right-click menu rather than on the main column, and a dot under the knob marks a send before
+the fader. Behaviour and commands: [sends and returns](sends-and-returns.md).
 
 ### Mixer (toggleable, resizable height)
 

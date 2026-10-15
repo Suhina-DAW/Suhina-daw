@@ -14,6 +14,9 @@ use crate::plugin::{Delay, Plugins};
 use crate::sends::{self, SendOut};
 use crate::{MAX_LATENCY_SECONDS, track_gains};
 
+/// A send of a chain: the return chain's index, the return track and the send's gains.
+type SendTarget = (usize, TrackId, (f32, f32));
+
 /// The most channels a route is followed through, so a routing cycle cannot loop forever.
 const MAX_HOPS: usize = 64;
 
@@ -99,7 +102,7 @@ pub(crate) fn build(
             Some((chains.iter().position(|o| o.track == bus)?, channel))
         })
         .collect();
-    let send_targets: Vec<Vec<(usize, TrackId, (f32, f32))>> = chains
+    let send_targets: Vec<Vec<SendTarget>> = chains
         .iter()
         .map(|c| {
             planned

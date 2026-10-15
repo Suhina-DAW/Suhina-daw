@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -150,7 +150,8 @@ part is empty (the main track's strip is planned). From top to bottom:
 
 | Part | Spec |
 |---|---|
-| Knob row | 22 px: the pan knob at the left. Sends (planned) as more knobs in the same row |
+| Knob row | 22 px: the pan knob at the left, then one send knob per return, 4 px apart, as many as fit (three in a track column, none in a return column). The volume is dragged from its value then, not from the right half of the strip |
+| Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader. While it is dragged, the values row's left value is the letter and the level ("A -12.0") |
 | Knob | 22 px; circle r 9, `control.background` fill, 1 px `text.hint` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |
 | Values row | 12 px, 4 px under the knobs: pan left (10 px mono `text.secondary`, "C", "15L"), volume right (10 px mono `#C9C4BB`, dragged up or down) |
 | Toggles | 18 px at the bottom: track on (two thirds, the track number, or the return's letter, in 10 px mono) and solo (one third, "S" in 10 px), 2 px apart; arm (planned) |

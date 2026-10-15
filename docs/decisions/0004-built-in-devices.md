@@ -3,7 +3,7 @@ description: The interface of built-in effects and instruments (Device trait, pa
 read_when: device, built-in effect or instrument, effect, instrument, dsp, filter, parameter, automation, utility, device-api, conformance
 type: decision
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/dsp/**
   - crates/device-api/**
@@ -11,6 +11,7 @@ covers:
   - crates/device-registry/**
   - crates/engine/src/chain.rs
   - crates/engine/src/buses.rs
+  - crates/engine/src/sends.rs
   - crates/session/src/devices.rs
 ---
 
@@ -127,11 +128,25 @@ decision 9.
    other track is delayed to match ([ADR 0006](0006-plug-in-hosting.md) › Consequences). A group without devices stays a gain on the
    tracks routed through it, with no buffer of its own.
 
+11. **Sends feed return chains** (added 2026-10-15, #396; behaviour in the
+   [sends and returns spec](../spec/sends-and-returns.md)). Every track with a heard send gets a
+   chain (one without devices when it has none), and every return fed by a send gets one too,
+   which is a bus like a group's. After its devices, before its own delay line and gains, a
+   chain adds its buffer to each return's input at the send's gains: the level alone before
+   the fader, the level times the channel's volume and equal-power pan after it. The chains are
+   put in a topological order over both kinds of edge (output into a bus, send into a return),
+   so one pass per block still runs every chain after everything that plays into it; a send
+   that would close a loop through outputs and earlier sends is left out when the graph is
+   built, so the order always exists. Each send has a delay line of its own: a return's input
+   waits for the slowest chain that feeds it, through its output or a send, and the output for
+   the slowest path, as in 10. A graph swap hands a send's delay line over when the chain sends
+   to the same return with the same delay (`crates/engine/src/sends.rs`).
+
 ## Not decided yet
 
 - **Automation lanes** for device parameters (LOOP-39).
-- **Chains on return and master channels, and sends into chains:** how they run and how latency
-  compensation (built for track and group chains, 10 above) extends to them.
+- **A chain on the master channel:** how it runs after every other chain, and how latency
+  compensation (10 and 11 above) extends to it. Return chains and sends are 11.
 - **Mono, multichannel and side-chain inputs.** The trait is stereo in, stereo out.
   Side-chained dynamics extend it when the first one is built.
 - **Per-note expression.** `NoteEvent` has no channel and no per-note controls yet (MIDI
