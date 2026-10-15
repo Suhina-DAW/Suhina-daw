@@ -59,6 +59,10 @@ that describe them (*Code and its documents*). Read only the documents that matc
 9. **GPL-compatible dependencies only.** Suhina is GPL-3.0-or-later. Dependencies must be
    compatible with GPLv3: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0, LGPL, GPL-3.0. Not GPL-2.0-only,
    not proprietary or "non-commercial" licences.
+10. **No links to private agent sessions.** The repository is public. Never put a link to an
+    agent's own session (such as `https://claude.ai/code/session_...`) in a commit message, a pull
+    request description, an issue or a comment, even when the tool's default attribution adds
+    one: leave that line out. The `Co-Authored-By:` trailer stays.
 
 ## 2. Workspace map
 
