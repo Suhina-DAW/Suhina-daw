@@ -15,7 +15,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use suhina_engine::model::{LaneData, Project};
-use suhina_session::{AudioSystem, CommandKind, Player, ProjectId, Projects, Session, all_commands, project_commands};
+use suhina_session::{
+    AudioSystem, CommandKind, MidiSystem, Player, ProjectId, Projects, Session, all_commands, project_commands,
+};
 
 use crate::render::{LaunchStep, render_launch_script, render_wav, scene_as_arrangement};
 use crate::workspace::{Workspace, display_path};
@@ -177,6 +179,16 @@ impl SuhinaMcp {
         if let Ok(mut projects) = self.projects.lock() {
             projects.set_audio_system(system);
             self.audio_output = true;
+        }
+        self
+    }
+
+    /// Hears MIDI controllers on `system`'s input ports: the armed tracks of the project that
+    /// plays play them (`midi.*`, `track.setArm`, ADR 0017).
+    pub fn with_midi_input(self, system: Arc<dyn MidiSystem>) -> Self {
+        if let Ok(mut projects) = self.projects.lock() {
+            // A port that cannot be opened is listed by midi.inputs with why.
+            let _ = projects.set_midi_system(system);
         }
         self
     }

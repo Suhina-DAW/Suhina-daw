@@ -184,6 +184,8 @@ impl Reader {
                 content: ContentKinds { notes: entry.kind == TrackKind::Midi, audio: entry.kind == TrackKind::Audio },
                 channel: Some(entry.channel),
                 parent,
+                midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             });
             if entry.kind != TrackKind::Return {
@@ -204,7 +206,7 @@ impl Reader {
             channels,
             contents: std::mem::take(&mut self.contents),
             arrangement: Arrangement { lanes, markers: self.markers(live_set) },
-            launcher: Launcher { scenes, columns },
+            launcher: Launcher { scenes, columns, mappings: Vec::new() },
             extensions: Extensions::default(),
         };
         self.untangle_groups(&mut project);
@@ -680,6 +682,7 @@ impl Reader {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         })
     }

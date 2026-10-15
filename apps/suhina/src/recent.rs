@@ -32,6 +32,17 @@ impl Recent {
         self.paths.retain(|p| !same(p));
         self.paths.insert(0, path);
         self.paths.truncate(KEPT);
+        self.write()
+    }
+
+    /// Takes `path` off the list and writes it.
+    pub fn remove(&mut self, path: &Path) -> Result<(), String> {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        self.paths.retain(|p| !p.to_string_lossy().eq_ignore_ascii_case(&path.to_string_lossy()));
+        self.write()
+    }
+
+    fn write(&self) -> Result<(), String> {
         let Some(file) = &self.file else { return Ok(()) };
         let text: String = self.paths.iter().map(|p| format!("{}\n", p.display())).collect();
         if let Some(parent) = file.parent() {
@@ -89,6 +100,11 @@ mod tests {
         // A file that is gone is not listed.
         let _gone = std::fs::remove_file(&songs[12]);
         assert_eq!(again.existing().get(1), Some(&songs[11]));
+        // One taken off the list stays off when it is read again.
+        let mut again = again;
+        assert_eq!(again.remove(&songs[11]), Ok(()));
+        let read = Recent::load(Some(dir.join("recent.txt")));
+        assert_eq!(read.existing().get(1), Some(&songs[10]));
         let _clean = std::fs::remove_dir_all(&dir);
     }
 

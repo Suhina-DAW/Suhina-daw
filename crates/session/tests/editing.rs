@@ -48,6 +48,7 @@ fn clip(content: u32, start: f64, length: f64) -> Clip {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     }
 }

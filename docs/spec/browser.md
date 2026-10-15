@@ -69,7 +69,7 @@ From top to bottom (sizes in components.md › Browser):
 5. **Footer:** the tags (dots that filter) and the count ("312 items", "3 selected").
 
 The panel is on the left of the main view, or on the right (Settings › Interface › Browser ›
-Side). Its width is dragged at its inner edge (200–600 px, default 300) and kept. Ctrl+B and
+Side). Its width is dragged at its inner edge (from 200 px to half the window, default 300) and kept. Ctrl+B and
 View › Show browser show and hide it; hidden, it takes no space. Ctrl+F shows it if hidden and
 puts the cursor in the search field.
 
@@ -87,7 +87,8 @@ Three sections, each title in small hint text:
   opened or saved; anything else when it is added to a project (dropped, or added with Enter or
   a double-click). Previewing does not count.
 - **Folders:** the added folders by name, each with a mark when it is not plain (`…` while
-  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it).
+  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it), with a **Browse…** button
+  at its end that picks the folder in the system's folder dialog instead.
   A folder dragged from the system onto the window is added too (and the browser shows). A folder's right-click menu
   has Refresh, Pin and Remove from the browser.
 
@@ -171,8 +172,13 @@ with the part played so far brighter and a playhead.
   plug-in, when that track has one; otherwise through the FM synth with its first voice. All
   of the file's MIDI tracks sound together, at 120 BPM or the file's first tempo.
 - A file that cannot be read shows "Cannot preview: <reason>" in the strip and nothing plays.
-  The status bar says so too, and says why when nothing can preview at all: no project is open
-  (previews play through the active project's audio output), or the project has no audio output.
+  The status bar says so too, and says why when nothing can preview at all: there is no audio
+  output here, or the active project has no audio output.
+- **With no project open** the browser works as with one: browsing, searching, the sample map
+  and previews. Previews then play through an output of their own, opened on the chosen device
+  at the first preview and closed before a project opens its output, so only one is ever open
+  ([ADR 0011](../decisions/0011-preview-and-added-audio.md) › Previews with no project open).
+  Adding to a track needs a project.
 
 The browser is not the only place a preview starts: the piano roll's key column plays a note
 through the track's instrument while a key is held, with the same voice and the same commands
@@ -220,7 +226,7 @@ without Ctrl).
 
 | Dropped on | Result |
 |---|---|
-| An Arrangement lane | Clips from the beat under the pointer, on the grid the view snaps to (Alt: no snap). The clips replace what they cover, unless the stacking settings allow it ([arrangement editing](arrangement-editing.md)). |
+| An Arrangement lane | Clips from the beat under the pointer, on the grid the control bar's value sets at that zoom ([arrangement editing](arrangement-editing.md) › The grid; Alt or `none`: no snap). The clips replace what they cover, unless the stacking settings allow it ([arrangement editing](arrangement-editing.md)). |
 | A Session slot (empty or not) | Clips into that slot and the ones below it; a clip already there is replaced. Scenes are added at the bottom when there are more clips than slots. |
 | The empty area | New tracks, see below. |
 

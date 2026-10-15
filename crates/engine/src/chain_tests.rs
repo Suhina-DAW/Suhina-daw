@@ -40,6 +40,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     Project {
@@ -50,6 +51,8 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }],
         channels: vec![Channel {
@@ -79,6 +82,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             markers: Vec::new(),
         },
         launcher: Launcher {
+            mappings: Vec::new(),
             scenes: vec![Scene::default()],
             columns: vec![LauncherColumn {
                 track: TrackId(1),

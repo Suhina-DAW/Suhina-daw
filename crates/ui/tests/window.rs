@@ -5,6 +5,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
+use suhina_engine::model::TrackId;
 use suhina_session::Session;
 use suhina_ui::arrangement_view::{self, ArrangementViewState};
 use suhina_ui::demo::demo_project;
@@ -960,9 +961,161 @@ fn the_cue_button_cues_a_track_in_both_views_and_undoes() {
     assert_eq!(cues(&harness), Some(vec![true, false, true, false]));
 }
 
+#[test]
+fn arming_is_exclusive_unless_ctrl_is_held_and_changes_no_project() {
+    let mut harness = window(demo_app());
+    let armed = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().tracks.iter().take(4).map(|t| s.is_armed(t.id)).collect::<Vec<_>>())
+    };
+    harness.get_by_label("Arm Drums to play it from a MIDI controller").click();
+    harness.run();
+    harness.get_by_label("Arm Keys to play it from a MIDI controller").click();
+    harness.run();
+    assert_eq!(armed(&harness), Some(vec![false, false, true, false]));
+    harness.get_by_label("Arm Vox to play it from a MIDI controller").click_modifiers(Modifiers::COMMAND);
+    harness.run();
+    assert_eq!(armed(&harness), Some(vec![false, false, true, true]));
+    assert!(!harness.state().session().is_some_and(Session::can_undo), "arming is not an edit");
+
+    // The Arrangement headers show it and disarm too.
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    harness.get_by_label("Disarm Keys").click();
+    harness.run();
+    assert_eq!(armed(&harness), Some(vec![false, false, false, true]));
+    assert!(harness.query_by_label("Disarm Vox").is_some());
+    // Return tracks play no notes: nothing to arm.
+    assert!(harness.query_by_label("Arm A Reverb to play it from a MIDI controller").is_none());
+}
+
+/// MIDI ports by name that open into nothing.
+struct StandMidi(Vec<String>);
+
+impl suhina_session::MidiSystem for StandMidi {
+    fn ports(&self) -> Result<Vec<String>, String> {
+        Ok(self.0.clone())
+    }
+
+    fn open(
+        &self,
+        _name: &str,
+        _input: std::sync::Arc<suhina_session::LiveInput>,
+    ) -> Result<Box<dyn std::any::Any + Send>, String> {
+        Ok(Box::new(()))
+    }
+}
+
+#[test]
+fn a_tracks_menu_chooses_the_midi_port_and_channel_it_hears() {
+    use suhina_engine::model::{MidiInput, MidiPort};
+    let mut app = demo_app();
+    app.projects_mut().set_midi_system(std::sync::Arc::new(StandMidi(vec!["Keys In".into(), "Pads In".into()])));
+    let mut harness = window(app);
+    let input = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .and_then(|s| s.project().tracks.iter().find(|t| t.name == "Keys").map(|t| t.midi_input.clone()))
+    };
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("MIDI input: All ports").click();
+    harness.run();
+    harness.get_by_label("Pads In").click();
+    harness.run();
+    assert_eq!(input(&harness), Some(MidiInput { port: MidiPort::Named("Pads In".into()), channel: None }));
+
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("MIDI input: Pads In").click();
+    harness.run();
+    harness.get_by_label("Ch 10").click();
+    harness.run();
+    assert_eq!(input(&harness), Some(MidiInput { port: MidiPort::Named("Pads In".into()), channel: Some(10) }));
+    assert!(harness.state().session().is_some_and(Session::can_undo), "an edit, saved with the project");
+}
+
+#[test]
+fn an_audio_track_is_armed_to_hear_its_input_and_its_menu_chooses_the_channels() {
+    use suhina_engine::model::{AudioInput, ContentKinds, InputChannels, Monitor};
+    let mut project = demo_project();
+    project.tracks[0].content = ContentKinds { notes: false, audio: true };
+    let name = project.tracks[0].name.clone();
+    let mut app = App::new();
+    app.set_session(Session::new(project), &[]);
+    let mut harness = window(app);
+    harness.get_by_label(&format!("Arm {name} to hear its audio input")).click();
+    harness.run();
+    assert!(harness.state().session().is_some_and(|s| s.is_armed(suhina_engine::model::TrackId(1))));
+
+    let input = |h: &Harness<'static, App>| h.state().session().map(|s| s.project().tracks[0].audio_input);
+    harness.get_by_label(&format!("Track {name}")).click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Audio input: No input").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("No input device").is_some(), "says why only eight are offered");
+    harness.get_by_label("In 3/4").click();
+    harness.run();
+    assert_eq!(input(&harness), Some(AudioInput { channels: InputChannels::Stereo(3), monitor: Monitor::Auto }));
+    harness.get_by_label(&format!("Track {name}")).click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Audio input: In 3/4").click();
+    harness.run();
+    harness.get_by_label("Monitor in").click();
+    harness.run();
+    assert_eq!(input(&harness), Some(AudioInput { channels: InputChannels::Stereo(3), monitor: Monitor::In }));
+    // A track that plays notes has a MIDI input instead.
+    harness.get_by_label("Track Keys").click_secondary();
+    harness.run();
+    assert!(harness.query_by_label_contains("MIDI input:").is_some());
+    assert!(harness.query_by_label_contains("Audio input:").is_none());
+}
+
+#[test]
+fn settings_audio_chooses_the_input_device_and_saves_it() {
+    let mut app = demo_app();
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
+    let mut harness = window(app);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Audio").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_label("Input: Off").click();
+    harness.step();
+    harness.step();
+    harness.get_by_label("Stand In (2 in)").click();
+    harness.step();
+    harness.step();
+    let chosen = harness.state().projects().output_choice().input.clone();
+    assert_eq!(chosen, suhina_session::InputChoice::Named("Stand In".into()));
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.audio_input);
+    assert_eq!(saved.as_deref(), Some("Stand In"));
+}
+
+#[test]
+fn settings_audio_lists_the_midi_inputs_and_one_turned_off_is_saved() {
+    let mut app = demo_app();
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
+    app.projects_mut().set_midi_system(std::sync::Arc::new(StandMidi(vec!["Keys In".into(), "Pads In".into()])));
+    let mut harness = window(app);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Audio").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    harness.get_by_label("MIDI input Pads In: Off").click();
+    harness.step();
+    harness.step();
+    assert_eq!(harness.state().projects().midi_inputs_off(), ["Pads In"]);
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.midi_inputs_off);
+    assert_eq!(saved, Some(vec!["Pads In".to_string()]));
+}
+
 /// The demo project with a group track, "Group", that tracks can play into.
 fn project_with_a_group() -> suhina_engine::model::Project {
-    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track, TrackId};
+    use suhina_engine::model::{Channel, ChannelId, ChannelRole, ContentKinds, Track};
     let mut project = demo_project();
     project.tracks.push(Track {
         id: TrackId(20),
@@ -1218,6 +1371,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -1867,6 +2021,12 @@ impl suhina_session::AudioSystem for StandAudio {
                 buffer_range: Some((256, 512)),
                 exclusive: false,
             }],
+            inputs: vec![suhina_session::audio::InputInfo {
+                name: "Stand In".into(),
+                default: true,
+                channels: 2,
+                sample_rates: vec![48_000],
+            }],
             error: None,
         }]
     }
@@ -2082,28 +2242,30 @@ fn closing_or_quitting_with_unsaved_changes_asks_first() {
 
 #[test]
 fn the_sample_map_opens_in_a_window_of_its_own_and_docks_back() {
+    // The map lays itself out on a thread and asks for frames until it is done, which takes
+    // longer than `run` waits on a slow machine: step a fixed number of frames instead.
     let mut harness = window(demo_app());
     // Hiding the browser for the test changed a setting already.
     let _ = harness.state_mut().take_changed_settings();
     assert!(harness.query_by_label("Dock").is_none());
     harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::M);
-    harness.run();
+    harness.run_steps(4);
     // Without windows of their own (as here) the toolkit draws it as a window inside this one.
     assert!(harness.state().sample_map.view.window);
     assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(true));
     assert!(harness.query_by_label("Dock").is_some(), "the map's bar offers to dock it");
     assert!(harness.query_by_label("Large").is_none(), "no large view while it has a window");
     harness.get_by_label("Dock").click();
-    harness.run();
+    harness.run_steps(4);
     assert!(!harness.state().sample_map.view.window);
     assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
     assert!(harness.query_by_label("Dock").is_none());
 
     // The View menu does the same.
     harness.get_by_label("View").click();
-    harness.run();
+    harness.run_steps(4);
     harness.get_by_label_contains("Sample map in a window").click();
-    harness.run();
+    harness.run_steps(4);
     assert!(harness.state().sample_map.view.window);
 }
 
@@ -2199,6 +2361,182 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+/// Presses and lets go twice at `at`, a frame apart: a double-click. It waits a second first,
+/// as a person would, so an earlier click does not make it a triple-click.
+fn double_click_at(harness: &mut Harness<'static, App>, at: egui::Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(at);
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.step();
+    }
+    harness.run();
+}
+
+/// The name of each clip's content in Keys' slots, `None` for an empty slot.
+fn keys_slots(harness: &Harness<'static, App>) -> Vec<Option<String>> {
+    let Some(session) = harness.state().session() else { return Vec::new() };
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+    let column = p.launcher.columns.iter().find(|c| Some(c.track) == keys);
+    column
+        .map(|c| {
+            c.slots
+                .iter()
+                .map(|s| s.clip.as_ref().and_then(|clip| p.content(clip.content)).map(|c| c.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(keys_slots(&harness).first(), Some(&Some("MIDI clip".to_string())));
+    assert!(harness.query_by_label("Launch MIDI clip on Keys (scene 1)").is_some());
+    // One undo step takes it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(keys_slots(&harness).first(), Some(&None));
+    // A double-click on a slot with a clip launches it and makes nothing.
+    let before = harness.state().session().map(|s| s.project().clone());
+    let at = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
+    double_click_at(&mut harness, at);
+    assert_eq!(harness.state().session().map(|s| s.project().clone()), before);
+}
+
+#[test]
+fn a_double_click_on_an_empty_spot_of_a_midi_lane_makes_a_bar_long_clip_on_the_grid_and_selects_it() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    let lane = harness.get_by_label("Lane Keys").rect();
+    let clips: Vec<egui::Rect> = harness.query_all_by_label_contains(" on Keys at bar ").map(|n| n.rect()).collect();
+    // The rightmost spot of the lane that no clip covers, a little into a bar (8 points a beat).
+    let at = (0..200)
+        .map(|i| egui::pos2(lane.right() - 12.0 - i as f32 * 8.0, lane.center().y))
+        .find(|p| lane.contains(*p) && !clips.iter().any(|c| c.expand(2.0).contains(*p)))
+        .unwrap();
+    let count = |h: &Harness<'static, App>| {
+        h.state().session().map_or(0, |s| {
+            let p = s.project();
+            let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+            p.arrangement.lanes.iter().filter(|l| l.track == keys).map(|l| l.clips.len()).sum::<usize>()
+        })
+    };
+    let before = count(&harness);
+    double_click_at(&mut harness, at);
+    assert_eq!(count(&harness), before + 1);
+    let session = harness.state().session().unwrap();
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id).unwrap();
+    let lane = p.arrangement.lanes.iter().find(|l| l.track == Some(keys)).unwrap();
+    let (index, made) = lane
+        .clips
+        .iter()
+        .enumerate()
+        .find(|(_, c)| p.content(c.content).is_some_and(|x| x.name == "MIDI clip"))
+        .unwrap();
+    assert_eq!(made.length, 4.0, "one bar of 4/4");
+    assert_eq!(made.start % 4.0, 0.0, "on the bar grid at this zoom: {}", made.start);
+    assert_eq!(harness.state().selected_clip(), Some((keys, index)), "the new clip is selected");
+}
+
+#[test]
+fn a_clips_name_selects_it_and_its_mark_launches_it() {
+    let mut harness = view();
+    let walk = (TrackId(2), 1);
+    assert!(clicked(&mut harness, "Select Walk on Bass (scene 2)").is_empty(), "selecting does not launch");
+    assert_eq!(harness.state().state.selected_slot, Some(walk));
+    assert_eq!(harness.state().state.selected, Some(TrackId(2)), "its track is selected with it");
+
+    // A launch selects the clip too, unless Select on launch is off.
+    assert_eq!(
+        clicked(&mut harness, "Launch Chords 1 on Keys (scene 2)"),
+        [Action::new("clip.launch", json!({ "track": 3, "scene": 2 }))]
+    );
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+    harness.state_mut().state.keep_selection_on_launch = true;
+    clicked(&mut harness, "Launch Walk on Bass (scene 2)");
+    assert_eq!(harness.state().state.selected_slot, Some((TrackId(3), 1)));
+
+    // A track's header selects the track and ends the clip's selection.
+    clicked(&mut harness, "Track Drums");
+    assert_eq!((harness.state().state.selected_slot, harness.state().state.selected), (None, Some(TrackId(1))));
+}
+
+#[test]
+fn the_arrows_step_through_the_slots_of_tracks_and_stop_at_the_edges() {
+    use suhina_ui::session_view::{Step, step_slot};
+    let grid = Grid::build(&demo_project(), None);
+    let (drums, bass, vox) = (TrackId(1), TrackId(2), TrackId(4));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Up), Some((bass, 0)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Down), Some((bass, 2)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Left), Some((drums, 1)));
+    assert_eq!(step_slot(&grid, (bass, 1), Step::Right), Some((TrackId(3), 1)));
+    assert_eq!(step_slot(&grid, (bass, 0), Step::Up), None);
+    assert_eq!(step_slot(&grid, (bass, 5), Step::Down), None);
+    assert_eq!(step_slot(&grid, (drums, 2), Step::Left), None);
+    // Return tracks have no slots, so the last track is the edge.
+    assert_eq!(step_slot(&grid, (vox, 2), Step::Right), None);
+    assert_eq!(step_slot(&grid, (TrackId(10), 0), Step::Down), None, "a return track is not in the grid of slots");
+}
+
+#[test]
+fn a_selected_slot_shows_in_the_detail_area_and_keys_move_and_launch_it() {
+    let mut harness = window(demo_app());
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_none());
+    harness.get_by_label("Select Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some());
+
+    harness.key_press(Key::ArrowDown);
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 3").is_some());
+    harness.key_press(Key::ArrowRight);
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_some());
+
+    // Enter launches it: here without an audio engine, which the status says.
+    harness.key_press(Key::Enter);
+    harness.run();
+    match harness.state().status() {
+        Status::Error(message) => assert!(message.contains("no audio engine"), "{message}"),
+        other => panic!("expected the launch to be tried, got {other:?}"),
+    }
+
+    // The Arrangement view keeps its own selection.
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Chords 2, scene 3").is_none());
+}
+
+#[test]
+fn with_select_on_launch_off_a_launch_leaves_the_detail_area_alone() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "on by default: a launch selects");
+
+    let ctx = harness.ctx.clone();
+    let settings = suhina_ui::settings::Settings { select_on_launch: false, ..Default::default() };
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.state_mut().set_browser_open(false);
+    harness.get_by_label("Launch Chords 1 on Keys (scene 2)").click();
+    harness.run();
+    assert!(harness.query_by_label("Clip Walk, scene 2").is_some(), "the selection stays");
+    assert!(harness.query_by_label("Clip Chords 1, scene 2").is_none());
 }
 
 /// Bass's send to the A Reverb return in the project: level and before the fader.
@@ -2347,6 +2685,400 @@ fn a_critical_command_from_the_window_is_backed_up_first() {
     kept.sort();
     assert_eq!(kept, [tracks, tracks + 1]);
     let _clean = std::fs::remove_dir_all(&dir);
+}
+
+/// Picks `value` in the control bar's grid box, as a user does: open it, click the value.
+fn choose_grid(harness: &mut Harness<'static, App>, value: &str) {
+    harness.get_by_label("Grid and launch quantisation").click();
+    harness.run();
+    harness.get_by_label(value).click();
+    harness.run();
+}
+
+/// The grid value of the active project's session.
+fn grid_of(harness: &Harness<'static, App>) -> Option<suhina_engine::Quantization> {
+    harness.state().session().map(|s| s.quantization())
+}
+
+/// Zooms the Arrangement view in eight times (64 points a beat) around a point just inside
+/// Beat B's left edge, so that edge stays in view; returns where the edge is then.
+fn zoom_in_at_beat_b(harness: &mut Harness<'static, App>) -> f32 {
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    // 8 points a beat by default: 4 points in is half a beat into the clip, which starts on beat 64.
+    let at = egui::pos2(clip.left() + 4.0, clip.center().y);
+    harness.hover_at(at);
+    harness.run();
+    harness.input_mut().events.push(egui::Event::Zoom(8.0));
+    harness.run();
+    let left = harness.get_by_label("Clip Beat B on Drums at bar 17").rect().left();
+    assert!((left - (at.x - 32.0)).abs() <= 1.0, "zoomed to 64 points a beat around the pointer: {left}");
+    left
+}
+
+/// Drags Beat B by `by` points, taking hold of it just inside its left edge, which stays in
+/// view when zoomed in.
+fn drag_beat_b(harness: &mut Harness<'static, App>, by: egui::Vec2) {
+    let clip = harness.get_by_label("Clip Beat B on Drums at bar 17").rect();
+    let from = egui::pos2(clip.left() + 16.0, clip.center().y);
+    harness.hover_at(from);
+    harness.run();
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from + by * 0.5);
+    harness.run();
+    harness.hover_at(from + by);
+    harness.run();
+    harness.drop_at(from + by);
+    harness.run();
+}
+
+/// Where Beat B (on beat 64 in the demo) starts now, after a move of less than two bars.
+fn beat_b_start(harness: &Harness<'static, App>) -> Option<f64> {
+    harness
+        .state()
+        .session()?
+        .project()
+        .arrangement
+        .lanes
+        .first()?
+        .clips
+        .iter()
+        .map(|c| c.start)
+        .find(|s| (63.9..72.0).contains(s))
+}
+
+#[test]
+fn the_grid_value_in_the_control_bar_sets_where_a_dragged_clip_lands() {
+    let mut harness = arrangement_app();
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Bars(1)));
+    // No audio engine is needed to choose the grid.
+    choose_grid(&mut harness, "1/16");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+    assert!(matches!(harness.state().status(), Status::Done(s) if s == "Grid 1/16"));
+    zoom_in_at_beat_b(&mut harness);
+
+    // 1.3 beats right (83.2 points at 64 a beat): on the nearest sixteenth, beat 65.25.
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(65.25));
+    // The move is one undo step.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(beat_b_start(&harness), Some(64.0));
+
+    // With Alt held it lands where it is let go, off the grid.
+    harness.event(egui::Event::ModifiersChanged(Modifiers::ALT));
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    harness.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    harness.run();
+    let free = beat_b_start(&harness).unwrap_or_default();
+    assert!((free - 65.3).abs() < 0.02 && (free * 4.0).fract().abs() > 0.01, "{free}");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+
+    // 1 bar: 3.5 beats right lands on the next bar, beat 68, at the same zoom.
+    choose_grid(&mut harness, "1 bar");
+    drag_beat_b(&mut harness, egui::vec2(224.0, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(68.0));
+}
+
+#[test]
+fn a_triplet_or_none_grid_places_a_dragged_clip_by_its_own_rule() {
+    let mut harness = arrangement_app();
+    choose_grid(&mut harness, "1/16T");
+    zoom_in_at_beat_b(&mut harness);
+    // 1.3 beats right: the nearest sixth of a beat is 64 + 8/6.
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    let start = beat_b_start(&harness).unwrap_or_default();
+    assert!((start - (64.0 + 8.0 / 6.0)).abs() < 1e-9, "{start}");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+
+    // none: nothing snaps, as if Alt were held.
+    choose_grid(&mut harness, "none");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::None));
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    let free = beat_b_start(&harness).unwrap_or_default();
+    assert!((free - 65.3).abs() < 0.02 && (free * 4.0).fract().abs() > 0.01, "{free}");
+}
+
+#[test]
+fn each_project_tab_keeps_its_own_grid() {
+    let mut harness = two_projects();
+    // The browser has tests of its own; the views get the whole width.
+    harness.state_mut().set_browser_open(false);
+    harness.run();
+    let ids = harness.state().projects().ids();
+    // The second project shows: 1/16 there.
+    choose_grid(&mut harness, "1/16");
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+
+    // The first keeps 1 bar: in its Arrangement a short drag at a fine zoom lands on a bar.
+    harness.get_by_label("Tab Untitled 1").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().projects().active(), ids.first().copied());
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Bars(1)));
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    zoom_in_at_beat_b(&mut harness);
+    drag_beat_b(&mut harness, egui::vec2(160.0, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(68.0));
+
+    // Back in the second, its 1/16 is still chosen and is its grid.
+    harness.get_by_label("Tab Untitled 2").click();
+    harness.run();
+    harness.run();
+    assert_eq!(grid_of(&harness), Some(suhina_engine::Quantization::Beats(0.25)));
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    zoom_in_at_beat_b(&mut harness);
+    drag_beat_b(&mut harness, egui::vec2(83.2, 0.0));
+    assert_eq!(beat_b_start(&harness), Some(65.25));
+}
+
+/// A window with nothing open that starts as `settings` say, given the last project `last`.
+fn started(settings: suhina_ui::settings::Settings, last: Option<std::path::PathBuf>) -> Harness<'static, App> {
+    let mut app = App::new();
+    app.set_settings(&egui::Context::default(), settings);
+    app.open_at_start(last);
+    window(app)
+}
+
+fn at_start(choice: suhina_ui::settings::AtStart) -> suhina_ui::settings::Settings {
+    suhina_ui::settings::Settings { at_start: choice, ..Default::default() }
+}
+
+#[test]
+fn at_start_the_start_panel_shows_unless_the_settings_say_otherwise() {
+    use suhina_ui::settings::AtStart;
+    let mut harness = started(at_start(AtStart::Panel), None);
+    assert!(!harness.state().project_dialog_open());
+    assert!(harness.state().start_panel_open());
+    assert!(harness.query_by_label("New project").is_some(), "the start panel shows");
+    assert!(harness.state_mut().take_lists_wanted().is_some(), "and asks for its lists");
+    assert_eq!(harness.state_mut().take_new_request(), None);
+
+    let mut harness = started(at_start(AtStart::Blank), None);
+    assert!(!harness.state().project_dialog_open());
+    assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
+}
+
+#[test]
+fn at_start_a_new_project_comes_from_the_start_template_or_the_panel_says_why_not() {
+    use suhina_ui::settings::AtStart;
+    let folder = std::env::temp_dir().join(format!("suhina-at-start-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    let template = folder.join("Four on the floor.suhina");
+    std::fs::write(&template, b"{}").unwrap_or_else(|e| panic!("{e}"));
+    let mut settings = at_start(AtStart::Template);
+    settings.templates_folder = folder.display().to_string();
+    // A name in the templates folder, or a whole path.
+    for named in ["Four on the floor.suhina".to_string(), template.display().to_string()] {
+        settings.start_template = named;
+        let mut harness = started(settings.clone(), None);
+        assert!(!harness.state().project_dialog_open());
+        assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Template(template.clone())));
+    }
+    settings.start_template = "Gone.suhina".into();
+    let mut harness = started(settings.clone(), None);
+    assert!(!harness.state().project_dialog_open());
+    assert!(harness.query_by_label("New project").is_some(), "the start panel shows");
+    assert_eq!(harness.state_mut().take_new_request(), None);
+    assert!(
+        matches!(harness.state().status(), Status::Hint(h) if h.contains("not there")),
+        "{:?}",
+        harness.state().status()
+    );
+    settings.start_template = String::new();
+    let harness = started(settings, None);
+    assert!(harness.query_by_label("New project").is_some());
+    assert!(matches!(harness.state().status(), Status::Hint(h) if h.contains("No template")));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn at_start_the_last_project_opens_or_the_panel_says_there_is_none() {
+    use suhina_ui::settings::AtStart;
+    let last = std::path::PathBuf::from("/songs/Last night.suhina");
+    let mut harness = started(at_start(AtStart::Last), Some(last.clone()));
+    assert!(!harness.state().project_dialog_open());
+    assert_eq!(harness.state_mut().take_open_request(), Some((last, OpenAs::NewTab)));
+
+    let mut harness = started(at_start(AtStart::Last), None);
+    assert!(harness.query_by_label("New project").is_some());
+    assert_eq!(harness.state_mut().take_open_request(), None);
+    assert!(matches!(harness.state().status(), Status::Hint(h) if h.contains("No project was opened before")));
+}
+
+#[test]
+fn at_start_is_chosen_in_settings_and_template_asks_for_the_template() {
+    use suhina_ui::settings::AtStart;
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    assert!(harness.query_by_label("Start template").is_none(), "only for a template");
+    harness.get_by_label("At start: Template").click();
+    harness.run();
+    assert_eq!(harness.state().settings().at_start, AtStart::Template);
+    assert!(harness.query_by_label("Start template").is_some());
+    harness.get_by_label("At start: Last").click();
+    harness.run();
+    assert_eq!(harness.state().settings().at_start, AtStart::Last);
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.to_text()).unwrap_or_default();
+    assert!(saved.contains("at_start = last"), "{saved}");
+}
+
+#[test]
+fn the_start_panel_opens_recent_projects_forgets_them_and_comes_back_when_the_last_project_closes() {
+    let night = std::path::PathBuf::from("/songs/Night drive.suhina");
+    let morning = std::path::PathBuf::from("/songs/Morning.suhina");
+    let mut app = App::new();
+    app.set_project_lists(vec![night.clone(), morning.clone()], Vec::new());
+    let mut harness = window(app);
+    assert!(harness.state().start_panel_open());
+    harness.get_by_label("Open Night drive").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_open_request(), Some((night, OpenAs::NewTab)));
+
+    harness.get_by_label("Open Morning").click_secondary();
+    harness.run();
+    harness.get_by_label("Remove from list").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_forget_request(), Some(morning));
+    assert!(harness.query_by_label("Open Morning").is_none(), "it is gone from the panel at once");
+
+    harness.get_by_label("Audio settings").click();
+    // The Audio page repaints while it shows, for its live figures.
+    harness.run_steps(2);
+    assert!(harness.state().settings_open());
+    harness.key_press(Key::Escape);
+    harness.run_steps(2);
+    assert!(!harness.state().settings_open());
+
+    harness.get_by_label("New project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_new_request(), Some(suhina_ui::NewProject::Blank));
+
+    // With a project open the panel is gone; when the last one closes it is back, with its lists
+    // read again.
+    let _ = harness.state_mut().take_lists_wanted();
+    harness.state_mut().set_session(Session::new(demo_project()), &[]);
+    harness.run();
+    assert!(harness.query_by_label("New project").is_none());
+    harness.get_by_label("Projects").click();
+    harness.run();
+    harness.get_by_label("Close project").click();
+    harness.run();
+    if let Some(dont) = harness.query_by_label("Don't save the changes") {
+        dont.click();
+        harness.run();
+    }
+    assert!(harness.state().start_panel_open());
+    assert!(harness.query_by_label("New project").is_some());
+    assert!(harness.state_mut().take_lists_wanted().is_some());
+}
+
+/// Renders the start panel to `target/ui-snapshots/start-panel.png`. Needs a GPU adapter:
+/// `cargo test -p suhina-ui -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_start_panel() {
+    let mut app = App::new();
+    app.set_project_lists(
+        vec![
+            "C:/Music/Suhina/Projects/Night drive.suhina".into(),
+            "C:/Music/Suhina/Projects/Morning.suhina".into(),
+            "C:/Music/Sets/Old jam.als".into(),
+        ],
+        vec!["C:/Music/Suhina/Templates/Beat starter.suhina".into()],
+    );
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(2.0)
+        .wgpu()
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+    std::fs::create_dir_all(&folder).unwrap_or_else(|e| panic!("{e}"));
+    image.save(folder.join("start-panel.png")).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn browse_buttons_ask_for_the_systems_dialog_and_fill_their_fields() {
+    use suhina_ui::pick::PickField;
+    // Settings › General: the folders and the start template.
+    let mut harness = window(demo_app());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Browse for Projects folder").click();
+    harness.run();
+    let request = harness.state_mut().take_pick_request().unwrap_or_else(|| panic!("no dialog asked for"));
+    assert_eq!(request.field, PickField::ProjectsFolder);
+    assert!(request.field.folder());
+    let _ = harness.state_mut().take_changed_settings();
+    harness.state_mut().set_picked(PickField::ProjectsFolder, "/music/projects".into());
+    harness.run();
+    assert_eq!(harness.state().settings().projects_folder, "/music/projects");
+    let saved = harness.state_mut().take_changed_settings().map(|s| s.to_text()).unwrap_or_default();
+    assert!(saved.contains("projects_folder = /music/projects"), "{saved}");
+    harness.get_by_label("At start: Template").click();
+    harness.run();
+    harness.get_by_label("Browse for Start template").click();
+    harness.run();
+    let request = harness.state_mut().take_pick_request().unwrap_or_else(|| panic!("no dialog asked for"));
+    assert_eq!(request.field, PickField::StartTemplate);
+    assert_eq!(request.field.extensions(), ["suhina", "locr", "als"]);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+
+    // Save as: the folder; the prompt stays open meanwhile.
+    harness.state_mut().do_action("file.saveAs", &mut Vec::new());
+    harness.run();
+    harness.get_by_label("Browse for the folder").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::SaveFolder));
+    harness.state_mut().set_picked(PickField::SaveFolder, "/music/songs".into());
+    harness.run();
+    assert_eq!(harness.get_by_label("Folder").value().as_deref(), Some("/music/songs"));
+    harness.key_press(Key::Escape);
+    harness.run();
+
+    // File › Open…: a project, which then opens; cancelling the dialog keeps File › Open.
+    harness.state_mut().open_project_dialog(true);
+    harness.run();
+    harness.get_by_label("Browse for a project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::OpenProject));
+    assert!(harness.state().project_dialog_open(), "the dialog stays while the system's is shown");
+    harness.state_mut().set_picked(PickField::OpenProject, "/music/songs/Night.suhina".into());
+    harness.run();
+    assert!(!harness.state().project_dialog_open());
+    // A project is open, so Suhina asks how to open it, as for any other way of opening one.
+    harness.get_by_label("In a new tab").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_open_request().map(|(path, _)| path),
+        Some(std::path::PathBuf::from("/music/songs/Night.suhina"))
+    );
+}
+
+#[test]
+fn open_on_the_start_panel_shows_the_systems_dialog() {
+    use suhina_ui::pick::PickField;
+    let mut harness = window(App::new());
+    harness.get_by_label("Open a project").click();
+    harness.run();
+    assert_eq!(harness.state_mut().take_pick_request().map(|r| r.field), Some(PickField::OpenProject));
+    harness.state_mut().set_picked(PickField::OpenProject, "/music/Old jam.als".into());
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_open_request().map(|(path, _)| path),
+        Some(std::path::PathBuf::from("/music/Old jam.als"))
+    );
 }
 
 #[test]

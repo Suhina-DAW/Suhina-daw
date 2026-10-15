@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 156
+COMMANDS = 170
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -39,7 +39,8 @@ CHAPTERS = [
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
      "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
      "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; "
-     "a change or a device back after unplugging keeps playback and launched clips going), "
+     "a change or a device back after unplugging keeps playback and launched clips going; "
+     "input device, MIDI inputs on/off), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
@@ -47,7 +48,7 @@ CHAPTERS = [
      "concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin."),
     (4, "Working with the Browser", 60, 0.49, "partial",
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
-     "engine, sample map by sound similarity with kinds recognised from the sound and set by hand; samples and MIDI files dragged from the system's file "
+     "engine, sample map by sound similarity (smooth with 200 000 items, also while its window is resized) with kinds recognised from the sound and set by hand; samples and MIDI files dragged from the system's file "
      "manager land like a browser drag (exact placement waits for pointer positions from the "
      "windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups "
      "from the formats' own categories) or in a flat list sortable by name, vendor, type, format "
@@ -58,9 +59,11 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.57, "partial",
+    (6, "Arrangement View", 22, 0.59, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
-     "overlap replace/stack, fades and fade shapes, grid snap, nested groups folded and unfolded, "
+     "overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to "
+     "triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades "
+     "and ruler clicks (Alt for off the grid), nested groups folded and unfolded, "
      "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
      "sample-accurately; imported from Live Sets), split at the playhead or a clicked beat, consolidate "
@@ -97,7 +100,8 @@ CHAPTERS = [
      "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
      "through the track's instrument, "
      "quantises them (Ctrl+U, and grid, amount and ends in the clip column) and edits velocity in a lane, "
-     "through note.* commands with undo; a duplicated clip's notes are its own once edited. No "
+     "through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty "
+     "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
      "transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
@@ -105,16 +109,19 @@ CHAPTERS = [
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.52, "partial",
+    (16, "Launching Clips", 12, 0.77, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time "
      "signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by "
      "chance, linked or timed, jump to a slot; by command and in the detail area), samples looping "
-     "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop). "
-     "Missing launch modes, legato, velocity amount, clip offset/nudge, follow-action multiplier "
-     "and scene follow actions."),
-    (17, "Routing and I/O", 22, 0.10, "absent",
-     "Only track output to main or a group (track.setOutput); track input is a model field read "
-     "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
+     "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), "
+     "launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch "
+     "quantisation, slots and scenes launched from computer keys. Missing velocity amount, clip "
+     "offset/nudge, launching from live MIDI notes, follow-action multiplier and scene follow actions."),
+    (17, "Routing and I/O", 22, 0.35, "partial",
+     "Track output to main or a group (track.setOutput); MIDI controllers play the armed tracks, "
+     "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
+     "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
+     "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
     (18, "Mixing", 18, 0.57, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
@@ -124,7 +131,8 @@ CHAPTERS = [
      "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
      "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
-     "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
+     "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
+     "recording, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
      "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
      "running plug-ins' state as heard; no per-track or group bounce, no paste."),
@@ -170,9 +178,11 @@ CHAPTERS = [
      "ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; "
      "no patching runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
-    (34, "MIDI and Key Remote Control", 9, 0.15, "partial",
-     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote "
-     "mapping, takeover modes or mapping browser."),
+    (34, "MIDI and Key Remote Control", 9, 0.25, "partial",
+     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode "
+     "(Ctrl+M) maps keys to clip slots, scenes and stop buttons, saved in the project, and "
+     "launcher.addMapping takes MIDI notes too. No live MIDI remote input, CC mapping, takeover "
+     "modes or mapping browser."),
     (35, "Using Push 1", 40, 0.00, "absent", "No control-surface support."),
     (36, "Using Push 2", 59, 0.00, "absent", "No control-surface support."),
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",

@@ -21,6 +21,20 @@ pub enum OnOpen {
     Replace,
 }
 
+/// What opens when Suhina starts without a project given (Settings › General › At start).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AtStart {
+    /// The start panel, with the recent projects and the templates (`start_panel`).
+    #[default]
+    Panel,
+    /// A new blank project.
+    Blank,
+    /// A new project from the template `Settings::start_template` names.
+    Template,
+    /// The project opened or saved last.
+    Last,
+}
+
 /// Where the playhead goes when the transport stops (`transport.stop`'s `return`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StopReturn {
@@ -148,12 +162,18 @@ impl WarpMode {
     }
 }
 
-/// The browser panel's narrowest and widest, and its width at first.
-pub const BROWSER_WIDTHS: (u32, u32) = (200, 600);
+/// The browser panel's narrowest and widest kept in the settings, and its width at first. On
+/// screen it is also never wider than [`BROWSER_SHARE`] of the window.
+pub const BROWSER_WIDTHS: (u32, u32) = (200, 4000);
 pub const BROWSER_WIDTH: u32 = 300;
+/// The most of the window's width the browser panel takes.
+pub const BROWSER_SHARE: f32 = 0.5;
 /// The preview's level, in dB: its range and its default.
 /// The longest sample the sample map shows by default, and the range it may be set to.
 pub const MAP_MAX_SECONDS: u32 = 10;
+/// The size of the sample map's points, in percent of their size at first: its range and default.
+pub const MAP_DOT_SIZES: (u32, u32) = (25, 400);
+pub const MAP_DOT_SIZE: u32 = 100;
 pub const MAP_MAX_SECONDS_RANGE: (u32, u32) = (1, 60);
 pub const PREVIEW_VOLUMES: (i32, i32) = (-48, 6);
 /// The cue volumes a settings file may hold, in dB; the lowest is silence.
@@ -175,11 +195,18 @@ pub struct Settings {
     /// MIDI clips moved over others stack instead of replacing them.
     pub midi_stacking: bool,
     pub on_open: OnOpen,
+    pub at_start: AtStart,
+    /// The template `AtStart::Template` starts from: a path, or a file name in the templates
+    /// folder.
+    pub start_template: String,
     /// Where Stop leaves the playhead.
     pub stop: StopReturn,
     /// Where Play starts.
     pub play_from: PlayFrom,
     pub device_layout: DeviceLayout,
+    /// Launching a clip in the Session view selects it, so the detail area shows it
+    /// (`docs/spec/ui-session-view.md` › Launching and selecting).
+    pub select_on_launch: bool,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
     /// The control bar's grid value sets the piano roll's too; otherwise the piano roll keeps
@@ -210,6 +237,8 @@ pub struct Settings {
     pub map_grid: bool,
     pub map_hover_preview: bool,
     pub map_max_seconds: u32,
+    /// The sample map's point size, in percent (Size in the map's top bar).
+    pub map_dot_size: u32,
     /// The sample map is in a window of its own (`docs/spec/sample-map.md` › Where the map is
     /// shown), and where that window was: its left, top, width and height in points, on the
     /// whole desktop, so a second screen counts.
@@ -230,6 +259,12 @@ pub struct Settings {
     pub audio_cue_pair: u16,
     /// The cue volume in dB (`output.setCueVolume`); the lowest of [`CUE_VOLUMES`] is silence.
     pub audio_cue_volume: i32,
+    /// The audio input device (Settings › Audio, `audio.setOutput`'s `input`): "off" (the
+    /// default), "default" or a device's name.
+    pub audio_input: String,
+    /// The MIDI input ports turned off, by name (Settings › MIDI, `midi.setInput`); every
+    /// other port is on. One `midi_input_off` line each, since a port's name may hold commas.
+    pub midi_inputs_off: Vec<String>,
     /// The size of the whole window, in percent (`ZOOMS`): everything is drawn this much larger
     /// or smaller.
     pub zoom: u32,
@@ -248,9 +283,12 @@ impl Default for Settings {
             sample_stacking: false,
             midi_stacking: false,
             on_open: OnOpen::Ask,
+            at_start: AtStart::Panel,
+            start_template: String::new(),
             stop: StopReturn::Marker,
             play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
+            select_on_launch: true,
             piano_roll_top: PianoRollTop::Track,
             piano_grid_follows: false,
             plugin_editors: EditorPlacement::Window,
@@ -267,6 +305,7 @@ impl Default for Settings {
             map_grid: false,
             map_hover_preview: true,
             map_max_seconds: MAP_MAX_SECONDS,
+            map_dot_size: MAP_DOT_SIZE,
             map_window: false,
             map_window_rect: None,
             waveform_db: false,
@@ -277,6 +316,8 @@ impl Default for Settings {
             audio_exclusive: false,
             audio_cue_pair: 0,
             audio_cue_volume: 0,
+            audio_input: "off".into(),
+            midi_inputs_off: Vec::new(),
             zoom: ZOOM,
             backup: suhina_session::backup::Interval::default(),
             backup_clean_up: true,
@@ -300,6 +341,7 @@ impl Settings {
             } else {
                 10f64.powf(f64::from(self.audio_cue_volume) / 20.0) as f32
             },
+            input: suhina_session::InputChoice::from_text(&self.audio_input),
         }
     }
 
@@ -316,6 +358,7 @@ impl Settings {
         } else {
             CUE_VOLUMES.0
         };
+        self.audio_input = choice.input.as_text().to_string();
     }
 
     /// Makes the window `steps` zoom steps larger (or smaller, when negative), onto the steps and
@@ -361,15 +404,22 @@ impl Settings {
             OnOpen::NewTab => "tab",
             OnOpen::Replace => "replace",
         };
+        let at_start = match self.at_start {
+            AtStart::Panel => "panel",
+            AtStart::Blank => "blank",
+            AtStart::Template => "template",
+            AtStart::Last => "last",
+        };
         let editors = match self.plugin_editors {
             EditorPlacement::Window => "window",
             EditorPlacement::DeviceView => "device",
         };
         format!(
-            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_cue_pair = {}\naudio_cue_volume = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\nbackup = {}\nbackup_clean_up = {}\n",
+            "# Suhina settings; changed from Options > Settings.\nanimations = {}\ntrack_headers = {headers}\nrenderer = {graphics}\nsample_stacking = {}\nmidi_stacking = {}\nopen_projects = {on_open}\nat_start = {at_start}\nstart_template = {}\nstop = {stop}\nplay_from = {play_from}\ndevice_chain = {devices}\nselect_on_launch = {select_on_launch}\nplugin_editors = {editors}\ntheme = {}\nprojects_folder = {}\ntemplates_folder = {}\nbrowser = {}\nbrowser_side = {browser_side}\nbrowser_width = {}\npreview_autoplay = {}\npreview_volume = {}\ndrop_files = {drop}\nwarp_mode = {}\nmap_layout = {map_layout}\nmap_hover_preview = {}\nmap_max_seconds = {}\nmap_dot_size = {}\nmap_window = {}\nmap_window_rect = {}\naudio_host = {}\naudio_device = {}\naudio_sample_rate = {}\naudio_buffer = {}\naudio_exclusive = {}\naudio_cue_pair = {}\naudio_cue_volume = {}\naudio_input = {}\nzoom = {}\nwaveform_scale = {waveform_scale}\npiano_roll_top = {piano_top}\npiano_roll_grid = {piano_grid}\nbackup = {}\nbackup_clean_up = {}\n",
             on(self.animations),
             on(self.sample_stacking),
             on(self.midi_stacking),
+            self.start_template,
             self.theme,
             self.projects_folder,
             self.templates_folder,
@@ -380,6 +430,7 @@ impl Settings {
             self.warp_mode.param(),
             on(self.map_hover_preview),
             self.map_max_seconds,
+            self.map_dot_size,
             on(self.map_window),
             self.map_window_rect.map_or_else(|| "none".to_string(), |[x, y, w, h]| format!("{x}, {y}, {w}, {h}")),
             self.audio_host,
@@ -389,12 +440,14 @@ impl Settings {
             on(self.audio_exclusive),
             self.audio_cue_pair,
             self.audio_cue_volume,
+            self.audio_input,
             self.zoom,
             self.backup.name(),
             on(self.backup_clean_up),
             map_layout = if self.map_grid { "grid" } else { "cloud" },
             waveform_scale = if self.waveform_db { "db" } else { "linear" },
             stop = self.stop.param(),
+            select_on_launch = on(self.select_on_launch),
             play_from = self.play_from.param(),
             browser_side = match self.browser_side {
                 Side::Left => "left",
@@ -406,7 +459,7 @@ impl Settings {
                 PianoRollTop::Window => "window",
             },
             piano_grid = if self.piano_grid_follows { "control_bar" } else { "own" },
-        )
+        ) + &self.midi_inputs_off.iter().map(|port| format!("midi_input_off = {port}\n")).collect::<String>()
     }
 
     /// Reads a settings file. Unknown keys and values are skipped with a warning and leave the
@@ -432,6 +485,7 @@ impl Settings {
                 ("track_headers", "right") => settings.track_headers = Side::Right,
                 ("device_chain", "row") => settings.device_layout = DeviceLayout::Row,
                 ("device_chain", "stack") => settings.device_layout = DeviceLayout::Stack,
+                ("select_on_launch", "on" | "off") => settings.select_on_launch = value == "on",
                 ("plugin_editors", "window") => settings.plugin_editors = EditorPlacement::Window,
                 ("plugin_editors", "device") => settings.plugin_editors = EditorPlacement::DeviceView,
                 ("projects_folder", folder) => settings.projects_folder = folder.to_string(),
@@ -439,6 +493,12 @@ impl Settings {
                 ("open_projects", "ask") => settings.on_open = OnOpen::Ask,
                 ("open_projects", "tab") => settings.on_open = OnOpen::NewTab,
                 ("open_projects", "replace") => settings.on_open = OnOpen::Replace,
+                // `dialog` is what test builds wrote before the start panel took the dialog's place.
+                ("at_start", "panel" | "dialog") => settings.at_start = AtStart::Panel,
+                ("at_start", "blank") => settings.at_start = AtStart::Blank,
+                ("at_start", "template") => settings.at_start = AtStart::Template,
+                ("at_start", "last") => settings.at_start = AtStart::Last,
+                ("start_template", path) => settings.start_template = path.to_string(),
                 ("stop", "marker") => settings.stop = StopReturn::Marker,
                 ("stop", "here") => settings.stop = StopReturn::Here,
                 ("play_from", "marker") => settings.play_from = PlayFrom::Marker,
@@ -466,6 +526,10 @@ impl Settings {
                         .parse::<u32>()
                         .unwrap_or(MAP_MAX_SECONDS)
                         .clamp(MAP_MAX_SECONDS_RANGE.0, MAP_MAX_SECONDS_RANGE.1);
+                }
+                ("map_dot_size", size) if size.parse::<u32>().is_ok() => {
+                    settings.map_dot_size =
+                        size.parse::<u32>().unwrap_or(MAP_DOT_SIZE).clamp(MAP_DOT_SIZES.0, MAP_DOT_SIZES.1);
                 }
                 ("map_window", "on" | "off") => settings.map_window = value == "on",
                 ("map_window_rect", "none") => settings.map_window_rect = None,
@@ -506,6 +570,14 @@ impl Settings {
                     settings.backup = suhina_session::backup::Interval::parse(when).unwrap_or_default();
                 }
                 ("backup_clean_up", "on" | "off") => settings.backup_clean_up = value == "on",
+                ("audio_input", input) => {
+                    settings.audio_input = suhina_session::InputChoice::from_text(input).as_text().to_string()
+                }
+                ("midi_input_off", port) if !port.is_empty() => {
+                    if !settings.midi_inputs_off.iter().any(|p| p == port) {
+                        settings.midi_inputs_off.push(port.to_string());
+                    }
+                }
                 _ => {
                     warnings.push(format!("settings line {}: {key} = {value} is not a known setting", number + 1));
                 }
@@ -550,9 +622,12 @@ mod tests {
             sample_stacking: true,
             midi_stacking: false,
             on_open: OnOpen::Replace,
+            at_start: AtStart::Template,
+            start_template: "Four on the floor = mine.suhina".into(),
             stop: StopReturn::Here,
             play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
+            select_on_launch: false,
             piano_roll_top: PianoRollTop::Window,
             piano_grid_follows: true,
             plugin_editors: EditorPlacement::DeviceView,
@@ -569,6 +644,7 @@ mod tests {
             map_grid: true,
             map_hover_preview: false,
             map_max_seconds: 30,
+            map_dot_size: 250,
             waveform_db: true,
             audio_host: "ASIO".into(),
             audio_device: "Universal Audio Thunderbolt".into(),
@@ -577,6 +653,8 @@ mod tests {
             audio_exclusive: true,
             audio_cue_pair: 2,
             audio_cue_volume: -6,
+            audio_input: "Line In (Interface)".into(),
+            midi_inputs_off: vec!["Keys, port 1".into(), "Pads:Pads MIDI 1 20:0".into()],
             zoom: 130,
             map_window: true,
             map_window_rect: Some([-1600, 40, 900, 700]),
@@ -585,6 +663,23 @@ mod tests {
         };
         assert_eq!(Settings::from_text(&settings.to_text()), (settings, Vec::new()));
         assert_eq!(Settings::from_text(&Settings::default().to_text()).0, Settings::default());
+    }
+
+    #[test]
+    fn at_start_reads_each_choice_and_keeps_the_panel_for_anything_else() {
+        for (text, choice) in [
+            ("panel", AtStart::Panel),
+            ("dialog", AtStart::Panel),
+            ("blank", AtStart::Blank),
+            ("template", AtStart::Template),
+            ("last", AtStart::Last),
+        ] {
+            let (settings, warnings) = Settings::from_text(&format!("at_start = {text}\n"));
+            assert_eq!((settings.at_start, warnings.len()), (choice, 0), "{text}");
+        }
+        let (settings, warnings) = Settings::from_text("at_start = everything\nat_start\n");
+        assert_eq!(settings.at_start, AtStart::Panel);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
     }
 
     #[test]
@@ -610,6 +705,10 @@ mod tests {
         back.set_output_choice(&choice);
         assert_eq!(back.output_choice(), choice);
         assert_eq!(Settings::default().output_choice(), suhina_session::OutputChoice::default());
+        // The input device: off unless chosen.
+        let (settings, _) = Settings::from_text("audio_input = default\n");
+        assert_eq!(settings.output_choice().input, suhina_session::InputChoice::Default);
+        assert_eq!(Settings::from_text("audio_input = \n").0.audio_input, "off");
 
         let (settings, warnings) = Settings::from_text(
             "audio_buffer = 17\naudio_sample_rate = lots\naudio_exclusive = maybe\naudio_cue_pair = 40\n",

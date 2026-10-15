@@ -14,7 +14,7 @@ use suhina_session::{CommandKind, ProjectId, Projects, Session};
 use crate::arrangement_view::{self, ArrangementViewState};
 use crate::browser::{BrowserState, ResultsMode};
 use crate::browser_view;
-use crate::detail_view;
+use crate::detail_view::{self, ClipRef};
 use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
 use crate::follow_view;
 use crate::grid::{Grid, SlotState};
@@ -22,22 +22,25 @@ use crate::keymap::Keymap;
 use crate::loading_dialog;
 use crate::motion;
 use crate::piano_roll::{self, PianoRollState};
+use crate::pick::{PickField, PickRequest};
 use crate::project_dialog::{
     self, AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
 };
-use crate::session_view::{self, SessionViewState};
-use crate::settings::{DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
+use crate::session_view::{self, SessionViewState, Step};
+use crate::settings::{AtStart, DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
+use crate::start_panel::{self, AudioSummary, StartChoice, StartState};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
 use crate::timeline::Timeline;
 use crate::widgets::{self, Action, Drag};
 
-/// Launch quantisation choices, as `launcher.setQuantization` takes them.
+/// Launch quantisation choices, as `launcher.setQuantization` takes them; the Arrangement
+/// view's grid follows the same value.
 const QUANTIZATION: [&str; 14] = [
     "none", "8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32",
 ];
-/// The engine's quantisation before anything is set.
+/// The quantisation of a session before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
 /// The piano roll's own grid value before one is picked.
 const DEFAULT_PIANO_GRID: &str = "1/16";
@@ -96,7 +99,6 @@ type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioDat
 struct Stash {
     view: SessionViewState,
     arrangement: Option<ArrangementViewState>,
-    quantization: Option<&'static str>,
     launches: HashMap<TrackId, (usize, f64)>,
     revision: u64,
     timeline: Option<(u64, Timeline)>,
@@ -193,7 +195,6 @@ pub struct App {
     view: SessionViewState,
     arrangement: ArrangementViewState,
     status: Status,
-    quantization: &'static str,
     /// Where each column's playing clip started, in beats, to show its progress.
     launches: HashMap<TrackId, (usize, f64)>,
     tempo_drag: Option<f64>,
@@ -230,13 +231,23 @@ pub struct App {
     /// The plug-in loading dialog was sent to the background for the project shown now.
     plugin_dialog_hidden: bool,
     about: About,
+    /// When Settings › Audio last listed the MIDI ports, so a controller plugged in shows up.
+    midi_listed: Option<std::time::Instant>,
     /// The themes to pick from; the settings say which is in use.
     themes: Themes,
     /// The project dialog (File › New or open) while it shows, and what it lists.
     project_dialog: Option<DialogState>,
     project_lists: Lists,
-    /// The dialog opened and its lists should be read again, by the app.
+    /// The dialog or the start panel opened and their lists should be read again, by the app.
     lists_wanted: bool,
+    /// The start panel, shown while no project is open.
+    start: StartState,
+    /// The start panel's lists were asked for since it last appeared.
+    start_lists: bool,
+    /// A project the user took off the recent list, for the app to forget.
+    forget_request: Option<PathBuf>,
+    /// A system file or folder dialog for the app to show.
+    pick_request: Option<PickRequest>,
     /// The name and folder asked for when a project is saved under a new name or as a template.
     save_prompt: Option<SavePrompt>,
     /// Help › About Suhina is open.
@@ -301,7 +312,6 @@ impl App {
             meters_moved_at: 0.0,
             arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
-            quantization: DEFAULT_QUANTIZATION,
             launches: HashMap::new(),
             tempo_drag: None,
             open_request: None,
@@ -325,10 +335,15 @@ impl App {
             settings_open: false,
             plugin_dialog_hidden: false,
             about: About::default(),
+            midi_listed: None,
             themes: Themes::default(),
             project_dialog: None,
             project_lists: Lists::default(),
             lists_wanted: false,
+            start: StartState::default(),
+            start_lists: false,
+            forget_request: None,
+            pick_request: None,
             save_prompt: None,
             about_open: false,
             new_request: None,
@@ -434,7 +449,6 @@ impl App {
         let stash = Stash {
             view: std::mem::take(&mut self.view),
             arrangement: Some(std::mem::take(&mut self.arrangement)),
-            quantization: Some(self.quantization),
             launches: std::mem::take(&mut self.launches),
             revision: self.revision,
             timeline: self.timeline.take(),
@@ -451,7 +465,6 @@ impl App {
         self.arrangement = stash.arrangement.unwrap_or_default();
         self.arrangement.headers_left = headers_left;
         self.arrangement.header_width = header_width;
-        self.quantization = stash.quantization.unwrap_or(DEFAULT_QUANTIZATION);
         self.launches = stash.launches;
         self.revision = stash.revision.wrapping_add(1);
         self.timeline = stash.timeline;
@@ -512,9 +525,6 @@ impl App {
     pub fn attach_player(&mut self, id: ProjectId, player: suhina_session::Player) {
         if let Some(session) = self.projects.get_mut(id) {
             session.attach_player(player);
-        }
-        if self.shown_project == Some(id) {
-            self.quantization = DEFAULT_QUANTIZATION;
         }
     }
 
@@ -638,6 +648,11 @@ impl App {
 
     pub fn view(&self) -> View {
         self.shown
+    }
+
+    /// The clip selected in the Arrangement view: its track and index.
+    pub fn selected_clip(&self) -> Option<(TrackId, usize)> {
+        self.arrangement.selected_clip()
     }
 
     /// `transport.stop`, with where the playhead goes from the settings.
@@ -766,6 +781,93 @@ impl App {
         self.lists_wanted = true;
     }
 
+    /// Opens what Settings › General › At start says, for Suhina started without a project:
+    /// the start panel, or asks for a new project, one from the start template, or the project
+    /// opened last (`last`), which the app takes up as it does the user's own requests
+    /// ([`App::take_new_request`], [`App::take_open_request`]). A template or last project that
+    /// is not there leaves the start panel, with a hint saying why.
+    pub fn open_at_start(&mut self, last: Option<PathBuf>) {
+        let missing = match self.settings.at_start {
+            AtStart::Panel => None,
+            AtStart::Blank => {
+                self.new_request = Some(NewProject::Blank);
+                return;
+            }
+            AtStart::Template => match self.start_template() {
+                Some(path) if path.is_file() => {
+                    self.new_request = Some(NewProject::Template(path));
+                    return;
+                }
+                Some(path) => Some(format!("The template to start from is not there: {}", path.display())),
+                None => Some("No template is chosen to start from (Settings › General › Start template)".into()),
+            },
+            AtStart::Last => match last {
+                Some(path) => {
+                    self.request_open(path);
+                    return;
+                }
+                None => Some("No project was opened before; choose one to start".into()),
+            },
+        };
+        self.lists_wanted = true;
+        if let Some(hint) = missing {
+            self.set_status(Status::Hint(hint));
+        }
+    }
+
+    /// The start panel, in the view's place while no project is open; its lists are read again
+    /// each time it appears.
+    fn start_panel(&mut self, ui: &mut Ui) {
+        if !std::mem::replace(&mut self.start_lists, true) {
+            self.lists_wanted = true;
+        }
+        let (rate, buffer) = (self.settings.audio_sample_rate, self.settings.audio_buffer);
+        let audio = AudioSummary {
+            device: if self.settings.audio_device.is_empty() {
+                "Default".to_string()
+            } else {
+                self.settings.audio_device.clone()
+            },
+            sample_rate: if rate > 0 { format!("{rate} Hz") } else { "Default".to_string() },
+            buffer: if buffer > 0 { format!("{buffer} samples") } else { "Default".to_string() },
+        };
+        let area = ui.max_rect();
+        let now = std::time::SystemTime::now();
+        let version = env!("CARGO_PKG_VERSION");
+        match start_panel::show(ui, area, &mut self.start, &self.project_lists, &audio, version, now) {
+            Some(StartChoice::NewBlank) => self.new_request = Some(NewProject::Blank),
+            Some(StartChoice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
+            Some(StartChoice::Open(path)) => self.request_open(path),
+            Some(StartChoice::Browse) => self.ask_pick(PickField::OpenProject),
+            Some(StartChoice::AudioSettings) => {
+                self.page.page = settings_view::Page::Audio;
+                self.settings_open = true;
+            }
+            Some(StartChoice::Forget(path)) => {
+                let lists = &mut self.project_lists;
+                if let Some(index) = lists.recent.iter().position(|p| *p == path) {
+                    lists.recent.remove(index);
+                    if index < lists.saved.len() {
+                        lists.saved.remove(index);
+                    }
+                }
+                self.forget_request = Some(path);
+            }
+            None => {}
+        }
+    }
+
+    /// The template At start makes a new project from: its path, a name in the templates folder.
+    fn start_template(&self) -> Option<PathBuf> {
+        match self.settings.start_template.trim() {
+            "" => None,
+            name => {
+                let path = PathBuf::from(name);
+                Some(if path.is_absolute() { path } else { self.templates_folder().join(path) })
+            }
+        }
+    }
+
     pub fn project_dialog_open(&self) -> bool {
         self.project_dialog.is_some()
     }
@@ -776,10 +878,75 @@ impl App {
         std::mem::take(&mut self.lists_wanted).then(|| self.templates_folder())
     }
 
-    /// The recent projects and the templates the project dialog lists.
+    /// The recent projects and the templates the project dialog and the start panel list.
     pub fn set_project_lists(&mut self, recent: Vec<PathBuf>, templates: Vec<PathBuf>) {
+        let saved = recent.iter().map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()).collect();
         self.project_lists =
-            Lists { recent, templates, templates_folder: self.templates_folder().display().to_string() };
+            Lists { recent, saved, templates, templates_folder: self.templates_folder().display().to_string() };
+    }
+
+    /// Whether the start panel shows: no project is open.
+    pub fn start_panel_open(&self) -> bool {
+        self.projects.active().is_none()
+    }
+
+    /// Asks the app to show the system's dialog for `field`, opening in the folder it names.
+    fn ask_pick(&mut self, field: PickField) {
+        let folder_of = |value: &str| {
+            let path = PathBuf::from(value.trim());
+            (!value.trim().is_empty()).then_some(path)
+        };
+        let start = match field {
+            PickField::ProjectsFolder | PickField::OpenProject => Some(self.projects_folder()),
+            PickField::TemplatesFolder | PickField::StartTemplate => Some(self.templates_folder()),
+            PickField::SaveFolder => self.save_prompt.as_ref().and_then(|p| folder_of(&p.folder)),
+            PickField::BrowserFolder => None,
+        };
+        self.pick_request = Some(PickRequest { field, start });
+    }
+
+    /// A dialog for the app to show with the system's file or folder picker; what is chosen comes
+    /// back through [`App::set_picked`].
+    pub fn take_pick_request(&mut self) -> Option<PickRequest> {
+        self.pick_request.take()
+    }
+
+    /// Puts a path chosen in the system's dialog where it was asked for: a setting, the save
+    /// prompt's folder, a project to open, or a folder for the browser.
+    pub fn set_picked(&mut self, field: PickField, path: PathBuf) {
+        let text = path.display().to_string();
+        match field {
+            PickField::ProjectsFolder => self.settings.projects_folder = text,
+            PickField::TemplatesFolder => self.settings.templates_folder = text,
+            PickField::StartTemplate => self.settings.start_template = text,
+            PickField::SaveFolder => {
+                if let Some(prompt) = self.save_prompt.as_mut() {
+                    prompt.folder = text;
+                }
+                return;
+            }
+            PickField::OpenProject => {
+                self.project_dialog = None;
+                self.request_open(path);
+                return;
+            }
+            PickField::BrowserFolder => {
+                match self.projects.execute("library.addFolder", &json!({ "folder": text })) {
+                    Ok(_) => {
+                        self.browser.relist();
+                        self.status = Status::Done(format!("Added {text} to the browser"));
+                    }
+                    Err(e) => self.status = Status::Error(e.0),
+                }
+                return;
+            }
+        }
+        self.settings_changed = true;
+    }
+
+    /// A project the user took off the recent list on the start panel, for the app to forget.
+    pub fn take_forget_request(&mut self) -> Option<PathBuf> {
+        self.forget_request.take()
     }
 
     /// A new project the user asked for, for the app to make and open in a new tab.
@@ -856,6 +1023,10 @@ impl App {
                 Some(Choice::Open(path)) => self.request_open(path),
                 Some(Choice::NewBlank) => self.new_request = Some(NewProject::Blank),
                 Some(Choice::NewFromTemplate(path)) => self.new_request = Some(NewProject::Template(path)),
+                Some(Choice::Browse) => {
+                    self.project_dialog = Some(state);
+                    self.ask_pick(PickField::OpenProject);
+                }
                 Some(Choice::Close) => {}
                 None => self.project_dialog = Some(state),
             }
@@ -872,6 +1043,10 @@ impl App {
                 }
                 // Cancelling the name also cancels closing or quitting.
                 Some(SaveChoice::Cancel) => self.save_then = None,
+                Some(SaveChoice::BrowseFolder) => {
+                    self.save_prompt = Some(prompt);
+                    self.ask_pick(PickField::SaveFolder);
+                }
                 None => self.save_prompt = Some(prompt),
             }
         }
@@ -1010,19 +1185,26 @@ impl App {
         self.projects.back_up_before(action.id);
         let Ok(session) = self.projects.session_mut(None) else { return };
         match session.execute(action.id, &action.params) {
-            Ok(_) => {
+            Ok(result) => {
+                // A clip made by a double-click is selected, ready to edit: in the Arrangement
+                // the clip, in the Session its slot, so the detail area shows it.
+                if action.id == "clip.create"
+                    && let Some(track) = result["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId)
+                {
+                    let at = |key: &str| result[key].as_u64().and_then(|i| usize::try_from(i).ok());
+                    match (at("index"), at("scene").and_then(|s| s.checked_sub(1))) {
+                        (Some(index), _) => self.arrangement.select_clip(track, index),
+                        (None, Some(scene)) => self.view.select_slot(track, scene),
+                        (None, None) => self.view.selected = Some(track),
+                    }
+                }
                 let changes_project = suhina_session::commands()
                     .iter()
                     .find(|c| c.id == action.id)
                     .is_some_and(|c| matches!(c.kind, CommandKind::Edit | CommandKind::History));
-                if changes_project {
+                // Arming changes no project, but the track headers show it.
+                if changes_project || action.id == "track.setArm" {
                     self.revision += 1;
-                }
-                if action.id == "launcher.setQuantization"
-                    && let Some(value) = action.params["value"].as_str()
-                    && let Some(known) = QUANTIZATION.iter().find(|q| **q == value)
-                {
-                    self.quantization = known;
                 }
                 if let Some(done) = describe(action) {
                     self.status = Status::Done(done);
@@ -1068,6 +1250,10 @@ impl App {
 
     /// Draws the window into `ui` and runs what the user asked for.
     pub fn ui(&mut self, ui: &mut Ui) {
+        if self.projects.active().is_some() {
+            // The start panel reads its lists again when it next appears.
+            self.start_lists = false;
+        }
         let window = ui.max_rect();
         let mut actions = Vec::new();
         self.follow_active();
@@ -1078,13 +1264,23 @@ impl App {
         self.projects.poll_sound_map();
         let dropped = self.dropped_files(ui);
         keys_for_shortcuts(ui.ctx());
+        self.launch_keys(ui, &mut actions);
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
         self.sample_map_window(ui.ctx(), &mut actions);
         let scale = if self.settings.waveform_db { crate::waveform::Scale::Db } else { crate::waveform::Scale::Linear };
         crate::waveform::set_scale(ui.ctx(), scale);
 
-        let grid = self.session().map(|s| Grid::build(s.project(), s.player().map(|p| p.monitor())));
+        let grid = self.session().map(|s| {
+            let mut grid = Grid::build(s.project(), s.player().map(|p| p.monitor()));
+            grid.midi_ports = self.projects.midi_ports().to_vec();
+            grid.input_channels =
+                s.player().and_then(suhina_session::Player::output_info).map_or(0, |i| i.input_channels);
+            for column in &mut grid.columns {
+                column.armed = s.is_armed(column.track);
+            }
+            grid
+        });
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
         // The CPU load the control bar shows, from the engine's monitor, in per mille.
         let cpu = self.session().and_then(|s| s.player()).map(|p| p.cpu_monitor().load_milli());
@@ -1188,6 +1384,7 @@ impl App {
                     // The piano roll pulled to the top over the whole window: no view.
                     _ if inner.height() < 1.0 => {}
                     (Some(grid), View::Session) => {
+                        self.view.keep_selection_on_launch = !self.settings.select_on_launch;
                         // Both views fold the same groups.
                         std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
@@ -1207,10 +1404,22 @@ impl App {
                                 }
                                 _ => {
                                     let mut timeline = Timeline::build(session.project(), monitor);
+                                    for lane in &mut timeline.lanes {
+                                        lane.armed = session.is_armed(lane.track);
+                                    }
                                     timeline.waveforms = self.waveforms.clone();
                                     timeline
                                 }
                             };
+                            // The grid follows the value in the control bar, which each
+                            // project keeps (`launcher.setQuantization`).
+                            self.arrangement.grid = session.quantization();
+                            let mut timeline = timeline;
+                            timeline.midi_ports = self.projects.midi_ports().to_vec();
+                            timeline.input_channels = session
+                                .player()
+                                .and_then(suhina_session::Player::output_info)
+                                .map_or(0, |i| i.input_channels);
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
                             self.timeline = Some((self.revision, timeline));
                             // The headers can be moved from the view itself; that is the setting too.
@@ -1221,7 +1430,7 @@ impl App {
                             }
                         }
                     }
-                    (None, _) => empty(ui),
+                    (None, _) => self.start_panel(ui),
                 });
             }
             drop_overlay(ui, view_area);
@@ -1280,14 +1489,17 @@ impl App {
         let stacked = self.settings.device_layout == DeviceLayout::Stack;
         // What it shows: the selected clip, or the selected track's devices.
         let (track, clip) = match self.shown {
-            View::Session => (self.view.selected, None),
-            View::Arrangement => (self.arrangement.selected_tracks.first().copied(), self.arrangement.selected_clip()),
+            View::Session => (self.view.selected, self.view.selected_slot.map(|(t, s)| ClipRef::Slot(t, s))),
+            View::Arrangement => (
+                self.arrangement.selected_tracks.first().copied(),
+                self.arrangement.selected_clip().map(|(t, i)| ClipRef::Arrangement(t, i)),
+            ),
         };
         // Where each plug-in on the shown track stands, read first: reading it needs the session
         // itself, building the detail only the project; and an editor embedded in the panel
         // decides how tall the panel is.
         let mut reports = std::collections::HashMap::new();
-        if let Some(shown_track) = clip.map(|(t, _)| t).or(track)
+        if let Some(shown_track) = clip.map(ClipRef::track).or(track)
             && let Ok(session) = self.projects.session_mut(None)
         {
             let devices = session
@@ -1315,10 +1527,15 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let piano = self.piano_clip(clip);
+        let arrangement_clip = match clip {
+            Some(detail_view::ClipRef::Arrangement(track, index)) => Some((track, index)),
+            _ => None,
+        };
+        let piano = self.piano_clip(arrangement_clip);
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
-        let focus = clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        let focus =
+            arrangement_clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
         self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
@@ -1374,7 +1591,7 @@ impl App {
         let grip = if stacked { Vec2::new(2.0, 32.0) } else { Vec2::new(32.0, 2.0) };
         painter.rect_filled(Rect::from_center_size(splitter.center(), grip), 0.0, theme::text_hint());
 
-        if let Some(shown_track) = clip.map(|(t, _)| t).or(track) {
+        if let Some(shown_track) = clip.map(ClipRef::track).or(track) {
             self.detail_drop = Some((detail, shown_track));
         }
         let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
@@ -1459,7 +1676,11 @@ impl App {
 
     /// The grid value the piano roll uses.
     fn piano_grid_name(&self) -> &'static str {
-        if self.settings.piano_grid_follows { self.quantization } else { self.piano_grid }
+        if self.settings.piano_grid_follows {
+            self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()))
+        } else {
+            self.piano_grid
+        }
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
@@ -1677,6 +1898,40 @@ impl App {
             }
             Err(e) => self.status = Status::Error(e.0),
         }
+        self.list_midi_inputs();
+    }
+
+    /// Lists the MIDI input ports for Settings › Audio (`midi.inputs`).
+    fn list_midi_inputs(&mut self) {
+        self.midi_listed = Some(std::time::Instant::now());
+        self.about.midi_inputs = self.projects.execute("midi.inputs", &json!({})).map_err(|e| e.0).map(|listed| {
+            listed["inputs"]
+                .as_array()
+                .map(|ports| {
+                    ports
+                        .iter()
+                        .map(|p| settings_view::MidiPort {
+                            name: p["name"].as_str().unwrap_or_default().to_string(),
+                            enabled: p["enabled"].as_bool().unwrap_or(false),
+                            open: p["open"].as_bool().unwrap_or(false),
+                            error: p["error"].as_str().map(String::from),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+    }
+
+    /// Turns a MIDI input port on or off (`midi.setInput`) and keeps the choice in the settings.
+    fn set_midi_input(&mut self, port: &str, enabled: bool) {
+        match self.projects.execute("midi.setInput", &json!({ "port": port, "enabled": enabled })) {
+            Ok(_) => {
+                self.settings.midi_inputs_off = self.projects.midi_inputs_off();
+                self.settings_changed = true;
+            }
+            Err(e) => self.status = Status::Error(e.0),
+        }
+        self.list_midi_inputs();
     }
 
     /// Plays on the output `choice` names from now on (`audio.setOutput`): the active project's
@@ -1720,6 +1975,7 @@ impl App {
             "sample_rate": choice.sample_rate.unwrap_or(0),
             "buffer_frames": choice.buffer_frames.unwrap_or(0),
             "exclusive": choice.exclusive,
+            "input": choice.input.as_text(),
         });
         match self.projects.execute("audio.setOutput", &params) {
             Ok(result) => {
@@ -1781,8 +2037,11 @@ impl App {
         let tag_limit = self.projects.file_library_mut().tag_limit();
         self.about.audio_live = self.session().and_then(Session::player).and_then(suhina_session::Player::output_info);
         if self.page.page == settings_view::Page::Audio {
-            // The latency and underruns change while it plays.
+            // The latency and underruns change while it plays, and controllers come and go.
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            if self.midi_listed.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(2)) {
+                self.list_midi_inputs();
+            }
         }
         let sources = Sources {
             about: &self.about,
@@ -1813,8 +2072,14 @@ impl App {
         if outcome.audio_refresh {
             self.list_audio_devices();
         }
+        if let Some(field) = outcome.pick {
+            self.ask_pick(field);
+        }
         if let Some(choice) = outcome.audio_output.clone() {
             self.choose_output(&choice);
+        }
+        if let Some((port, enabled)) = outcome.midi_input.clone() {
+            self.set_midi_input(&port, enabled);
         }
         if outcome.changed {
             self.projects.set_backup_settings(self.settings.backup, self.settings.backup_clean_up);
@@ -2023,6 +2288,64 @@ impl App {
         })
     }
 
+    /// Keys mapped to slots, scenes and stop buttons, and the keys of the mapping mode, before
+    /// the shortcuts see them: only while the Session view is shown and nothing else has the
+    /// keyboard (`docs/spec/ui-session-view.md` › Launch keys). A key held when that ends, or
+    /// when the window loses focus, is released.
+    fn launch_keys(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
+        let dialog = self.project_dialog.is_some() || self.save_prompt.is_some() || self.unsaved_prompt.is_some();
+        let session_view = self.shown == View::Session && !self.sample_map.view.large;
+        // A clicked slot or button keeps the focus; only a text field takes the keys away.
+        let focused = session_view && !dialog && !self.settings_open && !ui.ctx().text_edit_focused();
+        let lost = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))));
+        let Some(project) = self.projects.active().and_then(|id| self.projects.get(id)).map(Session::project) else {
+            return;
+        };
+        let keys = &mut self.view.launch_keys;
+        if !focused || lost {
+            keys.release_all(project, actions);
+        }
+        if !session_view && keys.mode.on {
+            keys.toggle_mode();
+        }
+        if !focused {
+            return;
+        }
+        let events = ui.input(|i| crate::launch_keys::key_events(&i.events));
+        let mut taken = Vec::new();
+        for (index, event) in events {
+            if keys.handle(project, &event, actions) == crate::launch_keys::Outcome::Taken {
+                taken.push(index);
+            }
+        }
+        if !taken.is_empty() {
+            ui.input_mut(|i| {
+                let mut index = 0;
+                i.events.retain(|_| {
+                    let keep = !taken.contains(&index);
+                    index += 1;
+                    keep
+                });
+            });
+        }
+    }
+
+    /// Turns the mapping mode on (showing the Session view) or off.
+    fn toggle_mapping_mode(&mut self) {
+        let keys = &mut self.view.launch_keys;
+        keys.toggle_mode();
+        if keys.mode.on {
+            self.shown = View::Session;
+            self.close_large_map();
+            self.status = Status::Hint(
+                "Mapping keys: click a slot, a scene or a stop button, then press a key. Delete removes, Escape leaves"
+                    .into(),
+            );
+        } else {
+            self.status = Status::Hint("Mapping keys off".into());
+        }
+    }
+
     /// Runs the actions whose keys were pressed (the keymap), unless a text field has the
     /// keyboard or Settings is waiting for a key to bind.
     fn shortcuts(&mut self, ui: &Ui, actions: &mut Vec<Action>) {
@@ -2033,9 +2356,14 @@ impl App {
         if ui.ctx().egui_wants_keyboard_input() || dialog || (self.settings_open && self.page.capture.is_some()) {
             return;
         }
-        // The piano roll's own keys only while it has the keyboard.
+        // The piano roll's own keys only while it has the keyboard; the selected slot's keys
+        // only while it does not, as the two share keys.
         let notes = self.piano_roll.focused;
-        let pressed = ui.input_mut(|i| self.keymap.pressed(i, |id| notes || !crate::keymap::piano_roll_only(id)));
+        let pressed = ui.input_mut(|i| {
+            self.keymap.pressed(i, |id| {
+                if notes { !crate::keymap::slot_only(id) } else { !crate::keymap::piano_roll_only(id) }
+            })
+        });
         for action in pressed {
             self.do_action(&action, actions);
         }
@@ -2090,6 +2418,7 @@ impl App {
                 self.close_large_map();
             }
             "view.detail" => self.detail_open = !self.detail_open,
+            "view.mappingMode" => self.toggle_mapping_mode(),
             "view.arrangement" => {
                 self.shown = View::Arrangement;
                 self.close_large_map();
@@ -2224,6 +2553,24 @@ impl App {
                 let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
                 actions.push(Action::new("marker.add", json!({ "beat": beat })));
             }
+            "selection.launch" => {
+                if let (View::Session, Some((track, scene))) = (self.shown, self.view.selected_slot) {
+                    actions.push(Action::new("clip.launch", json!({ "track": track.0, "scene": scene + 1 })));
+                }
+            }
+            "selection.up" | "selection.down" | "selection.left" | "selection.right" => {
+                let (View::Session, Some(from)) = (self.shown, self.view.selected_slot) else { return };
+                let step = match action {
+                    "selection.up" => Step::Up,
+                    "selection.down" => Step::Down,
+                    "selection.left" => Step::Left,
+                    _ => Step::Right,
+                };
+                let grid = self.session().map(|s| Grid::build(s.project(), None));
+                if let Some((track, scene)) = grid.and_then(|g| session_view::step_slot(&g, from, step)) {
+                    self.view.select_slot(track, scene);
+                }
+            }
             "projects.next" | "projects.previous" if self.projects.len() < 2 => {}
             command => actions.push(Action::new_owned(command, json!({}))),
         }
@@ -2282,8 +2629,8 @@ impl App {
     /// left for the view.
     fn browser_panel(&mut self, ui: &mut Ui, area: Rect) -> Rect {
         let (low, high) = crate::settings::BROWSER_WIDTHS;
-        let width = (self.settings.browser_width as f32)
-            .clamp(low as f32, (high as f32).min(area.width() - 240.0).max(low as f32));
+        let widest = (high as f32).min(area.width() * crate::settings::BROWSER_SHARE).max(low as f32);
+        let width = (self.settings.browser_width as f32).clamp(low as f32, widest);
         let left = self.settings.browser_side == Side::Left;
         let (panel, handle, rest) = if left {
             let panel = Rect::from_min_max(area.min, Pos2::new(area.left() + width, area.bottom()));
@@ -2301,7 +2648,7 @@ impl App {
             (panel, handle, Rect::from_min_max(area.min, Pos2::new(handle.left(), area.bottom())))
         };
         if let Some(new) = browser_view::resize_handle(ui, handle, width, left) {
-            let new = new.round().clamp(low as f32, high as f32) as u32;
+            let new = new.round().clamp(low as f32, widest) as u32;
             if new != self.settings.browser_width {
                 self.settings.browser_width = new;
                 self.settings_changed = true;
@@ -2340,6 +2687,9 @@ impl App {
         }
         if let Some(status) = out.status {
             self.status = status;
+        }
+        if out.pick_folder {
+            self.ask_pick(PickField::BrowserFolder);
         }
         if let Some(path) = out.open_project {
             self.request_open(path);
@@ -2993,18 +3343,28 @@ impl App {
         widgets::text_in(&painter, ts_rect, Align2::CENTER_CENTER, &signature, mono.clone(), theme::text_secondary());
         x = ts_rect.right() + PAD;
         let quant_rect = row(x, 64.0);
-        let mut chosen = self.quantization;
+        // One value for both: when launched clips start, and the Arrangement view's grid.
+        let current = self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()));
+        let mut chosen = current;
         ui.scope_builder(egui::UiBuilder::new().max_rect(quant_rect), |ui| {
-            egui::ComboBox::from_id_salt("quantization")
+            let response = egui::ComboBox::from_id_salt("quantization")
                 .width(quant_rect.width())
+                // Tall enough for every value at once, without a scroll bar.
+                .height(QUANTIZATION.len() as f32 * 2.0 * theme::ROW)
                 .selected_text(egui::RichText::new(chosen).font(mono.clone()).color(theme::text_value()))
                 .show_ui(ui, |ui| {
                     for q in QUANTIZATION {
                         ui.selectable_value(&mut chosen, q, egui::RichText::new(q).font(mono.clone()));
                     }
-                });
+                })
+                .response;
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, QUANTIZATION_LABEL));
+            response.on_hover_text(
+                "Grid: when launched clips start, and the Arrangement view's grid lines and snapping (Alt: off the \
+                 grid)",
+            );
         });
-        if chosen != self.quantization {
+        if chosen != current {
             actions.push(Action::new("launcher.setQuantization", json!({ "value": chosen })));
         }
 
@@ -3147,6 +3507,23 @@ impl App {
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("RAM usage {}", ram_text(bytes)))
             });
+            right = rect.left() - PAD;
+        }
+        // Left of that, the mapping mode's button, lit while the mode is on.
+        if !self.projects.is_empty() {
+            let on = self.view.launch_keys.mode.on;
+            let color = if on { theme::accent() } else { theme::text_secondary() };
+            let galley = widgets::fitted(&painter, "Map keys", theme::ui_font(theme::TEXT), color, 80.0);
+            let size = galley.size();
+            if fits(right, size.x) {
+                let rect = Rect::from_min_max(Pos2::new(right - size.x, bar.top()), Pos2::new(right, bar.bottom()));
+                let response = widgets::button_area(ui, rect, Id::new("map-keys"), "Map keys to slots and scenes");
+                if response.clicked() {
+                    self.toggle_mapping_mode();
+                }
+                let color = motion::mix(color, theme::text_primary(), widgets::hover(ui, &response));
+                painter.galley(Pos2::new(rect.left(), rect.center().y - size.y / 2.0), galley, color);
+            }
         }
         self.hover_switch(ui.ctx(), hovered_switch);
         // The underline slides to the view that was picked.
@@ -3285,21 +3662,6 @@ fn drop_overlay(ui: &Ui, area: Rect) {
     painter.text(area.center(), Align2::CENTER_CENTER, what, theme::ui_font(theme::TEXT + 2.0), text);
 }
 
-/// The window with no project open.
-fn empty(ui: &mut Ui) {
-    let area = ui.available_rect_before_wrap();
-    ui.allocate_rect(area, Sense::hover());
-    let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0.0, theme::window_background());
-    painter.text(
-        area.center(),
-        Align2::CENTER_CENTER,
-        "Drop a Live Set (.als) here to open it",
-        theme::ui_font(theme::TEXT),
-        theme::text_hint(),
-    );
-}
-
 /// The label beside the pointer while something is dragged: outlined in the accent colour when
 /// it can land where the pointer is.
 fn drag_label(ctx: &egui::Context, pointer: Pos2, text: &str, lands: bool) {
@@ -3320,6 +3682,26 @@ fn drag_label(ctx: &egui::Context, pointer: Pos2, text: &str, lands: bool) {
 }
 
 /// What the status bar says after a command ran, or nothing for silent ones.
+/// The control bar's value box, as screen readers and tests name it.
+const QUANTIZATION_LABEL: &str = "Grid and launch quantisation";
+
+/// The control bar's text for `quantization`: the choice that parses to it.
+fn quantization_label(quantization: suhina_engine::Quantization) -> &'static str {
+    QUANTIZATION
+        .into_iter()
+        .find(|q| suhina_session::parse_quantization(q).ok() == Some(quantization))
+        .unwrap_or(DEFAULT_QUANTIZATION)
+}
+
+/// A mapping command's target in words: "track 2 scene 1", "scene 3", "the stop button of track 2".
+fn mapping_target(p: &serde_json::Value) -> String {
+    match p["target"].as_str() {
+        Some("slot") => format!("track {} scene {}", p["track"], p["scene"]),
+        Some("scene") => format!("scene {}", p["scene"]),
+        _ => format!("the stop button of track {}", p["track"]),
+    }
+}
+
 fn describe(action: &Action) -> Option<String> {
     let p = &action.params;
     Some(match action.id {
@@ -3327,7 +3709,22 @@ fn describe(action: &Action) -> Option<String> {
         "scene.launch" => format!("Launched scene {}", p["scene"]),
         "track.stop" => format!("Stopping track {}", p["track"]),
         "launcher.stopAll" => "Stopping all clips".into(),
-        "launcher.setQuantization" => format!("Launch quantisation {}", p["value"].as_str().unwrap_or_default()),
+        "launcher.addMapping" => format!(
+            "Mapped {} to {}",
+            p["source"].as_str().unwrap_or_default().trim_start_matches("key:"),
+            mapping_target(p)
+        ),
+        "launcher.removeMapping" => format!("Removed the keys of {}", mapping_target(p)),
+        "launcher.setQuantization" => format!("Grid {}", p["value"].as_str().unwrap_or_default()),
+        "clip.setLaunchMode" => format!("Launch mode {}", p["mode"].as_str().unwrap_or_default()),
+        "clip.setQuantization" => format!("Clip launch quantisation {}", p["value"].as_str().unwrap_or_default()),
+        "clip.setLegato" => {
+            if p["on"] == true {
+                "Legato on".into()
+            } else {
+                "Legato off".into()
+            }
+        }
         "transport.setTempo" => format!("Tempo {}", p["bpm"]),
         "clip.copy" => "Copied the clip".into(),
         "clip.paste" if p.get("scene").is_some() => format!("Pasted into scene {} on track {}", p["scene"], p["track"]),

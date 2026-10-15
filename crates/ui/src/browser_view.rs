@@ -46,6 +46,8 @@ pub struct BrowserOut {
     /// A project file to open.
     pub open_project: Option<PathBuf>,
     pub status: Option<Status>,
+    /// Browse… beside the new folder's field: the system's folder dialog.
+    pub pick_folder: bool,
 }
 
 /// Draws the results area another way: the area, the browser's state and the projects.
@@ -247,11 +249,10 @@ pub fn show(ui: &mut Ui, area: Rect, state: &mut BrowserState, cx: Context<'_>) 
     }
     // A sample decoded for its preview plays now.
     if let Some((path, from, data)) = state.take_ready_preview() {
-        if let Ok(session) = projects.session_mut(None) {
-            session.provide_audio(&path, data);
-        }
+        // With no project open this opens the previews' own output (ADR 0011).
+        let provided = projects.preview_session_mut().map(|session| session.provide_audio(&path, data));
         let params = json!({ "path": path.display().to_string(), "from": from, "gain": settings.preview_volume });
-        match projects.execute("preview.play", &params) {
+        match provided.and_then(|()| projects.execute("preview.play", &params)) {
             Ok(_) => state.previewing = Some(path.display().to_string()),
             Err(e) => out.status = Some(Status::Error(format!("Cannot preview: {}", e.0))),
         }
@@ -471,7 +472,18 @@ fn sidebar_view(ui: &mut Ui, area: Rect, state: &mut BrowserState, projects: &mu
                 .hint_text("A folder's path")
                 .font(item_font.clone())
                 .text_color(theme::text_primary());
-            let response = ui.put(rect.shrink2(Vec2::new(4.0, 1.0)).intersect(area), edit);
+            let field = rect.shrink2(Vec2::new(4.0, 1.0));
+            let browse =
+                Rect::from_min_size(Pos2::new(field.right() - 56.0, field.top()), Vec2::new(56.0, field.height()));
+            if crate::project_dialog::button(ui, &painter, browse.intersect(area), "Browse…", "Browse for a folder") {
+                out.pick_folder = true;
+                state.new_folder = None;
+                return;
+            }
+            let response = ui.put(
+                Rect::from_min_max(field.min, Pos2::new(browse.left() - 4.0, field.bottom())).intersect(area),
+                edit,
+            );
             if !response.has_focus() && !response.lost_focus() {
                 response.request_focus();
             }
@@ -1011,10 +1023,12 @@ fn date(seconds: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// Why nothing can preview now, if so: previews play through the active project's audio output.
+/// Why nothing can preview now, if so: previews play through the active project's audio output,
+/// or with no project open through an output of their own.
 pub fn can_preview(projects: &Projects) -> Result<(), String> {
     match active(projects) {
-        None => Err("Open or make a project to preview: previews play through its audio output".into()),
+        None if projects.audio_system().is_none() => Err("Cannot preview: there is no audio output here".into()),
+        None => Ok(()),
         Some(s) if s.player().is_none() => {
             Err("Cannot preview: the project has no audio output (see the warnings when it opened)".into())
         }
@@ -1067,7 +1081,8 @@ fn preview_strip(
         }
     };
     let Some(path) = item.path() else { return };
-    let monitor = active(projects)
+    let monitor = projects
+        .preview_session()
         .and_then(|s| s.player())
         .map(|p| (p.preview_monitor().playing(), p.preview_monitor().seconds()));
     let playing_this = state.previewing.as_deref() == Some(item.key.as_str()) && monitor.is_some_and(|m| m.0);

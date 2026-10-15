@@ -70,6 +70,9 @@ pub(crate) enum PreviewCommand {
     Release {
         key: Option<u8>,
     },
+    /// A new level for what plays now and what is previewed next; glides there over a few
+    /// milliseconds so it does not click.
+    Gain(f32),
     Stop,
 }
 
@@ -130,6 +133,8 @@ struct SamplePlay {
     /// Engine frames played, for the click guard at the start.
     played: u64,
     gain: f32,
+    /// The level `gain` glides to.
+    target: f32,
 }
 
 /// Notes being played.
@@ -142,6 +147,8 @@ struct NotesPlay {
     /// the key column plays waits for `preview.noteOff`.
     held: [u64; 128],
     gain: f32,
+    /// The level `gain` glides to.
+    target: f32,
     /// The index of the track's chain in the playing graph, found again each block.
     chain: Option<usize>,
     /// Every note is on and stays on: only `preview.noteOff` (or the end of the preview) takes
@@ -165,7 +172,17 @@ pub(crate) struct Preview {
     events: Vec<(usize, NoteEvent)>,
     buffer: Vec<f32>,
     sample_rate: u32,
+    /// How far a level glides towards its target each frame.
+    glide: f32,
     pub(crate) monitor: Arc<PreviewMonitor>,
+}
+
+/// About how long a change of level takes.
+const GLIDE_SECONDS: f64 = 0.01;
+
+/// `gain` one frame closer to `target`.
+fn glided(gain: f32, target: f32, glide: f32) -> f32 {
+    if (target - gain).abs() < 1e-6 { target } else { gain + (target - gain) * glide }
 }
 
 impl Preview {
@@ -179,6 +196,7 @@ impl Preview {
             events: Vec::with_capacity(MAX_EVENTS),
             buffer: vec![0.0; MAX_BLOCK * 2],
             sample_rate,
+            glide: (1.0 - (-1.0 / (GLIDE_SECONDS * f64::from(sample_rate.max(1)))).exp()) as f32,
             monitor: Arc::new(PreviewMonitor::default()),
         }
     }
@@ -211,13 +229,22 @@ impl Preview {
                     None => return,
                 },
             };
+            if let PreviewCommand::Gain(gain) = command {
+                if let Some(play) = self.sample.as_mut() {
+                    play.target = gain;
+                }
+                if let Some(play) = self.notes.as_mut() {
+                    play.target = gain;
+                }
+                continue;
+            }
             match command {
                 PreviewCommand::Sample { data, from, gain } => {
                     self.stop(chains, 0);
                     let rate = f64::from(data.sample_rate.max(1));
                     let position = (from.max(0.0) * rate).min(data.frames() as f64);
                     let step = rate / f64::from(self.sample_rate.max(1));
-                    self.sample = Some(SamplePlay { data, position, step, played: 0, gain });
+                    self.sample = Some(SamplePlay { data, position, step, played: 0, gain, target: gain });
                 }
                 PreviewCommand::Notes { notes, gain } => {
                     self.stop(chains, 0);
@@ -227,6 +254,7 @@ impl Preview {
                         next: 0,
                         held: [NOT_HELD; 128],
                         gain,
+                        target: gain,
                         chain: None,
                         held_only: false,
                         released: false,
@@ -246,6 +274,7 @@ impl Preview {
                         next: 0,
                         held,
                         gain,
+                        target: gain,
                         chain: None,
                         held_only: true,
                         released: false,
@@ -253,6 +282,8 @@ impl Preview {
                 }
                 PreviewCommand::Release { key } => self.release(chains, key),
                 PreviewCommand::Stop => self.stop(chains, 0),
+                // Taken in above, without stopping what plays.
+                PreviewCommand::Gain(_) => {}
             }
         }
     }
@@ -417,6 +448,7 @@ impl Preview {
                     device.process(&context, span);
                 }
                 for ([l, r], [pl, pr]) in out.as_chunks_mut::<2>().0.iter_mut().zip(buffer.as_chunks::<2>().0) {
+                    play.gain = glided(play.gain, play.target, self.glide);
                     *l += pl * play.gain;
                     *r += pr * play.gain;
                 }
@@ -438,6 +470,7 @@ impl Preview {
                 let (left, right) = play.data.frame_at(play.position);
                 let fade_in = ((play.played as f64 + 1.0) / guard).min(1.0);
                 let fade_out = (left_in_file(play.position) / guard).min(1.0);
+                play.gain = glided(play.gain, play.target, self.glide);
                 let gain = play.gain * (fade_in * fade_out) as f32;
                 *l += left * gain;
                 *r += right * gain;

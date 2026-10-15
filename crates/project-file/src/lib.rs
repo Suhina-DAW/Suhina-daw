@@ -21,11 +21,13 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 use suhina_model::{
-    Arrangement, ArrangementLane, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId, ChannelRole, Clip,
-    ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension, Extensions,
-    FadeCurve, FadeShape, FollowAction, FollowKind, LaneData, Launcher, LauncherColumn, LoopRange, MAX_CHANGE_BEAT,
-    MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, Marker, Note, Project, Rgb, Scene, Send, Slot, StretchMode,
-    TempoPoint, TimeSignature, TimeSignatureChange, Track, TrackId, Transport, WarpMarker, automation, valid_bpm,
+    Arrangement, ArrangementLane, AudioInput, AudioRegion, AutomationLane, AutomationPoint, Channel, ChannelId,
+    ChannelRole, Clip, ClipContent, ContentId, ContentKinds, ContentLane, Device, DeviceKind, DeviceParam, Extension,
+    Extensions, FadeCurve, FadeShape, FollowAction, FollowKind, InputChannels, LaneData, LaunchMapping, LaunchMode,
+    LaunchQuantization, LaunchSettings, Launcher, LauncherColumn, LoopRange, MAX_CHANGE_BEAT, MAX_INPUT_CHANNEL,
+    MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, MappingSource, MappingTarget, Marker, MidiInput, MidiPort, Monitor,
+    Note, Project, Rgb, Scene, Send, Slot, StretchMode, TempoPoint, TimeSignature, TimeSignatureChange, Track, TrackId,
+    Transport, WarpMarker, automation, valid_bpm,
 };
 
 /// The file extension, without the dot.
@@ -243,16 +245,18 @@ fn project_value(p: &Project) -> Value {
             p.arrangement.markers.iter().map(|m| json!({ "beat": number(m.beat), "name": m.name })).collect();
     }
     out.insert("arrangement".into(), arrangement);
-    out.insert(
-        "launcher".into(),
-        json!({
-            "scenes": p.launcher.scenes.iter().map(scene_value).collect::<Vec<_>>(),
-            "columns": p.launcher.columns.iter().map(|c| json!({
-                "track": c.track.0,
-                "slots": c.slots.iter().map(|s| json!({ "clip": s.clip.as_ref().map(clip_value), "has_stop": s.has_stop })).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        }),
-    );
+    let mut launcher = json!({
+        "scenes": p.launcher.scenes.iter().map(scene_value).collect::<Vec<_>>(),
+        "columns": p.launcher.columns.iter().map(|c| json!({
+            "track": c.track.0,
+            "slots": c.slots.iter().map(|s| json!({ "clip": s.clip.as_ref().map(clip_value), "has_stop": s.has_stop })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+    // Left out when there are none, so a project without mappings is written as before.
+    if let (Some(map), false) = (launcher.as_object_mut(), p.launcher.mappings.is_empty()) {
+        map.insert("mappings".into(), p.launcher.mappings.iter().map(mapping_value).collect());
+    }
+    out.insert("launcher".into(), launcher);
     with_extensions(&mut out, &p.extensions);
     Value::Object(out)
 }
@@ -268,6 +272,29 @@ fn track_value(t: &Track) -> Value {
         "parent": t.parent.map(|p| p.0),
     });
     if let Some(map) = out.as_object_mut() {
+        // Left out while it is the default: every port, every channel.
+        if t.midi_input != MidiInput::default() {
+            let port = match &t.midi_input.port {
+                MidiPort::All => Value::String("all".into()),
+                MidiPort::Nothing => Value::String("none".into()),
+                MidiPort::Named(name) => json!({ "name": name }),
+            };
+            map.insert("midi_input".into(), json!({ "port": port, "channel": t.midi_input.channel }));
+        }
+        // Left out while it is the default: no input, monitored automatically.
+        if t.audio_input != AudioInput::default() {
+            let channels = match t.audio_input.channels {
+                InputChannels::None => json!([]),
+                InputChannels::Mono(c) => json!([c]),
+                InputChannels::Stereo(c) => json!([c, c.saturating_add(1)]),
+            };
+            let monitor = match t.audio_input.monitor {
+                Monitor::Auto => "auto",
+                Monitor::In => "in",
+                Monitor::Off => "off",
+            };
+            map.insert("audio_input".into(), json!({ "channels": channels, "monitor": monitor }));
+        }
         with_extensions(map, &t.extensions);
     }
     out
@@ -434,9 +461,32 @@ fn clip_value(c: &Clip) -> Value {
         if c.follow_action != FollowAction::default() {
             map.insert("follow".into(), follow_value(&c.follow_action));
         }
+        // Only a clip whose launch settings were changed carries them, so most clips (and every
+        // arrangement clip that never was in a slot) stay as they were written before.
+        if !c.launch.is_default() {
+            map.insert("launch".into(), launch_value(&c.launch));
+        }
         with_extensions(map, &c.extensions);
     }
     out
+}
+
+/// A launch mapping; its scene counts from 1, as in the commands.
+fn mapping_value(m: &LaunchMapping) -> Value {
+    let mut out = json!({ "source": m.source.name(), "target": m.target.kind() });
+    if let Some(map) = out.as_object_mut() {
+        if let Some(track) = m.target.track() {
+            map.insert("track".into(), json!(track.0));
+        }
+        if let Some(scene) = m.target.scene() {
+            map.insert("scene".into(), json!(scene.saturating_add(1)));
+        }
+    }
+    out
+}
+
+fn launch_value(l: &LaunchSettings) -> Value {
+    json!({ "mode": l.mode.name(), "legato": l.legato, "quantization": l.quantization.name() })
 }
 
 fn with_extensions(map: &mut Map<String, Value>, extensions: &Extensions) {
@@ -766,7 +816,18 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
                 }
                 columns.push(LauncherColumn { track: TrackId(whole(c, "track", &at)?), slots });
             }
-            Launcher { scenes, columns }
+            let mut mappings: Vec<LaunchMapping> = Vec::new();
+            for (i, v) in list(l, "mappings", "project.launcher")?.iter().enumerate() {
+                let mapping = read_mapping(v, &format!("project.launcher.mappings[{i}]"))?;
+                if mappings.iter().any(|m| m.source == mapping.source) {
+                    return Err(ProjectFileError(format!(
+                        "project.launcher.mappings[{i}]: {} is mapped twice",
+                        mapping.source.name()
+                    )));
+                }
+                mappings.push(mapping);
+            }
+            Launcher { scenes, columns, mappings }
         }
     };
     Ok(Project { transport, tracks, channels, contents, arrangement, launcher, extensions: extensions(p, "project")? })
@@ -793,8 +854,73 @@ fn read_track(value: &Value, at: &str) -> Result<Track, ProjectFileError> {
         content: ContentKinds { notes: flag(t, "notes", false, at)?, audio: flag(t, "audio", false, at)? },
         channel: optional_whole(t, "channel", at)?.map(ChannelId),
         parent: optional_whole(t, "parent", at)?.map(TrackId),
+        midi_input: read_midi_input(t.get("midi_input"), at)?,
+        audio_input: read_audio_input(t.get("audio_input"), at)?,
         extensions: extensions(t, at)?,
     })
+}
+
+/// A track's `audio_input`: `{ "channels": [] | [n] | [n, n + 1], "monitor": "auto" | "in" |
+/// "off" }`, channels counted from 1; no input, monitored automatically, when it is left out.
+fn read_audio_input(value: Option<&Value>, at: &str) -> Result<AudioInput, ProjectFileError> {
+    let at = format!("{at}.audio_input");
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(AudioInput::default()) };
+    let a = object(value, &at)?;
+    let channel =
+        |v: &Value| v.as_u64().and_then(|c| u16::try_from(c).ok()).filter(|c| (1..=MAX_INPUT_CHANNEL).contains(c));
+    let bad = || {
+        ProjectFileError(format!("{at}.channels: expected [], [n] or [n, n + 1] with n from 1 to {MAX_INPUT_CHANNEL}"))
+    };
+    let channels = match a.get("channels") {
+        None | Some(Value::Null) => InputChannels::None,
+        Some(Value::Array(list)) => match list.as_slice() {
+            [] => InputChannels::None,
+            [one] => InputChannels::Mono(channel(one).ok_or_else(bad)?),
+            [left, right] => {
+                let (left, right) = (channel(left).ok_or_else(bad)?, channel(right).ok_or_else(bad)?);
+                if left.checked_add(1) != Some(right) {
+                    return Err(bad());
+                }
+                InputChannels::Stereo(left)
+            }
+            _ => return Err(bad()),
+        },
+        Some(_) => return Err(bad()),
+    };
+    let monitor = match a.get("monitor").and_then(Value::as_str) {
+        None if a.get("monitor").is_none_or(Value::is_null) => Monitor::Auto,
+        Some("auto") => Monitor::Auto,
+        Some("in") => Monitor::In,
+        Some("off") => Monitor::Off,
+        _ => return Err(format!("{at}.monitor: expected \"auto\", \"in\" or \"off\"").into()),
+    };
+    Ok(AudioInput { channels, monitor })
+}
+
+/// A track's `midi_input`: `{ "port": "all" | "none" | { "name" }, "channel": 1–16 or null }`,
+/// every port and channel when it is left out.
+fn read_midi_input(value: Option<&Value>, at: &str) -> Result<MidiInput, ProjectFileError> {
+    let at = format!("{at}.midi_input");
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(MidiInput::default()) };
+    let m = object(value, &at)?;
+    let port = match m.get("port") {
+        None | Some(Value::Null) => MidiPort::All,
+        Some(Value::String(s)) if s == "all" => MidiPort::All,
+        Some(Value::String(s)) if s == "none" => MidiPort::Nothing,
+        Some(Value::Object(port)) => match port.get("name").and_then(Value::as_str) {
+            Some(name) if !name.trim().is_empty() => MidiPort::Named(name.to_string()),
+            _ => return Err(format!("{at}.port.name: expected a port's name").into()),
+        },
+        Some(_) => return Err(format!("{at}.port: expected \"all\", \"none\" or {{ \"name\" }}").into()),
+    };
+    let channel = match m.get("channel") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_u64() {
+            Some(c @ 1..=16) => u8::try_from(c).ok(),
+            _ => return Err(format!("{at}.channel: expected 1 to 16 or null").into()),
+        },
+    };
+    Ok(MidiInput { port, channel })
 }
 
 fn read_channel(value: &Value, at: &str) -> Result<Channel, ProjectFileError> {
@@ -1011,6 +1137,7 @@ fn read_clip(value: &Value, at: &str) -> Result<Clip, ProjectFileError> {
         fade_in_curve: fade_curve(c, "fade_in", at)?,
         fade_out_curve: fade_curve(c, "fade_out", at)?,
         follow_action: read_follow(c, at)?,
+        launch: read_launch(c, at)?,
         extensions: extensions(c, at)?,
     })
 }
@@ -1054,6 +1181,57 @@ fn read_follow(c: &Obj, at: &str) -> Result<FollowAction, ProjectFileError> {
         return Err(format!("{at}.time: expected more than 0 and at most {} beats", FollowAction::MAX_TIME).into());
     }
     Ok(follow)
+}
+
+/// A launch mapping: `source` (`key:Q`, `note:1:60`), `target` (slot, scene or stop) and the
+/// `track` and 1-based `scene` the target needs. The track need not exist: a mapping whose track
+/// is gone is kept, unused.
+fn read_mapping(value: &Value, at: &str) -> Result<LaunchMapping, ProjectFileError> {
+    let m = object(value, at)?;
+    let name = match m.get("source") {
+        Some(Value::String(name)) => name.as_str(),
+        _ => return Err(ProjectFileError(format!("{at}.source: expected a key or a note"))),
+    };
+    let source = MappingSource::from_name(name)
+        .ok_or_else(|| ProjectFileError(format!("{at}.source: unknown source {name:?}")))?;
+    let scene = || -> Result<usize, ProjectFileError> {
+        let number: usize = whole(m, "scene", at)?;
+        number.checked_sub(1).ok_or_else(|| ProjectFileError(format!("{at}.scene: scenes count from 1")))
+    };
+    let track = || whole(m, "track", at).map(TrackId);
+    let target = match m.get("target").and_then(Value::as_str) {
+        Some("slot") => MappingTarget::Slot { track: track()?, scene: scene()? },
+        Some("scene") => MappingTarget::Scene { scene: scene()? },
+        Some("stop") => MappingTarget::Stop { track: track()? },
+        _ => return Err(ProjectFileError(format!("{at}.target: expected slot, scene or stop"))),
+    };
+    Ok(LaunchMapping { source, target })
+}
+
+/// A clip's launch settings, `launch`: the defaults when missing (files written before launch
+/// settings), and for each of its keys that is missing.
+fn read_launch(c: &Obj, at: &str) -> Result<LaunchSettings, ProjectFileError> {
+    let at = format!("{at}.launch");
+    let l = match c.get("launch") {
+        None | Some(Value::Null) => return Ok(LaunchSettings::default()),
+        Some(value) => object(value, &at)?,
+    };
+    let name = |key: &str| match l.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name)) => Ok(Some(name.as_str())),
+        Some(_) => Err(ProjectFileError(format!("{at}.{key}: expected a name"))),
+    };
+    let mode = match name("mode")? {
+        None => LaunchMode::default(),
+        Some(text) => LaunchMode::from_name(text)
+            .ok_or_else(|| ProjectFileError(format!("{at}.mode: unknown launch mode {text:?}")))?,
+    };
+    let quantization = match name("quantization")? {
+        None => LaunchQuantization::default(),
+        Some(text) => LaunchQuantization::from_name(text)
+            .ok_or_else(|| ProjectFileError(format!("{at}.quantization: unknown launch quantisation {text:?}")))?,
+    };
+    Ok(LaunchSettings { mode, legato: flag(l, "legato", false, &at)?, quantization })
 }
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files

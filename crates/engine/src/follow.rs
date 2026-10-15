@@ -168,6 +168,7 @@ mod tests {
             fade_out_curve: Default::default(),
             follow_action: follow,
             extensions: Extensions::default(),
+            launch: Default::default(),
         }
     }
 

@@ -25,6 +25,7 @@ fn clip(content: u32, start: f64) -> Clip {
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
         extensions: Extensions::default(),
+        launch: Default::default(),
     }
 }
 
@@ -44,6 +45,8 @@ fn project() -> Project {
         channel: None,
         parent: None,
         extensions: Extensions::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     };
     let notes = |n: Vec<Note>| ContentLane { target: None, data: LaneData::Notes(n) };
     let audio = AudioRegion {
@@ -82,6 +85,7 @@ fn project() -> Project {
                 track: TrackId(1),
                 slots: vec![Slot { clip: Some(clip(5, 0.0)), has_stop: true }, Slot::default()],
             }],
+            mappings: Default::default(),
         },
         ..Project::default()
     }

@@ -19,7 +19,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split | The MCP server for agents: tools, file roots, errors and how to run it |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
 | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) | decision | current | warp, time-stretch, stretch mode, Signalsmith, keylock, timestretch, Rubber Band, audio crackles, CPU load, stretch quality | Real-time time-stretching of warped audio, stretch modes and backends, with measurements |
@@ -36,6 +36,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0014: Stock presets](decisions/0014-stock-presets.md) | decision | current | preset, stock preset, factory preset, preset contribution, CC0, presets folder, preset format, preset licence, DX7 bank | Presets that ship with Suhina for its built-in effects and instruments - where they live, their licence (CC0), what a contribution needs, and the proposed file format |
 | [0015: Extensions: optional components outside the tree](decisions/0015-extensions.md) | decision | draft | extension, add-on, optional component, model weights, model licence, inference runtime, non-free, plug-in host boundary, extension manifest, third-party model, ONNX, separation | How Suhina uses optional components it does not ship — separate programs with a manifest, a licence and declared permissions, never libraries linked into the process, and never downloaded by Suhina |
 | [0016: Parity target: what Suhina compares itself to, and what it leaves out](decisions/0016-parity-target.md) | decision | draft | parity, feature comparison, how far are we from Live, scope of the project, what Suhina does not aim at, milestone for recording, automation, MIDI editing, MIDI effects, devices | What Suhina measures itself against in another DAW, what it deliberately leaves out, and how the parity measurement is kept honest and free of the manual's content |
+| [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) | decision | current | MIDI input, MIDI controller, keyboard, arm, armed track, track.setArm, midi.inputs, live notes, sustain pedal, input latency, monitoring, recording, low latency, midir | How played input reaches the engine (MIDI controllers first, audio inputs later), what arming a track is, and what a key press costs in latency today and how that is made smaller |
 | [0018: A Windows audio driver of Suhina's own](decisions/0018-own-windows-audio-driver.md) | decision | draft | own ASIO driver, custom audio driver, universal ASIO driver, FlexASIO, low latency on Windows, non-exclusive ASIO, shared audio device, several audio interfaces at once, aggregate device, virtual audio device, driver signing, WHQL, attestation signing, kernel mode driver, IAudioClient3, WASAPI low latency shared mode | Whether Suhina should build and ship a low-latency Windows audio driver of its own, what that would take (user or kernel mode, signing, licences, the ASIO name, upkeep), what the output crate already gives, and what reaches the same goals instead |
 | [0019: MIDI controllers and mapping](decisions/0019-midi-controllers-and-mapping.md) | decision | draft | MIDI controller, MIDI learn, MIDI mapping, remote mapping, map a knob, CC, control change, fader, encoder, relative encoder, takeover, pick up, controller profile, control surface, mapping mode, controller feedback, LED, MIDI output | How hardware MIDI controllers drive Suhina - MIDI learn onto any command that takes a value, controller profiles in the user's settings, mappings to one project's tracks and devices saved in that project, gestures that make one undo step, and surface programs as extensions |
 | [Design brief](design/brief.md) | spec | draft | UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups | Suhina's visual language: principles, what stays familiar and what is our own, layout decisions and design tokens |
@@ -43,12 +44,12 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Specs](spec/README.md) | spec | current | writing a spec, clean-room observation, where specs go | What the specs are and how they are written (clean-room, observed version, test files) |
 | [About Suhina](spec/about.md) | spec | draft | about, version, build number, which build, nightly version, bug report, help menu, about dialog | Help › About Suhina, the dialog that says which build this is (version, platform, licence) and copies one line naming it for a bug report |
 | [Live Set (`.als`) format](spec/als-format.md) | spec | current | reading .als, importer, XML element, warp markers, locators, arrangement markers, time signature, devices, plug-in state, Utility, StereoGain, device parameters | The Live Set (.als) format as observed: container, tracks, clips, notes, audio, warp markers, devices, locators |
-| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), and named markers on the timeline |
+| [Arrangement editing](spec/arrangement-editing.md) | spec | draft | start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), and named markers on the timeline |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Automation](spec/automation.md) | spec | current | automation, envelope, automation lane, automation lanes view, show automation, automation.movePoints, automation.deletePoints, select points, breakpoint, automation point, curve, automation.addPoint, automation.movePoint, automation.deletePoint, automation.clear, automation.setEnabled, automation.list, device.setAutomation, automation off, re-enable automation, volume automation, pan automation, mute automation, device parameter automation, AutomationLane, AutomationPoint, MixLanes, DeviceLanes, Envelope | Automation envelopes - lanes of points over the arrangement for a track's volume, pan and mute and every device parameter, curves and jumps, how the engine plays them, a manual change turning a lane off, and the automation.* commands |
 | [Backups](spec/backups.md) | spec | draft | backup, backups, autosave, auto save, recovery, crash, lost work, .backup folder, project.autosave, critical operation, clean-up, power cut | Backups (autosave) of open projects - when they are written (an interval or before critical operations), where (the project's .backup folder, the settings folder for a project never saved), clean-up, and the recovery offer on start after a crash |
 | [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
-| [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands, follow actions | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
+| [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands, fades on launched clips, follow actions, launch modes, gate, toggle, repeat, legato, per-clip quantisation, launch keys, MIDI notes, mappings, launcher.addMapping | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launched clip fades, follow actions, launch modes, legato, per-clip quantisation, launching from computer keys and MIDI notes, launcher over arrangement |
 | [Device groups](spec/device-groups.md) | spec | planned | device group, group effects, group devices, parallel processing, parallel chain, branch, macro, macro control, mix, dry/wet, group preset, nested devices, layering instruments | Planned device groups - several devices on a track as one unit, with parallel branches, per-branch volume, pan, mute and solo, a mix, macros, group presets, latency compensation, the model and the commands |
 | [Importing devices from Live Sets](spec/device-import.md) | spec | current | device import, importing devices, device mapping, placeholder device, Operator, Live device to Suhina device, which device imports into what, golden renders of imported sets | How a device stored in a Live Set is brought into Suhina: the three import levels, how each Suhina device is learnt and mapped, and which Live device maps to which Suhina device |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
@@ -66,7 +67,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Stems files](spec/stems-format.md) | spec | draft | stems, stem file, .stem.mp4, .stem.m4a, Traktor stems, NI stems, master track, mastering_dsp, MP4 boxes, edit list, AAC priming, multitrack audio file, DJ, remix | Stems files (.stem.mp4, .stem.m4a): an MP4 with the master and its stems as audio tracks, stem names, colours and mastering settings in moov/udta/stem; what Suhina reads and how it maps the mastering to its compressor and limiter |
 | [The .suhina project file](spec/suhina-format.md) | spec | current | .suhina layout, markers in the file, .locr, project file fields, writing a project file by hand or from an agent, format version, base64 state | The layout of Suhina's own project file (.suhina; .locr from before still read), field by field, with what a reader accepts |
 | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) | spec | draft | piano roll, clip editor, toolbar, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, duplicate key | Functional spec of the MIDI clip editor (piano roll): layout, toolbar icons and tools, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands |
-| [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser |
+| [UI: main window and Session view](spec/ui-session-view.md) | spec | draft | Session view, main window layout, clip slot behaviour, scene launch, launch keys, mapping mode, Map button, Ctrl+M, mixer section, browser structure | Functional spec of the main window and the Session view: regions, clip slots, scenes, launch keys and their mapping mode, I/O, mixer, browser |
 | [Waveforms](spec/waveforms.md) | spec | current | waveform, peaks, RMS, waveform drawing, zoom, samples, stereo lanes, dB scale, clip waveform, preview waveform, sample map tooltip, frame budget | How waveforms are computed and drawn in clips, the browser's preview and the sample map's tooltips: peak levels with RMS, lanes per channel, the shape, samples close up, the dB scale, the frame budget |
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [The claim bot](claim-bot.md) | howto | current | claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed, project sync, board out of date, cards missing from the board | How the claim bot moves an issue's card on the project board, holds work, and is set up |
@@ -103,6 +104,7 @@ Change this code, and check these documents.
 | `apps/suhina/src/main.rs` | [Architecture](architecture.md), [Keyboard shortcuts](shortcuts.md) |
 | `apps/suhina/src/recent.rs` | [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md) |
 | `apps/suhina/src/theme_files.rs` | [Design brief](design/brief.md) |
+| `assets/brand/**` | [Components](design/components.md) |
 | `crates/*/Cargo.toml` | [Architecture](architecture.md) |
 | `crates/als/src/devices.rs` | [Live Set (`.als`) format](spec/als-format.md), [Importing devices from Live Sets](spec/device-import.md) |
 | `crates/als/src/lib.rs` | [Live Set (`.als`) format](spec/als-format.md) |
@@ -125,10 +127,17 @@ Change this code, and check these documents.
 | `crates/engine/src/buses.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [Automation](spec/automation.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Automation](spec/automation.md), [Device groups](spec/device-groups.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md), [MCP server](mcp.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/engine/src/fade_cost_tests.rs` | [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/engine/src/fade_tests.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/follow_tests.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/engine/src/input.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
+| `crates/engine/src/input_tests.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
 | `crates/engine/src/launcher.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
+| `crates/engine/src/launcher/modes.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
+| `crates/engine/src/live.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
+| `crates/engine/src/live_tests.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
 | `crates/engine/src/loop_tests.rs` | [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/engine/src/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/engine/src/meters_tests.rs` | [Level meters](spec/level-meters.md) |
@@ -156,11 +165,15 @@ Change this code, and check these documents.
 | `crates/media/src/stems_tests.rs` | [Stems files](spec/stems-format.md) |
 | `crates/media/src/tempo.rs` | [Browser](spec/browser.md) |
 | `crates/media/tests/data/**` | [Stems files](spec/stems-format.md) |
+| `crates/midi/src/lib.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
 | `crates/model/src/automation.rs` | [Automation](spec/automation.md) |
+| `crates/model/src/launch.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/model/src/lib.rs` | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md), [Arrangement editing](spec/arrangement-editing.md), [Device groups](spec/device-groups.md), [Key inputs and plug-in buses](spec/sidechain.md) |
+| `crates/model/src/mapping.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/output/src/devices.rs` | [Architecture](architecture.md), [0018: A Windows audio driver of Suhina's own](decisions/0018-own-windows-audio-driver.md) |
 | `crates/output/src/exclusive.rs` | [Architecture](architecture.md), [0018: A Windows audio driver of Suhina's own](decisions/0018-own-windows-audio-driver.md) |
-| `crates/output/src/lib.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
+| `crates/output/src/input.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
+| `crates/output/src/lib.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) |
 | `crates/plugin-host/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/plugin-host/src/clap.rs` | [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/plugin-host/src/vst3.rs` | [Key inputs and plug-in buses](spec/sidechain.md) |
@@ -178,13 +191,16 @@ Change this code, and check these documents.
 | `crates/session/src/devices.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Device groups](spec/device-groups.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/session/src/files.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |
 | `crates/session/src/follow.rs` | [Clip launching](spec/clip-launching.md) |
-| `crates/session/src/lib.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
+| `crates/session/src/launch.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/session/src/lib.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/library.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
+| `crates/session/src/mapping.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/src/meters.rs` | [Level meters](spec/level-meters.md) |
+| `crates/session/src/midi.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md), [MCP server](mcp.md) |
 | `crates/session/src/notes.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
 | `crates/session/src/plugins.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/session/src/projects.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0007: Several open projects](decisions/0007-several-open-projects.md) |
+| `crates/session/src/projects.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0007: Several open projects](decisions/0007-several-open-projects.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
 | `crates/session/src/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
@@ -192,6 +208,8 @@ Change this code, and check these documents.
 | `crates/session/tests/automation.rs` | [Automation](spec/automation.md) |
 | `crates/session/tests/files.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/follow.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/session/tests/launch_mappings.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/session/tests/launch_settings.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/session/tests/scenes.rs` | [Clip launching](spec/clip-launching.md) |
@@ -200,7 +218,7 @@ Change this code, and check these documents.
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/Cargo.toml` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) |
-| `crates/ui/src/app.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/app.rs` | [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/automation_lanes.rs` | [Components](design/components.md), [Automation](spec/automation.md) |
 | `crates/ui/src/browser.rs` | [Architecture](architecture.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
@@ -209,14 +227,17 @@ Change this code, and check these documents.
 | `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
 | `crates/ui/src/follow_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
+| `crates/ui/src/logo.rs` | [Components](design/components.md) |
 | `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/ui/src/meter.rs` | [Components](design/components.md), [Level meters](spec/level-meters.md) |
 | `crates/ui/src/missing_files.rs` | [Architecture](architecture.md), [Components](design/components.md), [Missing files](spec/missing-files.md) |
 | `crates/ui/src/motion.rs` | [Components](design/components.md) |
 | `crates/ui/src/piano_roll.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/pick.rs` | [Components](design/components.md) |
 | `crates/ui/src/project_dialog.rs` | [Components](design/components.md), [About Suhina](spec/about.md), [Backups](spec/backups.md) |
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/sample_map_crowd.rs` | [Sample map](spec/sample-map.md) |
@@ -224,6 +245,9 @@ Change this code, and check these documents.
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/settings_view.rs` | [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/slot_launch.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/splash.rs` | [Components](design/components.md) |
+| `crates/ui/src/start_panel.rs` | [Components](design/components.md) |
 | `crates/ui/src/theme.rs` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md), [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
 | `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
@@ -231,6 +255,7 @@ Change this code, and check these documents.
 | `crates/ui/src/waveform/tests.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/src/widgets.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/automation_lanes.rs` | [Automation](spec/automation.md) |
+| `crates/ui/tests/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/ui/tests/waveforms.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/themes/**` | [Design brief](design/brief.md) |

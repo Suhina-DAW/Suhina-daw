@@ -14,6 +14,7 @@ use suhina_session::{OutputChoice, Session};
 use suhina_ui::keymap::Keymap;
 use suhina_ui::settings::{Graphics, Settings};
 use suhina_ui::settings_view::About;
+use suhina_ui::splash::Splash;
 use suhina_ui::themes::FileAction;
 use suhina_ui::{App, NewProject, OpenAs, Status};
 
@@ -26,8 +27,9 @@ usage: suhina [<project.suhina> | <project.als> | --demo] [--renderer wgpu|glow]
   --renderer         how the window is drawn this time: wgpu or glow (OpenGL); the
                      default is the one chosen in Options > Settings
   --no-animations    turn the interface's animations off this time
-Without a project the window opens empty; Ctrl+T makes a new one or opens one, and a
-.suhina, .locr or .als file dropped on it opens.
+Without a project the window opens what Options > Settings > General > At start says (the
+New or open dialog unless changed); Ctrl+T makes a new one or opens one, and a .suhina,
+.locr or .als file dropped on it opens.
 Settings are kept in settings.txt, the keys in keymap.json and themes in themes/<name>.json,
 in Suhina's folder of the user's app data.";
 
@@ -90,38 +92,35 @@ fn main() -> ExitCode {
     let (theme_list, theme_warnings) = themes.read_all();
     settings_warnings.extend(theme_warnings);
     let recent = recent::Recent::load(eframe::storage_dir(app_id()).map(|d| d.join(RECENT_FILE)));
-    let mut window = Window { app: App::new(), graphics_now, editors_embeddable: false, themes, recent };
+    let mut window = Window {
+        app: App::new(),
+        graphics_now,
+        editors_embeddable: false,
+        themes,
+        recent,
+        splash: Some(Splash::new(env!("CARGO_PKG_VERSION"))),
+        start_up: Some(StartUp {
+            source: args.source,
+            output_choice: settings.output_choice(),
+            warnings: settings_warnings,
+        }),
+    };
     // The audio devices, and the output the settings choose (Settings › Audio, `audio.*`).
     window.app.projects_mut().set_audio_system(std::sync::Arc::new(suhina_output::DeviceOutput::new()));
     window.app.projects_mut().set_output_choice(settings.output_choice());
-    // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
-    let mut library = suhina_library::Library::new(eframe::storage_dir(app_id()));
-    settings_warnings.extend(library.take_warnings());
-    if let Err(e) = library.start() {
-        settings_warnings.push(e);
+    // The MIDI controllers, every port on but the ones the settings turn off (Settings › MIDI,
+    // `midi.*`, ADR 0017).
+    window.app.projects_mut().set_midi_inputs_off(settings.midi_inputs_off.clone());
+    let midi_warnings = window.app.projects_mut().set_midi_system(std::sync::Arc::new(suhina_midi::Midi::new()));
+    if let Some(start_up) = window.start_up.as_mut() {
+        start_up.warnings.extend(midi_warnings);
     }
-    window.app.set_file_library(library);
-    // The sample map analyses the library's samples in the background (ADR 0013).
-    window.app.projects_mut().start_sound_map();
     let (projects, templates) = default_folders();
     window.app.set_default_folders(projects, templates);
     // Backups of projects never saved, and the journal of the newest backups, beside the
-    // settings; what a crash left there is offered (`docs/spec/backups.md`).
+    // settings; what a crash left there is offered once the window starts (`docs/spec/backups.md`).
     let backups = eframe::storage_dir(app_id()).map(|d| d.join(suhina_session::backup::SETTINGS_SUBFOLDER));
     window.app.projects_mut().set_backup_folder(backups);
-    window.app.offer_recovery();
-    match args.source {
-        Source::Nothing => {}
-        Source::Demo => {
-            let session = Session::new(suhina_ui::demo::demo_project());
-            let (session, warnings) = with_audio(session, &settings.output_choice());
-            window.app.open_project(session, &warnings, OpenAs::NewTab);
-        }
-        Source::Als(path) => window.open(&path, OpenAs::NewTab),
-    }
-    if let Some(warning) = settings_warnings.first() {
-        window.app.set_status(Status::Hint(warning.clone()));
-    }
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -195,6 +194,10 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, String> {
 
 struct Window {
     app: App,
+    /// Shown over the first frames while Suhina starts; gone once it has faded out.
+    splash: Option<Splash>,
+    /// What starting does once the splash is on screen.
+    start_up: Option<StartUp>,
     graphics_now: Graphics,
     /// The main window is a Win32 or X11 one, which plug-in editors can be embedded in.
     editors_embeddable: bool,
@@ -203,8 +206,31 @@ struct Window {
     recent: recent::Recent,
 }
 
+/// The slow part of starting, done in the window once the splash shows rather than before the
+/// window opens: the browser's library (its saved indexes), the sample map and the project
+/// asked for.
+struct StartUp {
+    source: Source,
+    output_choice: OutputChoice,
+    /// Warnings from reading the settings, keymap and themes.
+    warnings: Vec<String>,
+}
+
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(splash) = self.splash.as_mut()
+            && splash.take_start(ui.ctx())
+            && let Some(start_up) = self.start_up.take()
+        {
+            self.start(start_up);
+        }
+        if let Some(splash) = self.splash.as_mut()
+            && !splash.started()
+        {
+            // The window is not ready yet: only the splash.
+            let _shown = splash.show(ui);
+            return;
+        }
         self.app.ui(ui);
         if let Some((path, how)) = self.app.take_open_request() {
             self.open(&path, how);
@@ -225,6 +251,16 @@ impl eframe::App for Window {
         }
         if let Some(path) = self.app.take_saved_path() {
             self.remember(&path);
+        }
+        if let Some(request) = self.app.take_pick_request()
+            && let Some(path) = pick(&request)
+        {
+            self.app.set_picked(request.field, path);
+        }
+        if let Some(path) = self.app.take_forget_request()
+            && let Err(e) = self.recent.remove(&path)
+        {
+            self.app.set_status(Status::Error(e));
         }
         if let Some(folder) = self.app.take_lists_wanted() {
             self.app.set_project_lists(self.recent.existing(), recent::templates(&folder));
@@ -262,6 +298,11 @@ impl eframe::App for Window {
             self.app.set_status(Status::Error(e));
         }
         self.sync_themes(ui.ctx());
+        if let Some(splash) = self.splash.as_mut()
+            && !splash.show(ui)
+        {
+            self.splash = None;
+        }
     }
 
     /// Quitting: backups that quitting calls for are written, and the journal says nothing is
@@ -272,6 +313,38 @@ impl eframe::App for Window {
 }
 
 impl Window {
+    /// Starts the browser's library and the sample map, and opens the project asked for, or what
+    /// Settings › General › At start says without one.
+    fn start(&mut self, start_up: StartUp) {
+        let StartUp { source, output_choice, mut warnings } = start_up;
+        // The browser's library: browser.json and the folder indexes beside the settings (ADR 0012).
+        let mut library = suhina_library::Library::new(eframe::storage_dir(app_id()));
+        warnings.extend(library.take_warnings());
+        if let Err(e) = library.start() {
+            warnings.push(e);
+        }
+        self.app.set_file_library(library);
+        // The sample map analyses the library's samples in the background (ADR 0013).
+        self.app.projects_mut().start_sound_map();
+        // What a crash left in the backups folder is offered (`docs/spec/backups.md`).
+        self.app.offer_recovery();
+        // Shown first, so what opening the project says comes after it.
+        if let Some(warning) = warnings.first() {
+            self.app.set_status(Status::Hint(warning.clone()));
+        }
+        match source {
+            // What Settings › General › At start says; the last project is the newest recent one.
+            Source::Nothing => self.app.open_at_start(self.recent.existing().into_iter().next()),
+            Source::Demo => {
+                self.app.projects_mut().close_preview_output();
+                let session = Session::new(suhina_ui::demo::demo_project());
+                let (session, opened) = with_audio(session, &output_choice);
+                self.app.open_project(session, &opened, OpenAs::NewTab);
+            }
+            Source::Als(path) => self.open(&path, OpenAs::NewTab),
+        }
+    }
+
     /// Opens a Live Set in a new tab or in place of the active project: imports it, decodes its
     /// audio and starts playing it, stopped.
     fn open(&mut self, path: &Path, how: OpenAs) {
@@ -304,6 +377,8 @@ impl Window {
         let waveforms = suhina_ui::waveform::from_pool(&audio);
         session.set_audio(audio);
         let choice = self.app.projects().output_choice().clone();
+        // A device may only be open once: the previews' own output closes first (ADR 0011).
+        self.app.projects_mut().close_preview_output();
         let (session, output_warnings) = with_audio(session, &choice);
         warnings.extend(output_warnings);
         if self.app.open_project(session, &warnings, how).is_some() {
@@ -401,6 +476,20 @@ impl Window {
 }
 
 /// "<what> <file>", and the file shown in the file manager.
+/// Shows the system's file or folder dialog `request` asks for; `None` when it was cancelled.
+/// It waits on the main thread, as macOS requires, while the window stays behind it.
+fn pick(request: &suhina_ui::pick::PickRequest) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new().set_title(request.field.title());
+    if let Some(start) = request.start.as_ref().filter(|s| s.is_dir()) {
+        dialog = dialog.set_directory(start);
+    }
+    if request.field.folder() {
+        dialog.pick_folder()
+    } else {
+        dialog.add_filter("Projects", request.field.extensions()).pick_file()
+    }
+}
+
 fn saved(path: &Path, what: &str) -> String {
     let _shown = theme_files::reveal(path, true);
     format!("{what} {}", path.display())

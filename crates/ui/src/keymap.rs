@@ -81,7 +81,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 46] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 52] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -94,6 +94,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 46] = [
     ("view.arrangement", "Show the Arrangement view", "View"),
     ("settings.open", "Open or close Settings", "View"),
     ("view.detail", "Show or hide the detail area", "View"),
+    ("view.mappingMode", "Map keys to clip slots, scenes and stop buttons, or stop mapping", "View"),
     ("view.browser", "Show or hide the browser", "View"),
     ("browser.search", "Search in the browser", "View"),
     ("view.sampleMap", "Show or hide the sample map in the main area", "View"),
@@ -113,6 +114,11 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 46] = [
     ("selection.split", "Split the selected clip at the playhead", "Edit"),
     ("selection.consolidate", "Consolidate the selected clip into a new one", "Edit"),
     ("selection.group", "Group the selected tracks", "Tracks"),
+    ("selection.launch", "Launch the selected clip slot", "Session"),
+    ("selection.up", "Select the clip slot above", "Session"),
+    ("selection.down", "Select the clip slot below", "Session"),
+    ("selection.left", "Select the clip slot in the track to the left", "Session"),
+    ("selection.right", "Select the clip slot in the track to the right", "Session"),
     ("pianoRoll.quantize", "Quantise the piano roll's selected notes, or all its notes", PIANO_ROLL),
     ("pianoRoll.selectAll", "Select every note in the piano roll", PIANO_ROLL),
     ("pianoRoll.deselect", "Clear the piano roll's note selection", PIANO_ROLL),
@@ -143,6 +149,17 @@ const PIANO_ROLL: &str = "Piano roll";
 /// shows a clip.
 pub fn piano_roll_only(action: &str) -> bool {
     action.starts_with("pianoRoll.") && action != "pianoRoll.quantize"
+}
+
+/// Whether `action` works only on a selected clip slot in the Session view: the piano roll keys
+/// never do (it edits arrangement clips), so the two may share keys.
+pub fn slot_only(action: &str) -> bool {
+    matches!(action, "selection.launch" | "selection.up" | "selection.down" | "selection.left" | "selection.right")
+}
+
+/// Whether `a` and `b` can both run on the same key press, so one key for both is a conflict.
+fn overlap(a: &str, b: &str) -> bool {
+    !((piano_roll_only(a) && slot_only(b)) || (slot_only(a) && piano_roll_only(b)))
 }
 
 /// Every action a key can be bound to: the window's, then each command that needs no
@@ -224,7 +241,7 @@ impl Preset {
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 47] = [
+const DEFAULTS: [(&str, &[&str]); 53] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -233,6 +250,7 @@ const DEFAULTS: [(&str, &[&str]); 47] = [
     ("transport.playFromSelection", &["Shift+Space"]),
     ("view.toggle", &["Tab"]),
     ("view.detail", &["Shift+Tab"]),
+    ("view.mappingMode", &["Ctrl+M"]),
     ("view.browser", &["Ctrl+B"]),
     ("browser.search", &["Ctrl+F"]),
     ("view.sampleMap", &["Ctrl+Shift+M"]),
@@ -251,6 +269,11 @@ const DEFAULTS: [(&str, &[&str]); 47] = [
     ("selection.split", &["Ctrl+E"]),
     ("selection.consolidate", &["Ctrl+J"]),
     ("selection.group", &["Ctrl+G"]),
+    ("selection.launch", &["Enter"]),
+    ("selection.up", &["Up"]),
+    ("selection.down", &["Down"]),
+    ("selection.left", &["Left"]),
+    ("selection.right", &["Right"]),
     ("pianoRoll.quantize", &["Ctrl+U"]),
     ("marker.addAtPlayhead", &["M"]),
     ("transport.setLoopEnabled", &["Ctrl+L"]),
@@ -392,7 +415,7 @@ impl Keymap {
                 }
             }
         }
-        seen.retain(|(_, ids)| ids.len() > 1);
+        seen.retain(|(_, ids)| ids.iter().enumerate().any(|(i, a)| ids[i + 1..].iter().any(|b| overlap(a, b))));
         seen
     }
 
@@ -464,6 +487,8 @@ mod tests {
             "Ctrl+Equals",
             "Ctrl+0",
             "Minus",
+            "Enter",
+            "Up",
             "Escape",
             "Shift+Up",
             "Left",
@@ -578,5 +603,9 @@ mod tests {
         let conflicts = keymap.conflicts();
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].1.len(), 2);
+        // The selected slot and the piano roll share the arrows: they never work at once.
+        assert_eq!(Keymap::default().keys("selection.up"), Keymap::default().keys("pianoRoll.up"));
+        assert!(!overlap("selection.up", "pianoRoll.up"));
+        assert!(overlap("selection.up", "transport.play"));
     }
 }

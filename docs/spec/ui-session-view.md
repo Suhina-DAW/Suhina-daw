@@ -1,15 +1,19 @@
 ---
-description: Functional spec of the main window and the Session view: regions, clip slots, scenes, I/O, mixer, browser
-read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
+description: Functional spec of the main window and the Session view: regions, clip slots, scenes, launch keys and their mapping mode, I/O, mixer, browser
+read_when: Session view, main window layout, clip slot behaviour, scene launch, launch keys, mapping mode, Map button, Ctrl+M, mixer section, browser structure
 type: spec
 status: draft
 last_verified: 2026-10-15
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
+  - crates/ui/src/slot_launch.rs
+  - crates/ui/src/launch_keys.rs
+  - crates/ui/tests/launch_keys.rs
   - crates/ui/src/app.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/detail_view.rs
+  - crates/ui/src/keymap.rs
   - crates/ui/src/follow_view.rs
   - crates/engine/src/cpu.rs
 ---
@@ -28,7 +32,8 @@ From top to bottom:
    Edit, View, Projects, Options and Help so far; components.md lists what is built.)
 2. **Control bar**, left to right:
    - external sync and tempo: sync toggle, tap tempo, tempo field, nudge, time signature
-   - groove amount, metronome, global launch quantisation
+   - groove amount, metronome, global launch quantisation (in Suhina also the Arrangement
+     view's grid: [arrangement editing](arrangement-editing.md) › The grid)
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
@@ -96,13 +101,41 @@ Each cell is a slot for one clip.
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
 | Empty, without stop button | nothing | nothing (**Suhina:** selects it) |
-| Clip, stopped | clip colour, clip name, launch control | launches the clip; **Suhina:** and selects it |
-| Clip, queued | launch control in a pending (blinking) state until the quantisation point | |
-| Clip, playing | launch control in the playing state, progress through the clip | relaunches |
+| Clip, stopped | clip colour, clip name, launch control | on the launch control: launches the clip (**Suhina:** and selects it); on the name: selects it |
+| Clip, queued | launch control in a pending (blinking) state until the quantisation point | as stopped |
+| Clip, playing | launch control in the playing state, progress through the clip | on the launch control: relaunches; on the name: selects it |
 | Clip, recording | recording state | |
 
-Double-clicking an empty slot on a MIDI track creates an empty one-bar clip and opens it in the
-detail area. Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
+**Launching and selecting** (public manual, Session View › clips and launch settings). A clip's
+launch control is at the left edge of its slot; the rest of the slot, its name, selects the clip
+without launching it. A selected clip shows in the detail area. Launching a clip with its launch
+control also selects it, unless the user turns that off (a launch setting, on by default); with it
+off, launching leaves the selection and the detail area as they were. With a clip selected, Enter
+launches it and the arrow keys move the selection to the slot above, below, or in the next track.
+Shift-click and Ctrl-click add clips to the selection **(not built)**.
+
+**Suhina:** the launch control is the slot's mark and the padding around it (the first 18 px);
+the name selects. Selecting a clip selects its track too, and selecting a track by its header ends
+the clip's selection. The selected slot is drawn like a selected arrangement clip. The setting is
+Settings › Interface › Detail area › **Select on launch** (On by default, saved as
+`select_on_launch`). Enter is the action `selection.launch`; the arrows are `selection.up`,
+`selection.down`, `selection.left` and `selection.right` (all rebindable,
+[shortcuts](../shortcuts.md)); left and right move to the next track with clip slots (groups and
+return tracks are skipped) and keep the scene, up and down stay in the track. They act in the
+Session view only, and only while a clip slot is selected. Multiple selection is not built.
+
+**Suhina:** a clip's launch control launches when the mouse button goes down on it, not when the
+click ends, and going up is the release a clip in gate or repeat mode listens for
+([clip launching](clip-launching.md#launch-settings)). Right-clicking a clip opens the slot's menu
+with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repeat), **Launch
+quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
+
+Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
+empty MIDI clip there, one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
+[arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the
+detail area shows it; a first click on a slot with a stop button still stops the track. Audio
+tracks, groups and returns do nothing on a double-click. Editing its notes waits for the piano
+roll (#200). Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
 there; on an empty audio track the track takes the clip's name **(observed in the corpus)**.
 
 Below the last scene each track has a **stop all clips** button for that track, and the main
@@ -152,6 +185,33 @@ each applied with Enter, then **Insert scene below**, **Duplicate scene** and **
 control bar shows the time signature playing, and its position counts bars in it; a launched
 scene can change it.
 
+### Launch keys
+
+**Suhina:** a computer key can launch a slot, a scene or a track's stop button
+([clip launching](clip-launching.md#launching-from-keys-and-notes)).
+
+- **Mapping mode.** **Map keys** at the right end of the title bar, after the view names, or
+  Ctrl+M (`view.mappingMode`) turns it on and shows the Session view; **Map keys** is lit while
+  it is on.
+  Every slot (empty ones too), scene launch button and track stop button gets a tint, and a
+  control with keys mapped to it shows them in small text at its right edge (`Q`, `Note 36`).
+  A click picks a control (an outline) and launches nothing; clicking it again drops it.
+- **Mapping a key.** With a control picked, the next key pressed without Ctrl, Alt, Shift or Cmd
+  is mapped to it (`launcher.addMapping`), one undo step; a key mapped elsewhere moves here.
+  Delete or Backspace removes the picked control's keys (`launcher.removeMapping`). Escape, Ctrl+M
+  or **Map keys** again leaves the mode; so does showing the Arrangement view. With nothing picked,
+  keys do what they always do.
+- **Playing.** Outside the mapping mode a mapped key going down is the press (`clip.launch`,
+  `scene.launch`, `track.stop`) and going up the release (`clip.release`, for a clip in gate or
+  repeat mode). Holding a key down does not press it again.
+- **Keys that are also shortcuts.** A mapped key wins over a shortcut on the same key while the
+  Session view is shown, no text field has the keyboard and no dialog or Settings is open;
+  anywhere else the shortcut works as before. A key pressed with Ctrl, Alt, Shift or Cmd is
+  always a shortcut, so Ctrl+Z still undoes when Z is mapped.
+- **Releases are never lost.** A key held when the window loses focus, or when one of the
+  conditions above ends (a text field takes the keyboard, the Arrangement view is shown), is
+  released then, so a gate clip does not play on.
+
 ### I/O section (below the grid, per track, toggleable)
 
 - MIDI tracks: "MIDI From" (source, channel), monitoring (In / Auto / Off), "MIDI To" or "Audio
@@ -180,9 +240,22 @@ undo step (`track.setPan`, `track.setVolume` with `continue`). The Arrangement v
 headers work the same. **Solo:** while any track is soloed, only the
 soloed tracks are heard, with the groups they play into, the tracks inside a soloed group, and
 the return tracks (so effects stay audible); mute still wins. A click solos one track and ends
-the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). MIDI tracks without an instrument show no
+the other solos; with a modifier (Ctrl) it adds to them (`track.setSolo`, `exclusive`). **Arm:**
+an armed track's instrument plays what the MIDI controllers play; a click arms one track and
+disarms the others, Ctrl adds (`track.setArm`, `exclusive`; [ADR 0017](../decisions/0017-inputs-and-latency.md)).
+A track that plays audio is armed to hear its audio input (`track.setAudioInput`, monitoring Auto). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+## Detail area: a selected clip
+
+A selected clip in a slot shows its properties as an arrangement clip does
+([components](../design/components.md) › Clip properties), with **Scene** (its number) in place
+of Start: track, scene, length, loop, then gain, fade-in and fade-out for an audio clip
+(`clip.setFades {track, scene, …}` sets them, [clip launching](clip-launching.md) › Clip fades)
+or the note count for a MIDI clip; the track's device chain follows. A slot that is emptied, or a
+track that is deleted, shows the track's devices or nothing. Editing the properties there is
+planned.
 
 ## Detail area: follow action
 

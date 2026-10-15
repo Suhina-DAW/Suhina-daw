@@ -70,7 +70,7 @@ Both play a sample as soon as the pointer is over it.
 
 - **In the browser.** A **List | Map** switch above the results changes the results area into
   the map. The sidebar, the category filters, search, tags and the preview strip stay as they
-  are. The browser can be widened to 600 px.
+  are. The browser can be widened to half the window.
 - **Large.** The **Large** button at the map's corner (and View › Sample map,
   **Ctrl+Shift+M**) shows the map in the main area in place of the Session or Arrangement view,
   at full size; **Close**, Ctrl+Shift+M, Escape (when Show similar is not on) or the view
@@ -110,7 +110,25 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
   length is kept with the analysis, so changing the limit needs no new analysis.
 - The map's top bar says what it holds: "1 240 samples, analysing, 6 760 to go, 12 too long,
   3 could not be read". While the analysis goes on, the layout is computed again at most every
-  2 seconds, on a thread of its own ("arranging…"), so the window never waits for it.
+  2 seconds, on a thread of its own ("arranging…", then "arranging 42 %" as the layout's
+  iterations go by), so the window never waits for it.
+- While samples are left to analyse, a card in the middle of the map says **Analysing samples**,
+  with a bar and "6 760 of 14 000"; once they are all analysed and a layout takes longer than a
+  moment, it says **Arranging the map**, with a bar and the share of the layout's iterations done
+  ("Getting the map ready" before the first, and for a layout already kept). The card is only drawn: the map
+  under it, its buttons and the rest of the window keep working.
+- **The top bar:** the controls in one row (**Cloud | Grid**, **+**, **−**, **Fit**, **Large**,
+  **Window**, **Size**, **Volume**), wrapping onto more rows when the map is narrow, never on top
+  of each other (a label stays with its field); under them, the status on a row of its own.
+- **Volume** (−48 to +6 dB) is the preview level the browser's previews use too (Options ›
+  Settings › Browser › Preview volume), kept; moving it also changes the sample playing now
+  (`preview.setGain`), gliding there without a click.
+- When the status does not fit its row, it is cut short with "…". Its tooltip has all of it and says why samples are missing, one part each:
+  still to analyse; too long (the limit, and Options › Settings › Browser › Map: longest sample
+  to change it); could not be read, by reason with the commonest first (the reason as the
+  decoder gives it, such as "unsupported codec: …", "read error: …", "silent" or "larger than
+  256 MiB", its count and the names of the first three files; at most 12 reasons, the rest
+  counted under the last); and left out over the 200 000 a map holds.
 - A file that cannot be decoded is left out and counted; `soundmap.info` gives the reason.
 
 ## Layout
@@ -123,15 +141,17 @@ Before an item can be placed, its audio is analysed. This happens in the backgro
 - **Grid:** the same layout snapped to a grid of square cells, one item per cell, keeping
   neighbours together as far as possible. The grid is as close to the map's aspect ratio as the
   item count allows, and is made again when the map's shape changes; `soundmap.layout` takes the
-  aspect ratio as `aspect`.
+  aspect ratio as `aspect`. Snapping a large map takes a while (over a second for 150 000 items),
+  so it is made on a thread of its own, only while the grid is shown, and the old grid is drawn
+  stretched meanwhile; resizing never waits for it.
 - A **Cloud | Grid** switch at the top of the map chooses; the choice is kept.
 - The same scope with the same items always opens with the same layout (layouts are kept),
   so a user can learn where things are. Adding or changing files lays the scope out again
   **(to decide:** whether new items are placed into the existing layout instead, until a
   Re-layout button is pressed**)**.
 - A large scope takes a while to lay out the first time (about 5 seconds for 10 000 items, a
-  minute or more for 200 000); meanwhile the map shows "Arranging…" over the previous layout or
-  an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
+  minute or more for 200 000); meanwhile the map shows the **Arranging the map** card over the
+  previous layout or an empty map. A scope with more than 200 000 items shows the first 200 000 and says so.
 
 ## Many items
 
@@ -156,6 +176,11 @@ number of points in view:
   than a solid blob.
 - The grid layout draws the same way. A cell smaller than 3 pixels is part of the density;
   larger cells are drawn as before.
+- **Resizing.** While the map's area changes size (the window, the map's own window, the
+  large map), the last density raster is drawn scaled into place, so the points stay where they
+  are drawn. It is worked out again once the area has kept one size for 150 ms. In the cloud
+  the legend's counts and the clusters are kept, since the points' positions do not depend on
+  the view's shape; the grid works them out again, as its cells follow it.
 
 **Labels.** Every cluster of a kind gets a label, not one label for the whole kind. Kinds
 that sit in several places are named in each of them.
@@ -186,7 +211,7 @@ change, not every frame.
 
 Every item has a kind. The kinds and the words in names that give them:
 
-| Kind | Words (whole words in the file name or its folders, any case) |
+| Kind | Words (whole words in the file name or its two nearest folders, any case) |
 |---|---|
 | Kick | kick, kik, kck, bd, bassdrum, bass drum |
 | Snare | snare, snr, sd |
@@ -199,7 +224,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Crash | crash |
 | Ride | ride |
 | Cymbal | cymbal, cym, china, splash |
-| Percussion | perc, shaker, shk, tamb, tambourine, conga, bongo, cowbell, clave, block, triangle |
+| Percussion | perc, percussion, shaker, shk, tamb, tambourine, conga, bongo, cowbell, clave, block, triangle |
 | Bass | 808, bass, sub |
 | Tonal | stab, chord, pluck, keys, synth, lead, pad |
 | Vocal | vox, vocal, voice, chant |
@@ -210,9 +235,17 @@ Every item has a kind. The kinds and the words in names that give them:
   digits (`KickHard_02` → kick, hard, 02); a word with a trailing *s* also counts as the word
   without it (`Kicks`, `Hats`) when what is left has at least three letters and the word is not
   itself in the table. Two words in a row (`closed hat`, `bass drum`) count before one word
-  alone. The file name is read first, then its folders from the
-  nearest up to the library folder; the first word that names a kind wins, and a more specific
-  kind (Closed hat) wins over a general one (Hat) in the same name.
+  alone. These words also count at the start of a longer word (`Kickdrum`, `Snareroll`,
+  `Bassline`): kick, snare, clap, hihat, crash, cymbal, shaker, conga, bongo, cowbell, bass,
+  synth, chord, pluck, vocal, voice, riser, sweep, impact.
+- **The most specific kind in a name wins**, wherever it is in the name: a drum (kick, snare,
+  clap, closed or open hat, rim, tom, crash, ride) over Hat and Cymbal, those over Percussion,
+  then Vocal, Bass, Tonal and Effect (`808 Kick` is a kick, `Snare FX` a snare, `Vocal Chop FX`
+  a vocal). Between two equally specific kinds, the first in the name wins.
+- **The file name is read first, then its two nearest folders** below the library folder; a
+  folder further up is usually a pack's or a collection's name, not a kind. In a folder's name,
+  "bass" next to a word of a style of music (house, music, future, drum, dnb, uk, and, n,
+  jungle, trap: `Bass House Vol 2`, `Drum and Bass`) names no kind.
 - **Kinds from the sound.** Before the layout, the map learns what each kind sounds like from
   the scope's own items whose file name (or the user) gives their kind; no model is shipped. A
   kind with fewer than 4 such items learns from items whose folder names it as well. Each
@@ -244,6 +277,10 @@ Every item has a kind. The kinds and the words in names that give them:
 ## Points
 
 - A point is a dot (cloud) or a filled cell (grid) in its kind's colour.
+- **Size** in the map's top bar (25 to 400 %, kept) makes the dots smaller or larger; their
+  places do not change, so smaller dots stand further apart. In the density view it sets how far
+  each point is spread: below 75 % not at all, so neighbouring points stand apart, and further
+  the larger the size.
 - **In use:** items used by a clip of the active project are drawn larger with a ring.
 - **Selected:** items selected in the browser have a light outline; the map and the list share
   one selection.
@@ -263,7 +300,7 @@ Every item has a kind. The kinds and the words in names that give them:
 | Pointer resting on a point | Its tooltip shows the name, the kind, the folder and, after 0.15 s, the file's waveform, read in the background ([waveforms](waveforms.md)). |
 | Click a point | Selects it and previews it (also with preview on hover off) as the button goes down, as in the list. |
 | Ctrl+click, Shift+drag on empty space | Adds to or removes from the selection; Shift+drag draws a rectangle and selects what is in it. |
-| Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. |
+| Drag a point | Drags the selection into the project, exactly as from the list (drop targets, labels, Ctrl for one track each): [`browser.md`](browser.md) › Dragging into the project. The drag carries the point the button went down on (with the selection when it is part of it), not the one under the pointer when the drag begins a few pixels later; while it goes on, points are not highlighted or previewed and the view does not move. |
 | Double-click a point | Adds it to the selected track, as in the list. |
 | Drag empty space, middle-drag | Moves the view. |
 | Mouse wheel | Zooms around the pointer (Ctrl+wheel is not needed). |

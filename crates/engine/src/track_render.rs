@@ -60,6 +60,8 @@ fn alone(project: &Project, track: TrackId) -> Project {
             channel: Some(channel),
             parent: None,
             extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: channel,
@@ -133,6 +135,8 @@ mod tests {
                 channel: Some(ChannelId(7)),
                 parent: None,
                 extensions: Extensions::default(),
+                audio_input: Default::default(),
+                midi_input: Default::default(),
             }],
             channels: vec![Channel {
                 id: ChannelId(7),
@@ -172,6 +176,7 @@ mod tests {
                         fade_in_curve: Default::default(),
                         fade_out_curve: Default::default(),
                         follow_action: Default::default(),
+                        launch: Default::default(),
                         extensions: Extensions::default(),
                     }],
                 }],

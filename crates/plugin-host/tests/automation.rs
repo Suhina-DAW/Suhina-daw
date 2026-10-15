@@ -66,6 +66,8 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             channel: Some(ChannelId(1)),
             parent: None,
             extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),
@@ -106,6 +108,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
                     fade_out_curve: Default::default(),
                     extensions: Extensions::default(),
                     follow_action: Default::default(),
+                    launch: Default::default(),
                 }],
             }],
             markers: Vec::new(),

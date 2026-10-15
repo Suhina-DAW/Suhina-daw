@@ -15,6 +15,11 @@ pub use tempo::{
     TempoPoint, TimeSignatureChange, valid_bpm,
 };
 
+mod launch;
+mod mapping;
+pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
+pub use mapping::{KEY_NAME_MAX, LaunchMapping, MappingSource, MappingTarget};
+
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackId(pub u32);
@@ -108,7 +113,66 @@ pub struct Track {
     /// The group track this track belongs to, if any. Groups nest: a group's own `parent` is
     /// the group it is inside, at most [`MAX_GROUP_DEPTH`] levels deep and never in a cycle.
     pub parent: Option<TrackId>,
+    /// Which MIDI controllers the track hears while it is armed (ADR 0017).
+    pub midi_input: MidiInput,
+    /// Which channels of the audio input the track hears, and when (ADR 0017).
+    pub audio_input: AudioInput,
     pub extensions: Extensions,
+}
+
+/// What a track hears of the audio input device (a microphone, a guitar), and when.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AudioInput {
+    pub channels: InputChannels,
+    pub monitor: Monitor,
+}
+
+/// The channels of the audio input device a track hears, counted from 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputChannels {
+    /// None: the track has no audio input.
+    #[default]
+    None,
+    /// One channel, heard in the middle (then panned by the track).
+    Mono(u16),
+    /// This channel on the left and the next one on the right.
+    Stereo(u16),
+}
+
+/// When a track's audio input is heard through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Monitor {
+    /// While the track is armed.
+    #[default]
+    Auto,
+    /// Always.
+    In,
+    /// Never; the input is only recorded.
+    Off,
+}
+
+/// The highest audio input channel a track can name.
+pub const MAX_INPUT_CHANNEL: u16 = 256;
+
+/// Which MIDI controllers a track hears while it is armed: a port, or every one, or none, and
+/// one channel or every one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MidiInput {
+    pub port: MidiPort,
+    /// 1 to 16, or `None` for every channel.
+    pub channel: Option<u8>,
+}
+
+/// The MIDI input port a track hears.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MidiPort {
+    /// Every port that is on.
+    #[default]
+    All,
+    /// One port, by the name the system gives it; a port that is not there plays nothing.
+    Named(String),
+    /// No port: the track is not played from a controller.
+    Nothing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,9 +433,9 @@ pub struct Clip {
     pub offset: f64,
     pub loop_range: Option<LoopRange>,
     pub enabled: bool,
-    /// Fade-in and fade-out of an audio clip on the arrangement, in beats from the clip's start
-    /// and to its end; 0.0 is no fade. Both are at least 0 and together at most `length`
-    /// ([`Clip::fades_valid`]). Notes and launcher slots ignore them.
+    /// Fade-in and fade-out of an audio clip, on the arrangement or in a launcher slot, in beats
+    /// from the clip's start and to its end; 0.0 is no fade. Both are at least 0 and together at
+    /// most `length` ([`Clip::fades_valid`]). Notes ignore them.
     pub fade_in: f64,
     pub fade_out: f64,
     /// How the fade-in and the fade-out rise: a shape, bent by a curve. Linear and unbent by
@@ -380,6 +444,8 @@ pub struct Clip {
     pub fade_out_curve: FadeCurve,
     /// What a launched clip does after it has played for a while; arrangement clips ignore it.
     pub follow_action: FollowAction,
+    /// How the clip launches from a launcher slot: mode, legato and its own quantisation.
+    pub launch: LaunchSettings,
     pub extensions: Extensions,
 }
 
@@ -694,6 +760,9 @@ pub struct ArrangementLane {
 pub struct Launcher {
     pub scenes: Vec<Scene>,
     pub columns: Vec<LauncherColumn>,
+    /// Keys and MIDI notes that launch slots, scenes and stop buttons. A mapping whose track or
+    /// scene is gone stays, unused, so an undo brings it back working.
+    pub mappings: Vec<LaunchMapping>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -756,6 +825,10 @@ pub enum ValidationError {
     GroupCycle(TrackId),
     /// This track is inside more than [`MAX_GROUP_DEPTH`] groups.
     GroupTooDeep(TrackId),
+    /// The track's MIDI input names an empty port or a channel outside 1 … 16.
+    BadMidiInput(TrackId),
+    /// The track's audio input names a channel outside 1 … 256.
+    BadAudioInput(TrackId),
 }
 
 impl fmt::Display for ValidationError {
@@ -770,6 +843,12 @@ impl fmt::Display for ValidationError {
             Self::GroupCycle(id) => write!(f, "track {} is inside itself through its groups", id.0),
             Self::GroupTooDeep(id) => {
                 write!(f, "track {} is inside more than {MAX_GROUP_DEPTH} nested groups", id.0)
+            }
+            Self::BadAudioInput(id) => {
+                write!(f, "track {} has an audio input on a channel outside 1 to {MAX_INPUT_CHANNEL}", id.0)
+            }
+            Self::BadMidiInput(id) => {
+                write!(f, "track {} has a MIDI input with an empty port name or a channel outside 1 to 16", id.0)
             }
             Self::BadFades { lane, clip } => {
                 write!(
@@ -823,6 +902,18 @@ impl Project {
                     Some(depth) if depth > MAX_GROUP_DEPTH => errors.push(ValidationError::GroupTooDeep(track.id)),
                     Some(_) => {}
                 }
+            }
+            let bad_port = matches!(&track.midi_input.port, MidiPort::Named(name) if name.trim().is_empty());
+            if bad_port || track.midi_input.channel.is_some_and(|c| !(1..=16).contains(&c)) {
+                errors.push(ValidationError::BadMidiInput(track.id));
+            }
+            let audio_ok = match track.audio_input.channels {
+                InputChannels::None => true,
+                InputChannels::Mono(c) => (1..=MAX_INPUT_CHANNEL).contains(&c),
+                InputChannels::Stereo(c) => (1..MAX_INPUT_CHANNEL).contains(&c),
+            };
+            if !audio_ok {
+                errors.push(ValidationError::BadAudioInput(track.id));
             }
         }
         for channel in &self.channels {
@@ -972,6 +1063,8 @@ mod tests {
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(channel)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         }
     }
@@ -1007,6 +1100,7 @@ mod tests {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         }
     }
@@ -1072,6 +1166,7 @@ mod tests {
                 markers: Vec::new(),
             },
             launcher: Launcher {
+                mappings: Vec::new(),
                 scenes: vec![Scene::default(), Scene::default()],
                 columns: vec![LauncherColumn {
                     track: TrackId(1),

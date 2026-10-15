@@ -4,9 +4,9 @@
 
 use std::collections::BTreeSet;
 
-use egui::{Align2, Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
+use egui::{Align2, Color32, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::TrackId;
+use suhina_engine::model::{MappingTarget, TrackId};
 
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
@@ -23,6 +23,8 @@ const PITCH: f32 = ROW + 1.0;
 const FOLD_ARROW: f32 = 12.0;
 /// Mark sizes inside a slot.
 const CLIP_MARK: f32 = 6.0;
+/// The part of a clip's slot that launches it: the mark and the padding around it.
+const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
 /// How dim a muted track's lane is.
 const MUTED_ALPHA: f32 = 0.55;
@@ -38,14 +40,18 @@ pub struct SessionViewState {
     /// The selected track (its header was clicked, or a clip on it selected); the detail area
     /// shows its devices.
     pub selected: Option<TrackId>,
-    /// The selected clip slot, its track and scene from 0: launching its clip or clicking it
-    /// selected it. The detail area shows the clip's follow action; Ctrl+C and Ctrl+V act on it.
+    /// The selected clip slot, its track and scene from 0: a click on the clip's name, a launch,
+    /// or a click on an empty slot selected it. The detail area shows its clip; Ctrl+C and Ctrl+V
+    /// act on it.
     pub selected_slot: Option<(TrackId, usize)>,
     /// Something has been copied, so a slot's menu can paste it; the window says so each frame.
     pub can_paste: bool,
     /// A clip slot whose drag started this frame (track, scene from 0): the window carries the
     /// clip from there (`docs/spec/ui-session-view.md` › Between the views).
     pub slot_drag: Option<(TrackId, usize)>,
+    /// Launching a clip leaves the selection as it is (Settings › Detail area › Select on
+    /// launch is off); by default a launch selects the clip.
+    pub keep_selection_on_launch: bool,
     /// A column header being dragged to move its track, and where it was let go.
     track_drag: Option<TrackId>,
     track_drop: Option<(TrackId, f32)>,
@@ -58,6 +64,8 @@ pub struct SessionViewState {
     pub drop: Option<DropProbe>,
     /// The engine's levels this frame, for the mixer's meters.
     pub meters: Meters,
+    /// Keys that launch slots, scenes and stop buttons, and the mode that maps them.
+    pub launch_keys: crate::launch_keys::LaunchKeys,
 }
 
 impl SessionViewState {
@@ -65,6 +73,31 @@ impl SessionViewState {
     pub fn select_slot(&mut self, track: TrackId, scene: usize) {
         self.selected_slot = Some((track, scene));
         self.selected = Some(track);
+    }
+}
+
+/// Where a key moves the selected slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// The slot one `step` from `from` (a track and a scene from 0): up and down within the track,
+/// left and right to the next track with clip slots in the same scene. `None` at the edge of the
+/// grid, or when `from` is not in it.
+pub fn step_slot(grid: &Grid, from: (TrackId, usize), step: Step) -> Option<(TrackId, usize)> {
+    let (track, scene) = from;
+    let slotted: Vec<&Column> = grid.columns.iter().filter(|c| c.kind == ColumnKind::Track).collect();
+    let at = slotted.iter().position(|c| c.track == track)?;
+    let scenes = slotted.get(at)?.slots.len();
+    match step {
+        Step::Up => scene.checked_sub(1).filter(|s| *s < scenes).map(|s| (track, s)),
+        Step::Down => Some(scene + 1).filter(|s| *s < scenes).map(|s| (track, s)),
+        Step::Left => at.checked_sub(1).and_then(|i| slotted.get(i)).map(|c| (c.track, scene)),
+        Step::Right => slotted.get(at + 1).map(|c| (c.track, scene)),
     }
 }
 
@@ -141,8 +174,18 @@ pub fn show(
 
     let groups =
         grid.columns.iter().filter(|c| c.kind == ColumnKind::Group).map(|c| (c.track, c.name.clone())).collect();
-    let bands =
-        Bands { header, body, mixer, top: body.top() - state.scroll.y, scenes: grid.scenes.len(), places, groups };
+    let bands = Bands {
+        midi_ports: &grid.midi_ports,
+        input_channels: grid.input_channels,
+        header,
+        body,
+        mixer,
+        top: body.top() - state.scroll.y,
+        scenes: grid.scenes.len(),
+        places,
+        groups,
+        mapped: &grid.mapped,
+    };
     // Where each track column is this frame, for a dragged header to find its place.
     let mut spans: Vec<(&Column, egui::Rangef)> = Vec::new();
     let mut track_x = area.left() - state.scroll.x;
@@ -262,6 +305,7 @@ pub fn show(
         scene_span,
         body.top() - state.scroll.y,
         grid,
+        &mut state.launch_keys,
         actions,
     );
     let main_mixer = Rect::from_x_y_ranges(scene_span, mixer.y_range());
@@ -313,8 +357,13 @@ pub(crate) fn empty_space(ui: &Ui, painter: &egui::Painter, area: Rect, actions:
     }
 }
 
-/// The view's horizontal bands, and where the first scene row is after scrolling.
-struct Bands {
+/// The view's horizontal bands, where the first scene row is after scrolling, and the keys
+/// mapped to slots and stop buttons.
+struct Bands<'a> {
+    /// The MIDI input ports there are, and the audio input device's channels, for the tracks'
+    /// menus.
+    midi_ports: &'a [String],
+    input_channels: u16,
     header: Rect,
     body: Rect,
     mixer: Rect,
@@ -323,6 +372,7 @@ struct Bands {
     /// Every track but the returns, in track order, and the group tracks with their names.
     places: Vec<Place>,
     groups: Vec<(TrackId, String)>,
+    mapped: &'a [(MappingTarget, String)],
 }
 
 /// One column: header, slots and stop button, mixer strip, and its separator, inside `clip`.
@@ -343,19 +393,7 @@ fn draw_column(
     let header = Rect::from_x_y_ranges(span, bands.header.y_range()).intersect(clip);
     column_header(ui, painter, header, column, bands, state, actions);
     let body_clip = bands.body.intersect(clip);
-    column_body(
-        ui,
-        &painter.with_clip_rect(body_clip),
-        body_clip,
-        span,
-        bands.top,
-        bands.scenes,
-        column,
-        progress,
-        id,
-        state,
-        actions,
-    );
+    column_body(ui, &painter.with_clip_rect(body_clip), body_clip, span, bands, column, progress, id, state, actions);
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
     let mixer_painter = painter.with_clip_rect(bands.mixer.intersect(clip));
     mixer_strip(ui, &mixer_painter, mixer_rect, column, track_number, state, id, actions);
@@ -405,6 +443,8 @@ fn column_header(
             selection: &[],
             into: &into,
             out: nesting::out_of_group(&bands.places, column.track),
+            midi: column.plays_notes.then_some((&column.midi_input, bands.midi_ports)),
+            audio: column.plays_audio.then_some((&column.audio_input, bands.input_channels)),
         };
         menus::track_menu(ui, &menu, actions);
     });
@@ -437,8 +477,7 @@ fn column_body(
     painter: &egui::Painter,
     clip: Rect,
     span: egui::Rangef,
-    top: f32,
-    scenes: usize,
+    bands: &Bands,
     column: &Column,
     progress: Option<f32>,
     id: Id,
@@ -448,6 +487,9 @@ fn column_body(
     // A track's slots can be selected, copied, pasted into and dragged; a group's only launch.
     let editable = column.kind == ColumnKind::Track;
     let can_paste = state.can_paste;
+    let (top, scenes) = (bands.top, bands.scenes);
+    let mapping = state.launch_keys.mode.on && column.kind != ColumnKind::Return;
+    let label = |target: MappingTarget| bands.mapped.iter().find(|(t, _)| *t == target).map(|(_, l)| l.as_str());
     for (scene, slot) in column.slots.iter().enumerate() {
         let rect = Rect::from_x_y_ranges(
             span,
@@ -457,13 +499,52 @@ fn column_body(
             continue;
         }
         let number = scene + 1;
-        let response = match slot.state {
-            SlotState::Empty if editable => Some(widgets::button_area(
+        let target = MappingTarget::Slot { track: column.track, scene };
+        if mapping {
+            // The mapping mode: a click picks the slot, empty or not, and launches nothing.
+            let response = widgets::button_area(
                 ui,
                 rect.intersect(clip),
                 id.with(scene),
-                format!("Empty slot on {} (scene {number})", column.name),
-            )),
+                format!("Map a key to {} scene {number}", column.name),
+            );
+            if response.clicked() {
+                state.launch_keys.pick(target);
+            }
+            slot_cell(painter, rect, column, slot, 0.0, 1.0, progress, false);
+            crate::launch_keys::overlay(
+                painter,
+                rect,
+                label(target),
+                state.launch_keys.mode.selected == Some(target),
+                0.0,
+            );
+            painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
+            continue;
+        }
+        let has_clip = !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
+        let key = (column.track, scene);
+        // A clip on a track: its mark launches it, its name selects it. A group's slot launches
+        // the tracks inside it from anywhere.
+        let selectable = has_clip && column.kind == ColumnKind::Track;
+        let launch_rect = if selectable {
+            Rect::from_min_max(rect.min, Pos2::new((rect.left() + LAUNCH_WIDTH).min(rect.right()), rect.bottom()))
+        } else {
+            rect
+        };
+        let name = if slot.name.is_empty() { "clip" } else { slot.name.as_str() };
+        let sense = if editable { Sense::click_and_drag() } else { Sense::click() };
+        let launch = match slot.state {
+            // An empty slot without a stop button launches nothing. On a track it can be selected
+            // (to paste into), and on a track that plays notes a double-click makes a MIDI clip in it.
+            SlotState::Empty if editable || column.notes => {
+                let response = ui.interact(rect.intersect(clip), id.with(scene), Sense::click());
+                response.widget_info(|| {
+                    let label = format!("Empty slot on {} (scene {number})", column.name);
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)
+                });
+                Some(response)
+            }
             SlotState::Empty => None,
             SlotState::EmptyStop => Some(widgets::button_area(
                 ui,
@@ -472,39 +553,63 @@ fn column_body(
                 format!("Stop {} (scene {number})", column.name),
             )),
             _ => {
-                let name = if slot.name.is_empty() { "clip" } else { slot.name.as_str() };
                 let label = format!("Launch {name} on {} (scene {number})", column.name);
-                let sense = if editable { Sense::click_and_drag() } else { Sense::click() };
-                let response = ui.interact(rect.intersect(clip), id.with(scene), sense);
+                let response = ui.interact(launch_rect.intersect(clip), id.with(scene), sense);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                 Some(response)
             }
         };
-        let hover = response.as_ref().map_or(0.0, |r| widgets::hover(ui, r));
+        let select = selectable.then(|| {
+            let name_rect = Rect::from_min_max(Pos2::new(launch_rect.right(), rect.top()), rect.max);
+            let label = format!("Select {name} on {} (scene {number})", column.name);
+            let response = ui.interact(name_rect.intersect(clip), id.with(("select", scene)), sense);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+            response
+        });
+        let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
-        let has_clip = !matches!(slot.state, SlotState::Empty | SlotState::EmptyStop);
-        let key = (column.track, scene);
-        if let Some(response) = &response {
-            if response.clicked() && slot.state != SlotState::Empty {
-                actions.push(Action::new("clip.launch", json!({ "track": column.track.0, "scene": number })));
-                // A launched clip on a track is selected, so the detail area shows it.
-                if column.kind == ColumnKind::Track && has_clip {
-                    state.select_slot(column.track, scene);
-                }
-            }
-            if editable {
-                if response.clicked() || response.secondary_clicked() {
+        // The launch button launches as the pointer goes down, and releases a gate or repeat
+        // clip as it goes up.
+        if slot.state != SlotState::Empty
+            && let Some(response) = &launch
+            && crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions)
+            && selectable
+            && !state.keep_selection_on_launch
+        {
+            state.select_slot(column.track, scene);
+        }
+        if !has_clip && column.notes && launch.as_ref().is_some_and(Response::double_clicked) {
+            actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
+        }
+        if select.as_ref().is_some_and(Response::clicked) {
+            state.select_slot(column.track, scene);
+        }
+        if editable {
+            for response in [&launch, &select].into_iter().flatten() {
+                // An empty slot is selected by a click, any slot by a right-click: Ctrl+C and
+                // Ctrl+V act on it.
+                if (!has_clip && response.clicked()) || response.secondary_clicked() {
                     state.selected_slot = Some(key);
                 }
                 if has_clip && response.drag_started_by(egui::PointerButton::Primary) {
                     state.selected_slot = Some(key);
                     state.slot_drag = Some(key);
                 }
-                response.context_menu(|ui| menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions));
+                // The slot's menu, and a clip's launch settings under it.
+                response.context_menu(|ui| {
+                    menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions);
+                    if let Some(launch) = slot.launch {
+                        ui.separator();
+                        crate::slot_launch::launch_menu(ui, column.track, number, launch, actions);
+                    }
+                });
             }
+        } else if let (Some(response), Some(launch)) = (&launch, slot.launch) {
+            response.context_menu(|ui| crate::slot_launch::launch_menu(ui, column.track, number, launch, actions));
         }
-        slot_cell(painter, rect, column, slot, hover, pulse, progress);
-        if state.selected_slot == Some(key) {
+        let selected = state.selected_slot == Some(key);
+        slot_cell(painter, rect, column, slot, hover, pulse, progress, selectable && selected);
+        if selected && !selectable {
             painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
         }
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
@@ -525,16 +630,31 @@ fn column_body(
     }
     let response =
         widgets::button_area(ui, stop_rect.intersect(clip), id.with("stop"), format!("Stop {}", column.name));
+    let target = MappingTarget::Stop { track: column.track };
     if response.clicked() {
-        actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
+        if mapping {
+            state.launch_keys.pick(target);
+        } else {
+            actions.push(Action::new("track.stop", json!({ "track": column.track.0 })));
+        }
     }
     let fill = motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response));
     painter.rect_filled(stop_rect, 0.0, fill);
     let square = Rect::from_center_size(stop_rect.center(), Vec2::splat(7.0));
     let color = if column.stop_queued { theme::accent() } else { theme::text_secondary() };
     painter.rect_stroke(square, 0.0, theme::hairline(color), StrokeKind::Inside);
+    if mapping {
+        crate::launch_keys::overlay(
+            painter,
+            stop_rect,
+            label(target),
+            state.launch_keys.mode.selected == Some(target),
+            0.0,
+        );
+    }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn slot_cell(
     painter: &egui::Painter,
     rect: Rect,
@@ -543,6 +663,7 @@ fn slot_cell(
     hover: f32,
     pulse: f32,
     progress: Option<f32>,
+    selected: bool,
 ) {
     let track_color = rgb(column.color);
     let mark_rect =
@@ -561,7 +682,11 @@ fn slot_cell(
             painter.rect_filled(mark_rect(EMPTY_MARK), 0.0, theme::slot_empty());
         }
         SlotState::Stopped | SlotState::Queued => {
-            let fill = motion::mix(theme::control_background(), theme::control_hover(), hover);
+            let fill = if selected {
+                theme::control_active()
+            } else {
+                motion::mix(theme::control_background(), theme::control_hover(), hover)
+            };
             painter.rect_filled(rect, 0.0, lane(fill, column.mute));
             let (mark, text) = if slot.enabled {
                 (track_color, theme::text_value())
@@ -590,6 +715,11 @@ fn slot_cell(
                 Rect::from_min_size(Pos2::new(rect.left(), rect.bottom() - 2.0), Vec2::new(rect.width() * done, 2.0));
             painter.rect_filled(line, 0.0, theme::accent());
         }
+    }
+    // A selected clip is outlined as a selected arrangement clip is; a queued one keeps its
+    // breathing outline.
+    if selected && slot.state != SlotState::Queued {
+        painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
     }
 }
 
@@ -714,11 +844,30 @@ fn mixer_strip(
         Vec2::new(inner.width(), theme::TOGGLE),
     );
     let label = if column.mute { format!("Turn {} on", column.name) } else { format!("Turn {} off", column.name) };
-    // Track on (half), solo and cue (a quarter each), 2 px apart.
-    let quarter = (toggle.width() - 4.0) / 4.0;
-    let cue = Rect::from_min_max(Pos2::new(toggle.right() - quarter, toggle.top()), toggle.max);
+    // Track on takes what solo and cue leave (a quarter each); on a track that can be armed,
+    // solo, cue and arm take a fifth each. 2 px apart.
+    let small = if column.armable { (toggle.width() - 6.0) / 5.0 } else { (toggle.width() - 4.0) / 4.0 };
+    let toggle = if column.armable {
+        let arm = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
+        if let Some(action) = widgets::arm_button(
+            ui,
+            painter,
+            arm,
+            id.with("arm"),
+            track.0,
+            &column.name,
+            column.armed,
+            column.plays_notes,
+        ) {
+            actions.push(action);
+        }
+        Rect::from_min_max(toggle.min, Pos2::new(arm.left() - 2.0, toggle.bottom()))
+    } else {
+        toggle
+    };
+    let cue = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
     let solo = Rect::from_min_max(
-        Pos2::new(cue.left() - 2.0 - quarter, toggle.top()),
+        Pos2::new(cue.left() - 2.0 - small, toggle.top()),
         Pos2::new(cue.left() - 2.0, toggle.bottom()),
     );
     let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
@@ -832,6 +981,7 @@ fn scene_column(
     span: egui::Rangef,
     top: f32,
     grid: &Grid,
+    keys: &mut crate::launch_keys::LaunchKeys,
     actions: &mut Vec<Action>,
 ) {
     let clip = painter.clip_rect();
@@ -847,8 +997,13 @@ fn scene_column(
             format!("Launch scene {} {}", scene.number, scene.name)
         };
         let response = widgets::button_area(ui, rect.intersect(clip), Id::new(("scene", scene.number)), label);
+        let target = MappingTarget::Scene { scene: scene.number.saturating_sub(1) };
         if response.clicked() {
-            actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
+            if keys.mode.on {
+                keys.pick(target);
+            } else {
+                actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
+            }
         }
         // A click in the menu's text fields keeps it open; its buttons close it.
         egui::Popup::context_menu(&response)
@@ -884,6 +1039,15 @@ fn scene_column(
             theme::ui_font(theme::TEXT),
             theme::text_primary(),
         );
+        if keys.mode.on {
+            crate::launch_keys::overlay(
+                painter,
+                rect,
+                grid.mapped_to(target),
+                keys.mode.selected == Some(target),
+                18.0,
+            );
+        }
         painter.hline(span, rect.bottom() + 0.5, theme::hairline(theme::border()));
     }
     let stop_top = top + grid.scenes.len() as f32 * PITCH;

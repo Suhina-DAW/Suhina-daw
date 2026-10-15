@@ -31,6 +31,8 @@ pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         content: ContentKinds { notes: parent.is_some() || id == 4, audio: false },
         channel: Some(ChannelId(id)),
         parent: parent.map(TrackId),
+        midi_input: Default::default(),
+        audio_input: Default::default(),
         extensions: Extensions::default(),
     };
     let clip = Clip {
@@ -45,6 +47,7 @@ pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     };
     let players: Vec<u32> = if outside { vec![1, 2, 4] } else { vec![1, 2] };

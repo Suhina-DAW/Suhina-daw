@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
+read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
 type: system
 status: current
 last_verified: 2026-10-15
@@ -8,6 +8,7 @@ covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
   - crates/session/src/audio.rs
+  - crates/session/src/midi.rs
   - crates/automation/src/render.rs
   - crates/engine/src/cpu.rs
   - apps/suhina-cli/src/main.rs
@@ -46,10 +47,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `projects.close` (through `command_run`) manage them. Tools work on the active project, or on
   the one their `project` argument names, without switching. At most 32 are open.
 - **Audio output.** With `--audio`, each opened project also plays on the chosen output device
-  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `track.stop`,
+  (the default one until `audio.setOutput` chooses another) with the transport stopped, and transport commands (`scene.launch`, `clip.launch`, `clip.release`, `track.stop`,
   `launcher.stopAll`, `launcher.setQuantization`, `launcher.backToArrangement`, `transport.play`, `transport.stop`,
   `transport.setPosition`, `transport.setMetronome`,
-  `launcher.state`) are heard. Without it they return an error; launch scripts in
+  `launcher.state`) are heard. Without it they return an error, except `launcher.setQuantization`,
+  which the project's session keeps and hands to an engine attached later; launch scripts in
   `project_render` work either way. Edits and undo/redo are heard by the playing engine from its
   next audio block (0.15 s later when stretched arrangement clips must be prepared first), with
   launched clips playing on
@@ -73,10 +75,12 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   output there, the same way. The engine renders in blocks of
   `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
-  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `underruns`,
-  `failed`, `fallback` (it plays in place of a chosen host or device that is not there),
-  `channels` (opened) and `cue_pair`. Without `--audio`, `audio.devices` returns an
-  error.
+  `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
+  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a
+  key on a MIDI controller takes to be heard), `underruns`, `failed` and `fallback` (it plays in
+  place of a chosen host or device that is not there), `channels` (opened) and `cue_pair`.
+  Without `--audio`, `audio.devices` returns an error.
+
 - **The cue (headphones).** `output.setCuePair {pair}` plays previews and the tracks whose cue
   is on (`track.setCue {track, cue}`, an edit) on another pair of the same device's outputs
   (1 is outputs 3/4; 0 plays them with the main output), reopening the output like
@@ -92,6 +96,27 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   time signature overrides the map for the launcher clock (`launcher.state` reports
   `follows_tempo_map: false`) until `transport.followTempoMap`, the next `transport.play` after a
   stop, or an edit to the map ([scenes and the tempo map](spec/tempo-map.md#scenes-and-the-tempo-map)).
+
+- **MIDI controllers.** With `--audio`, the server also opens every MIDI input port
+  ([ADR 0017](decisions/0017-inputs-and-latency.md)). `midi.inputs` lists them with `enabled`,
+  `open` and the `error` a port could not be opened with, and whether the playing engine takes
+  their notes (`connected`); `midi.setInput {port, enabled}` turns one off or on again.
+  `track.setArm {track, armed, exclusive?}` arms a track: its instrument plays what the ports
+  play, transport running or not. `track.setMidiInput {track, port?, channel?}` chooses which
+  controllers it hears (`port` `"all"`, `"none"` or a port's name from `midi.inputs`; `channel`
+  1 to 16, or 0 for every one), so two controllers can play two armed tracks; it is an edit,
+  saved with the project, and `project.tracks` reports each track's `midi_input`.
+
+- **Audio input.** `audio.devices` lists each host's `inputs` (name, channels, sample rates).
+  `audio.setOutput {input}` opens one beside the output (`"off"`, the default; `"default"`; or
+  a name), at the output's sample rate. `track.setAudioInput {track, input?, monitor?}` chooses
+  what a track hears: `input` `"none"`, a channel (`"3"`) or a pair (`"1/2"`), `monitor`
+  `auto` (while armed), `in` or `off`; it is an edit, saved with the project. Arm several
+  tracks with `track.setArm` and `exclusive: false` to hear a band on separate tracks.
+  `audio.info` adds `input`, `input_channels` and `input_underruns`. Arming is not an edit (no undo step, not saved) and works
+  before an engine plays; `project.tracks` says which tracks are `armed`. Without `--audio`,
+  `midi.*` returns an error.
+
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`
   moves the marker to that arrangement clip's start and plays from there. `transport.stop` returns the playhead to the
@@ -119,7 +144,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `command_run` ([arrangement editing](spec/arrangement-editing.md)). `clip.copy {track, scene}`
   copies a clip slot's clip and `clip.paste {track, scene}` puts the copied clip into a slot, so a
   clip goes from the arrangement into a slot and back
-  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots).
+  ([clip launching](spec/clip-launching.md) › Clips between the arrangement and the slots). `clip.setFades` with
+  `scene` instead of `index` sets a launcher slot clip's fades
+  ([clip launching](spec/clip-launching.md)). `clip.create {track, scene? | start?, length?,
+  stack?}` makes an empty MIDI clip, a bar long by default, in an empty slot or at a beat
+  ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
   `clip.split {track, index, at}` cuts a clip in two at a song position; `clip.consolidate
   {track, start, end}` turns a range of one track into one clip (audio is rendered to a file next
   to the project, which must have been saved).
@@ -170,12 +199,26 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`. `preview.noteOn {track, key,
-  velocity?}` plays one key through the track's instrument and holds it, as the piano roll's key
-  column does, until `preview.noteOff {track, key?}` lets that key go, or every held preview note
-  when `key` is left out. Both are transport commands: the project, its undo history and the
-  transport are untouched.
+  `preview.setGain {gain}` changes the level of the one playing (in dB, gliding there without a
+  click); `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
+  work, through an output of their own that closes before a project opens one (ADR 0011).
+  `preview.noteOn {track, key, velocity?}` plays one key through the track's instrument and
+  holds it, as the piano roll's key column does, until `preview.noteOff {track, key?}` lets that
+  key go, or every held preview note when `key` is left out. Both are transport commands: the
+  project, its undo history and the transport are untouched.
 
+- **Launch settings.** `clip.setLaunchMode {track, scene, mode}` (trigger, gate, toggle,
+  repeat), `clip.setLegato {track, scene, on}` and `clip.setQuantization {track, scene, value}`
+  (global, none or a grid value) set how a slot's clip launches, one undo step each;
+  `project.launcher` shows them. `clip.launch` is a press of the slot's launch button and
+  `clip.release` its release, which stops a gate clip and ends a repeat clip's repeats; in a
+  `project_render` script the two can be steps at different times
+  ([spec](spec/clip-launching.md#launch-settings)).
+- **Launch keys and notes.** `launcher.addMapping {source, target, track?, scene?}` maps a key
+  (`key:Q`) or a MIDI note (`note:1:36`) to a slot, a scene or a track's stop button;
+  `launcher.removeMapping` and `launcher.mappings` remove and list them. Agents launch with
+  `clip.launch` and friends as before; the mappings are for the window and controllers
+  ([spec](spec/clip-launching.md#launching-from-keys-and-notes)).
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.

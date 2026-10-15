@@ -143,6 +143,8 @@ pub(crate) fn add_return(session: &mut Session, params: &Value) -> Result<Value,
         channel: Some(channel),
         parent: None,
         extensions: Default::default(),
+        audio_input: Default::default(),
+        midi_input: Default::default(),
     });
     Ok(json!({ "track": id.0, "name": name }))
 }

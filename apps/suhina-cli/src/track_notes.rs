@@ -97,6 +97,8 @@ mod tests {
                 content: ContentKinds { notes: true, audio: false },
                 channel: Some(ChannelId(1)),
                 parent: None,
+                midi_input: Default::default(),
+                audio_input: Default::default(),
                 extensions: Extensions::default(),
             }],
             contents: vec![ClipContent {
@@ -127,6 +129,7 @@ mod tests {
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
             follow_action: Default::default(),
+            launch: Default::default(),
             extensions: Extensions::default(),
         }
     }

@@ -132,6 +132,7 @@ const WORDS: &[(&str, Kind)] = &[
     ("china", Kind::Cymbal),
     ("splash", Kind::Cymbal),
     ("perc", Kind::Percussion),
+    ("percussion", Kind::Percussion),
     ("shaker", Kind::Percussion),
     ("shk", Kind::Percussion),
     ("tamb", Kind::Percussion),
@@ -210,6 +211,51 @@ pub fn words(name: &str) -> Vec<String> {
     out
 }
 
+/// How specific a kind is when a name holds several: a drum beats the hat or cymbal family,
+/// which beats percussion, which beats the broad kinds ("808 Kick" is a kick, "Snare FX" a
+/// snare, "Vocal Chop FX" a vocal). Lower is more specific.
+fn specificity(kind: Kind) -> u8 {
+    match kind {
+        Kind::Kick
+        | Kind::Snare
+        | Kind::Clap
+        | Kind::ClosedHat
+        | Kind::OpenHat
+        | Kind::Rim
+        | Kind::Tom
+        | Kind::Crash
+        | Kind::Ride => 0,
+        Kind::Hat | Kind::Cymbal => 1,
+        Kind::Percussion => 2,
+        Kind::Vocal => 3,
+        Kind::Bass => 4,
+        Kind::Tonal => 5,
+        Kind::Effect => 6,
+        Kind::Other => 7,
+    }
+}
+
+/// Words that name a kind also at the start of a longer word ("Kickdrum", "Snareroll",
+/// "Bassline"). Short words and words that start common other words ("ride" in "rider") only
+/// count whole.
+const PREFIXES: &[&str] = &[
+    "kick", "snare", "clap", "hihat", "crash", "cymbal", "shaker", "conga", "bongo", "cowbell", "bass", "synth",
+    "chord", "pluck", "vocal", "voice", "riser", "sweep", "impact",
+];
+
+/// The kind a word names, whole or as the start of a longer word.
+fn kind_of_word(word: &str) -> Option<Kind> {
+    if let Some((_, kind)) = WORDS.iter().find(|(w, _)| *w == word) {
+        return Some(*kind);
+    }
+    let prefix = PREFIXES.iter().find(|p| word.len() > p.len() && word.starts_with(**p))?;
+    WORDS.iter().find(|(w, _)| w == prefix).map(|(_, kind)| *kind)
+}
+
+/// Words that, next to "bass", name a style of music rather than a bass sound ("Bass House",
+/// "Drum and Bass", "Future Bass"), for folder names.
+const STYLE_WORDS: &[&str] = &["house", "music", "future", "drum", "dnb", "uk", "and", "n", "jungle", "trap"];
+
 /// The kind one name gives, if any: the most specific of the kinds its words name (a pair
 /// before a single word, and Closed or Open hat before Hat).
 pub fn kind_of_name(name: &str) -> Option<Kind> {
@@ -224,9 +270,8 @@ pub fn kind_of_name(name: &str) -> Option<Kind> {
     let mut found: Option<Kind> = None;
     let mut consider = |kind: Kind| {
         found = Some(match found {
-            Some(Kind::Hat) if matches!(kind, Kind::ClosedHat | Kind::OpenHat) => kind,
-            Some(current) => current,
-            None => kind,
+            Some(current) if specificity(current) <= specificity(kind) => current,
+            _ => kind,
         });
     };
     for pair in words.windows(2) {
@@ -237,21 +282,53 @@ pub fn kind_of_name(name: &str) -> Option<Kind> {
         }
     }
     for word in &words {
-        if let Some((_, kind)) = WORDS.iter().find(|(w, _)| w == word) {
-            consider(*kind);
+        if let Some(kind) = kind_of_word(word) {
+            consider(kind);
         }
     }
     found
 }
 
-/// The kind a file's name gives: its file name first, then its folders from the nearest up to
-/// (not including) `root`.
+/// The kind a folder's name gives: as [`kind_of_name`], except that "bass" next to a word of a
+/// style of music ("Bass House Vol 2") names no kind.
+fn kind_of_folder(name: &str) -> Option<Kind> {
+    let kind = kind_of_name(name)?;
+    let style = words(name).iter().any(|w| STYLE_WORDS.contains(&w.as_str()));
+    if kind == Kind::Bass && style { None } else { Some(kind) }
+}
+
+/// Where a name's kind came from: the file's own name, which is trusted, or a folder above it,
+/// which a sound that is clearly something else overrules (`Standardised` › kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    FileName,
+    Folder,
+}
+
+/// How many folders above a file are read for its kind: deeper ones are usually a pack's or a
+/// collection's name, not a kind.
+const FOLDER_LEVELS: usize = 2;
+
+/// The kind a file's name gives: its file name first, then the nearest two folders below (not
+/// including) `root`.
 pub fn kind_of_path(path: &Path, root: &Path) -> Option<Kind> {
+    named_kind(path, root).map(|(kind, _)| kind)
+}
+
+/// [`kind_of_path`], with where the kind came from.
+pub fn named_kind(path: &Path, root: &Path) -> Option<(Kind, Source)> {
     if let Some(kind) = path.file_stem().and_then(|s| s.to_str()).and_then(kind_of_name) {
-        return Some(kind);
+        return Some((kind, Source::FileName));
     }
     let below = path.strip_prefix(root).unwrap_or(path);
-    below.parent()?.components().rev().filter_map(|c| c.as_os_str().to_str()).find_map(kind_of_name)
+    below
+        .parent()?
+        .components()
+        .rev()
+        .take(FOLDER_LEVELS)
+        .filter_map(|c| c.as_os_str().to_str())
+        .find_map(kind_of_folder)
+        .map(|kind| (kind, Source::Folder))
 }
 
 #[cfg(test)]
@@ -286,6 +363,31 @@ mod tests {
     }
 
     #[test]
+    fn the_most_specific_word_wins_wherever_it_is() {
+        assert_eq!(kind_of_name("808 Kick"), Some(Kind::Kick));
+        assert_eq!(kind_of_name("Perc Kick 3"), Some(Kind::Kick));
+        assert_eq!(kind_of_name("Snare FX"), Some(Kind::Snare));
+        assert_eq!(kind_of_name("FX Snare"), Some(Kind::Snare));
+        assert_eq!(kind_of_name("Vocal Chop FX"), Some(Kind::Vocal));
+        assert_eq!(kind_of_name("Bass Stab"), Some(Kind::Bass));
+        assert_eq!(kind_of_name("WestCoastTrap&RnB_Percussion_13_SP"), Some(Kind::Percussion));
+        assert_eq!(kind_of_name("XO-1 KICK 1 (processed stem) 2021-06-16"), Some(Kind::Kick));
+        assert_eq!(kind_of_name("PML_DPV2_CHH_2_SKIN_017"), Some(Kind::ClosedHat));
+        assert_eq!(kind_of_name("FractalFoley_BasicKick_SP_01"), Some(Kind::Kick));
+    }
+
+    #[test]
+    fn known_words_count_at_the_start_of_longer_words() {
+        assert_eq!(kind_of_name("Kickdrum 4"), Some(Kind::Kick));
+        assert_eq!(kind_of_name("snareroll"), Some(Kind::Snare));
+        assert_eq!(kind_of_name("Bassline 2"), Some(Kind::Bass));
+        // Short and ambiguous words only count whole.
+        assert_eq!(kind_of_name("Rider"), None);
+        assert_eq!(kind_of_name("Padded"), None);
+        assert_eq!(kind_of_name("Subtle"), None);
+    }
+
+    #[test]
     fn folders_count_when_the_file_name_does_not() {
         let root = Path::new("/lib");
         assert_eq!(kind_of_path(Path::new("/lib/Drums/Kicks/01.wav"), root), Some(Kind::Kick));
@@ -295,6 +397,19 @@ mod tests {
         assert_eq!(kind_of_path(Path::new("/lib/Snare/clap 2.wav"), root), Some(Kind::Clap));
         // The library folder's own name does not count.
         assert_eq!(kind_of_path(Path::new("/Kick/01.wav"), Path::new("/Kick")), None);
+        assert_eq!(named_kind(Path::new("/lib/Kicks/01.wav"), root), Some((Kind::Kick, Source::Folder)));
+        assert_eq!(named_kind(Path::new("/lib/Kicks/Kick 1.wav"), root), Some((Kind::Kick, Source::FileName)));
+    }
+
+    #[test]
+    fn far_folders_and_styles_of_music_name_no_kind() {
+        let root = Path::new("/lib");
+        // Three folders up is a pack's name.
+        assert_eq!(kind_of_path(Path::new("/lib/Kicks/Pack/One shots/01.wav"), root), None);
+        assert_eq!(kind_of_path(Path::new("/lib/Bass House Vol 2/One Shots/Loop 3.wav"), root), None);
+        assert_eq!(kind_of_path(Path::new("/lib/Drum and Bass/Hits/01.wav"), root), None);
+        assert_eq!(kind_of_path(Path::new("/lib/Future Bass/Snares/01.wav"), root), Some(Kind::Snare));
+        assert_eq!(kind_of_path(Path::new("/lib/Synths/Bass/01.wav"), root), Some(Kind::Bass));
     }
 
     #[test]

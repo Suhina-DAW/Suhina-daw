@@ -5,6 +5,8 @@
 //! plug-ins' main-thread callbacks and their editors. It runs any number of plug-in instances,
 //! each loaded and unloaded on its own and named by the number the engine gave it; each has
 //! its own link and a thread of its own that serves its audio blocks through `suhina-ipc`.
+//! A block may ask for other instances to run after the link's own; the thread that has it runs
+//! them in turn and answers once ([`audio`]).
 //! When the control connection closes, the engine is gone and the process exits.
 //!
 //! What it can load: CLAP plug-ins ([`clap`]), the CLAP test plug-ins built in for tests
@@ -15,6 +17,7 @@
 //! each instance whether it did (restarting its processing first where the format asks for
 //! that) and tells the engine unasked (`latency_changed`).
 
+mod audio;
 mod clap;
 mod processors;
 mod run_loop;
@@ -43,9 +46,9 @@ use suhina_ipc::Served;
 use suhina_plugins::ParamInfo;
 use suhina_plugins::protocol::{Message, VERSION};
 
-/// How long the audio thread of a test processor waits for a block before checking whether it
-/// should stop.
-const POLL: Duration = Duration::from_millis(100);
+/// How long loading waits for a new instance's audio thread to serve, so that blocks naming it
+/// find it.
+const SERVING_WAIT: Duration = Duration::from_secs(2);
 /// How often the main thread looks for plug-in callbacks while no message comes.
 const TICK: Duration = Duration::from_millis(10);
 /// The same while an editor is open where the main thread cannot wait for its window's events
@@ -318,28 +321,33 @@ impl Loaded {
     }
 }
 
-fn load(plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
+fn load(instance: u32, plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
+    let loaded = start(instance, plugin, link, sample_rate)?;
+    // Its thread starts serving at once; a plug-in whose processing would not start never does.
+    audio::wait_serving(instance, SERVING_WAIT);
+    Ok(loaded)
+}
+
+fn start(instance: u32, plugin: &str, link: &str, sample_rate: f64) -> Result<Loaded, String> {
     let served = Served::open(link).map_err(|e| e.to_string())?;
     if plugin.starts_with("clap:")
         || plugin == "test:clap"
         || plugin == "test:clap-delay"
         || plugin == "test:clap-ports"
     {
-        return clap::ClapPlugin::load(plugin, served, sample_rate).map(Loaded::Clap);
+        return clap::ClapPlugin::load(plugin, instance, served, sample_rate).map(Loaded::Clap);
     }
     if plugin.starts_with("vst3:") || plugin == "test:vst3" {
-        return vst3::Vst3Plugin::load(plugin, served, sample_rate).map(Loaded::Vst3);
+        return vst3::Vst3Plugin::load(plugin, instance, served, sample_rate).map(Loaded::Vst3);
     }
     let processor = processors::create(plugin)?;
     let stop = Arc::new(AtomicBool::new(false));
-    let (audio_processor, audio_stop, mut served) = (processor.clone(), stop.clone(), served);
+    let (block, audio_stop, mut served) = (processors::TestBlock(processor.clone()), stop.clone(), served);
     let audio = thread::Builder::new()
         .name("plug-in audio".into())
         .spawn(move || {
             let _realtime = real_time_thread();
-            while !audio_stop.load(Ordering::Acquire) {
-                served.serve(POLL, |input, output| audio_processor.process(input, output));
-            }
+            audio::serve(instance, block, &mut served, &audio_stop);
         })
         .map_err(|e| e.to_string())?;
     let reported = processor.latency();
@@ -458,7 +466,7 @@ fn answer(instances: &mut Instances, message: Message) -> Option<Message> {
         Message::Load { instance, .. } if instances.len() >= MAX_INSTANCES => {
             failed(instance, format!("at most {MAX_INSTANCES} plug-ins run in one process"))
         }
-        Message::Load { instance, plugin, link, sample_rate } => match load(&plugin, &link, sample_rate) {
+        Message::Load { instance, plugin, link, sample_rate } => match load(instance, &plugin, &link, sample_rate) {
             Ok(fresh) => {
                 let latency = fresh.latency();
                 instances.insert(instance, fresh);

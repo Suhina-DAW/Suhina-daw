@@ -51,6 +51,7 @@ impl AudioSystem for Interface {
                 buffer_range: None,
                 exclusive: false,
             }],
+            inputs: Vec::new(),
             error: None,
         }]
     }

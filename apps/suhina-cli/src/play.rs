@@ -72,7 +72,8 @@ pub fn play(project: &Project, audio: &AudioPool, choice: &OutputChoice) -> Resu
 const LAUNCHER_HELP: &str = "\
 commands (scenes count from 1; a track is its name or id):
   scene <n>             launch scene n
-  clip <track> <n>      launch the clip in scene n of a track
+  clip <track> <n>      launch the clip in scene n of a track (a press of its launch button)
+  release <track> <n>   release its launch button: stops a gate clip, ends a repeat clip's repeats
   stop <track>          stop a track's clip (a track named here: by its id)
   stopall               stop every clip
   play / stop           start the transport from the play start marker / stop everything now
@@ -185,6 +186,9 @@ fn parse_line(line: &str) -> Result<Line, String> {
         ["scene", n] => command("scene.launch", json!({ "scene": scene_value(n)? })),
         ["clip", track @ .., n] if !track.is_empty() => {
             command("clip.launch", json!({ "track": track_value(track), "scene": scene_value(n)? }))
+        }
+        ["release", track @ .., n] if !track.is_empty() => {
+            command("clip.release", json!({ "track": track_value(track), "scene": scene_value(n)? }))
         }
         ["stop", track @ ..] => command("track.stop", json!({ "track": track_value(track) })),
         ["quant", value @ ..] if !value.is_empty() => {
@@ -314,6 +318,7 @@ mod tests {
         assert_eq!(parse_line("scene 2"), cmd("scene.launch", json!({ "scene": 2 })));
         assert_eq!(parse_line("clip Lead Vox 3"), cmd("clip.launch", json!({ "track": "Lead Vox", "scene": 3 })));
         assert_eq!(parse_line("clip 4 1"), cmd("clip.launch", json!({ "track": 4, "scene": 1 })));
+        assert_eq!(parse_line("release Lead Vox 3"), cmd("clip.release", json!({ "track": "Lead Vox", "scene": 3 })));
         assert_eq!(parse_line("stop"), cmd("transport.stop", json!({})));
         assert_eq!(parse_line("stop Drums"), cmd("track.stop", json!({ "track": "Drums" })));
         assert_eq!(parse_line("stop here"), cmd("transport.stop", json!({ "return": "here" })));

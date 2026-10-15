@@ -132,12 +132,30 @@ impl PluginBox {
     }
 }
 
+/// A selected clip: on the arrangement (its track and index there), or in a launcher slot (its
+/// track and scene, from 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipRef {
+    Arrangement(TrackId, usize),
+    Slot(TrackId, usize),
+}
+
+impl ClipRef {
+    pub fn track(self) -> TrackId {
+        match self {
+            Self::Arrangement(track, _) | Self::Slot(track, _) => track,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipInfo {
     pub name: String,
     pub track: String,
-    /// bar.beat where it starts, and its length in bars and beats.
+    /// Where it is: bar.beat where an arrangement clip starts, or the number of a slot's scene
+    /// (`scene` tells which); and its length in bars and beats.
     pub start: String,
+    pub scene: bool,
     pub length: String,
     pub looping: bool,
     pub audio: bool,
@@ -165,7 +183,7 @@ pub enum Detail {
 }
 
 /// The detail for a selected clip (it wins, with its own track's chain) or track.
-pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, usize)>) -> Detail {
+pub fn build(project: &Project, track: Option<TrackId>, clip: Option<ClipRef>) -> Detail {
     build_with(project, track, clip, &mut |_, _| None)
 }
 
@@ -173,7 +191,7 @@ pub fn build(project: &Project, track: Option<TrackId>, clip: Option<(TrackId, u
 pub fn build_with(
     project: &Project,
     track: Option<TrackId>,
-    clip: Option<(TrackId, usize)>,
+    clip: Option<ClipRef>,
     plugins: &mut dyn FnMut(TrackId, usize) -> Option<PluginReport>,
 ) -> Detail {
     let ts = project.transport.time_signature;
@@ -181,10 +199,24 @@ pub fn build_with(
         if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
     let track_name =
         |id: TrackId| project.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_default();
-    if let Some((id, index)) = clip
-        && let Some(placed) =
-            project.arrangement.lanes.iter().find(|l| l.track == Some(id)).and_then(|l| l.clips.get(index))
-    {
+    let found = clip.and_then(|clip| match clip {
+        ClipRef::Arrangement(id, index) => project
+            .arrangement
+            .lanes
+            .iter()
+            .find(|l| l.track == Some(id))
+            .and_then(|l| l.clips.get(index))
+            .map(|placed| (id, placed, None)),
+        ClipRef::Slot(id, scene) => project
+            .launcher
+            .columns
+            .iter()
+            .find(|c| c.track == id)
+            .and_then(|c| c.slots.get(scene))
+            .and_then(|s| s.clip.as_ref())
+            .map(|placed| (id, placed, Some(scene))),
+    });
+    if let Some((id, placed, scene)) = found {
         let content = project.content(placed.content);
         let audio = content.and_then(|c| {
             c.lanes.iter().find_map(|l| match &l.data {
@@ -210,7 +242,8 @@ pub fn build_with(
             ClipInfo {
                 name: content.map(|c| c.name.clone()).unwrap_or_default(),
                 track: track_name(id),
-                start: bars_beats(placed.start, 1),
+                start: scene.map_or_else(|| bars_beats(placed.start, 1), |s| (s + 1).to_string()),
+                scene: scene.is_some(),
                 length: bars_beats(placed.length, 0),
                 looping: placed.loop_range.is_some(),
                 audio: audio.is_some(),
@@ -282,6 +315,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places:
         Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
             let column = clip_properties(&painter, area, info, false);
+            clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
             if rest.width() > 0.0 {
                 chain_row(ui, &painter, rest, chain, actions, places);
@@ -333,6 +367,7 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
         Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
             let column = clip_properties(&painter, area, info, true);
+            clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
             if rest.height() > 0.0 {
                 chain_stack(ui, &painter, rest, chain, actions, places);
@@ -557,6 +592,17 @@ fn plugin_button(
     }
 }
 
+/// Names the clip's properties for screen readers and tests: "Clip Walk, scene 2".
+fn clip_for_readers(ui: &Ui, rect: Rect, info: &ClipInfo) {
+    let response = ui.interact(rect, egui::Id::new("clip-properties"), Sense::hover());
+    let label = if info.scene {
+        format!("Clip {}, scene {}", info.name, info.start)
+    } else {
+        format!("Clip {}, start {}", info.name, info.start)
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+}
+
 /// Names a device's panel for screen readers and tests.
 fn name_for_readers(ui: &Ui, rect: Rect, device: &DeviceBox) {
     let response = ui.interact(rect, egui::Id::new(("device", rect.min.x as i32, rect.min.y as i32)), Sense::hover());
@@ -666,7 +712,7 @@ fn device_panel(painter: &egui::Painter, rect: Rect, device: &DeviceBox) {
 fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked: bool) -> Rect {
     let mut rows = vec![
         ("Track", info.track.clone()),
-        ("Start", info.start.clone()),
+        (if info.scene { "Scene" } else { "Start" }, info.start.clone()),
         ("Length", info.length.clone()),
         ("Loop", if info.looping { "On".into() } else { "Off".into() }),
     ];
@@ -729,12 +775,36 @@ mod tests {
 
     #[test]
     fn a_selected_clip_shows_its_properties() {
-        let detail = build(&demo_project(), Some(TrackId(1)), Some((TrackId(1), 1)));
+        let detail = build(&demo_project(), Some(TrackId(1)), Some(ClipRef::Arrangement(TrackId(1), 1)));
         let Detail::Clip(info, chain) = detail else { panic!("expected the clip") };
         assert_eq!(chain.track, TrackId(1));
         assert_eq!((info.name.as_str(), info.start.as_str(), info.length.as_str()), ("Beat B", "17.1", "12.0"));
-        assert!(info.looping && !info.audio);
+        assert!(info.looping && !info.audio && !info.scene);
         assert_eq!(info.notes, 4);
+    }
+
+    #[test]
+    fn a_selected_slot_clip_shows_its_scene_loop_and_fades() {
+        let mut project = demo_project();
+        let column = project.launcher.columns.iter_mut().find(|c| c.track == TrackId(2)).expect("Bass has slots");
+        let clip = column.slots[1].clip.as_mut().expect("Bass has a clip in scene 2");
+        clip.fade_in = 1.5;
+        clip.fade_out = 0.25;
+        let content = clip.content;
+        let name = project.content(content).map(|c| c.name.clone()).unwrap_or_default();
+        let Detail::Clip(info, chain) = build(&project, None, Some(ClipRef::Slot(TrackId(2), 1))) else {
+            panic!("expected the slot's clip")
+        };
+        assert_eq!(chain.track, TrackId(2));
+        assert_eq!((info.name, info.start.as_str(), info.scene), (name, "2", true));
+        assert_eq!(info.fades, (1.5, 0.25));
+        // An empty slot, a scene past the last, or a track without slots shows the track, or nothing.
+        let Detail::Devices(chain) = build(&project, Some(TrackId(3)), Some(ClipRef::Slot(TrackId(3), 0))) else {
+            panic!("an empty slot shows the track")
+        };
+        assert_eq!(chain.track, TrackId(3));
+        assert_eq!(build(&project, None, Some(ClipRef::Slot(TrackId(2), 99))), Detail::Nothing);
+        assert_eq!(build(&project, None, Some(ClipRef::Slot(TrackId(10), 0))), Detail::Nothing);
     }
 
     #[test]
@@ -754,7 +824,9 @@ mod tests {
         assert_eq!(chain.devices[0].params, [("gain".to_string(), "-3.5".to_string())]);
         assert!(!chain.devices[0].enabled);
         // A clip on the track shows the same chain beside its properties.
-        let Detail::Clip(_, with_clip) = build(&project, None, Some((TrackId(1), 0))) else { panic!() };
+        let Detail::Clip(_, with_clip) = build(&project, None, Some(ClipRef::Arrangement(TrackId(1), 0))) else {
+            panic!()
+        };
         assert_eq!(with_clip, chain);
         assert_eq!(build(&project, None, None), Detail::Nothing);
     }

@@ -149,6 +149,7 @@ pub(crate) fn consolidate(session: &mut Session, params: &Value) -> Result<Value
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Default::default(),
     };
     let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;

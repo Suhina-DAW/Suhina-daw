@@ -72,6 +72,32 @@ fn a_new_preview_replaces_the_one_playing() {
 }
 
 #[test]
+fn the_level_of_a_playing_preview_changes_smoothly_and_it_keeps_playing() {
+    let mut renderer = stopped(&empty_project());
+    let mut controller = renderer.controller();
+    controller.preview_sample(steady(), 0.0, 1.0).unwrap();
+    let before = blocks(&mut renderer, 2, 1024);
+    assert!((before[3000] - 0.5).abs() < 1e-6);
+    controller.preview_gain(0.5).unwrap();
+    let after = blocks(&mut renderer, 4, 1024);
+    assert!(controller.preview_monitor().playing(), "a new level does not restart or stop it");
+    // No jump: the first frame is still near the old level, and it glides down.
+    assert!((after[0] - 0.5).abs() < 0.01, "{}", after[0]);
+    let steps: Vec<f32> = after.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+    assert!(steps.iter().all(|d| *d < 0.01), "no click");
+    // About 80 ms later it is there.
+    assert!((after[8000] - 0.25).abs() < 1e-3, "{}", after[8000]);
+    // The next preview starts at the level it is given.
+    controller.preview_sample(steady(), 0.0, 1.0).unwrap();
+    let next = blocks(&mut renderer, 1, 1024);
+    assert!((next[1500] - 0.5).abs() < 1e-6, "{}", next[1500]);
+    // Hostile values are made safe.
+    controller.preview_gain(f32::NAN).unwrap();
+    let silent = blocks(&mut renderer, 4, 1024);
+    assert!(silent[8000].abs() < 1e-3);
+}
+
+#[test]
 fn the_preview_is_heard_with_the_transport_running_and_a_track_muted() {
     let mut muted = project(vec![note(0.0, 4.0, 60)], 4.0, Vec::new());
     muted.channels[0].mute = true;

@@ -258,3 +258,134 @@ fn asking_how_an_instance_is_never_waits_for_a_sibling_loading() {
     assert_eq!(sibling.process_id(), plugin.process_id());
     assert_eq!(sibling.health(), Health::Running);
 }
+
+/// One block of `input` sent jointly: `first`'s host runs it, then each of `followers`.
+fn joint_block(
+    first: &mut PluginAudio,
+    followers: &[&PluginAudio],
+    input: &[f32],
+    timeout: Duration,
+) -> (Outcome, Vec<f32>) {
+    let members: Vec<u32> = followers.iter().map(|f| f.seat().unwrap().instance).collect();
+    let mut output = vec![9.0f32; input.len()];
+    let outcome = if first.send_joint(input, &[], &members, output.len(), Duration::ZERO) {
+        first.finish(&mut output, timeout)
+    } else {
+        Outcome::Busy
+    };
+    for follower in followers {
+        follower.followed(outcome);
+    }
+    (outcome, output)
+}
+
+#[test]
+fn instances_of_one_process_run_a_block_in_one_round_trip() {
+    // Three formats in one process: the test processor, the CLAP and the VST3 test plug-ins.
+    let (_a, mut a) = start("test:gain", Some("joint"));
+    let (_b, mut b) = start("test:clap", Some("joint"));
+    let (_c, mut c) = start("test:vst3", Some("joint"));
+    let (_d, d) = start("test:gain", None);
+    let seats = [a.seat().unwrap(), b.seat().unwrap(), c.seat().unwrap()];
+    assert!(seats.iter().all(|s| s.process == seats[0].process));
+    assert_ne!(seats[0].instance, seats[1].instance);
+    assert_ne!(d.seat().unwrap().process, seats[0].process, "a process of its own");
+
+    let input: Vec<f32> = (0..FRAMES * 2).map(|n| (n as f32 * 0.37).sin()).collect();
+    for _ in 0..20 {
+        // Each on its own: three round trips, one after another.
+        let mut alone = input.clone();
+        for audio in [&mut a, &mut b, &mut c] {
+            let mut output = vec![0.0f32; alone.len()];
+            assert_eq!(audio.process(&alone, &mut output, PATIENT), Outcome::Done);
+            alone = output;
+        }
+        // Together: one round trip, sample for sample the same.
+        let (outcome, together) = joint_block(&mut a, &[&b, &c], &input, PATIENT);
+        assert_eq!(outcome, Outcome::Done);
+        assert!(together.iter().zip(&alone).all(|(x, y)| x.to_bits() == y.to_bits()));
+        assert!(together.iter().any(|s| *s != 0.0));
+    }
+    // The followers' own links were left alone and still work.
+    assert_eq!(block(&mut b, PATIENT).0, Outcome::Done);
+}
+
+#[test]
+fn a_follower_that_crashes_takes_the_joint_block_and_the_group() {
+    let (mut first, mut audio) = start("test:gain", Some("joint-crash"));
+    let (mut crashing, crashing_audio) = start("test:crash-after:3", Some("joint-crash"));
+    let input = [1.0f32; FRAMES * 2];
+    for _ in 0..3 {
+        assert_eq!(joint_block(&mut audio, &[&crashing_audio], &input, PATIENT).0, Outcome::Done);
+    }
+    // In the fourth block the follower takes the process with it: the block is a miss.
+    let (outcome, output) = joint_block(&mut audio, &[&crashing_audio], &input, Duration::from_millis(500));
+    assert_eq!(outcome, Outcome::Missed);
+    assert!(output.iter().all(|s| *s == 9.0), "a missed block leaves the output alone");
+    wait_for(&mut first, Health::Crashed);
+    wait_for(&mut crashing, Health::Crashed);
+}
+
+#[test]
+fn a_follower_that_hangs_counts_against_every_plug_in_of_the_block() {
+    let (mut first, mut audio) = start("test:gain", Some("joint-hang"));
+    let (mut hanging, hanging_audio) = start("test:hang-after:0", Some("joint-hang"));
+    let input = [1.0f32; FRAMES * 2];
+    let (outcome, _) = joint_block(&mut audio, &[&hanging_audio], &input, DEADLINE);
+    assert_eq!(outcome, Outcome::Missed);
+    // The host never answers that block: every later one is refused, for both.
+    for _ in 0..HUNG_AFTER {
+        assert_eq!(joint_block(&mut audio, &[&hanging_audio], &input, DEADLINE).0, Outcome::Busy);
+    }
+    wait_for(&mut first, Health::Hung);
+    wait_for(&mut hanging, Health::Hung);
+}
+
+/// Measures what a joint round trip saves (#108): four instances of one process at 64 and 128
+/// frames, as four round trips a block and as one, blocks paced as in playback. Prints the
+/// average and the 99th percentile per block; run with
+/// `cargo test -p suhina-plugin-host --release --test groups measure -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn measure_joint_round_trips() {
+    const PLUGINS: usize = 4;
+    const BLOCKS: usize = 2_000;
+    for frames in [64usize, 128] {
+        let launch = |group: &str| Launch { max_frames: frames as u32, ..launch("test:gain", Some(group)) };
+        let started: Vec<(Plugin, PluginAudio)> =
+            (0..PLUGINS).map(|_| Plugin::start(launch("measure")).unwrap()).collect();
+        let (_controls, mut audios): (Vec<Plugin>, Vec<PluginAudio>) = started.into_iter().unzip();
+        let period = Duration::from_secs_f64(frames as f64 / 48_000.0);
+        let input = vec![0.25f32; frames * 2];
+        let mut output = vec![0.0f32; frames * 2];
+        let mut run = |joint: bool| {
+            let mut times = Vec::with_capacity(BLOCKS);
+            for _ in 0..BLOCKS {
+                let started = Instant::now();
+                if joint {
+                    let (first, rest) = audios.split_first_mut().unwrap();
+                    let members: Vec<u32> = rest.iter().map(|a| a.seat().unwrap().instance).collect();
+                    assert!(first.send_joint(&input, &[], &members, output.len(), PATIENT));
+                    assert_eq!(first.finish(&mut output, PATIENT), Outcome::Done);
+                } else {
+                    let mut block = input.clone();
+                    for audio in audios.iter_mut() {
+                        assert_eq!(audio.process(&block, &mut output, PATIENT), Outcome::Done);
+                        block.copy_from_slice(&output);
+                    }
+                }
+                times.push(started.elapsed());
+                std::thread::sleep(period.saturating_sub(started.elapsed()));
+            }
+            times.sort();
+            let mean = times.iter().sum::<Duration>() / BLOCKS as u32;
+            (mean, times[BLOCKS * 99 / 100])
+        };
+        let (each_mean, each_p99) = run(false);
+        let (joint_mean, joint_p99) = run(true);
+        println!(
+            "{frames} frames, {PLUGINS} plug-ins: one round trip each {each_mean:?} (99 %: {each_p99:?}); \
+             one joint round trip {joint_mean:?} (99 %: {joint_p99:?})"
+        );
+    }
+}

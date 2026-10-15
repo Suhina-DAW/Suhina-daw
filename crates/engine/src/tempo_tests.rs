@@ -35,6 +35,7 @@ fn clip(start: f64, length: f64) -> Clip {
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
         follow_action: Default::default(),
+        launch: Default::default(),
         extensions: Extensions::default(),
     }
 }
@@ -52,6 +53,8 @@ fn project(lane: LaneData, length: f64) -> Project {
             channel: Some(ChannelId(1)),
             parent: None,
             extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),
@@ -88,6 +91,7 @@ fn project(lane: LaneData, length: f64) -> Project {
                     has_stop: true,
                 }],
             }],
+            mappings: Vec::new(),
         },
         ..Project::default()
     }

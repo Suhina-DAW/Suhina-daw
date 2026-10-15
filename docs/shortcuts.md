@@ -77,6 +77,7 @@ keys. Unknown actions, keys and presets are skipped with a warning in the status
 | Play from the start of the clip selected in the Arrangement view, whatever the setting (`transport.playFromSelection`; from the marker when no clip is selected) | Shift+Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
+| Map keys to clip slots, scenes and stop buttons, or stop mapping (`view.mappingMode`; [Session view](spec/ui-session-view.md#launch-keys)). A key mapped to a slot wins over its shortcut while the Session view is shown | Ctrl+M |
 | Show or hide the browser (`view.browser`) | Ctrl+B |
 | Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |
 | Open the sample map in a window of its own, or put it back (`view.sampleMapWindow`; [spec](spec/sample-map.md) › Where the map is shown) | Ctrl+Alt+M |
@@ -97,6 +98,7 @@ keys. Unknown actions, keys and presets are skipped with a warning in the status
 | Split the selected clip at the playhead (`selection.split`; [spec](spec/arrangement-editing.md#splitting)) | Ctrl+E |
 | Consolidate the selected clip into one new clip (`selection.consolidate`; [spec](spec/arrangement-editing.md#consolidating)) | Ctrl+J |
 | Group the selected tracks (`selection.group`) | Ctrl+G |
+| In the Session view, with a clip slot selected: launch it (`selection.launch`); select the slot above, below, in the track to the left or right (`selection.up`, `.down`, `.left`, `.right`; [spec](spec/ui-session-view.md) › Launching and selecting) | Enter; Up, Down, Left, Right |
 | Quantise the piano roll's selected notes, or all its notes, with the settings the quantise block in the clip column keeps (`pianoRoll.quantize`, [spec](spec/ui-clip-editor.md) › Quantise) | Ctrl+U |
 | Add an arrangement marker at the playhead, or at the play start marker while stopped (`marker.addAtPlayhead`; [spec](spec/arrangement-editing.md#markers)) | M |
 | Turn arrangement looping on or off; on without a loop region makes one over the first 4 bars (`transport.setLoopEnabled`; [spec](spec/arrangement-editing.md#loop-region)) | Ctrl+L |

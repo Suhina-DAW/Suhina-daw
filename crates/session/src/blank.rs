@@ -41,6 +41,8 @@ pub fn blank_project() -> Project {
             content: ContentKinds { notes, audio: !notes },
             channel: Some(ChannelId(id)),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         project.channels.push(channel(ChannelId(id), name, ChannelRole::Regular, Some(main)));
@@ -56,14 +58,19 @@ pub fn blank_project() -> Project {
             content: ContentKinds::default(),
             channel: Some(id),
             parent: None,
+            midi_input: Default::default(),
+            audio_input: Default::default(),
             extensions: Extensions::default(),
         });
         project.channels.push(channel(id, name, ChannelRole::Effect, Some(main)));
     }
     project.channels.push(channel(main, "Main", ChannelRole::Master, None));
     project.arrangement = Arrangement { lanes, markers: Vec::new() };
-    project.launcher =
-        Launcher { scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), ..Scene::default() }).collect(), columns };
+    project.launcher = Launcher {
+        scenes: (1..=SCENES).map(|n| Scene { name: n.to_string(), ..Scene::default() }).collect(),
+        columns,
+        mappings: Vec::new(),
+    };
     project
 }
 

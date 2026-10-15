@@ -68,6 +68,8 @@ fn project() -> Project {
             channel: Some(ChannelId(1)),
             parent: None,
             extensions: Extensions::default(),
+            audio_input: Default::default(),
+            midi_input: Default::default(),
         }],
         channels: vec![Channel {
             id: ChannelId(1),
