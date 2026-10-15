@@ -2,11 +2,18 @@
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use suhina_plugins::scan::{Catalog, Scanned, find_files, scan_file, standard_folders};
+use suhina_plugins::scan::{Catalog, Scanned, find_files, hung_message, scan_file, standard_folders};
 
-const PATIENT: Duration = Duration::from_secs(10);
+/// The timeout of a scan that is not meant to hang. It returns as soon as the host exits, so
+/// this costs nothing; it is long so that a slow process start (on a busy Windows machine the
+/// antivirus checks each one) is never mistaken for a hang.
+const PATIENT: Duration = Duration::from_secs(60);
+/// How long a test waits for a scan that is meant to hang to give up, before calling it a
+/// stall. Far above any process start, so it never races the machine's load.
+const STALL: Duration = Duration::from_secs(120);
 
 fn host() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_suhina-plugin-host"))
@@ -39,18 +46,17 @@ fn a_crash_or_a_hang_while_loading_is_a_failure_not_a_stall() {
     let crashed = scan_file(&host(), "test:crash", PATIENT);
     assert!(matches!(&crashed, Scanned::Failed(why) if why.contains("crashed")), "{crashed:?}");
 
-    // How long a scan takes that does not hang: mostly starting the process, which is slow on a
-    // busy machine (the antivirus checks each start).
-    let started = Instant::now();
-    let _ = scan_file(&host(), "test:clap", PATIENT);
-    let start = started.elapsed();
-    let started = Instant::now();
-    let hung = scan_file(&host(), "test:hang", Duration::from_millis(500));
-    assert!(matches!(&hung, Scanned::Failed(why) if why.contains("hung")), "{hung:?}");
-    // The hang costs its 500 ms timeout and a kill, on top of a start like that one (with room
-    // for the next start to be slower): far less than "forever".
-    let bound = start * 3 + Duration::from_secs(5);
-    assert!(started.elapsed() < bound, "{:?} (a start took {start:?})", started.elapsed());
+    // A hang ends at the scanner's own deadline: the reason it gives is the one only that
+    // deadline gives, with the timeout it was given. Whether the host started within the 500 ms
+    // or not (a busy machine), `test:hang` never answers, so the answer is the same. The scan
+    // runs on a thread so that a scanner that never gave up fails the test instead of stalling
+    // it; that guard is not a measure of speed, only of "not forever".
+    let timeout = Duration::from_millis(500);
+    let (sender, answer) = mpsc::channel();
+    let hang_host = host();
+    std::thread::spawn(move || sender.send(scan_file(&hang_host, "test:hang", timeout)));
+    let hung = answer.recv_timeout(STALL).unwrap_or_else(|e| panic!("the scan of a hang never ended ({e})"));
+    assert_eq!(hung, Scanned::Failed(hung_message(timeout)));
 
     let dir = folder("not-a-plugin");
     let fake = dir.join("fake.clap");

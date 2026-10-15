@@ -9,7 +9,7 @@ primary platform; Windows and macOS are supported.
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation and the metronome work; follow actions and launch modes to come |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, follow actions and the metronome work; launch modes to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
 | M7 | **More formats:** DAWproject import and export | not started |
@@ -34,7 +34,7 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
    locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
-7. **Follow actions, launch modes, legato and per-clip quantisation** (the rest of M4).
+7. **Launch modes, legato and per-clip quantisation** (the rest of M4).
 
 Finishing what is in flight (M3's commands, M6's automation and editors, M7, M8's installers and
 detail area) goes alongside this list, not after it.
@@ -103,7 +103,8 @@ command with undo. Behaviour, detectors and tests: [`docs/spec/audio-to-midi.md`
   one that writes every note of a mix; snap results to the project's tempo, warp grid and key.
 - **Stem separation** before detecting is the largest single gain in quality, and is also offered
   on its own, as separating stems to new audio tracks
-  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146)).
+  ([#146](https://github.com/suhina-daw/suhina-daw/issues/146), [spec](docs/spec/stem-separation.md);
+  the pipeline around a model and a test backend exist in `crates/separation`).
 - **Order:** after the sampler and drum sampler exist; slicing first (smallest), then drums, bass,
   melody and chords, then stem separation. An ADR comes before the detectors.
 
@@ -125,8 +126,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 ## What works now
 
 ### M0 Foundation
-- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;
-  Windows and macOS when started by hand and in every release build.
+- Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux, Windows and
+  macOS for every change; macOS does not block merging yet.
 - A nightly build of `main` for Linux, Windows and macOS, with the desktop app, the CLI and the
   plug-in host, published every night as the `nightly` release
   ([`docs/releasing.md`](docs/releasing.md#nightly)).
@@ -205,7 +206,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `transport.play`/`stop`/`setPosition`) reach the audio thread through a lock-free queue:
   `suhina-cli play --launcher` takes them as typed lines, `suhina-cli mcp --audio` from
   agents, and `project_render` renders a script of them offline.
-- Still to do: follow actions, launch modes, per-clip quantisation, fades on launched clips
+- Follow actions: after its follow time (beats, or the clip's length) a slot clip runs action A
+  or B, picked by chance: stop, play again, previous, next, first, last, any, other, or jump to
+  a scene's slot, on the exact frame, saved in the project (`clip.setFollowAction`).
+- Launching a slot clip selects it, and the detail area shows its follow action: an on switch,
+  the follow time and a switch that links it to the clip's length, actions A and B (a jump picks
+  its scene) and their chances, each change one undo step (`clip.setFollowAction`).
+- Still to do: launch modes, per-clip quantisation, fades on launched clips
   ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.
@@ -247,6 +254,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the chain. On Linux the window is an X11 one whenever an X server (or XWayland) is there,
   so this works on Wayland desktops too.
 - Renders (`suhina-cli render`, MCP `project_render`) run the same plug-ins.
+- MCP `project_render` from an open project starts its plug-ins with the state the running ones
+  have now, so a change made in a plug-in's editor is in the render as it is heard.
 - The plug-ins of different tracks run at the same time (one block out to every host, then
   every answer collected), the engine renders ahead of the audio device in blocks of its own,
   and host audio threads run at real-time priority: a project with 25 plug-ins plays without a
@@ -273,10 +282,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   notes (loops repeated), the playhead, track headers on the right that show volume and pan once
   a lane is tall enough (drag its lower edge), return and main rows along the bottom. Clips move
   by dragging (`clip.move`), snapped to a grid that follows the zoom (Ctrl and the wheel).
+- A track's pan and volume (the mixer strip in the Session view, the track headers in the
+  Arrangement view) are heard while they are dragged, and one drag is one undo step
+  (`track.setPan`, `track.setVolume` with `continue`;
+  [#313](https://github.com/suhina-daw/suhina-daw/issues/313)).
 - A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
   marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
+- **Play from the selected clip:** Shift+Space plays from the start of the clip selected in the
+  Arrangement view, and the setting Settings › General › Play from (**Marker** or **Selected
+  clip**) makes Play and Space do the same; the marker moves to the clip's start, so Stop returns
+  there (`transport.play {from: "clip", track, index}`, `play <track> <i>` in
+  `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
 - Clips move between tracks by dragging them up or down (`clip.move` with `to_track`); a MIDI
   clip then plays through the new track's instrument and effects.
 - **New, open and save:** Ctrl+T shows a dialog to make a new blank project, one from a template
@@ -300,6 +318,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   to the selected track. The folders are indexed on disk and watched for changes
   ([spec](docs/spec/browser.md), [ADR 0011](docs/decisions/0011-preview-and-added-audio.md),
   [ADR 0012](docs/decisions/0012-file-library.md)).
+- Samples, Stems files and MIDI files dragged from the system's file manager land like a drag
+  from the browser: on the slot, lane or empty space under the pointer, outlined while they hover
+  (`clip.addFiles`). Where the system reports no pointer position during the drag, they go where
+  Enter puts them ([spec](docs/spec/browser.md#files-from-the-system)).
+- The browser's **plug-ins in three views** (the Plug-ins category): grouped by vendor as
+  ever, grouped by type (Instruments and Effects, Suhina's groups from the formats' own
+  sub-categories), or one flat list whose columns (name, vendor, type, format, date modified)
+  sort by clicking their headings; the choice is kept with the library, and pins and tags work
+  on plug-in rows like on files
+  ([spec](docs/spec/plugin-browsing.md)).
 - **Missing files**: a project whose audio files cannot be found says so in a bar when it opens
   (Find…, Later; View › Missing files). The panel lists them with the clips that use them, finds
   them by name in the browser's folders and the project's folder at once, or in a folder typed or
@@ -307,8 +335,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/missing-files.md)).
 - The **sample map** (the browser's List | Map switch, large in the main area, or in a window of its own for a second screen, Ctrl+Alt+M, which keeps its place): the samples
   of the browser's place laid out by how they sound, coloured by kind (kick, snare, clap, hats,
-  toms, cymbals, percussion, bass, tonal, vocal, effect; from the name or guessed from similar
-  samples), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
+  toms, cymbals, percussion, bass, tonal, vocal, effect), as a free cloud or snapped to a grid that follows the view's shape (`soundmap.layout`
   takes `aspect`), with the kinds' names over their regions and a
   legend that filters. Pointing at a sample previews it; click, Ctrl+click, Shift+drag and the
   arrow keys select; a drag places it like a drag from the list; right-click › Show similar rings
@@ -316,11 +343,21 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   It stays readable with up to 200 000 samples: a density view when points crowd, and labels per
   cluster that never overlap. Samples are analysed in the background once and kept
   ([spec](docs/spec/sample-map.md), [ADR 0013](docs/decisions/0013-sample-map-analysis.md)).
+- The sample map **recognises kinds by sound**: features read from the sample's onset, with
+  its attack apart from its body, energy in five bands and the fall of a kick's pitch; a
+  classifier learned from the library's own named samples gives each sample its kind before the
+  layout, and the layout keeps each kind in regions of its own, so a tambourine in a folder of
+  kicks lands among the percussion. Right-click a point › **Kind ▸** sets a kind by hand
+  (`soundmap.setKind`); it wins over the name and the sound and is kept
+  ([spec](docs/spec/sample-map.md) › Kinds and colours, #325).
 - A menu bar and a **Settings** dialog over the window (Options › Settings, Ctrl+,; Escape closes
   it) with its pages listed down the
   left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
   Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
   OpenGL); saved in `settings.txt`.
+- **Help › About Suhina** says which build this is: the version (a nightly's names its night and
+  commit), the platform and the licence, and copies one line naming the build for a bug report
+  ([spec](docs/spec/about.md)).
 - The whole window zooms from 50 % to 200 % (Ctrl and + or -, Cmd on macOS; Ctrl and 0 for
   100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
   ([spec](docs/spec/window-zoom.md)).
@@ -334,10 +371,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
-- The control bar has tempo, launch quantisation, play, stop, the position and the CPU load
+- The control bar has tempo, launch quantisation, play, stop, the position, the CPU load
   (how much of the time the audio engine spends rendering, from the engine's monitor; hidden
-  while no engine plays); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every
-  click is a command, the same the CLI and MCP run.
+  while no engine plays) and the program's RAM in megabytes or gigabytes (its resident
+  memory, measured once a second); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and
+  redo. Every click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - A track header 70 px or taller shows where the track plays: the main output or a group

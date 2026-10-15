@@ -7,6 +7,7 @@ mod blank;
 mod commands;
 mod devices;
 mod files;
+mod follow;
 mod library;
 mod plugins;
 mod preview;
@@ -30,7 +31,8 @@ pub use library::{Category, Found, file_info, library_commands, search_items};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{
-    Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, is_instrument, start_offline,
+    Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, is_instrument, plugin_group,
+    start_offline,
 };
 pub use relink::{MAX_RELINK, search as find_candidates};
 pub use soundmap::{scope_files, sound_map_commands};
@@ -73,9 +75,18 @@ pub struct Player {
     output: Option<std::sync::Arc<dyn LiveOutput>>,
 }
 
+/// `controller`, with the follow actions' random numbers seeded from the clock, so each
+/// playback picks its own (offline renders keep the engine's fixed seed).
+fn seeded(mut controller: Controller) -> Controller {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    // A full queue means the engine is not running yet; it then keeps its fixed seed.
+    let _ = controller.send(suhina_engine::LaunchCommand::SeedRandom(nanos as u64));
+    controller
+}
+
 impl Player {
     pub fn new(controller: Controller, keep_alive: Option<Box<dyn std::any::Any + Send>>) -> Self {
-        Self { controller, keep_alive, output: None }
+        Self { controller: seeded(controller), keep_alive, output: None }
     }
 
     /// A player whose output reports what it runs with (`audio.info`).
@@ -84,7 +95,7 @@ impl Player {
         keep_alive: Option<Box<dyn std::any::Any + Send>>,
         output: std::sync::Arc<dyn LiveOutput>,
     ) -> Self {
-        Self { controller, keep_alive, output: Some(output) }
+        Self { controller: seeded(controller), keep_alive, output: Some(output) }
     }
 
     /// What the output runs with now, when it says.
@@ -195,6 +206,12 @@ pub struct Session {
     audio_changed: bool,
     /// Files decoded ahead of a command that uses them (`provide_audio`), newest last.
     decoded: Vec<(String, std::sync::Arc<suhina_engine::AudioData>)>,
+    /// The command and track of the undo step on top that a call with `continue` may join: one
+    /// drag of a value is one step. Any other edit, undo or redo ends it.
+    open_step: Option<(&'static str, suhina_model::TrackId)>,
+    /// Set when a continued edit could not reach the playing engine; [`Session::catch_up_player`]
+    /// sends the project again.
+    player_behind: bool,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -217,6 +234,8 @@ impl Session {
             audio: suhina_engine::AudioPool::new(),
             audio_changed: false,
             decoded: Vec::new(),
+            open_step: None,
+            player_behind: false,
         }
     }
 
@@ -491,6 +510,33 @@ impl Session {
             name.push(suhina_project_file::EXTENSION);
             path.set_file_name(name);
         }
+        let mut project = self.project_as_heard();
+        let from = match &self.audio_folder {
+            Some(folder) => folder.clone(),
+            None => std::env::current_dir().unwrap_or_default(),
+        };
+        let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+        suhina_project_file::rebase_audio(&mut project, &from, &to);
+        suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
+        if !copy {
+            self.source = Some(path.clone());
+            self.saved_at = self.changes;
+        }
+        Ok(path)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.project
+    }
+
+    /// A copy of the project with each running plug-in's state as it is now (what its editor
+    /// changed since the project was opened), for a save or a render that should play what is
+    /// heard (ADR 0006 decision 5). The component state goes into `Device::state` and a VST3
+    /// controller's into its extension. Each host process is asked on a thread of its own and
+    /// the answers are waited for at most a second, as a save does; a plug-in that is not running
+    /// keeps the state it was last given. The open project is not changed: reading a plug-in's
+    /// state is neither a change nor an undo step.
+    pub fn project_as_heard(&mut self) -> Project {
         let mut project = self.project.clone();
         let states = self.plugins.current_states();
         for device in suhina_engine::plugin_devices(&project) {
@@ -512,22 +558,7 @@ impl Session {
                 }
             }
         }
-        let from = match &self.audio_folder {
-            Some(folder) => folder.clone(),
-            None => std::env::current_dir().unwrap_or_default(),
-        };
-        let to = path.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-        suhina_project_file::rebase_audio(&mut project, &from, &to);
-        suhina_project_file::write_file(&path, &project).map_err(|e| CommandError(e.0))?;
-        if !copy {
-            self.source = Some(path.clone());
-            self.saved_at = self.changes;
-        }
-        Ok(path)
-    }
-
-    pub fn project(&self) -> &Project {
-        &self.project
+        project
     }
 
     pub fn source(&self) -> Option<&Path> {
@@ -565,12 +596,25 @@ impl Session {
             | CommandKind::Audio
             | CommandKind::Plugin => (spec.run)(self, params),
             CommandKind::History => {
+                self.open_step = None;
                 let value = (spec.run)(self, params)?;
                 self.update_player()?;
                 Ok(value)
             }
             CommandKind::Edit => {
                 self.param_edit = None;
+                // A command with a `continue` parameter can add to the step it made last time.
+                let step = spec
+                    .params
+                    .iter()
+                    .any(|p| p.name == "continue")
+                    .then(|| commands::track_id(&self.project, params).ok())
+                    .flatten()
+                    .map(|track| (spec.id, track));
+                let continued = params.get("continue").and_then(Value::as_bool) == Some(true);
+                if !continued || step != self.open_step {
+                    self.open_step = None;
+                }
                 let before = self.project.clone();
                 let result = (spec.run)(self, params).and_then(|value| match self.project.validate() {
                     Ok(()) => Ok(value),
@@ -579,7 +623,14 @@ impl Session {
                 match result {
                     Ok(value) => {
                         if self.project != before {
-                            self.push_undo(before);
+                            if self.open_step.is_some() {
+                                // Joins the open step, which keeps the project from before it.
+                                self.changes = self.changes.wrapping_add(1);
+                                self.redo.clear();
+                            } else {
+                                self.push_undo(before);
+                                self.open_step = step;
+                            }
                             // A parameter change goes to the engine as a message; anything else,
                             // or a message that cannot be sent, as a new graph.
                             let sent = match (self.param_edit.take(), self.player.as_mut()) {
@@ -587,7 +638,13 @@ impl Session {
                                 _ => false,
                             };
                             if !sent {
-                                self.update_player()?;
+                                match self.update_player() {
+                                    Ok(()) => self.player_behind = false,
+                                    // A drag sends a value every frame and may outrun the engine
+                                    // taking new graphs: the engine catches up on a later frame.
+                                    Err(_) if continued => self.player_behind = true,
+                                    Err(e) => return Err(e),
+                                }
                             }
                         }
                         Ok(value)
@@ -598,6 +655,14 @@ impl Session {
                     }
                 }
             }
+        }
+    }
+
+    /// Sends the project to the playing engine again if a continued edit could not reach it
+    /// (its queue was full). The window calls it every frame, through `Projects::poll_plugins`.
+    pub fn catch_up_player(&mut self) {
+        if self.player_behind && self.update_player().is_ok() {
+            self.player_behind = false;
         }
     }
 
@@ -615,6 +680,7 @@ impl Session {
     }
 
     fn push_undo(&mut self, before: Project) {
+        self.open_step = None;
         self.changes = self.changes.wrapping_add(1);
         if self.undo.len() >= MAX_UNDO {
             self.undo.remove(0);

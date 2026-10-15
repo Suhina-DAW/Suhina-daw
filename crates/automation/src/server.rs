@@ -353,7 +353,7 @@ impl SuhinaMcp {
     }
 
     #[tool(
-        description = "Render the arrangement (or one launcher scene, or a script of clip launches) offline to a 32-bit float stereo WAV below the write root. Built-in effects and instruments, and installed plug-ins (found in the plug-in catalog, with their saved state) run as in playback; notes on a track without an instrument play as sine tones; audio clips play. `plugins` in the result lists plug-ins that are missing or did not start."
+        description = "Render the arrangement (or one launcher scene, or a script of clip launches) offline to a 32-bit float stereo WAV below the write root. Built-in effects and instruments, and installed plug-ins (found in the plug-in catalog, with the state their running instances have now, else the saved one) run as in playback; notes on a track without an instrument play as sine tones; audio clips play. `plugins` in the result lists plug-ins that are missing or did not start."
     )]
     async fn project_render(&self, Parameters(p): Parameters<RenderParams>) -> Result<CallToolResult, McpError> {
         let path = match self.workspace.writable(&p.output, p.overwrite.unwrap_or(false)) {
@@ -379,7 +379,7 @@ impl SuhinaMcp {
                         return Err("give either scene or launches, not both".into());
                     }
                     let seconds = seconds.ok_or("launches needs seconds, the length of the render")?;
-                    let project = session.project().clone();
+                    let project = session.project_as_heard();
                     let (audio, warnings) = project_audio(session, &project);
                     let (summary, steps) =
                         render_launch_script(&project, &audio, &path, sample_rate, &steps, seconds, Some(&env))?;
@@ -396,11 +396,12 @@ impl SuhinaMcp {
                 if seconds.is_some() {
                     return Err("seconds applies only to launches".into());
                 }
+                let scene = scene.map(|n| n.checked_sub(1).ok_or("scenes are numbered from 1")).transpose()?;
+                // The running plug-ins' state as it is now, so the render plays what is heard.
+                let heard = session.project_as_heard();
                 let project = match scene {
-                    Some(n) => {
-                        scene_as_arrangement(session.project(), n.checked_sub(1).ok_or("scenes are numbered from 1")?)?
-                    }
-                    None => session.project().clone(),
+                    Some(index) => scene_as_arrangement(&heard, index)?,
+                    None => heard,
                 };
                 let (audio, warnings) = project_audio(session, &project);
                 let summary = render_wav(&project, &audio, &path, sample_rate, Some(&env))?;
@@ -516,6 +517,7 @@ fn confine(workspace: &Workspace, id: &str, mut params: Value, source: Option<&P
             confine_place(workspace, &mut params)?;
         }
         "soundmap.layout" => confine_place(workspace, &mut params)?,
+        "soundmap.setKind" => confine_file(workspace, &mut params, "item")?,
         "library.search" => {
             if let Some(place) = params.get("place").and_then(Value::as_str)
                 && place != "pinned"
@@ -729,6 +731,7 @@ mod confine_tests {
             ("soundmap.layout", json!({ "place": dir.join("outside").display().to_string() })),
             ("soundmap.similar", json!({ "item": outside.clone() })),
             ("soundmap.info", json!({ "item": outside.clone() })),
+            ("soundmap.setKind", json!({ "item": outside.clone(), "kind": "kick" })),
             ("soundmap.analyse", json!({ "folder": dir.join("outside").display().to_string() })),
             ("project.relinkFiles", json!({ "files": ["a.wav"], "to": [outside.clone()] })),
             ("library.findFiles", json!({ "names": ["a.wav"], "folder": dir.join("outside").display().to_string() })),

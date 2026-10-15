@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-15
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -124,13 +124,17 @@ workspace forbids.
      them again after a restart.
 4. **Block sync and deadline.** The engine signals the host, the host processes and signals
    back. Primitives: a futex in the shared memory on Linux; duplicated auto-reset events on
-   Windows; semaphores on macOS, prototyped first because they are the least certain. The host's
+   Windows, waited on together with a high-resolution waitable timer that wakes the wait 1 ms
+   before the deadline, the rest spent yielding, so a miss ends on time and not on the system
+   timer's next 15.6 ms tick (#211); semaphores on macOS, prototyped first because they are the
+   least certain. The host's
    audio thread runs at the engine's real-time priority (MMCSS "Pro Audio" on Windows; the
    engine's audio workgroup on macOS). The engine waits at most the rest of the block's time.
    On a miss it outputs the plug-in's input (an effect) or silence (an instrument) for that block
    and counts the miss. Repeated misses, a dead process or an unanswered ping mark the plug-in
    *crashed* or *hung*; the engine kills the process and offers a restart. Offline renders wait
-   without a deadline (with a long timeout), so they run as fast as the plug-in allows.
+   without a deadline (with a long timeout), so they run as fast as the plug-in allows; a block
+   left unanswered there says whether the process died (the plug-in crashed) or is still stuck.
    *Built:* the host's audio threads and the desktop app's render thread join MMCSS "Pro Audio"
    on Windows (`audio_thread_priority`; `thread-priority`'s highest, `THREAD_PRIORITY_HIGHEST`,
    only where MMCSS refuses) and take the highest priority the system gives them elsewhere (on
@@ -167,12 +171,19 @@ workspace forbids.
    once (`Plugin::health` keeps what it found last, and a restart sets that), not as the
    instance it replaced.
 5. **State survives crashes.** The host pulls each plug-in's state on save and periodically;
-   the project keeps it in `Device::state`. A restart loads the last state and keeps the latency
+   the saved project keeps it in `Device::state` (a VST3 controller's in an extension), and the
+   open project keeps what it was opened with, so reading it is neither a change nor an undo
+   step. A restart loads the last state and keeps the latency
    the chain was compensated for. `project.save` asks every running plug-in for its state as it
    is then, each on a thread of its own, waits at most a second for the answers (the last state
    read stands in for one that has not answered) and writes that, with the last state of
    stopped ones
    ([ADR 0010](0010-project-files.md)).
+   A render from an open project (`project_render`) reads the states the same way
+   (`Session::project_as_heard`, which the save uses too) and starts its own offline instances
+   with them, so it plays what is heard, edits made in an editor since the project was opened
+   included (#363). The running instances are only asked for their state: the render's
+   instances are separate host processes, as for any offline render.
 6. **`unsafe` only in two crates.** `crates/ipc` (shared memory and block sync, linked into the
    engine) and `crates/plugin-host` (the plug-in host process) may use `unsafe`; every other
    crate stays `forbid`. Both offer safe APIs, keep `unsafe` blocks small, explain each one in a
@@ -180,10 +191,14 @@ workspace forbids.
    runs inside the engine process, so it stays small.
 7. **Formats.** CLAP first, then VST3, on the same boundary. CLAP goes through `clack-host`:
    the instance stays on the host's main thread (with the plug-in's main-thread callbacks), the
-   started audio processor on its audio thread. A plug-in is named `clap:<file>` or
+   started audio processor on its audio thread. Every audio port the plug-in declares gets a
+   buffer with the channels it declared (a plug-in may read them all, and one given fewer can
+   crash, #327); the link's stereo goes through the main ports and the rest get silence. A
+   plug-in is named `clap:<file>` or
    `clap:<file>#<id>`; the only `unsafe` the host needs for it is opening the file. A CLAP gain
    built into the host (`test:clap`, made with `clack-plugin`) lets the tests run the whole path
-   without a plug-in installed; `SUHINA_TEST_CLAP` runs them against a real file too.
+   without a plug-in installed, and `test:clap-ports` has a rack's port layout (8-channel main
+   ports and stereo side ports); `SUHINA_TEST_CLAP` runs them against a real file too.
    VST3 goes through the `vst3` bindings to the SDK: the component and controller on the main
    thread (connected through their connection points, the controller given the component's
    state; the host makes the messages and attribute lists they send each other,

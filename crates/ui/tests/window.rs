@@ -364,6 +364,225 @@ fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     assert!((monitor.start_beat() - 17.0).abs() < 0.03, "{}", monitor.start_beat());
 }
 
+/// The demo project with only Drums heard, held notes and no sends, so what is heard is one
+/// track's pan and volume.
+fn drums_alone() -> suhina_engine::model::Project {
+    let mut project = demo_project();
+    for channel in &mut project.channels {
+        channel.sends.clear();
+        channel.mute = channel.id.0 != 1 && channel.id.0 <= 4;
+    }
+    for content in &mut project.contents {
+        for lane in &mut content.lanes {
+            if let suhina_engine::model::LaneData::Notes(notes) = &mut lane.data {
+                notes.iter_mut().for_each(|n| n.duration = 1.0);
+            }
+        }
+    }
+    project
+}
+
+/// The level of the left and right side over the next quarter of a second of `renderer`.
+fn sides(renderer: &mut suhina_engine::Renderer) -> (f64, f64) {
+    let mut out = vec![0.0f32; 2 * 12_000];
+    for block in out.chunks_mut(2 * 64) {
+        renderer.process(block);
+    }
+    let rms = |side: usize| {
+        let sum: f64 = out.iter().skip(side).step_by(2).map(|s| f64::from(*s).powi(2)).sum();
+        (sum / 12_000.0).sqrt()
+    };
+    (rms(0), rms(1))
+}
+
+/// Starts playing `renderer` from the window and moves the pointer onto `label`, pressed.
+fn press_while_playing(harness: &mut Harness<'static, App>, renderer: &mut suhina_engine::Renderer, label: &str) {
+    harness.get_by_label("Play").click();
+    // While playing the window repaints on its own: step it instead of running it to rest.
+    harness.run_steps(2);
+    let at = harness.get_by_label(label).rect().center();
+    harness.hover_at(at);
+    harness.run_steps(1);
+    harness.drag_at(at);
+    harness.run_steps(1);
+    sides(renderer);
+}
+
+#[test]
+fn a_pan_drag_is_heard_while_dragging_and_is_one_undo_step() {
+    let project = drums_alone();
+    let mut renderer = suhina_engine::Renderer::stopped(&project, &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(project);
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(session, &[]);
+    // Frames close enough together for a double-click.
+    let mut harness = window_with_step(app, 1.0 / 60.0);
+    let pan = |h: &Harness<'static, App>| h.state().session().map_or(f64::NAN, |s| s.project().channels[0].pan);
+
+    press_while_playing(&mut harness, &mut renderer, "Drums pan");
+    let (left, right) = sides(&mut renderer);
+    assert!(left > 0.01 && (left / right - 1.0).abs() < 0.01, "{left} {right}");
+    let knob = harness.get_by_label("Drums pan").rect().center();
+    // Up raises the pan, 0.01 a point; the button is still held after each step.
+    let mut heard = Vec::new();
+    for up in [20.0, 40.0, 60.0] {
+        harness.hover_at(knob - egui::vec2(0.0, up));
+        harness.run_steps(1);
+        let (left, right) = sides(&mut renderer);
+        heard.push((pan(&harness), right / left));
+    }
+    for pair in heard.windows(2) {
+        assert!(pair[1].0 > pair[0].0 && pair[1].1 > pair[0].1, "louder on the right as it pans: {heard:?}");
+    }
+    // At a pan of p the sides are cos and sin of (p + 1) * 45 degrees.
+    for &(p, ratio) in &heard {
+        let want = ((p + 1.0) * std::f64::consts::FRAC_PI_4).tan();
+        assert!(p > 0.0 && (ratio - want).abs() < 0.05 * want, "{p}: heard {ratio}, want {want}");
+    }
+    harness.drop_at(knob - egui::vec2(0.0, 60.0));
+    harness.run_steps(2);
+    let dropped = pan(&harness);
+    assert!((dropped - heard[2].0).abs() < 1e-9, "{dropped} {heard:?}");
+
+    // The whole drag is one step: one undo goes back to the centre, and there is nothing older.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(pan(&harness), 0.0);
+    assert!(harness.state().session().is_some_and(|s| !s.can_undo()));
+    let (left, right) = sides(&mut renderer);
+    assert!((left / right - 1.0).abs() < 0.01, "{left} {right}");
+
+    // Redo brings the drag's end back; a double-click then centres the knob as a step of its own.
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(pan(&harness), dropped);
+    // Half a second later, as a person would, so the clicks do not count with the drag.
+    harness.run_steps(30);
+    for _ in 0..2 {
+        harness.hover_at(knob);
+        harness.drag_at(knob);
+        harness.drop_at(knob);
+        harness.step();
+    }
+    harness.run_steps(2);
+    assert_eq!(pan(&harness), 0.0);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(pan(&harness), dropped);
+}
+
+#[test]
+fn a_volume_drag_in_the_arrangement_is_heard_while_dragging_and_is_one_undo_step() {
+    let project = drums_alone();
+    let mut renderer = suhina_engine::Renderer::stopped(&project, &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(project);
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    let volume = |h: &Harness<'static, App>| h.state().session().map_or(f64::NAN, |s| s.project().channels[0].volume);
+
+    press_while_playing(&mut harness, &mut renderer, "Drums volume");
+    let (before, _) = sides(&mut renderer);
+    let field = harness.get_by_label("Drums volume").rect().center();
+    // Down lowers the volume, 0.25 dB a point: 24 points is about -6 dB, 48 about -12 dB.
+    let mut heard = Vec::new();
+    for down in [24.0, 48.0] {
+        harness.hover_at(field + egui::vec2(0.0, down));
+        harness.run_steps(1);
+        let (left, _) = sides(&mut renderer);
+        heard.push((volume(&harness), left / before));
+    }
+    for &(gain, ratio) in &heard {
+        assert!(gain < 0.6 && (ratio - gain).abs() < 0.02, "heard {ratio} at a gain of {gain}: {heard:?}");
+    }
+    assert!(heard[1].0 < heard[0].0, "{heard:?}");
+    harness.drop_at(field + egui::vec2(0.0, 48.0));
+    harness.run_steps(2);
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(volume(&harness), 1.0);
+    assert!(harness.state().session().is_some_and(|s| !s.can_undo()));
+}
+
+#[test]
+fn play_starts_from_the_selected_clip_with_shift_space_or_the_setting() {
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut harness = arrangement_app_with_engine(&mut renderer);
+    let monitor = renderer.monitor();
+    let stop = |harness: &mut Harness<'static, App>, renderer: &mut suhina_engine::Renderer| {
+        harness.get_by_label("Stop").click();
+        harness.run_steps(2);
+        render_a_block(renderer);
+    };
+
+    // By default Play starts from the marker, a selected clip or not.
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+    stop(&mut harness, &mut renderer);
+
+    // Shift+Space plays from the selected clip's start (bar 17, beat 64), and Stop returns there.
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 64.0));
+    for _ in 0..100 {
+        render_a_block(&mut renderer);
+    }
+    stop(&mut harness, &mut renderer);
+    assert_eq!((monitor.running(), monitor.beat()), (false, 64.0));
+
+    // With Play from set to the selected clip, Space and the Play button start there too.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: General").click();
+    harness.run();
+    harness.get_by_label("Play from: Selected clip").click();
+    harness.run();
+    assert_eq!(
+        harness.state_mut().take_changed_settings().map(|s| s.play_from),
+        Some(suhina_ui::settings::PlayFrom::Clip)
+    );
+    harness.get_by_label("Close settings").click();
+    harness.run();
+    harness.get_by_label("Clip Beat A on Drums at bar 1").click();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+    stop(&mut harness, &mut renderer);
+    harness.get_by_label("Clip Beat B on Drums at bar 17").click();
+    harness.run();
+    harness.get_by_label("Play").click();
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 64.0));
+    stop(&mut harness, &mut renderer);
+
+    // In the Session view the selection is not shown, so Play starts from the marker; stopping
+    // again first puts the marker at the beginning.
+    stop(&mut harness, &mut renderer);
+    assert_eq!(monitor.start_beat(), 0.0);
+    harness.get_by_label("Session view").click();
+    harness.run();
+    harness.key_press(Key::Space);
+    harness.run_steps(2);
+    render_a_block(&mut renderer);
+    assert_eq!((monitor.running(), monitor.start_beat()), (true, 0.0));
+}
+
 #[test]
 fn arrangement_headers_turn_tracks_off() {
     let mut harness = arrangement_app();
@@ -737,6 +956,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         fade_out: 0.0,
         fade_in_curve: Default::default(),
         fade_out_curve: Default::default(),
+        follow_action: Default::default(),
         extensions: Extensions::default(),
     };
     project.arrangement.lanes.push(ArrangementLane {
@@ -1384,6 +1604,80 @@ fn the_control_bar_shows_the_cpu_load_only_while_an_engine_plays() {
     assert!(harness.query_by_label("CPU load").is_none());
 }
 
+#[test]
+fn the_control_bar_shows_the_ram_usage_whether_or_not_an_engine_plays() {
+    // The program's own RAM is shown without an engine too: it is the process's, not the
+    // engine's.
+    let mut app = App::new();
+    app.set_session(Session::new(demo_project()), &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.query_by_label_contains("RAM usage");
+    assert!(ram.is_some(), "the RAM shows next to the CPU's place");
+    // In megabytes or gigabytes, as the issue asks.
+    let text = format!("{:?}", ram.unwrap());
+    assert!(text.contains("MB") || text.contains("GB"), "{text}");
+}
+
+#[test]
+fn the_view_switch_is_the_last_control_at_the_right_with_the_cpu_and_ram_left_of_it() {
+    // With an engine attached, all four show: RAM, CPU, then the view switch at the edge.
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let mut harness = window(app);
+    harness.run();
+    let ram = harness.get_by_label_contains("RAM usage").rect();
+    let cpu = harness.get_by_label_contains("CPU load").rect();
+    let arrangement = harness.get_by_label("Arrangement view").rect();
+    let session = harness.get_by_label("Session view").rect();
+    let switch_left = arrangement.left().min(session.left());
+    let switch_right = arrangement.right().max(session.right());
+    assert!(ram.right() <= cpu.left(), "RAM {ram:?} left of CPU {cpu:?}");
+    assert!(cpu.right() <= switch_left, "CPU {cpu:?} left of the view switch at {switch_left}");
+    // The switch keeps its place at the right edge.
+    assert!(SIZE.0 - switch_right <= 16.0, "the switch ends at {switch_right}");
+}
+
+#[test]
+fn a_narrow_window_leaves_out_what_would_reach_the_position_readout() {
+    // At the smallest window the app allows, the blocks that show keep their order and stay
+    // right of the transport in the centre (play, stop and the 64 px position).
+    let mut renderer =
+        suhina_engine::Renderer::stopped(&demo_project(), &suhina_engine::AudioPool::new(), 48_000).unwrap();
+    let mut session = Session::new(demo_project());
+    session.attach_player(suhina_session::Player::new(renderer.controller(), None));
+    let mut app = App::new();
+    app.set_session(session, &[]);
+    let size = (640.0, 400.0);
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .with_step_dt(0.25)
+        .with_max_steps(4)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    harness.run();
+    let transport_end = size.0 / 2.0 + (28.0 * 2.0 + 1.0 + theme::PAD + 64.0) / 2.0;
+    let arrangement = harness.get_by_label("Arrangement view").rect();
+    let session = harness.get_by_label("Session view").rect();
+    let switch_left = arrangement.left().min(session.left());
+    assert!(switch_left > transport_end, "the switch at {switch_left} clears the position");
+    let cpu = harness.query_by_label_contains("CPU load").map(|n| n.rect());
+    let ram = harness.query_by_label_contains("RAM usage").map(|n| n.rect());
+    // The CPU still fits beside the switch; the RAM, further left, may not.
+    assert!(cpu.is_some(), "the CPU load fits at 640 px");
+    if let Some(cpu) = cpu {
+        assert!(cpu.left() >= transport_end && cpu.right() <= switch_left, "CPU at {cpu:?}");
+    }
+    if let Some(ram) = ram {
+        assert!(ram.left() >= transport_end, "RAM at {ram:?}");
+        assert!(cpu.is_some_and(|cpu| ram.right() <= cpu.left()), "RAM {ram:?} left of the CPU");
+    }
+}
+
 /// The label of the active project's Close button in the tab row.
 fn active_close_label(harness: &Harness<'static, App>) -> String {
     let projects = harness.state().projects();
@@ -1577,4 +1871,25 @@ fn the_wheel_over_open_settings_leaves_the_arrangement_alone() {
     harness.run();
     assert!(!harness.state().settings_open());
     assert_eq!(clip(&harness), before, "the arrangement neither scrolled nor zoomed");
+}
+
+#[test]
+fn help_about_shows_the_version_and_copies_it() {
+    let mut harness = window(demo_app());
+    let version = suhina_ui::project_dialog::VERSION;
+    assert!(harness.query_by_label_contains(version).is_none());
+    harness.get_by_label("Help").click();
+    harness.run();
+    harness.get_by_label_contains("About Suhina").click();
+    harness.run();
+    let line = suhina_ui::project_dialog::version_line();
+    assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
+    harness.get_by_label(&format!("Copy version: {line}")).click();
+    harness.run();
+    assert_eq!(harness.state().status(), &Status::Done(format!("Copied {line}")));
+    // Still open after copying; Escape closes it.
+    assert!(harness.query_by_label_contains(version).is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label_contains(version).is_none());
 }
