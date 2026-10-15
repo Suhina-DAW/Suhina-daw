@@ -30,22 +30,27 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 93
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
 CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
-    (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.50, "partial",
-     "Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), "
+    (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
+     "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
+     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
      "Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer "
      "concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin."),
-    (4, "Working with the Browser", 60, 0.45, "partial",
+    (4, "Working with the Browser", 60, 0.49, "partial",
      "Search, categories, folders watched on disk, pins, recent, colour tags, preview through the "
-     "engine, sample map by sound similarity with kinds recognised from the sound and set by hand. Missing collections/tag editor depth, packs, Splice, "
+     "engine, sample map by sound similarity with kinds recognised from the sound and set by hand; samples and MIDI files dragged from the system's file "
+     "manager land like a browser drag (exact placement waits for pointer positions from the "
+     "windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups "
+     "from the formats' own categories) or in a flat list sortable by name, vendor, type, format "
+     "and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.35, "partial",
      ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
@@ -56,9 +61,10 @@ CHAPTERS = [
      "fade shapes, grid snap. A clip's loop range is read and drawn but no command sets it. Missing "
      "locators, the arrangement loop brace, time-signature changes, split, consolidate, crop, "
      "crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.50, "partial",
+    (7, "Session View", 13, 0.52, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching. "
-     "Missing scene view/editing depth, select-on-launch options, follow actions."),
+     "A launched clip is selected and the detail area shows its follow-action controls. Missing "
+     "scene view/editing depth, select-on-launch options."),
     (8, "Clip View", 34, 0.08, "started",
      "Detail area shows clip properties; the MIDI clip editor is a spec only "
      "(docs/spec/ui-clip-editor.md, planned). No clip panels, no sample editor, no groove/scale panels."),
@@ -77,10 +83,11 @@ CHAPTERS = [
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.35, "partial",
+    (16, "Launching Clips", 12, 0.48, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, "
-     "warped launched clips. Missing launch modes, legato, velocity amount, clip offset/nudge, "
-     "follow actions."),
+     "warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by "
+     "command and in the detail area). Missing launch modes, legato, velocity amount, "
+     "clip offset/nudge, follow-action multiplier and scene follow actions."),
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
@@ -91,16 +98,17 @@ CHAPTERS = [
     (19, "Recording New Clips", 13, 0.00, "absent",
      "No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
-     "Whole-project offline render to 32-bit float WAV (CLI/MCP); no per-track or group bounce, "
-     "no paste."),
+     "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
+     "running plug-ins' state as heard; no per-track or group bounce, no paste."),
     (21, "Comping", 6, 0.00, "absent", "No take lanes, no comping."),
     (22, "Stem Separation", 8, 0.00, "planned", "Roadmap item (Demucs candidate, weights unaudited)."),
     (23, "Working with Instruments and Effects (Device View)", 34, 0.30, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
-    (24, "Using Plug-Ins", 12, 0.55, "partial",
-     "CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency "
+    (24, "Using Plug-Ins", 12, 0.57, "partial",
+     "CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, "
+     "editors (Windows/X11), scans, latency "
      "compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, "
      "configure mode, VST preset banks, sidechain parameters."),
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
@@ -131,8 +139,8 @@ CHAPTERS = [
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",
      "No Link, no Tempo Follower, no MIDI clock sync."),
     (38, "Computer Audio Resources and Strategies", 7, 0.35, "partial",
-     "CPU-load meter, buffer-size choice, render-ahead engine, plug-in deadline reporting, an "
-     "80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter."),
+     "CPU-load meter, the program's RAM in the control bar, buffer-size choice, render-ahead "
+     "engine, plug-in deadline reporting, an 80 s / 58-warped-clip set opens in 0.4 s. Missing track freeze, disk-load meter."),
     (39, "Audio Fact Sheet", 8, None, "n/a",
      "Not a feature list. Suhina renders 32-bit float and does not dither; no neutrality test suite."),
     (40, "MIDI Fact Sheet", 6, None, "n/a",
