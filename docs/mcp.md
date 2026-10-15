@@ -73,7 +73,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   default output and the result's `notice` says so. The choice is kept: while the default plays
   in its place, Suhina looks every few seconds whether the chosen device is back and moves the
   output there, the same way. The engine renders in blocks of
-  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
+  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. A size is fitted to what the
+  device's driver declared, and a driver is never asked for one outside that range: a range
+  holding no size the engine renders in leaves the driver its own size, and `notice` says which
+  size plays. On WASAPI shared mode Windows sets the device's buffer, so there `buffer_frames` is
+  the engine's block alone and `buffer_sizes` the engine's own sizes. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
   armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a

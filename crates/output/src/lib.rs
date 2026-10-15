@@ -15,7 +15,11 @@
 //!
 //! Hosts are cpal's (WASAPI shared on Windows, ASIO with the `asio` feature, ALSA, JACK,
 //! CoreAudio), and WASAPI exclusive mode through the `wasapi` crate. A stream is opened and
-//! closed on the audio owner's thread, never on the render or device thread.
+//! closed on the audio owner's thread, never on the render or device thread. The buffer size
+//! chosen is fitted to what the device declares ([`devices`]) and a driver is never asked for a
+//! size outside the range it reports; where the device's own buffer is not ours to set (WASAPI
+//! shared mode, where Windows plays the period it gives the device) the number is the engine's
+//! block alone, and `audio.info` reports the device's measured buffer next to it.
 
 pub mod devices;
 #[cfg(windows)]
@@ -314,7 +318,9 @@ impl Output {
 
     /// The output `choice` names, made to fit what the device offers: a host or device that is
     /// not there, or a sample rate it does not offer, falls back to the default with a notice
-    /// ([`Output::notices`]); a buffer size goes to the nearest the driver allows.
+    /// ([`Output::notices`]); a buffer size goes to the nearest the driver allows, and the
+    /// device is never asked for one outside the range its driver declared — a driver whose
+    /// sizes the engine cannot render in is asked for none and keeps its own, with a notice.
     pub fn choose(choice: &OutputChoice) -> Result<Self, String> {
         let mut notices = Vec::new();
         let default_host = cpal::default_host().id();
@@ -348,8 +354,11 @@ impl Output {
         #[cfg(windows)]
         if choice.exclusive && host_name == "WASAPI" {
             let sample_rate = choice.sample_rate.unwrap_or(default.sample_rate());
+            // The device is asked for this period itself, so it stays within what the engine
+            // renders in; the device aligns it further, or refuses it and says why (`exclusive`).
+            let buffer = choice.buffer_frames.map(|frames| frames.clamp(MIN_BUFFER_FRAMES, MAX_BUFFER_FRAMES));
             return Ok(Self {
-                backend: Backend::Exclusive { device: Some(device_name.clone()), buffer: choice.buffer_frames },
+                backend: Backend::Exclusive { device: Some(device_name.clone()), buffer },
                 host: host_name,
                 device_name,
                 sample_rate,
@@ -382,6 +391,11 @@ impl Output {
         }
         let range = devices::buffer_range(supported.buffer_size());
         let fitted = choice.buffer_frames.map(|wanted| devices::fit_for_host(&host_name, wanted, range));
+        if let (Some(wanted), Some((block, asked))) = (choice.buffer_frames, fitted)
+            && let Some(notice) = devices::buffer_notice(&host_name, &device_name, wanted, block, asked, range)
+        {
+            notices.push(notice);
+        }
         let buffer = fitted.map(|(block, _)| block);
         let format = supported.sample_format();
         let mut config: cpal::StreamConfig = supported.into();
@@ -582,10 +596,16 @@ pub fn start_stopped(project: &Project, audio: &AudioPool) -> Result<Stopped, St
     Ok(Stopped { controller, output, progress, stream })
 }
 
-/// Opens the device for `choice` and its stream: as chosen, then shared instead of exclusive,
-/// then the default output, saying why in the notices. The stream does not play yet.
+/// Opens the device for `choice` and its stream: as chosen, then without a buffer size of its
+/// own, then shared instead of exclusive, then the default output, saying why in the notices. A
+/// driver can refuse a size it declared — an ASIO range with a step its sizes have to sit on,
+/// which cpal's range cannot tell us about — and the device is not given up over it. The stream
+/// does not play yet.
 fn open_fitting(choice: &OutputChoice) -> Result<(Output, DeviceStream, rtrb::Producer<f32>, Arc<Progress>), String> {
     let mut tries = vec![choice.clone()];
+    if choice.buffer_frames.is_some() {
+        tries.push(OutputChoice { buffer_frames: None, ..choice.clone() });
+    }
     if choice.exclusive {
         tries.push(OutputChoice { exclusive: false, ..choice.clone() });
     }
@@ -613,6 +633,7 @@ fn open_fitting(choice: &OutputChoice) -> Result<(Output, DeviceStream, rtrb::Pr
             }
             Err(e) => {
                 let next = match tries.get(i + 1) {
+                    Some(next) if next.buffer_frames != attempt.buffer_frames => "it keeps its own buffer size",
                     Some(next) if !next.exclusive && attempt.exclusive => "it plays shared",
                     Some(_) => "the default output plays",
                     None => "",

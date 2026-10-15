@@ -1050,7 +1050,7 @@ fn an_audio_track_is_armed_to_hear_its_input_and_its_menu_chooses_the_channels()
 #[test]
 fn settings_audio_chooses_the_input_device_and_saves_it() {
     let mut app = demo_app();
-    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio("Stand")));
     let mut harness = window(app);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
@@ -1073,7 +1073,7 @@ fn settings_audio_chooses_the_input_device_and_saves_it() {
 #[test]
 fn settings_audio_lists_the_midi_inputs_and_one_turned_off_is_saved() {
     let mut app = demo_app();
-    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio("Stand")));
     app.projects_mut().set_midi_system(std::sync::Arc::new(StandMidi(vec!["Keys In".into(), "Pads In".into()])));
     let mut harness = window(app);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
@@ -1979,24 +1979,43 @@ fn render_every_built_in_theme() {
     }
 }
 
-/// An audio system with one device on one host, whose players run nowhere.
-struct StandAudio;
+/// An audio system with one device on one host, whose players run nowhere. `WASAPI` is the host
+/// whose shared mode Windows gives the device's buffer in, so the Settings row there names the
+/// engine's own block; its exclusive mode is possible, and does ask the device. `ALSA` is a host
+/// whose driver declares no buffer range of its own: it keeps its own size, and Suhina's own are
+/// offered.
+struct StandAudio(&'static str);
 
 impl suhina_session::AudioSystem for StandAudio {
     fn hosts(&self) -> Vec<suhina_session::audio::HostInfo> {
         use suhina_session::audio::{DeviceInfo, HostInfo};
+        let wasapi = self.0 == "WASAPI";
+        let undeclared = self.0 == "ALSA";
         vec![HostInfo {
-            name: "Stand".into(),
+            name: self.0.into(),
             default: true,
             devices: vec![DeviceInfo {
-                name: "Stand Out".into(),
+                name: if wasapi { "Apollo" } else { "Stand Out" }.into(),
                 default: true,
                 channels: 2,
                 sample_rates: vec![48_000],
                 default_sample_rate: Some(48_000),
-                buffer_sizes: vec![256, 512],
-                buffer_range: Some((256, 512)),
-                exclusive: false,
+                // WASAPI shared mode plays the period Windows gives the device (480 frames here),
+                // whatever is asked, so the sizes listed there are the engine's own block; a
+                // driver that declared nothing is offered those too, and asked for none of them.
+                buffer_sizes: if wasapi || undeclared {
+                    vec![64, 128, 256, 512, 1024, 2048, 4096]
+                } else {
+                    vec![256, 512]
+                },
+                buffer_range: if undeclared {
+                    None
+                } else if wasapi {
+                    Some((480, 480))
+                } else {
+                    Some((256, 512))
+                },
+                exclusive: wasapi,
             }],
             inputs: vec![suhina_session::audio::InputInfo {
                 name: "Stand In".into(),
@@ -2021,11 +2040,12 @@ impl suhina_session::AudioSystem for StandAudio {
     }
 }
 
-#[test]
-fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
+/// The window with Settings › Audio open, on `host` as its only audio host. (`Result` so that a
+/// failure is raised inside the test, where a panic is expected, and not in this helper.)
+fn settings_audio_on(host: &'static str) -> Result<Harness<'static, App>, String> {
     let mut app = demo_app();
-    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio));
-    app.projects_mut().open_output(None).unwrap_or_else(|e| panic!("{e}"));
+    app.projects_mut().set_audio_system(std::sync::Arc::new(StandAudio(host)));
+    app.projects_mut().open_output(None).map_err(|e| e.0)?;
     let mut harness = window(app);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
@@ -2034,6 +2054,12 @@ fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
     for _ in 0..3 {
         harness.step();
     }
+    Ok(harness)
+}
+
+#[test]
+fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
+    let mut harness = settings_audio_on("Stand").unwrap_or_else(|e| panic!("{e}"));
     assert!(harness.query_by_label("Driver: Default (Stand)").is_some());
     assert!(harness.query_by_label("Device: Default (Stand Out)").is_some());
     harness.get_by_label("Buffer size: Default (1024 frames)").click();
@@ -2046,6 +2072,36 @@ fn settings_audio_lists_the_devices_and_a_buffer_picked_is_chosen_and_saved() {
     let saved = harness.state_mut().take_changed_settings().map(|s| s.audio_buffer);
     assert_eq!(saved, Some(512));
     assert!(harness.query_by_label("Buffer size: 512 frames (10.7 ms)").is_some());
+}
+
+/// WASAPI shared mode plays the period Windows gives the device, so the Settings row is Suhina's
+/// own engine block there: it never claims the device takes a size, whatever the driver does (an
+/// Apollo's takes 2048 frames at most). Exclusive mode does ask the device, so the row is the
+/// device's own buffer then.
+#[test]
+fn settings_audio_names_the_engine_block_on_wasapi_shared() {
+    let mut harness = settings_audio_on("WASAPI").unwrap_or_else(|e| panic!("{e}"));
+    assert!(harness.query_by_label("Engine block: Default (1024 frames)").is_some());
+    assert!(harness.query_by_label("Buffer size: Default (1024 frames)").is_none());
+    // Exclusive mode takes the device for Suhina alone and asks it for the size, so the row says
+    // what the number is there.
+    harness.get_by_label("Exclusive mode: On").click();
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert!(harness.state().projects().output_choice().exclusive);
+    assert!(harness.query_by_label("Buffer size: Default (1024 frames)").is_some());
+    assert!(harness.query_by_label("Engine block: Default (1024 frames)").is_none());
+}
+
+/// A driver that declares no buffer range of its own keeps its own size (Suhina asks it for
+/// none), so the Settings row is the engine's block there too, and the sizes on offer are
+/// Suhina's own.
+#[test]
+fn settings_audio_names_the_engine_block_when_the_driver_declares_no_sizes() {
+    let harness = settings_audio_on("ALSA").unwrap_or_else(|e| panic!("{e}"));
+    assert!(harness.query_by_label("Engine block: Default (1024 frames)").is_some());
+    assert!(harness.query_by_label("Buffer size: Default (1024 frames)").is_none());
 }
 
 #[test]
