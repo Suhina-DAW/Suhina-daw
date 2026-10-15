@@ -181,6 +181,14 @@ packaged CLI; the desktop app needs a window, so only its libraries are checked.
 `LICENSE`, `NOTICE`, `README.md`, `ATTRIBUTION.md` and the licences of the ported code,
 `LICENSE-APACHE` (the FM synth) and `LICENSE-signalsmith.txt` (the time stretcher).
 
+## Reminders
+
+Secrets that expire, so a release checks them before they stop a bot in the middle of the next one:
+
+| Secret | Used by | Expires | Renew |
+|---|---|---|---|
+| `PROJECT_TOKEN` | the claim bot and Project sync ([`claim-bot.md`](claim-bot.md)) | fill in | [`claim-bot.md`](claim-bot.md) › Setting it up |
+
 ## Not yet
 
 The binaries are not signed: macOS Gatekeeper and Windows SmartScreen warn about them. The
