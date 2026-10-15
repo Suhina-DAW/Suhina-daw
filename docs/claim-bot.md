@@ -1,9 +1,9 @@
 ---
 description: How the claim bot moves an issue's card on the project board, holds work, and is set up
-read_when: claim, /claim, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue
+read_when: claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - .github/workflows/claim.yml
   - scripts/claim_bot_test.py
@@ -14,11 +14,13 @@ covers:
 [`.github/workflows/claim.yml`](../.github/workflows/claim.yml) moves an issue's card on the
 [Suhina project board](https://github.com/orgs/suhina-daw/projects/1) when someone comments one of
 four commands, so that taking a task works the way [`CONTRIBUTING.md`](../CONTRIBUTING.md) ›
-*Working on an issue* describes, without a maintainer moving cards by hand.
+*Working on an issue* describes, without a maintainer moving cards by hand. The first line of the
+comment carries the command; the rest is the plan.
 
 | Comment on an issue | What happens |
 |---|---|
-| `/claim` | Refused when the card is held, when an open pull request closes the issue, when the issue is an `epic`, or when the status says someone is already on it. Otherwise the issue is added to the board if it is not there, Status becomes `In progress`, and the commenter is assigned |
+| `/claim` | Refused when the card is held, when an open pull request closes the issue, when the issue is an `epic`, when it is a feature (`enhancement`) still in `Backlog` and the commenter is not a maintainer, or when the status says someone is already on it. A claim `In progress` with no pull request 48 hours after the bot wrote *Claimed by* has lapsed: the claimer is unassigned and the new claim goes ahead. Otherwise the issue is added to the board if it is not there, Status becomes `In progress`, and the commenter is assigned. When the commenter has the claim already, the answer names the open pull request to continue in |
+| `/claim @login` | A maintainer only: the same claim, made for `@login` instead of the commenter. Every refusal above applies to that person, the card becomes `In progress`, `@login` is assigned, and the answer reads *Claimed by @login, on behalf of a maintainer*. Someone already assigned by hand keeps the assignment and the card moves; a feature in `Backlog` may be claimed, as with a maintainer's own claim. Anyone else naming another person is refused (they may claim only for themselves; naming yourself is an ordinary claim), and a name that is not a GitHub login (letters, digits and single hyphens, up to 39 characters) is refused without being quoted. When GitHub will not assign the person (no access, and never commented on the issue), the claim stands on the card and the answer says so |
 | `/unclaim` | By the assigned person, who is unassigned, or a maintainer, who unassigns whoever claimed it. A card `In progress` goes back to `Ready`; a held card or one `In review` keeps its status |
 | `/hold <why>` | A maintainer only, and the reason is required: Status becomes `Do not start yet` |
 | `/ready` | A maintainer only: Status goes back to `Ready`, so the card can be claimed again |
@@ -28,10 +30,23 @@ Contributors keep working without it: a plain comment that says "I'd like to tak
 claim, and the bot says so in the issue when it cannot do its job.
 
 The bot reads the board rather than hard-coding it: it finds the project's `Status` field by name,
-treats `Backlog`, `Ready` and a card without a status as free, `Do not start yet` as held, `In progress` and `In review` as
+treats `Backlog`, `Ready` and a card without a status as free (a feature only in `Ready`), `Do not start yet` as held, `In progress` and `In review` as
 someone already on it, and every other value as not open to start; all of them are matched without
 case. The names live at the top of the script, so renaming a status is a one-line change there;
 until then the bot says so in the issue and names the options the field does have.
+
+## Lapsed claims and features not agreed
+
+A claim keeps work for 48 hours without a pull request (`LAPSE_HOURS` at the top of the script).
+The bot dates a claim by its own *Claimed by* comment, so a claim made only in a plain comment, or
+one whose comment was deleted, never lapses on its own; a maintainer frees it with `/unclaim`. A
+claim with an open pull request that says `Closes #N` never lapses: stalled pull requests are taken
+over by asking in them, as [`CONTRIBUTING.md`](../CONTRIBUTING.md) › *Working on an issue* says.
+A card `In review` never lapses either.
+
+A feature request (`enhancement`) lands in `Backlog` like any issue, but it is not agreed until a
+maintainer moves it to `Ready` (`/ready`); until then a contributor's `/claim` is refused with that
+explanation, so two people never start the same idea in two shapes. A bug in `Backlog` is free.
 
 ## Holding work
 
@@ -81,8 +96,9 @@ python scripts/claim_bot_test.py
 The script runs the workflow's script against mocked API clients, because a wrong branch would write
 to the board instead of failing a test: every command is answered for each state a card can be in
 (free, without a status, held, taken, in review, absent from the board), for `/unclaim` by the
-claimer and by a maintainer, and for the mistakes the bot is meant to catch (an open pull request, an
+claimer and by a maintainer, for `/claim @login` by a maintainer (for someone new, for someone
+already assigned, on a held or taken card) and by a contributor, and for the mistakes the bot is meant to catch (an open pull request, an
 `epic`, a status the field does not have, a missing token, a `/hold` written by someone who may not
-hold, assignees newer than the event). It needs Node.js on the
+hold, a name that is not a GitHub login, assignees newer than the event). It needs Node.js on the
 PATH — the CI `docs` job runs it on every change — writes its two files under `target/claim-bot-test/`
 and removes them again.
