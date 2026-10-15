@@ -12,7 +12,6 @@ covers:
   - crates/device-sdk/examples/distortion.rs
   - crates/device-sdk/examples/delay.rs
   - crates/device-sdk/examples/compressor.rs
-  - crates/device-sdk/examples/common/mod.rs
   - crates/device-sdk/examples/catalog.rs
   - crates/device-sdk/examples/validate.rs
   - crates/device-sdk/examples/ui_controls.rs
@@ -74,6 +73,8 @@ cargo run -p suhina-device-sdk --example delay -- target/sdk-examples/delay.sd
 cargo run -p suhina-device-sdk --example compressor -- target/sdk-examples/compressor.sd
 cargo run -p suhina-device-sdk --example validate -- target/sdk-examples/delay.sd
 ```
+
+Each example includes its own graph-building and control-layout helpers; no shared example module is required.
 
 Read the individual files under `crates/device-sdk/examples/` for complete graphs: stereo width, auto-pan,
 low-pass filter, distortion with wet/dry, filtered/modulated delay and a stereo-linked compressor.

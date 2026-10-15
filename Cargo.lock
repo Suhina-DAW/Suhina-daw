@@ -4334,6 +4334,7 @@ dependencies = [
  "egui_kittest",
  "hound",
  "image",
+ "memory-stats",
  "serde_json",
  "suhina-device-api",
  "suhina-device-registry",

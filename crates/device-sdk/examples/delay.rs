@@ -1,6 +1,4 @@
 //! Stereo delay with an embedded control panel.
-mod common;
-use common::{finish, parameter, wire};
 use suhina_device_sdk::{
     Connection, DeviceGraph, DeviceRole, FilterMode, Node as N, NodeKind as K, ParameterControl as C, Waveform,
 };
@@ -208,7 +206,7 @@ pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {
 }
 #[cfg(not(test))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    common::save(build()?, "delay")
+    save(build()?, "delay")
 }
 
 use suhina_device_sdk::{Parameter, ui::*};
@@ -451,4 +449,72 @@ fn build_panel(parameters: &[Parameter]) -> DeviceUi {
         }
     }
     ui
+}
+
+fn parameter(
+    graph: &mut suhina_device_sdk::DeviceGraph,
+    id: &str,
+    range: (f64, f64),
+    default: f64,
+    unit: &str,
+    logarithmic: bool,
+) {
+    let mut p = suhina_device_sdk::Parameter::new(id, id, range, default);
+    p.unit = unit.into();
+    if logarithmic {
+        p.control = suhina_device_sdk::ParameterControl::LogSlider;
+    }
+    graph.parameters.push(p);
+    graph.nodes.push(suhina_device_sdk::Node::new(id, suhina_device_sdk::NodeKind::Parameter { parameter: id.into() }));
+}
+
+fn wire(graph: &mut suhina_device_sdk::DeviceGraph, from: &str, to: &str, port: &str) {
+    graph.connections.push(suhina_device_sdk::Connection::ports(from, "out", to, port));
+}
+
+fn style_parameter(parameter: &mut suhina_device_sdk::Parameter) {
+    parameter.ui.font_size = 11.0;
+    parameter.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+    let knob = matches!(
+        parameter.control,
+        suhina_device_sdk::ParameterControl::Knob | suhina_device_sdk::ParameterControl::LogKnob
+    );
+    parameter.ui.shape =
+        if knob { suhina_device_sdk::ControlShape::Rounded } else { suhina_device_sdk::ControlShape::Square };
+    parameter.ui.corner_radius = if knob { 5.0 } else { 0.0 };
+}
+
+fn finish(mut g: suhina_device_sdk::DeviceGraph) -> Result<suhina_device_sdk::DeviceGraph, Box<dyn std::error::Error>> {
+    let mut visible_parameter = 0usize;
+    // The examples teach their controls; their implementation graph does not need panel space.
+    for node in &mut g.nodes {
+        node.visible = false;
+    }
+    for p in &mut g.parameters {
+        p.control = match p.id.as_str() {
+            "cutoff" | "rate" | "time" => suhina_device_sdk::ParameterControl::LogKnob,
+            "drive" | "feedback" | "width" => suhina_device_sdk::ParameterControl::Knob,
+            "ratio" | "attack" | "release" => suhina_device_sdk::ParameterControl::Number,
+            _ => p.control,
+        };
+        style_parameter(p);
+        p.ui.tooltip = format!("{} ({})", p.name, p.unit);
+        if !g.ui.as_ref().is_some_and(|ui| ui.hidden_parameters.contains(&p.id)) {
+            p.ui.position = Some([(visible_parameter % 2) as f32 * 104.0, (visible_parameter / 2) as f32 * 84.0]);
+            p.ui.size = Some([100.0, 80.0]);
+            visible_parameter += 1;
+        }
+    }
+    g.validate()?;
+    Ok(g)
+}
+
+#[cfg(not(test))]
+fn save(graph: suhina_device_sdk::DeviceGraph, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let path = std::env::args_os()
+        .nth(1)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(format!("target/sdk-examples/{name}.sd")));
+    graph.write_file(&path)?;
+    Ok(())
 }

@@ -1,5 +1,4 @@
 #[allow(dead_code)]
-mod common;
 use std::path::PathBuf;
 
 use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, NodeKind, Parameter, ParameterControl, Waveform};
@@ -9,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut graph = DeviceGraph::new("org.example.gated-instrument", "MIDI Sine", DeviceRole::Instrument);
     let mut volume = Parameter::new("volume", "Output", (0.0, 1.0), 0.8);
     volume.control = ParameterControl::Knob;
-    common::style_parameter(&mut volume);
+    style_parameter(&mut volume);
     graph.parameters.push(volume);
     graph.nodes = vec![
         Node::new("key", NodeKind::MidiKey),
@@ -54,4 +53,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     graph.write_file(&path)?;
     println!("Wrote {}", path.display());
     Ok(())
+}
+
+fn style_parameter(parameter: &mut suhina_device_sdk::Parameter) {
+    parameter.ui.font_size = 11.0;
+    parameter.ui.label_position = suhina_device_sdk::LabelPosition::Top;
+    let knob = matches!(
+        parameter.control,
+        suhina_device_sdk::ParameterControl::Knob | suhina_device_sdk::ParameterControl::LogKnob
+    );
+    parameter.ui.shape =
+        if knob { suhina_device_sdk::ControlShape::Rounded } else { suhina_device_sdk::ControlShape::Square };
+    parameter.ui.corner_radius = if knob { 5.0 } else { 0.0 };
 }

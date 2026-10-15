@@ -70,7 +70,7 @@ pub fn system_file(path: &Path) -> Option<BrowserItem> {
     let kind = match suhina_media::info::kind_of(path)? {
         FileKind::Sample | FileKind::Stems => ItemKind::Sample,
         FileKind::Midi => ItemKind::Midi,
-        FileKind::Preset | FileKind::Project => return None,
+        FileKind::Preset | FileKind::Project | FileKind::Effect => return None,
     };
     let name = path.file_name()?.to_string_lossy().into_owned();
     Some(BrowserItem { key: Item::File(path.to_path_buf()).key(), name, kind, plugin: false })
@@ -304,7 +304,16 @@ mod tests {
         );
         assert_eq!(system_file(Path::new("/s/groove.mid")).map(|i| i.kind), Some(ItemKind::Midi));
         assert_eq!(system_file(Path::new("/s/song.stem.mp4")).map(|i| i.kind), Some(ItemKind::Sample));
-        for other in ["/s/song.suhina", "/s/set.als", "/s/theme.json", "/s/bank.syx", "/s/notes.txt", "/s/noext", ""] {
+        for other in [
+            "/s/effect.sd",
+            "/s/song.suhina",
+            "/s/set.als",
+            "/s/theme.json",
+            "/s/bank.syx",
+            "/s/notes.txt",
+            "/s/noext",
+            "",
+        ] {
             assert!(system_file(Path::new(other)).is_none(), "{other}");
         }
         // The same plan as a browser drag of that file.

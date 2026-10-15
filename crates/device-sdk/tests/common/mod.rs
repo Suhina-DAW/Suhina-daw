@@ -1,4 +1,4 @@
-//! Tests load standalone example crates, each with its own common helper module.
+//! Tests load standalone example crates, each with its own local helpers.
 #![allow(clippy::duplicate_mod)]
 #[path = "../../examples/auto_pan.rs"]
 mod auto_pan;
