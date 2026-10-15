@@ -3,7 +3,7 @@ description: How much of Ableton Live 12's documented functionality Suhina has t
 read_when: Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap.
 type: plan
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - scripts/parity/**
 ---
@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **92**, every one reachable from the UI, the CLI and MCP |
+| Commands | **95**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -143,16 +143,16 @@ documented behaviour that exists today.
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP); no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). |
-| 23 | Working with Instruments and Effects (Device View) | 34 | 30 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
+| 23 | Working with Instruments and Effects (Device View) | 34 | 35 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, graphs and custom panels, and support explicit revision updates. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
 | 24 | Using Plug-Ins | 12 | 55 % | partial | CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency compensation, saved state, VST2 read and matched to VST3. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
 | 26 | Automation and Editing Envelopes | 22 | 0 % | absent | No automation lanes, no recording or drawing of automation. |
 | 27 | Clip Envelopes | 13 | 0 % | absent | No clip envelopes. |
 | 28 | Working with Video | 6 | 0 % | absent | No video import or window. |
 | 29 | Live Audio Effect Reference | 139 | 15 % | partial | Suhina has 7 effects (utility, auto-pan, three-band DJ EQ, vinyl distortion, overdrive, compressor, limiter) against 42 documented audio effects; several are close equivalents in kind but far narrower in parameters and modes. |
-| 30 | Live MIDI Effect Reference | 13 | 0 % | absent | None of the 8 MIDI effects (arpeggiator, chord, scale, velocity...) exist. |
+| 30 | Live MIDI Effect Reference | 13 | 0 % | absent | SDK MIDI-effect graphs run before the instrument; the MIDI-transpose example shifts notes. None of the 8 documented MIDI effects is implemented in full. |
 | 31 | Live Instrument Reference | 120 | 8 % | started | One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, drum sampler, wavetable, subtractive or physical modelling yet. |
-| 32 | Max for Live | 6 | 5 % | planned | ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; no patching runtime. |
+| 32 | Max for Live | 6 | 5 % | planned | ADR 0020 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; visual graph editing is planned. Imported Max devices remain placeholders; no Max runtime. |
 | 33 | Max for Live Devices | 35 | 0 % | absent | Not applicable until Max for Live exists. |
 | 34 | MIDI and Key Remote Control | 9 | 15 % | partial | Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote mapping, takeover modes or mapping browser. |
 | 35 | Using Push 1 | 40 | 0 % | absent | No control-surface support. |
@@ -173,7 +173,7 @@ documented behaviour that exists today.
 |---|---|---|
 | Views and editing (ch 6-10, 16) | 140 | 21 % |
 | Browser, files, project (ch 4, 5) | 103 | 41 % |
-| Devices (ch 23-25, 29-31) | 338 | 14 % |
+| Devices (ch 23-25, 29-31) | 338 | 15 % |
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 21 % |
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
@@ -343,7 +343,7 @@ or does something Live does not:
 <!-- parity:begin gap-table -->
 | Gap | Manual pages | Today | What closing it means |
 |---|---|---|---|
-| Devices: effects and instruments | 338 (ch 23-25, 29-31) | 14 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
+| Devices: effects and instruments | 338 (ch 23-25, 29-31) | 15 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
 | Browser and file management depth | 103 (ch 4, 5) | 41 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
 | Views and clip editing | 140 (ch 6-10, 16) | 21 % | MIDI note editor, clip view panels, locators, loop brace, split, consolidate, follow actions |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 0 % | transformation and generative tools, MPE editing, groove pool, tuning systems |

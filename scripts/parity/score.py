@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 92
+COMMANDS = 95
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -95,9 +95,11 @@ CHAPTERS = [
      "no paste."),
     (21, "Comping", 6, 0.00, "absent", "No take lanes, no comping."),
     (22, "Stem Separation", 8, 0.00, "planned", "Roadmap item (Demucs candidate, weights unaudited)."),
-    (23, "Working with Instruments and Effects (Device View)", 34, 0.30, "partial",
+    (23, "Working with Instruments and Effects (Device View)", 34, 0.35, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
-     "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "
+     "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. "
+     "SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, "
+     "graphs and custom panels, and support explicit revision updates. Missing A/B, "
      "hot-swap, preset browser depth, defaults, device delay review."),
     (24, "Using Plug-Ins", 12, 0.55, "partial",
      "CLAP and VST3 hosted out of process, sandboxed, editors (Windows/X11), scans, latency "
@@ -115,13 +117,14 @@ CHAPTERS = [
      "compressor, limiter) against 42 documented audio effects; several are close equivalents in "
      "kind but far narrower in parameters and modes."),
     (30, "Live MIDI Effect Reference", 13, 0.00, "absent",
-     "None of the 8 MIDI effects (arpeggiator, chord, scale, velocity...) exist."),
+     "SDK MIDI-effect graphs run before the instrument; the MIDI-transpose example shifts notes. "
+     "None of the 8 documented MIDI effects is implemented in full."),
     (31, "Live Instrument Reference", 120, 0.08, "started",
      "One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, "
      "drum sampler, wavetable, subtractive or physical modelling yet."),
     (32, "Max for Live", 6, 0.05, "planned",
-     "ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; "
-     "no patching runtime."),
+     "ADR 0020 defines data-only .sd graphs with a Rust SDK, DSP runtime and custom UI nodes; "
+     "visual graph editing is planned. Imported Max devices remain placeholders; no Max runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
     (34, "MIDI and Key Remote Control", 9, 0.15, "partial",
      "Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote "

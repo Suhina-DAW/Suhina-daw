@@ -437,12 +437,31 @@ impl DeviceUi {
             }
             if let Some(widget) = &c.widget {
                 let valid = match widget {
+                    Widget::Label { .. } | Widget::Separator => c.x.is_none() && c.y.is_none(),
                     Widget::Button { .. } => {
                         matches!(c.gesture, UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_))
                     }
                     Widget::Disclosure { .. } => c.gesture == UiGesture::Toggle,
-                    Widget::Number { .. } | Widget::Knob { .. } => {
+                    Widget::Number { .. } | Widget::Knob { .. } | Widget::Dial { .. } | Widget::Stepper { .. } => {
                         c.gesture == UiGesture::Drag && c.x.is_none() && c.y.is_some()
+                    }
+                    Widget::ValueMenu { choices } => {
+                        let mut values = HashSet::new();
+                        c.gesture == UiGesture::Menu
+                            && !choices.is_empty()
+                            && choices.len() <= 128
+                            && choices.iter().all(|(value, label)| {
+                                values.insert(value)
+                                    && !label.is_empty()
+                                    && label.len() <= 128
+                                    && c.x.as_ref().is_some_and(|b| {
+                                        parameters.iter().any(|p| {
+                                            p.id == b.parameter
+                                                && f64::from(*value) >= p.min
+                                                && f64::from(*value) <= p.max
+                                        })
+                                    })
+                            })
                     }
                     Widget::Menu => c.gesture == UiGesture::Menu,
                     Widget::WaveformMenu => {
@@ -487,7 +506,7 @@ impl DeviceUi {
             if let Some(condition) = &c.visible_when {
                 condition.validate(&ids, 0, &mut expression_budget)?;
             }
-            if c.x.is_none() && c.y.is_none() {
+            if c.x.is_none() && c.y.is_none() && !matches!(c.widget, Some(Widget::Label { .. } | Widget::Separator)) {
                 return Err(fail("custom control needs a parameter binding"));
             }
             if c.x.as_ref().zip(c.y.as_ref()).is_some_and(|(x, y)| x.parameter == y.parameter) {
@@ -503,7 +522,10 @@ impl DeviceUi {
                     .iter()
                     .find(|p| p.id == binding.parameter)
                     .ok_or_else(|| fail("unknown bound parameter"))?;
-                if c.gesture == UiGesture::Menu && (p.control != crate::ParameterControl::Choice || binding.logarithmic)
+                if c.gesture == UiGesture::Menu
+                    && ((!matches!(c.widget, Some(Widget::ValueMenu { .. }))
+                        && p.control != crate::ParameterControl::Choice)
+                        || binding.logarithmic)
                 {
                     return Err(fail("menu needs a non-logarithmic Choice binding"));
                 }

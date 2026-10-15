@@ -136,14 +136,14 @@ drawing and interaction; an omitted condition keeps the control visible. Conditi
 same bounded validation as drawing expressions. Control width and height are at least 8 pixels.
 Text supports `align: left|center` (default left) and `format: number|frequency|choice` (default number).
 Frequency formatting uses two decimal kHz at >=1000 Hz and the declared numeric precision below.
-The Delay example uses these fields for centred selectors and mutually exclusive Sync/Time controls.
+The Delay example uses these fields for mutually exclusive tempo-step and millisecond controls.
 
 `exp` and `log` expressions each take `value`; `log` is the natural logarithm. Domain errors
 and non-finite results evaluate to zero, like other drawing expressions. These support a continuous
 log-frequency band response in the Delay panel without changing DSP processing. Its plotted
 high-pass and low-pass losses use a two-pole magnitude model at every sampled frequency.
 Parameter text is fitted to its control's clip area, down to 8 logical pixels, and percent
-readouts omit the space before the unit. Delay offsets also have a bordered field.
+readouts omit the space before the unit. Delay offsets have explicit text labels.
 Keyboard and mouse focus use short grey corner brackets around the complete custom control;
 rotary controls include their caption inside that area. Starting a drag requests keyboard focus.
 
@@ -156,20 +156,42 @@ cancelling with Escape, or clicking outside changes no parameter. Popups use the
 layer and remain visible above or below the authored canvas. `text.format: choice` displays
 the bound parameter's current option label instead of a number.
 
-## Delay example folding
+`ValueMenu` uses the same menu gesture with explicit `choices: [[value, label], ...]`.
+Values are unique integers inside the bound parameter range; 1..128 entries with
+nonempty labels of at most 128 bytes are accepted. It can bind a numeric parameter
+without Choice options. Selecting an entry writes its value, not its array index.
+Menus scroll when needed, using a fixed-width solid scrollbar that does not expand
+on hover. Delay uses this node to expose actual note divisions,
+triplet/dotted suffixes and sixteenth-note step counts while retaining saved values.
 
-The Delay example keeps its 400 by 180 canvas fixed. Expanding LFO details
-reduces the filter graph height from 148 to 118 logical pixels; collapsing them
-returns those 30 pixels to the graph. The Filter row and LFO summary move together,
-keeping the LFO section anchored at the bottom. LFO controls retain their size.
+## Delay example layout
+
+Delay uses independent SDK UI nodes throughout its 944 by 168 logical-pixel panel.
+Including the host header and padding, it fits a 200-pixel device slot.
+Time and Feedback occupy the left; Tone and Motion follow, with Mix at the far right. The only graph is Tone's filter response. All sections stay visible.
+
+Left and Right timing columns flank the link icon in Time. Beats/ms buttons switch between
+explicit note-length menus and millisecond fields. Link mirrors timing edits; each column has a synchronized offset field. Freeze sits
+below Feedback and Ping Pong below Mix. Repitch/Fade/Jump remain in Time. Tone exposes filter enable,
+centre frequency and octave width; Motion exposes rate mode/value, waveform,
+delay/filter depth and morph. Speed appears once: a number in Hz/Time modes and
+a ValueMenu in synchronized modes. The obsolete `lfo_expanded` parameter remains hidden for
+saved-parameter compatibility and no longer affects presentation.
+
+The host resolves widget text, surfaces, borders and accents from the active Suhina
+theme at render time. No authored purple accent or device header is required.
 
 ## Reusable functional widgets
 
 A control may specify a typed `widget` instead of a custom `drawing`. Widgets are
-independent UI nodes, each bound to its own declared parameter (or two parameters
+independent UI nodes; interactive nodes bind to a declared parameter (or two parameters
 for the filter band display). They are not DSP nodes. The SDK supplies buttons,
-number fields, knobs, disclosure toggles, choice menus, waveform menus and filter
-band displays. Styling and bindings belong to each instance; no LFO section widget
+number fields, knobs, ringed dials, steppers, disclosure toggles, choice menus,
+waveform menus and filter band displays. Non-interactive Label and Separator widgets
+use no parameter bindings and cannot receive focus. Dial follows the available
+control size; its caption reserves two lines so knob centres stay aligned across
+single-line and two-line labels; Stepper arrows adjust by one integer or the declared decimal precision,
+while vertical dragging, keyboard edits and double-click reset remain available. Styling and bindings belong to each instance; no LFO section widget
 exists. The host uses the same gestures, commands, keyboard handling, undo and
 persistence as custom controls. Knobs use Suhina's small circular face, pointer and value;
 the widget palette follows the active theme. Legacy drawing colours remain literal and legacy

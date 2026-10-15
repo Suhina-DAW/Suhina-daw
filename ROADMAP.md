@@ -41,12 +41,6 @@ detail area) goes alongside this list, not after it.
 
 ## Built-in effects and instruments
 
-The separate Rust SDK can create data-only composable `.sd` effects from supported nodes. They can
-be dropped onto tracks, are embedded in projects, render in real-time and offline, and expose
-their parameters and signal flow in the device detail panel ([ADR 0020](docs/decisions/0020-device-graph-files.md)).
-The SDK also supports MIDI-effect graphs that preserve event timing and monophonic instrument
-graphs that turn timestamped MIDI input into audio; a MIDI effect runs before the track instrument.
-
 Instruments and effects that ship with Suhina. They run inside the engine (rule 5 covers
 third-party plug-ins only), so they follow the real-time and never-crash rules like the engine
 itself. Written in Rust; DSP from GPL-compatible open-source projects may be ported (rule 9) with
@@ -129,27 +123,6 @@ but has not been tried yet ([ADR 0008](docs/decisions/0008-patch-devices.md), pr
 Session clips do not fit ARA's linear timeline; Session view later. ADR before implementation.
 
 ## What works now
-
-- SDK `.sd` version 3 preserves node positions, port anchors and wire routes for future visual editing; version 1/2 files remain readable. Interactive graph editing is still planned.
-
-- SDK panels have reusable typed buttons, number fields, knobs, disclosure toggles, selectors and filter-band controls; Delay composes its interface from these individual widgets.
-- SDK custom panels support popup choice menus; Delay exposes waveform and LFO rate-mode selections.
-
-- The SDK Delay example has an embedded stereo timing/filter/LFO panel, Sync/Time modes, bidirectional linked timing edits, feedback freeze, ping-pong repeats and three delay-time transition modes.
-
-- SDK custom panels support independent canvas and preferred viewport dimensions, with scrolling and backwards-compatible automatic sizing.
-
-- SDK effects package custom drawing controls, XY pads, backgrounds and embedded PNG/JPEG artwork in one `.sd`.
-- SDK effect panels support per-control size/position, RGB colours, fonts, shapes and label placement.
-
-- SDK effect controls include knobs, numeric fields, choices and buttons; continuous parameter
-  edits ramp over a configurable duration to reduce clicks.
-
-- SDK effects use arithmetic, stereo operations, modulation, filters, envelope detection and
-  delayed feedback; a node catalog and examples support authoring by people and AI agents
-  ([guide](docs/device-sdk.md)).
-- SDK MIDI effects process timestamped note events, and monophonic instrument graphs turn MIDI key,
-  velocity and gate signals into audio ([node reference](docs/spec/sdk-nodes.md)).
 
 ### M0 Foundation
 - Rust workspace, GPL-3.0-or-later, CI (fmt, clippy `-D warnings`, tests) on Linux for every change;

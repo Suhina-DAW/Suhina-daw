@@ -142,10 +142,27 @@ pub enum Widget {
     Knob {
         label: String,
     },
+    /// Ringed dial whose diameter follows the available control area.
+    Dial {
+        label: String,
+    },
+    Stepper {
+        decimals: usize,
+    },
+    /// Non-interactive, theme-aware section caption.
+    Label {
+        label: String,
+    },
+    /// Non-interactive vertical section divider.
+    Separator,
     Disclosure {
         label: String,
     },
     Menu,
+    /// Menu entries map display labels to explicit integer parameter values.
+    ValueMenu {
+        choices: Vec<(u16, String)>,
+    },
     WaveformMenu,
     FilterBand {
         min_hz: f32,
@@ -205,6 +222,21 @@ impl Widget {
     fn drawings(&self, control: &CustomControl) -> Vec<Draw> {
         let mut ui = DeviceUi::default();
         let [_, _, w, height] = control.bounds;
+        if let Self::Label { label } = self {
+            let mut caption = text(0., 0., label, TEXT, false);
+            if let Draw::Text { size, .. } = &mut caption {
+                *size = 11.;
+            }
+            return vec![caption];
+        }
+        if matches!(self, Self::Separator) {
+            return vec![Draw::Line {
+                from: [(w / 2.).into(), 0.0.into()],
+                to: [(w / 2.).into(), height.into()],
+                color: RIM,
+                width: 1.,
+            }];
+        }
         let Some(binding) = control.x.as_ref().or(control.y.as_ref()) else {
             return vec![];
         };
@@ -250,6 +282,71 @@ impl Widget {
                     }
                 }
             }
+            Self::Label { .. } | Self::Separator => return vec![],
+            Self::Stepper { decimals } => {
+                let mut value = readout(id, 3., (height - 10.) / 2., *decimals, ACCENT, false);
+                if let Draw::Text { size, .. } = &mut value {
+                    *size = 9.;
+                }
+                let mut out =
+                    vec![rect(0., 0., w.into(), height, RIM), rect(1., 1., (w - 2.).into(), height - 2., DARK), value];
+                for (cy, sign) in [(height * 0.28, -1.), (height * 0.72, 1.)] {
+                    out.push(Draw::Path {
+                        points: vec![
+                            [(w - 9.).into(), (cy - sign * 1.5).into()],
+                            [(w - 6.).into(), (cy + sign * 1.5).into()],
+                            [(w - 3.).into(), (cy - sign * 1.5).into()],
+                        ],
+                        color: TEXT,
+                        width: 0.8,
+                        closed: false,
+                        fill: None,
+                    });
+                }
+                return out;
+            }
+            Self::Dial { label } => {
+                let label_height = if label.is_empty() { 0. } else { 24. };
+                let r = ((height - label_height - 18.) / 2.).min(w / 2. - 2.).max(1.);
+                let cx = w / 2.;
+                let cy = label_height + (height - label_height - 18.) / 2.;
+                let angle = UiValue::from(2.35) + UiValue::normalized(id, binding.logarithmic) * 4.7.into();
+                let mut caption =
+                    text(cx, if label.contains('\n') { 0. } else { label_height / 4. }, label, TEXT, true);
+                if let Draw::Text { size, .. } = &mut caption {
+                    *size = 9.;
+                }
+                return vec![
+                    caption,
+                    Draw::Arc {
+                        center: [cx.into(), cy.into()],
+                        radius: r.into(),
+                        start: 2.35.into(),
+                        end: 7.05.into(),
+                        color: RIM,
+                        width: 4.,
+                    },
+                    Draw::Circle { center: [cx.into(), cy.into()], radius: (r - 2.).max(0.).into(), color: DARK },
+                    Draw::Circle {
+                        center: [cx.into(), cy.into()],
+                        radius: (r - 6.).max(0.).into(),
+                        color: [46, 45, 42, 255],
+                    },
+                    Draw::Line {
+                        from: [
+                            UiValue::from(cx) + angle.clone().cos() * (r * 0.25).into(),
+                            UiValue::from(cy) + angle.clone().sin() * (r * 0.25).into(),
+                        ],
+                        to: [
+                            UiValue::from(cx) + angle.clone().cos() * (r * 0.72).into(),
+                            UiValue::from(cy) + angle.sin() * (r * 0.72).into(),
+                        ],
+                        color: ACCENT,
+                        width: if r > 20. { 2. } else { 1.5 },
+                    },
+                    readout(id, cx, height - 16., 0, TEXT, true),
+                ];
+            }
             Self::Knob { label } => {
                 let label_height = if label.is_empty() { 0. } else { 12. };
                 knob(&mut ui, id, label, [0., label_height, w, height - label_height], binding.logarithmic);
@@ -273,7 +370,7 @@ impl Widget {
                 return disclosure;
             }
             Self::WaveformMenu => {
-                let mut wave = vec![];
+                let mut wave = vec![rect(0., 0., w.into(), height, [46, 45, 42, 255])];
                 for shape in 0..7 {
                     let shift = (UiValue::from(1.) + equal(id, shape) * (-1.).into()) * 4096.0.into();
                     let mut pts = Vec::new();
@@ -294,12 +391,16 @@ impl Widget {
                             5 => ((t * 4.).floor() * 5.).sin(),
                             _ => (t * 8.).sin() * 0.6 + (t * 3.).cos() * 0.4,
                         };
-                        pts.push([UiValue::from(2. + t * 15.) + shift.clone(), (6. - y * 3.).into()]);
+                        pts.push([UiValue::from(4. + t * (w - 22.)) + shift.clone(), (height / 2. - y * 3.).into()]);
                     }
                     wave.push(Draw::Path { points: pts, color: ACCENT, width: 1., closed: false, fill: None });
                 }
                 wave.push(Draw::Path {
-                    points: vec![[23.0.into(), 5.0.into()], [26.0.into(), 8.0.into()], [29.0.into(), 5.0.into()]],
+                    points: vec![
+                        [(w - 13.).into(), (height / 2. - 2.).into()],
+                        [(w - 10.).into(), (height / 2. + 1.).into()],
+                        [(w - 7.).into(), (height / 2. - 2.).into()],
+                    ],
                     color: ACCENT,
                     width: 1.,
                     closed: false,
@@ -307,6 +408,27 @@ impl Widget {
                 });
 
                 return wave;
+            }
+            Self::ValueMenu { choices } => {
+                let mut drawings = vec![
+                    rect(0., 0., w.into(), height, RIM),
+                    rect(1., 1., (w - 2.).into(), height - 2., [46, 45, 42, 255]),
+                ];
+                drawings.extend(choices.iter().map(|(value, label)| {
+                    conditional_text((w - 12.) / 2., (height - 10.) / 2., label, ACCENT, equal(id, *value))
+                }));
+                drawings.push(Draw::Path {
+                    points: vec![
+                        [(w - 10.).into(), (height / 2. - 2.).into()],
+                        [(w - 6.).into(), (height / 2. + 1.).into()],
+                        [(w - 2.).into(), (height / 2. - 2.).into()],
+                    ],
+                    color: ACCENT,
+                    width: 1.,
+                    closed: false,
+                    fill: None,
+                });
+                return drawings;
             }
             Self::Menu => {
                 let mut label = readout(id, 0., 0., 0, ACCENT, false);
@@ -377,7 +499,15 @@ impl Widget {
                 return drawing;
             }
         }
-        ui.controls.pop().map_or_else(Vec::new, |c| c.drawing)
+        let mut drawings = ui.controls.pop().map_or_else(Vec::new, |c| c.drawing);
+        if matches!(self, Self::Button { .. } | Self::Number { .. }) {
+            for draw in &mut drawings {
+                if let Draw::Text { position, .. } = draw {
+                    position[1] = position[1].clone() + ((height - 10.) / 2.).into();
+                }
+            }
+        }
+        drawings
     }
 }
 
@@ -405,6 +535,8 @@ mod tests {
                 UiGesture::Drag,
             ),
             (Widget::Knob { label: "Amount".into() }, UiGesture::Drag),
+            (Widget::Dial { label: "Amount".into() }, UiGesture::Drag),
+            (Widget::Stepper { decimals: 1 }, UiGesture::Drag),
             (Widget::Disclosure { label: "Details".into() }, UiGesture::Toggle),
             (Widget::Menu, UiGesture::Menu),
             (Widget::WaveformMenu, UiGesture::Menu),

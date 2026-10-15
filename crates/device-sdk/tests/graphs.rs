@@ -451,7 +451,7 @@ fn logarithmic_delay_curve_is_smooth_when_narrow_and_handles_bad_math() {
                 (v - p.min) / (p.max - p.min)
             }
         };
-        let ys: Vec<_> = points.iter().map(|p| p[1].evaluate(&lookup)).collect();
+        let ys: Vec<_> = points.iter().map(|p| p[1].evaluate(&lookup) * 118. / control.bounds[3]).collect();
         assert!(ys.iter().all(|y| y.is_finite()));
         let peak = ys.iter().copied().fold(f32::INFINITY, f32::min);
         assert!((30.0..45.0).contains(&peak));
@@ -484,6 +484,16 @@ fn lfo_rate_modes_convert_real_units_and_follow_tempo() {
             effect.process_context(&ProcessContext { tempo: 90., beat: 0., playing: true }, &mut audio);
             assert!((audio[0] as f64 - hz * 0.75).abs() < 1e-6, "tempo in mode {mode}");
         }
+    }
+    for (mode, hz) in [(2., 4.), (3., 6.), (4., 8. / 3.), (5., 1.)] {
+        let mut g = graph(K::LfoRate);
+        for (id, value, port) in [("mode", mode, "mode"), ("division", 8., "division")] {
+            g.nodes.push(N::new(id, K::Constant { value }));
+            g.connections.push(C::ports(id, "out", "node", port));
+        }
+        let mut audio = [0.; 2];
+        g.compile().unwrap().process(&mut audio);
+        assert!((audio[0] as f64 - hz).abs() < 1e-6);
     }
     let mut bad = examples::build("delay").unwrap();
     bad.parameters.iter_mut().find(|p| p.id == "mod_shape").unwrap().control = ParameterControl::Integer;
@@ -535,26 +545,93 @@ fn effect_examples_use_circular_knobs_and_square_value_controls() {
 }
 
 #[test]
-fn delay_folding_gives_space_to_the_filter_graph() {
+fn delay_layout_has_no_overlapping_controls_in_any_timing_or_motion_mode() {
     let graph = examples::build("delay").unwrap();
     let canvas = graph.ui.as_ref().unwrap();
-    for (expanded, height, offset) in [(1., 118., 0.), (0., 148., 30.)] {
-        let lookup = |id: &str, _: bool, _: bool| if id == "lfo_expanded" { expanded } else { 0. };
-        let visible = |name: &str| {
-            canvas
-                .controls
-                .iter()
-                .find(|c| c.name == name && c.visible_when.as_ref().is_none_or(|v| v.evaluate(&lookup) != 0.))
-                .unwrap()
-        };
-        let filter = visible("Filter frequency and width");
-        assert_eq!(filter.bounds, [129., 0., 204., height]);
-        let disclosure = visible("LFO details");
-        assert_eq!(disclosure.bounds, [129., 135. + offset, 43., 12.]);
-        assert_eq!(visible("mod delay").bounds, [207., 135. + offset, 52., 12.]);
-        assert_eq!(visible("mod filter").bounds, [298., 135. + offset, 35., 12.]);
+    assert!(canvas.size[1] + 32. <= 200.);
+    for expanded in [0., 1.] {
+        for left in [0., 1.] {
+            for right in [0., 1.] {
+                for mode in 0..6 {
+                    let lookup = |id: &str, _: bool, _: bool| match id {
+                        "lfo_expanded" => expanded,
+                        "sync_left" => left,
+                        "sync_right" => right,
+                        "mod_rate_mode" => mode as f64,
+                        _ => 0.,
+                    };
+                    let visible: Vec<_> = canvas
+                        .controls
+                        .iter()
+                        .filter(|c| c.visible_when.as_ref().is_none_or(|v| v.evaluate(&lookup) != 0.))
+                        .collect();
+                    assert_eq!(visible.iter().filter(|c| c.id == "mod_shape").count(), 1);
+                    assert_eq!(visible.iter().filter(|c| c.id == "filter_graph").count(), 1);
+                    for (i, a) in visible.iter().enumerate() {
+                        let [x, y, w, h] = a.bounds;
+                        assert!(x >= 0. && y >= 0. && x + w <= canvas.size[0] && y + h <= canvas.size[1]);
+                        for b in &visible[i + 1..] {
+                            let [bx, by, bw, bh] = b.bounds;
+                            assert!(
+                                x + w <= bx || bx + bw <= x || y + h <= by || by + bh <= y,
+                                "{} overlaps {}",
+                                a.id,
+                                b.id
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
-    assert!(canvas.layers.is_empty());
+}
+
+#[test]
+fn delay_dials_share_centres_despite_different_caption_lengths_and_widths() {
+    use suhina_device_sdk::ui::Draw;
+    let graph = examples::build("delay").unwrap();
+    let canvas = graph.ui.as_ref().unwrap();
+    let centre = |id: &str| {
+        let c = canvas.controls.iter().find(|c| c.id == id).unwrap();
+        c.drawings()
+            .iter()
+            .find_map(|draw| match draw {
+                Draw::Arc { center, .. } => Some(c.bounds[1] + center[1].evaluate(&|_, _, _| 0.)),
+                _ => None,
+            })
+            .unwrap()
+    };
+    for id in ["mod_filter", "mod_morph"] {
+        assert_eq!(centre(id), centre("mod_delay"), "{id}");
+    }
+    assert_eq!(centre("feedback"), centre("wet"));
+}
+
+#[test]
+fn delay_has_one_time_control_no_stereo_mirrors_and_explicit_rhythm_values() {
+    use suhina_device_sdk::ui::Widget;
+    let g = examples::build("delay").unwrap();
+    let ui = g.ui.as_ref().unwrap();
+    assert!(!ui.controls.iter().any(|c| c.id == "STEREO"));
+    assert_eq!(ui.controls.iter().filter(|c| c.y.as_ref().is_some_and(|b| b.parameter == "mod_time")).count(), 1);
+    let mix = ui.controls.iter().find(|c| c.id == "wet").unwrap();
+    assert!(ui.controls.iter().filter(|c| c.y.is_some() && c.id != "wet").all(|c| c.bounds[0] < mix.bounds[0]));
+    for (mode, expected) in [(2, "1/8"), (3, "1/8 T"), (4, "1/8 D"), (5, "8 x 1/16")] {
+        let c = ui.controls.iter().find(|c| c.id == format!("motion_division_{mode}")).unwrap();
+        let Some(Widget::ValueMenu { choices }) = &c.widget else { panic!("missing rhythm menu") };
+        assert_eq!(choices.iter().find(|(v, _)| *v == 8).unwrap().1, expected);
+    }
+    let mut bad = g.clone();
+    let c = bad
+        .ui
+        .as_mut()
+        .unwrap()
+        .controls
+        .iter_mut()
+        .find(|c| matches!(c.widget, Some(Widget::ValueMenu { .. })))
+        .unwrap();
+    c.widget = Some(Widget::ValueMenu { choices: vec![(0, "bad".into())] });
+    assert!(bad.validate().is_err());
 }
 
 #[test]

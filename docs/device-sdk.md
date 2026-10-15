@@ -11,7 +11,6 @@ covers:
   - crates/device-sdk/examples/filter.rs
   - crates/device-sdk/examples/distortion.rs
   - crates/device-sdk/examples/delay.rs
-  - crates/device-sdk/examples/common/delay_panel.rs
   - crates/device-sdk/examples/compressor.rs
   - crates/device-sdk/examples/common/mod.rs
   - crates/device-sdk/examples/catalog.rs
@@ -243,33 +242,41 @@ See [the sizing contract](spec/sdk-custom-ui.md) for automatic sizes and both ch
 
 ## Delay example
 
-The Delay panel has independent left/right timing. Sync selects sixteenth-note multiples
-(1, 2, 3, 4, 5, 6, 8, 16) at the transport tempo; otherwise the division grid and offset are replaced by a logarithmic millisecond time knob.
+The 944 by 168 Delay panel has Left and Right timing columns with a link icon between them.
+Each column has a Beats/ms button, delay length and offset: Beats offers explicit note lengths (for example
+1/8, 3/16, 1/4), while ms exposes a logarithmic millisecond field. The saved division
+still counts sixteenth notes from 1 through 16. Offset is only available in Beats mode.
 Offsets adjust synchronized times by up to 33.3 percent; they do not alter the millisecond value in Time mode. Link mirrors Sync/Time mode, division, offset and millisecond edits in both directions.
 Enabling Link copies the left settings to the right. Linked edits, including continuous drags,
 are one undo step and persist in the project.
-Feedback and Dry/Wet are percentages. Freeze stops feeding new input and sets feedback to unity.
-Ping Pong feeds the left channel first and swaps channels on each return.
+Feedback and Mix are percentages. Freeze sits below Feedback; it stops feeding new input and sets feedback to unity.
+Ping Pong sits below Mix; it feeds the left channel first and swaps channels on each return.
 The filter has a logarithmic centre frequency, width in octaves, high/low-pass edges and bypass.
 The graph is a smooth logarithmic band display controlled by the same frequency/width parameters,
 with continuous two-pole high-pass and low-pass magnitude curves at narrow and wide settings.
-LFO controls delay-time depth, filter-frequency depth, rate and morph towards sine.
-Click the arrow or LFO caption to collapse or expand Rate, Wave and Morph. Delay and Filter
-amounts stay visible. The section stays anchored at the bottom: opening the details reduces
-the filter graph height by 30 pixels, and folding restores that space to the graph.
-Control sizes stay fixed. Folding only changes presentation, retains all modulation settings
-and is saved with the device through `device.setParam` (`lfo_expanded`).
-Wave opens a menu of Sine, Triangle, Ramp Up, Ramp Down, Square, S&H and Wander.
+Motion controls delay-time depth, filter-frequency depth, rate and morph towards sine.
+The horizontal order is Time, Feedback, Tone, Motion, then Mix.
+The panel fits a 200-pixel slot including the host header and padding. The former
+`lfo_expanded` parameter is retained for compatibility but no longer hides controls.
+Widget colours follow the active Suhina theme, including number text and accents.
+Motion has one speed control: frequency in Hz, period in milliseconds, or a rhythm menu.
+There are no duplicated Time or depth controls.
+The default waveform is Sine. Wave opens a menu of Sine, Triangle, Ramp Up, Ramp Down, Square, S&H and Wander.
 S&H holds a deterministic random value per cycle; Wander smooths that source with a 200 ms one-pole.
-Rate opens Rate, Time, Synced, Triplet, Dotted and 16th. Rate edits Hz and Time edits milliseconds.
+Mode opens Hz, Time, Synced, Triplet, Dotted and 16th steps. Hz edits frequency and Time edits milliseconds.
 Synced edits a whole-note divisor (1/N), Triplet and Dotted scale that frequency by 3/2 and 2/3,
-and 16th edits the number of sixteenth notes per cycle. These modes follow transport tempo.
+and 16th steps selects the number of sixteenth notes per cycle. Rhythm menus offer
+explicit values such as 1/8, 1/8 T, 1/8 D and 3 x 1/16; the caption changes with the mode.
+These modes follow transport tempo.
 Menu choices use the standard parameter command, persistence and undo. Opening or dismissing
 an overlay does not create an edit.
 Repitch slews the read-head distance over 20 ms, Fade crossfades read heads over 20 ms, and Jump
 changes distance immediately. Times are bounded to one sample..4 seconds, including tempo sync
 and modulation. The processor is an original implementation, without a claim of sound equivalence.
 Existing projects embed their old graph; add the newly generated delay.sd to use this panel.
+The entire example, including its node-authored panel, is in `examples/delay.rs`.
+After SDK UI nodes change, rebuild the desktop application as well as the example
+(`cargo build -p suhina`); an older executable cannot read newly added widget kinds.
 
 ### Reusing functional panel elements
 
@@ -277,7 +284,7 @@ Existing projects embed their old graph; add the newly generated delay.sd to use
 `Disclosure`, `Menu`, `WaveformMenu` or `FilterBand`. Assign it to a
 `CustomControl.widget`, set that control's id, bounds and parameter bindings,
 and leave `drawing` empty. The host supplies the artwork and existing gestures.
-Delay uses widgets for every interactive element; its LFO section is a composition
+Delay uses widgets for every interactive element; its Motion section is a composition
 of individual widgets, not a reusable section with fixed parameters.
 
 For example, a choice selector in any device can use:

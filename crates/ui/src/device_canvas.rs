@@ -268,6 +268,9 @@ pub(crate) fn show(
             parameters,
             &loaded,
         );
+        if matches!(control.widget, Some(Widget::Label { .. } | Widget::Separator)) {
+            continue;
+        }
         let response = ui
             .interact(
                 bounds,
@@ -275,6 +278,11 @@ pub(crate) fn show(
                 if control.gesture == UiGesture::Menu { egui::Sense::click() } else { egui::Sense::click_and_drag() },
             )
             .on_hover_text(&control.tooltip);
+        let response = if control.gesture == UiGesture::Drag {
+            response.on_hover_cursor(egui::CursorIcon::ResizeVertical)
+        } else {
+            response
+        };
         if response.clicked() || response.drag_started() {
             response.request_focus();
         }
@@ -316,20 +324,48 @@ pub(crate) fn show(
                 let mut picked = None;
                 popup.frame(frame).show(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.;
+                    ui.spacing_mut().scroll =
+                        egui::style::ScrollStyle { bar_width: 6., ..egui::style::ScrollStyle::solid() };
                     ui.spacing_mut().interact_size.y = 14.;
                     ui.visuals_mut().selection.bg_fill = color(loaded.palette.accent);
-                    for (index, label) in p.ui.options.iter().enumerate() {
-                        let selected = p.value.round() == index as f64;
-                        let text = egui::RichText::new(label).size(11.).color(color(if selected {
-                            loaded.palette.accent_text
-                        } else {
-                            loaded.palette.text
-                        }));
-                        if ui.selectable_label(selected, text).clicked() {
-                            picked = Some(index as f64);
-                            ui.close();
+                    let choices: Vec<(f64, &str)> = if let Some(Widget::ValueMenu { choices }) = &control.widget {
+                        choices.iter().map(|(v, label)| (f64::from(*v), label.as_str())).collect()
+                    } else {
+                        p.ui.options.iter().enumerate().map(|(i, label)| (i as f64, label.as_str())).collect()
+                    };
+                    let text_width = choices
+                        .iter()
+                        .map(|(_, label)| {
+                            ui.fonts_mut(|fonts| {
+                                fonts
+                                    .layout_no_wrap((*label).into(), egui::FontId::proportional(11.), Color32::WHITE)
+                                    .size()
+                                    .x
+                            })
+                        })
+                        .fold(0., f32::max);
+                    let scroll = &ui.spacing().scroll;
+                    let width = text_width
+                        + ui.spacing().button_padding.x * 2.
+                        + scroll.bar_width
+                        + scroll.bar_inner_margin
+                        + scroll.bar_outer_margin;
+                    ui.set_min_width(width.ceil());
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    egui::ScrollArea::vertical().max_height(240.).show(ui, |ui| {
+                        for (value, label) in choices {
+                            let selected = p.value.round() == value;
+                            let text = egui::RichText::new(label).size(11.).color(color(if selected {
+                                loaded.palette.accent_text
+                            } else {
+                                loaded.palette.text
+                            }));
+                            if ui.selectable_label(selected, text).clicked() {
+                                picked = Some(value);
+                                ui.close();
+                            }
                         }
-                    }
+                    });
                 });
                 if let Some(value) = picked.filter(|v| *v != p.value) {
                     control_actions.push(Action::new("device.setParam",json!({"track":track.0,"device":device,"param":p.id,"value":value,"continuous":false,"gesture":control.id})));
@@ -383,15 +419,29 @@ pub(crate) fn show(
                     | suhina_device_sdk::ParameterControl::Choice
                     | suhina_device_sdk::ParameterControl::Radio
             );
-            let key_delta = if axis == 0 { dx } else { dy };
+            let step_click = if matches!(control.widget, Some(Widget::Stepper { .. })) && response.clicked() {
+                response
+                    .interact_pointer_pos()
+                    .filter(|pos| pos.x >= bounds.right() - 12.)
+                    .map_or(0, |pos| if pos.y < bounds.center().y { 1 } else { -1 })
+            } else {
+                0
+            };
+            let key_delta = (if axis == 0 { dx } else { dy }) + step_click;
             if key_delta != 0
                 && !matches!(
                     control.gesture,
                     UiGesture::Toggle | UiGesture::Momentary | UiGesture::Set(_) | UiGesture::Menu
                 )
-                && (discrete || p.ui.step > 0.0)
+                && (discrete || p.ui.step > 0.0 || step_click != 0)
             {
-                let step = if discrete { p.ui.step.max(1.0) } else { p.ui.step * fine };
+                let step = if discrete {
+                    p.ui.step.max(1.0)
+                } else if let Some(Widget::Stepper { decimals }) = control.widget {
+                    10_f64.powi(-(decimals.min(8) as i32)) * fine
+                } else {
+                    p.ui.step * fine
+                };
                 value = (p.value + f64::from(key_delta) * step).clamp(p.min, p.max);
             }
             if response.double_clicked()
@@ -403,7 +453,7 @@ pub(crate) fn show(
                 value = p.default;
             }
             // Reuse the SDK's discrete/range rules through the shared command.
-            let changed = next != old || response.double_clicked();
+            let changed = next != old || response.double_clicked() || step_click != 0;
             let interacting = response.clicked()
                 || response.dragged()
                 || dx != 0
@@ -495,11 +545,11 @@ mod tests {
         let canvas = Arc::new(graph.ui.unwrap());
         let preview_canvas = canvas.clone();
         let preview_parameters = parameters.clone();
-        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(956., 180.)).build_ui(move |ui| {
             crate::theme::install(ui.ctx());
             show(
                 ui,
-                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(944., 168.)),
                 &preview_canvas,
                 &preview_parameters,
                 TrackId(1),
@@ -508,7 +558,37 @@ mod tests {
             );
         });
         harness.run();
+        for control in &canvas.controls {
+            for drawing in control.drawings().iter() {
+                if let Draw::Text { text, size, parameter: None, position, align, .. } = drawing {
+                    let galley = harness.ctx.fonts_mut(|fonts| {
+                        fonts.layout_no_wrap(text.clone(), egui::FontId::proportional(*size), Color32::WHITE)
+                    });
+                    let x = position[0].evaluate(&|_, _, _| 0.);
+                    if x < 0. || x > control.bounds[2] {
+                        continue;
+                    }
+                    let width = if *align == TextAlign::Center {
+                        2. * x.min(control.bounds[2] - x)
+                    } else {
+                        control.bounds[2] - x
+                    };
+                    assert!(
+                        galley.size().x <= width + 0.5,
+                        "{} caption clipped: {} > {}",
+                        control.id,
+                        galley.size().x,
+                        width
+                    );
+                }
+            }
+        }
         harness.render().unwrap().save("../../target/delay-panel.png").unwrap();
+        let nord = crate::theme::Theme::from_json(include_str!("../themes/nord.json")).0;
+        crate::theme::set_palette(&harness.ctx, nord.colors);
+        harness.run();
+        harness.render().unwrap().save("../../target/delay-panel-nord.png").unwrap();
+        crate::theme::set_palette(&harness.ctx, crate::theme::Palette::DARK);
         use egui_kittest::kittest::Queryable;
         let mut narrow_parameters = parameters.clone();
         for p in &mut narrow_parameters {
@@ -521,11 +601,11 @@ mod tests {
             };
         }
         let narrow_canvas = canvas.clone();
-        let mut narrow = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+        let mut narrow = egui_kittest::Harness::builder().with_size(Vec2::new(956., 180.)).build_ui(move |ui| {
             crate::theme::install(ui.ctx());
             show(
                 ui,
-                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(944., 168.)),
                 &narrow_canvas,
                 &narrow_parameters,
                 TrackId(1),
@@ -547,11 +627,11 @@ mod tests {
             }
         }
         let time_canvas = canvas.clone();
-        let mut time_harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 192.)).build_ui(move |ui| {
+        let mut time_harness = egui_kittest::Harness::builder().with_size(Vec2::new(956., 180.)).build_ui(move |ui| {
             crate::theme::install(ui.ctx());
             show(
                 ui,
-                Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                Rect::from_min_size(Pos2::ZERO, Vec2::new(944., 168.)),
                 &time_canvas,
                 &time_parameters,
                 TrackId(1),
@@ -561,8 +641,10 @@ mod tests {
         });
         time_harness.run();
         time_harness.render().unwrap().save("../../target/delay-time-panel.png").unwrap();
-        let actions = click(&canvas, &parameters, Pos2::new(40., 35.));
-        assert!(actions.iter().any(|a| a.params["param"] == "division_left" && a.params["value"] == 2.0));
+        let offset = click(&canvas, &parameters, Pos2::new(108., 102.));
+        assert!(offset.iter().any(|a| a.params["param"]=="offset_left" && (a.params["value"].as_f64().unwrap()-0.1).abs()<1e-6));
+        let actions = click(&canvas, &parameters, Pos2::new(100., 151.));
+        assert!(actions.iter().any(|a| a.params["param"] == "mode" && a.params["value"] == 1.0));
         let mut time_parameters = parameters.clone();
         for p in &mut time_parameters {
             if p.id.starts_with("sync_") {
@@ -570,12 +652,12 @@ mod tests {
             }
         }
         assert!(
-            click(&canvas, &time_parameters, Pos2::new(40., 35.))
+            click(&canvas, &time_parameters, Pos2::new(89., 59.))
                 .iter()
                 .all(|a| !a.params["param"].as_str().unwrap_or_default().starts_with("division_")),
-            "hidden sync grid must not intercept clicks"
+            "hidden tempo field must not intercept clicks"
         );
-        let actions = click(&canvas, &time_parameters, Pos2::new(30., 18.));
+        let actions = click(&canvas, &time_parameters, Pos2::new(35., 59.));
         assert!(actions.iter().any(|a| a.params["param"] == "sync_left" && a.params["value"] == 1.0));
     }
     #[test]
@@ -598,13 +680,13 @@ mod tests {
             })
             .collect();
         let canvas = Arc::new(graph.ui.unwrap());
-        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(412., 220.)).build_ui_state(
+        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(956., 210.)).build_ui_state(
             move |ui, state: &mut (Vec<GraphParameter>, Vec<Action>)| {
                 crate::theme::install(ui.ctx());
                 let mut actions = Vec::new();
                 show(
                     ui,
-                    Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                    Rect::from_min_size(Pos2::ZERO, Vec2::new(944., 168.)),
                     &canvas,
                     &state.0,
                     TrackId(1),
@@ -621,7 +703,7 @@ mod tests {
             (parameters, Vec::new()),
         );
         harness.run();
-        harness.get_by_label("LFO waveform").click();
+        harness.get_by_label("Motion waveform").click();
         harness.run();
         assert!(harness.state().1.is_empty(), "opening Wave must not edit the parameter");
         harness.render().unwrap().save("../../target/delay-wave-menu.png").unwrap();
@@ -631,7 +713,7 @@ mod tests {
         assert_eq!(harness.state().1[0].params["param"], "mod_shape");
         assert_eq!(harness.state().1[0].params["value"], 6.0);
         assert_eq!(harness.state().1[0].params["continuous"], false);
-        harness.get_by_label("LFO rate mode").click();
+        harness.get_by_label("Motion rate mode").click();
         harness.run();
         assert_eq!(harness.state().1.len(), 1);
         harness.render().unwrap().save("../../target/delay-rate-menu.png").unwrap();
@@ -640,30 +722,60 @@ mod tests {
         assert_eq!(harness.state().1.len(), 2);
         assert_eq!(harness.state().1[1].params["param"], "mod_rate_mode");
         assert_eq!(harness.state().1[1].params["value"], 3.0);
-        harness.get_by_label("LFO rate mode").click();
+        harness.get_by_label("Motion rate mode").click();
         harness.run();
         harness.key_combination(&[egui::Key::Escape]);
         harness.run();
         assert_eq!(harness.state().1.len(), 2, "Escape must not edit a parameter");
-        harness.get_by_label("LFO details").click();
+        assert!(harness.query_by_label("Motion details").is_none());
+        assert!(harness.query_by_label("Motion waveform").is_some());
+        assert!(harness.query_by_label("Morph").is_some());
+        assert!(harness.query_by_label("Delay depth").is_some());
+        assert!(harness.query_by_label("Filter depth").is_some());
+        harness.get_by_label("Motion rhythm").click();
         harness.run();
-        assert_eq!(harness.state().1.last().unwrap().params["param"], "lfo_expanded");
-        assert_eq!(harness.state().1.last().unwrap().params["value"], 0.0);
-        assert!(harness.query_by_label("LFO waveform").is_none());
-        assert!(harness.query_by_label("LFO rate mode").is_none());
-        assert!(harness.query_by_label("mod morph").is_none());
-        assert!(harness.query_by_label("mod delay").is_some());
-        assert!(harness.query_by_label("mod filter").is_some());
-        harness.render().unwrap().save("../../target/delay-lfo-collapsed.png").unwrap();
-        harness.get_by_label("LFO details").click();
+        assert_eq!(harness.state().1.len(), 2);
+        harness.render().unwrap().save("../../target/delay-rhythm-menu.png").unwrap();
+        let before = harness.get_by_label("1/8 T").rect();
+        harness.hover_at(egui::pos2(before.right() + 8., before.center().y));
         harness.run();
-        assert_eq!(harness.state().1.last().unwrap().params["value"], 1.0);
-        assert!(harness.query_by_label("LFO waveform").is_some());
-        assert!(harness.query_by_label("LFO rate mode").is_some());
-        assert!(harness.query_by_label("mod morph").is_some());
-        assert_eq!(harness.state().0.iter().find(|p| p.id == "mod_shape").unwrap().value, 6.0);
-        assert_eq!(harness.state().0.iter().find(|p| p.id == "mod_rate_mode").unwrap().value, 3.0);
-        harness.render().unwrap().save("../../target/delay-lfo-expanded.png").unwrap();
+        assert_eq!(
+            before,
+            harness.get_by_label("1/8 T").rect(),
+            "hovering the scroll bar must not resize menu content"
+        );
+        harness.render().unwrap().save("../../target/delay-rhythm-hover.png").unwrap();
+        harness.get_by_label("1/8 T").click();
+        harness.run();
+        assert_eq!(harness.state().1.last().unwrap().params["param"], "mod_division");
+        assert_eq!(harness.state().1.last().unwrap().params["value"], 8.);
+        harness.get_by_label("Motion rate mode").click();
+        harness.run();
+        harness.get_by_label("16th steps").click();
+        harness.run();
+        harness.get_by_label("Motion rhythm").click();
+        harness.run();
+        harness.get_by_label("3 x 1/16").click();
+        harness.run();
+        assert_eq!(harness.state().1.last().unwrap().params["value"], 3.);
+        harness.get_by_label("Motion rate mode").click();
+        harness.run();
+        harness.get_by_label("Time").click();
+        harness.run();
+        assert!(harness.query_by_label("Motion rhythm").is_none());
+        assert!(harness.query_by_label("mod time").is_some());
+        assert!(harness.query_by_label("motion_time").is_none());
+        harness.get_by_label("Left delay").click();
+        harness.run();
+        harness.get_by_label("1/4").click();
+        harness.run();
+        assert_eq!(harness.state().1.last().unwrap().params["param"], "division_left");
+        assert_eq!(harness.state().1.last().unwrap().params["value"], 4.);
+        harness.get_by_label("Left timing mode").click();
+        harness.run();
+        assert!(harness.query_by_label("Left delay").is_none());
+        assert!(harness.query_by_label("time left").is_some());
+        harness.render().unwrap().save("../../target/delay-motion.png").unwrap();
     }
     fn click(canvas: &Arc<DeviceUi>, parameters: &[GraphParameter], position: Pos2) -> Vec<Action> {
         let ctx = egui::Context::default();
@@ -682,14 +794,14 @@ mod tests {
             });
             let mut output = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(412., 192.))),
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(956., 180.))),
                     events,
                     ..Default::default()
                 },
                 |ui| {
                     show(
                         ui,
-                        Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 180.)),
+                        Rect::from_min_size(Pos2::ZERO, Vec2::new(944., 168.)),
                         canvas,
                         parameters,
                         TrackId(1),
@@ -797,6 +909,16 @@ mod tests {
                 .iter()
                 .any(|draw| matches!(draw, Draw::Rect { color, .. } if *color == [12, 34, 56, 255]))
         );
+        let delay = Arc::new(super::delay_example::build().unwrap().ui.unwrap());
+        let themed = images(&context, &delay);
+        let cutoff = delay.controls.iter().position(|c| c.id == "cutoff").unwrap();
+        assert!(themed.controls[cutoff].iter().any(|draw| matches!(
+            draw, Draw::Text { color, .. } if *color == rgba(alternate.text_primary)
+        )));
+        let button = delay.controls.iter().position(|c| matches!(c.widget, Some(Widget::Button { .. }))).unwrap();
+        assert!(themed.controls[button].iter().any(|draw| matches!(
+            draw, Draw::Rect { color, .. } if *color == rgba(alternate.accent)
+        )));
         crate::theme::set_palette(&context, dark);
     }
 
