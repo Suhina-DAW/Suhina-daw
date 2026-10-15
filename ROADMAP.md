@@ -391,6 +391,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Editing the notes of a **duplicated clip** changes that clip only: its first note edit gives
   it its own copy of the notes, in the same undo step
   ([#352](https://github.com/suhina-daw/suhina-daw/issues/352)). A shared pattern stays shared.
+- **Quantise** in the piano roll ([#345](https://github.com/suhina-daw/suhina-daw/issues/345)):
+  Ctrl+U moves the selected notes, or every note, onto the grid; the **Q** button over the keys
+  sets the grid (triplets too), how far notes move (0 to 100 %) and whether their ends move.
+  It is the command `note.quantize`, one undo step, that the CLI and MCP run too.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

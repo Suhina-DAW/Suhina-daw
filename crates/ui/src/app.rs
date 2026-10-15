@@ -1696,6 +1696,15 @@ impl App {
                 let running = self.session().and_then(|s| s.player()).is_some_and(|p| p.monitor().running());
                 actions.push(if running { self.stop_action() } else { Action::new("transport.play", json!({})) });
             }
+            // Quantise in the piano roll, while it shows a clip.
+            "pianoRoll.quantize" => {
+                let showing = self.detail_open
+                    && matches!(self.shown, View::Arrangement)
+                    && self.piano_clip(self.arrangement.selected_clip()).is_some();
+                if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
+                    actions.push(quantize);
+                }
+            }
             // Delete in the piano roll deletes its selected notes, not the clip.
             "selection.delete" if let Some(delete) = self.piano_roll.delete_selected() => actions.push(delete),
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {

@@ -6,10 +6,10 @@
 //! of notes an edit did not delete stay valid for the next edit.
 
 use serde_json::{Map, Value, json};
-use suhina_engine::MAX_START_BEAT;
+use suhina_engine::{MAX_START_BEAT, Quantization};
 use suhina_model::{Clip, ClipContent, ContentId, ContentLane, LaneData, Note, Project, TrackId};
 
-use crate::commands::track_id;
+use crate::commands::{parse_quantization, track_id};
 use crate::{CommandError, Session};
 
 /// The most notes one command may name or add.
@@ -398,6 +398,94 @@ pub(crate) fn set_velocity(session: &mut Session, params: &Value) -> Result<Valu
             }
         }
         Ok(json!({ "notes": changed }))
+    })
+}
+
+/// The quantise grid `params.grid` names, in beats: a value as `launcher.setQuantization` takes it,
+/// with bars as long as the project's time signature makes them.
+fn quantize_step(p: &Project, params: &Value) -> Result<f64, CommandError> {
+    let text = params.get("grid").and_then(Value::as_str).ok_or("grid must be a text such as \"1/16\" or \"1/8T\"")?;
+    let step = match parse_quantization(text)? {
+        Quantization::None => return Err("grid none has no lines to quantise to; give a value such as \"1/16\"".into()),
+        Quantization::Bars(bars) => {
+            let ts = p.transport.time_signature;
+            let bar = if ts.denominator == 0 {
+                4.0
+            } else {
+                f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator)
+            };
+            f64::from(bars) * bar
+        }
+        Quantization::Beats(beats) => beats,
+    };
+    if step.is_finite() && step > 0.0 { Ok(step) } else { Err(format!("grid {text:?} has no step").into()) }
+}
+
+/// The grid line nearest to `beat`; `beat` itself when it is already on one, so a note on the grid
+/// keeps its exact value.
+fn nearest_line(beat: f64, step: f64) -> f64 {
+    let line = (beat / step).round() * step;
+    if (line - beat).abs() <= EPSILON { beat } else { line }
+}
+
+/// `from` moved towards `to` by `amount` (0 … 1); `to` itself at 1.
+fn towards(from: f64, to: f64, amount: f64) -> f64 {
+    if amount >= 1.0 { to } else { from + (to - from) * amount }
+}
+
+pub(crate) fn quantize(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let step = quantize_step(&session.project, params)?;
+    let amount = optional_number(params, "amount")?.unwrap_or(100.0);
+    if !(0.0..=100.0).contains(&amount) {
+        return Err(format!("amount must be 0 to 100 percent, got {amount}").into());
+    }
+    let amount = amount / 100.0;
+    let ends = match params.get("ends") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or("ends must be true or false")?,
+    };
+    let all = matches!(params.get("notes"), None | Some(Value::Null));
+    // Every note of an empty clip is none: nothing to change, and no note lane to add.
+    if all && notes_of(&session.project, params)?.is_empty() {
+        return Ok(json!({ "notes": [], "moved": 0 }));
+    }
+    // Through `edit_notes`, so quantising a duplicate gives it its own content (#352).
+    edit_notes(&mut session.project, params, |notes| {
+        let chosen = if all { (0..notes.len()).collect() } else { indices(params, notes.len())? };
+        let mut changed = Vec::with_capacity(chosen.len());
+        for &index in &chosen {
+            let note = notes.get(index).ok_or("a note is missing")?;
+            let start = nearest_line(note.time, step);
+            let time = towards(note.time, start, amount).max(0.0);
+            if time > MAX_BEAT {
+                return Err(format!("note {index} would start at beat {time}, after {MAX_BEAT}").into());
+            }
+            let duration = if ends {
+                let end = note.time + note.duration;
+                let mut line = nearest_line(end, step);
+                if line <= start + EPSILON {
+                    // On or before its quantised start: the end goes to the first line after it.
+                    line = ((start / step + EPSILON).floor() + 1.0) * step;
+                }
+                towards(end, line, amount) - time
+            } else {
+                note.duration
+            };
+            if !(duration > 0.0 && duration <= MAX_BEAT) {
+                return Err(format!("note {index} would be {duration} beats long").into());
+            }
+            if time != note.time || duration != note.duration {
+                changed.push((index, time, duration));
+            }
+        }
+        let moved = changed.len();
+        for (index, time, duration) in changed {
+            if let Some(note) = notes.get_mut(index) {
+                note.time = time;
+                note.duration = duration;
+            }
+        }
+        Ok(json!({ "notes": chosen, "moved": moved }))
     })
 }
 

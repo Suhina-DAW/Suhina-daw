@@ -352,6 +352,25 @@ fn editing_the_original_of_a_duplicate_leaves_the_duplicate_alone() {
 }
 
 #[test]
+fn quantising_a_duplicate_leaves_the_original_alone() {
+    let mut session = Session::new(project());
+    run(
+        &mut session,
+        "note.add",
+        json!({ "track": 1, "index": 0, "notes": [{ "time": 0.3, "length": 1, "key": 70 }] }),
+    )
+    .unwrap();
+    let original = notes(&session, 1);
+    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    let copy = made["index"].as_u64().unwrap() as usize;
+    run(&mut session, "note.quantize", json!({ "track": 1, "index": copy, "grid": "1/4" })).unwrap();
+    let own = arranged(&session)[copy];
+    assert_ne!(own, 1);
+    assert_eq!(notes(&session, 1), original);
+    assert_eq!(notes(&session, own)[3].time, 0.0);
+}
+
+#[test]
 fn a_launcher_clip_sharing_an_arrangement_clips_content_is_copied_when_edited() {
     let mut p = project();
     p.launcher.columns[0].slots[1].clip = Some(clip(1, 0.0));

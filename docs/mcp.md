@@ -98,6 +98,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
   other clips also play (a duplicate) first gives that clip its own copy of the content, so the
   others do not change; the result's indices are the same.
+- **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
+  starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
+  `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
+  onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
+  outside 0 to 100 or a note that does not exist fails and changes nothing.
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |
