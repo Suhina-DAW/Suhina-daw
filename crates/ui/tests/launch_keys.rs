@@ -2,6 +2,8 @@
 //! maps a key to the picked slot, scene or stop button, and the key then launches it while the
 //! Session view is shown, ahead of a shortcut on the same key.
 
+#![allow(clippy::unwrap_used)] // test helpers outside #[test] functions
+
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;

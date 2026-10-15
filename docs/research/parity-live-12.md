@@ -70,7 +70,7 @@ documentation and UI). The scope decision it leads to is
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **96**, every one reachable from the UI, the CLI and MCP |
+| Commands | **99**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MIDI Tools, MPE, Grooves, Tuning, Recording, Comping, Racks, Automation, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -136,7 +136,7 @@ documented behaviour that exists today.
 | 13 | Converting Audio to MIDI | 5 | 5 % | planned | Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap. |
 | 14 | Using Grooves | 6 | 0 % | absent | No groove pool, extraction or commit. |
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
-| 16 | Launching Clips | 12 | 55 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, warped launched clips, launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch quantisation. Missing velocity amount, clip offset/nudge, launching from keys and MIDI notes, follow actions. |
+| 16 | Launching Clips | 12 | 60 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, warped launched clips, launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch quantisation, slots and scenes launched from computer keys. Missing velocity amount, clip offset/nudge, launching from live MIDI notes, follow actions. |
 | 17 | Routing and I/O | 22 | 10 % | absent | Only track output to main or a group (track.setOutput); track input is a model field read from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral. |
 | 18 | Mixing | 18 | 30 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses, master, latency compensation, return tracks imported and drawn. Return tracks are silent: sends live in the model and in the .als importer only, so nothing feeds them. Missing crossfader, cue, meters, track delay. |
 | 19 | Recording New Clips | 13 | 0 % | absent | No audio or MIDI recording, no arm, no overdub, no count-in, no capture MIDI. |
@@ -154,7 +154,7 @@ documented behaviour that exists today.
 | 31 | Live Instrument Reference | 120 | 8 % | started | One instrument: the FM synth (DX7-style, MSFA port) against 13 instruments; no sampler, drum sampler, wavetable, subtractive or physical modelling yet. |
 | 32 | Max for Live | 6 | 5 % | planned | ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; no patching runtime. |
 | 33 | Max for Live Devices | 35 | 0 % | absent | Not applicable until Max for Live exists. |
-| 34 | MIDI and Key Remote Control | 9 | 15 % | partial | Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote mapping, takeover modes or mapping browser. |
+| 34 | MIDI and Key Remote Control | 9 | 25 % | partial | Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode (Ctrl+M) maps keys to clip slots, scenes and stop buttons, saved in the project, and launcher.addMapping takes MIDI notes too. No live MIDI remote input, CC mapping, takeover modes or mapping browser. |
 | 35 | Using Push 1 | 40 | 0 % | absent | No control-surface support. |
 | 36 | Using Push 2 | 59 | 0 % | absent | No control-surface support. |
 | 37 | Synchronizing with Link, Tempo Follower, and MIDI | 9 | 0 % | absent | No Link, no Tempo Follower, no MIDI clock sync. |
@@ -178,7 +178,7 @@ documented behaviour that exists today.
 | Automation, envelopes (ch 26, 27) | 35 | 0 % |
 | Generative/transform (ch 11-15) | 67 | 0 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
-| Outside scope (ch 28, 32-37, 41) | 175 | 1 % |
+| Outside scope (ch 28, 32-37, 41) | 175 | 2 % |
 | Setup, shortcuts (ch 2, 3, 42) | 61 | 42 % |
 <!-- parity:end -->
 
@@ -350,7 +350,7 @@ or does something Live does not:
 | Automation and clip envelopes | 35 (ch 26, 27) | 0 % | automation lanes, recording and drawing, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
 | Mixing, routing, I/O | 47 (ch 17, 18, 38) | 21 % | sends into return chains, crossfader, cue, meters, inputs and monitoring, resampling |
-| Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 1 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
+| Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 2 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
 
 Two observations the numbers make plain:

@@ -110,6 +110,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `clip.release` its release, which stops a gate clip and ends a repeat clip's repeats; in a
   `project_render` script the two can be steps at different times
   ([spec](spec/clip-launching.md#launch-settings)).
+- **Launch keys and notes.** `launcher.addMapping {source, target, track?, scene?}` maps a key
+  (`key:Q`) or a MIDI note (`note:1:36`) to a slot, a scene or a track's stop button;
+  `launcher.removeMapping` and `launcher.mappings` remove and list them. Agents launch with
+  `clip.launch` and friends as before; the mappings are for the window and controllers
+  ([spec](spec/clip-launching.md#launching-from-keys-and-notes)).
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about
   a second (`0.0` before anything is measured, `null` without an audio output). The control bar shows the same number.

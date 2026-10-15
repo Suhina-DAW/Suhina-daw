@@ -9,7 +9,7 @@ primary platform; Windows and macOS are supported.
 | M1 | **First sound:** offline renderer and the `.als` reader | done |
 | M2 | **Real-time playback:** audio output, `suhina-cli play` | done (verified on Windows) |
 | M3 | **Commands and agents:** command registry with undo; CLI and MCP server on the same commands | in progress: commands, undo, MCP, edits heard while playing, and saving projects in Suhina's own format (`.suhina`) work; more commands to come |
-| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, the metronome, launch modes, legato and per-clip quantisation work; follow actions to come |
+| M4 | **Clip launching:** launch quantisation, scenes, stop buttons, follow actions | in progress: launching, scenes, stops, quantisation, the metronome, launch modes, legato, per-clip quantisation and launch keys work; follow actions to come |
 | M5 | **Audio playback:** imported audio clips with gain, transpose, warping and time-stretching | done (verified by ear on a heavily warped set) |
 | M6 | **Plug-ins:** CLAP and VST3 hosting, sandboxed out of process (AGENTS.md rule 5, ADR 0006), and projects with VST2 plug-ins opened through their VST3 versions | in progress: CLAP and VST3 plug-ins load, play in the app and in renders with latency compensation, keep their state and survive crashes in their own process; editors on Windows and Linux X11; still to do: automation, one round trip per host, macOS and Wayland editors ([#30](https://github.com/suhina-daw/suhina-daw/issues/30)) |
 | M7 | **More formats:** DAWproject import and export | not started |
@@ -210,7 +210,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   release of a slot's launch button; in the Session view a slot launches as the mouse button goes
   down, and right-clicking a clip sets its launch settings
   ([spec](docs/spec/clip-launching.md#launch-settings)).
-- Still to do: follow actions, launching slots from keys and MIDI notes, fades on launched clips
+- Computer keys launch slots, scenes and stop buttons: Ctrl+M or **Map** in the title bar maps
+  the next key to the clicked control, and a key down and up are the press and release, so gate
+  and repeat clips play from the keyboard. `launcher.addMapping` maps MIDI notes too, kept in the
+  project; playing them waits for MIDI input
+  ([spec](docs/spec/clip-launching.md#launching-from-keys-and-notes)).
+- Still to do: follow actions, launching from live MIDI notes, fades on launched clips
   ([#104](https://github.com/suhina-daw/suhina-daw/issues/104)), reading the global
   quantisation from a Live Set, and checking the behaviour marked as hypotheses in the spec
   against Live.

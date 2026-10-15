@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 96
+COMMANDS = 99
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -77,11 +77,11 @@ CHAPTERS = [
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
     (14, "Using Grooves", 6, 0.00, "absent", "No groove pool, extraction or commit."),
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
-    (16, "Launching Clips", 12, 0.55, "partial",
+    (16, "Launching Clips", 12, 0.60, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes, stop, loop, back to arrangement, "
      "warped launched clips, launch modes (trigger, gate, toggle, repeat) with press and release, "
-     "legato, per-clip launch quantisation. Missing velocity amount, clip offset/nudge, launching "
-     "from keys and MIDI notes, follow actions."),
+     "legato, per-clip launch quantisation, slots and scenes launched from computer keys. Missing "
+     "velocity amount, clip offset/nudge, launching from live MIDI notes, follow actions."),
     (17, "Routing and I/O", 22, 0.10, "absent",
      "Only track output to main or a group (track.setOutput); track input is a model field read "
      "from .als. No monitoring, external audio/MIDI in-out, resampling, sidechain, multi-timbral."),
@@ -124,9 +124,11 @@ CHAPTERS = [
      "ADR 0008 proposes Pure Data patch devices and keeps imported Max devices as placeholders; "
      "no patching runtime."),
     (33, "Max for Live Devices", 35, 0.00, "absent", "Not applicable until Max for Live exists."),
-    (34, "MIDI and Key Remote Control", 9, 0.15, "partial",
-     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); no MIDI remote "
-     "mapping, takeover modes or mapping browser."),
+    (34, "MIDI and Key Remote Control", 9, 0.25, "partial",
+     "Every command can be bound to a key (keymap.json, Settings > Shortcuts); a key mapping mode "
+     "(Ctrl+M) maps keys to clip slots, scenes and stop buttons, saved in the project, and "
+     "launcher.addMapping takes MIDI notes too. No live MIDI remote input, CC mapping, takeover "
+     "modes or mapping browser."),
     (35, "Using Push 1", 40, 0.00, "absent", "No control-surface support."),
     (36, "Using Push 2", 59, 0.00, "absent", "No control-surface support."),
     (37, "Synchronizing with Link, Tempo Follower, and MIDI", 9, 0.00, "absent",

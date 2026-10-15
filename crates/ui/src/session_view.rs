@@ -370,7 +370,6 @@ fn column_header(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn column_body(
     ui: &Ui,
     painter: &egui::Painter,

@@ -1,6 +1,6 @@
 ---
-description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launch modes, legato, per-clip quantisation, launcher over arrangement
-read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, launch modes, gate, toggle, repeat, legato, per-clip quantisation
+description: How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launch modes, legato, per-clip quantisation, launching from computer keys and MIDI notes, launcher over arrangement
+read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, launch modes, gate, toggle, repeat, legato, per-clip quantisation, launch keys, MIDI notes, mappings, launcher.addMapping
 type: spec
 status: current
 last_verified: 2026-10-15
@@ -11,6 +11,9 @@ covers:
   - crates/session/src/launch.rs
   - crates/session/tests/launcher.rs
   - crates/session/tests/launch_settings.rs
+  - crates/model/src/mapping.rs
+  - crates/session/src/mapping.rs
+  - crates/session/tests/launch_mappings.rs
 ---
 
 # Clip launching
@@ -122,6 +125,41 @@ held or playing is heard at once ([ADR 0005](../decisions/0005-edits-while-playi
 reports each clip's `launch_mode`, `legato` and `quantization`. The project file keeps the
 settings ([Suhina format](suhina-format.md)).
 
+## Launching from keys and notes
+
+A **mapping** makes a computer key or a MIDI note launch a slot, a scene or a track's stop
+button, the same way the mouse does. This is Suhina's own design; the general controller
+mappings of [ADR 0019](https://github.com/suhina-daw/suhina-daw/pull/405) (knobs, faders,
+profiles) are planned separately and can take these over.
+
+1. **Sources.** A key by its name (`key:Q`, `key:1`, `key:Space`, `key:F5`), pressed without
+   Ctrl, Alt, Shift or Cmd; or a MIDI note on a channel (`note:<channel 1-16>:<note 0-127>`,
+   `note:10:36`). A source is mapped to one target at most; mapping it again moves it. A target
+   can have several sources.
+2. **Press and release.** A key down or a note on is the press, a key up or a note off the
+   release. A slot's press is `clip.launch` and its release `clip.release` when its clip is in
+   gate or repeat mode, so those modes work from keys and notes. A scene's press is
+   `scene.launch` and a stop button's `track.stop`; their releases do nothing. The commands are
+   the ones the mouse sends, with the same quantisation. **Suhina:** a held key that the system
+   repeats is not pressed again; a toggle clip would otherwise start and stop.
+3. **Targets that are gone.** A mapping whose track was deleted (or whose track has no slots)
+   stays in the project and does nothing; `launcher.mappings` reports it as `broken`, and an undo
+   that brings the track back makes it work again.
+4. **Where keys count.** In the window a mapped key wins over a shortcut on the same key only
+   while the Session view is shown and nothing else has the keyboard
+   ([Session view](ui-session-view.md#launch-keys)).
+5. **MIDI notes.** **Suhina:** a mapped note launches and does not also play on a track. The
+   mappings, the commands and the press and release logic for notes are in place; Suhina reads no
+   live MIDI input yet ([#264](https://github.com/suhina-daw/suhina-daw/issues/264)). When live
+   input lands, its notes go through the same lookup (`suhina_session::mapped_command`) as keys,
+   and the window's mapping mode learns notes as it learns keys.
+
+**Commands.** `launcher.addMapping {source, target, track?, scene?}` (`target` slot, scene or
+stop; a slot needs `track` and `scene`, a scene `scene`, a stop button `track`) and
+`launcher.removeMapping {source}` or `{target, track?, scene?}` (every mapping of that target)
+are one undo step each; a project keeps at most 1024 mappings. `launcher.mappings` lists them.
+The project file keeps them under the launcher ([Suhina format](suhina-format.md)).
+
 ## Suhina decisions
 
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
@@ -176,7 +214,7 @@ with a screen recording or notes, no audio from Live needed):
 - Follow actions.
 - Reading the global launch quantisation and the clips' launch settings from a Live Set (needs a
   corpus series).
-- Launching slots from computer keys and MIDI notes (their press and release would drive gate
-  and repeat the same way; [#411](https://github.com/suhina-daw/suhina-daw/issues/411)).
+- Launching from live MIDI input: the note half of the mappings waits for MIDI input
+  ([#264](https://github.com/suhina-daw/suhina-daw/issues/264)).
 - Launch velocity.
 - Recording into slots.
