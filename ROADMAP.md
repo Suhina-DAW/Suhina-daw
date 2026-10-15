@@ -388,6 +388,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   the wheel scrolls and Ctrl (with Shift for key height) zooms. Every edit is a `note.*` command
   (`note.list`, `.add`, `.delete`, `.move`, `.resize`, `.setVelocity`), one undo step each, that
   the CLI and MCP run too.
+- **Quantise** in the piano roll ([#345](https://github.com/suhina-daw/suhina-daw/issues/345)):
+  Ctrl+U moves the selected notes, or every note, onto the grid; the **Q** button over the keys
+  sets the grid (triplets too), how far notes move (0 to 100 %) and whether their ends move.
+  It is the command `note.quantize`, one undo step, that the CLI and MCP run too.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

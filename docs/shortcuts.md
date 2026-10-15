@@ -1,9 +1,9 @@
 ---
 description: Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them
-read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys
+read_when: shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys, quantise, Ctrl+U
 type: howto
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -69,6 +69,7 @@ keys. Unknown actions and keys are skipped with a warning in the status bar.
 | Copy, cut, paste the selected clip (`selection.copy`, `.cut`, `.paste`) | Ctrl+C, Ctrl+X, Ctrl+V |
 | Duplicate, delete the selected clip (`selection.duplicate`, `.delete`); in the piano roll, after a click in it, Delete deletes the selected notes instead | Ctrl+D; Delete, Backspace |
 | Group the selected tracks (`selection.group`) | Ctrl+G |
+| Quantise the piano roll's selected notes, or all its notes, with the Quantise panel's settings (`pianoRoll.quantize`, [spec](spec/ui-clip-editor.md) › Quantise) | Ctrl+U |
 | Next, previous project (`projects.next`, `projects.previous`) | Ctrl+Tab, Ctrl+Shift+Tab |
 | New project or open one (`file.new`), open one (`file.open`) | Ctrl+T, Ctrl+O |
 | Save, save as (`file.save`, `file.saveAs`); save as template (`file.saveTemplate`) | Ctrl+S, Ctrl+Shift+S; none |

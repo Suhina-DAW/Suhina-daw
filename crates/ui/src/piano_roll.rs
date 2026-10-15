@@ -518,7 +518,9 @@ pub fn show(ui: &mut Ui, area: Rect, clip: &PianoClip, state: &mut PianoRollStat
 /// The Quantise button in the corner over the keys, and the panel it opens: the grid, the amount
 /// and whether ends move, kept for Ctrl+U, and a button that quantises now.
 fn quantize_panel(ui: &mut Ui, corner: Rect, state: &mut PianoRollState, actions: &mut Vec<Action>) {
-    let response = widgets::button_area(ui, corner, Id::new("piano-roll-quantize"), "Quantise");
+    // Its hit area keeps clear of the corner's edges, so a press just inside the grid or the keys
+    // reaches them and not the button.
+    let response = widgets::button_area(ui, corner.shrink(3.0), Id::new("piano-roll-quantize"), "Quantise");
     if response.clicked() {
         state.quantize_open = !state.quantize_open;
     }

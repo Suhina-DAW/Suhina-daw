@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview
 type: system
 status: current
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -96,6 +96,11 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
   deleted stay valid; each is one undo step and fails as a whole on a bad value
   ([clip editor spec](spec/ui-clip-editor.md) › Commands).
+- **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
+  starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
+  `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
+  onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
+  outside 0 to 100 or a note that does not exist fails and changes nothing.
 
 - **Tracks and files.** `track.add {kind?, name?, after?, device?, preset?, voice?}` adds an audio
   or MIDI track (with a device, when one is named). `clip.addFiles {paths, track?, start? |

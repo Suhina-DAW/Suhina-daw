@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, chords, shortcuts, and the note.* commands
-read_when: piano roll, clip editor, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list
+read_when: piano roll, clip editor, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, slice, glue, chords, strum, note.add, note.delete, note.move, note.resize, note.setVelocity, note.list, note.quantize, Ctrl+U
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -176,11 +176,24 @@ of keys grows and shrinks.
 
 ## Quantise
 
-- **Later ([#345](https://github.com/suhina-daw/suhina-daw/issues/345)):** quantise the selection (or every note) to the grid: Ctrl+U applies the last
-  settings, a dialog sets the grid, whether starts and or ends move, and how much (an amount in
-  percent, 100 % lands on the grid). Quantise is a command (`note.quantize`) with the grid,
-  amount and which edges as parameters, so it also runs from the CLI and MCP. Quantise while
-  recording (record quantisation) belongs to recording, which has its own issue.
+- **Built ([#345](https://github.com/suhina-daw/suhina-daw/issues/345)):** Ctrl+U quantises the
+  selected notes, or every note of the clip when none is selected, with the last settings. The
+  **Q** button in the corner over the keys opens the Quantise panel: **Grid** (1/32 to 8 bars,
+  triplets too; 1/16 at first), **Amount** (0 to 100 %, 100 at first) and **Move ends too** (off
+  at first). **Quantise notes** quantises at once; the panel keeps the settings for Ctrl+U until
+  Suhina closes. Escape, **Close** or a click outside closes it.
+- Each start moves towards the nearest grid line by the amount: 100 % lands on the line, 50 %
+  goes half way, 0 % changes nothing. A note already on a line keeps its exact start. A tie
+  between two lines goes to the later one. Without ends a note keeps its length; with ends its
+  end moves towards the nearest line the same way, and when that line is on or before the
+  quantised start, to the first line after it, so a note never becomes zero long.
+- The panel's grid is its own and does not follow the control bar's grid value, so snapping
+  while drawing and quantising can differ. Bars are as long as the project's time signature
+  makes them.
+- The edit is `note.quantize` (see Commands), one undo step, so it also runs from the CLI and MCP.
+- **Later:** the panel moves into the MIDI tools column when that is built
+  ([#349](https://github.com/suhina-daw/suhina-daw/issues/349)); swing; quantise while recording
+  (record quantisation) belongs to recording, which has its own issue.
 
 ## Scale and key
 
@@ -234,12 +247,13 @@ Built in the first version:
 | Alt while drawing or dragging | No snapping |
 | Drag a stem in the velocity lane | Changes the selection's velocity |
 | Delete, Backspace | Deletes the selected notes (after a click in the piano roll) |
+| Ctrl+U | Quantises the selected notes, or every note, with the last settings |
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo (as everywhere) |
 | Wheel, Shift+wheel | Scroll keys, scroll time |
 | Ctrl+wheel, Ctrl+Shift+wheel | Zoom time, zoom key height |
 | Middle-button drag | Pan |
 
-Later: arrow keys, Ctrl+A, Ctrl+D, copy and paste, B (draw mode), Ctrl+U (quantise), Ctrl+J (glue),
+Later: arrow keys, Ctrl+A, Ctrl+D, copy and paste, B (draw mode), Ctrl+J (glue),
 Ctrl+1 to Ctrl+4 (grid), Z (zoom to selection). They are added to the keymap
 ([`docs/shortcuts.md`](../shortcuts.md)) when built, so they can be changed like the rest.
 
@@ -262,6 +276,7 @@ nothing when it fails.
 | `note.move` | clip, `notes`, `beats?`, `semitones?` | Moves them in time and in pitch |
 | `note.resize` | clip, `notes`, `length?` or `by?` | Sets their length, or changes it by `by` beats |
 | `note.setVelocity` | clip, `notes`, `velocity?` or `by?` | Sets their velocity, or changes it by `by` (each kept within 1 to 127) |
+| `note.quantize` | clip, `notes?`, `grid`, `amount?`, `ends?` | Moves the starts (with `ends: true` the ends too) of the notes, or of every note when `notes` is left out, towards the nearest line of `grid` (as `launcher.setQuantization` takes it, such as `"1/16"` or `"1/8T"`; not `none`) by `amount` percent, 0 to 100 (default 100); returns the indices and how many moved |
 
 Limits, so a hostile input cannot break the project or exhaust memory: time from 0 to 120 000 beats
 (the engine's furthest start), length above 0 and at most 120 000 beats, keys 0 to 127, velocity 1
