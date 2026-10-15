@@ -46,11 +46,12 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Arrangement editing](spec/arrangement-editing.md) | spec | draft | start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead | How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, and where playback starts and stops (the play start marker) |
 | [Audio to MIDI](spec/audio-to-midi.md) | spec | planned | slice to MIDI, audio to MIDI, convert drums, bass, melody, chords, transcription, drop audio on MIDI track | How slicing audio to a MIDI track and converting drums, bass, melody and chords to MIDI behave |
 | [Browser](spec/browser.md) | spec | draft | browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, new track, empty area | How the browser behaves: places, categories, search, the tree, previewing, dragging samples, MIDI files, devices, presets and plug-ins into the project, pins, recent items and colour tags |
-| [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
+| [Clip launching](spec/clip-launching.md) | spec | current | clip launching, scenes, launch quantisation, stop, session view, launcher commands, follow actions | How launching clips and scenes behaves: quantisation, stop buttons, scene tempo, launcher over arrangement |
 | [Device groups](spec/device-groups.md) | spec | planned | device group, group effects, group devices, parallel processing, parallel chain, branch, macro, macro control, mix, dry/wet, group preset, nested devices, layering instruments | Planned device groups - several devices on a track as one unit, with parallel branches, per-branch volume, pan, mute and solo, a mix, macros, group presets, latency compensation, the model and the commands |
 | [Importing devices from Live Sets](spec/device-import.md) | spec | current | device import, importing devices, device mapping, placeholder device, Operator, Live device to Suhina device, which device imports into what, golden renders of imported sets | How a device stored in a Live Set is brought into Suhina: the three import levels, how each Suhina device is learnt and mapped, and which Live device maps to which Suhina device |
 | [DX7 voice data](spec/dx7-voice-format.md) | spec | current | DX7, sysex, syx, voice, bank, cartridge, FM synth patch, patch format, fm-synth | DX7 voice data as system-exclusive messages (one voice, a bank of 32), the voice layout and what the FM synth does with bad data |
 | [Extensions](spec/extensions.md) | spec | planned | extension, add-on, optional component, extension manifest, extension.json, model weights, licence shown to the user, extensions.add, extensions.list, missing extension, inference runtime | How Suhina uses an optional component it does not ship — the manifest and the licence it must carry, adding and listing one, what the user sees, and what happens when an extension is missing, crashes or hangs |
+| [FL Studio project (`.flp`) format](spec/flp-format.md) | spec | draft | reading .flp, FL Studio project, FLhd, FLdt, event stream, event id, varint, LEB128, UTF-16 strings, version event 199, flp reader errors | The FL Studio project (.flp) container and event stream as read by crates/flp, a draft spec where most statements are hypotheses |
 | [MIDI controllers and mapping](spec/midi-mapping.md) | spec | planned | MIDI learn, MIDI mapping, map a knob, mapping mode, controller profile, controllers folder, controller_mappings, takeover, pick up, relative encoder, 14-bit CC, mapping.add, mapping.learn, controllers.list, gesture, controller feedback | What a MIDI controller can do in Suhina - sources, targets, ranges, takeover, relative encoders, gestures and undo, the controller profile file, mappings saved in a project, the mapping mode and MIDI learn, the commands, and how malformed input is treated |
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
 | [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them |
@@ -68,6 +69,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, rebind, cut copy paste, duplicate, hotkeys | Keyboard shortcuts in the desktop app: the default keys, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
+| [Making the `.flp` test corpus](spec/flp-corpus.md) | howto | draft | making .flp test files, flp corpus, what to save in FL Studio, corpus/flp, flp series | How to author the FL Studio projects (.flp) that confirm the format spec and test crates/flp, series by series |
 | [parity-live-12](research/parity-live-12.md) | plan | draft | Asking where the project stands against Live, planning parity work, or deciding which milestone closes which gap. | How much of Ableton Live 12's documented functionality Suhina has today, chapter by chapter, measured against the Live 12 reference manual; contains no content from the manual. |
 | [Separation checkpoint licence audit (checked 2026-10-13)](research/separation-weights-licence-audit.md) | plan | draft | Deciding whether Suhina may bundle or auto-download a separation checkpoint. | Licence and provenance audit of current music source-separation checkpoints for GPL-3.0-or-later Suhina. |
 
@@ -84,6 +86,7 @@ Change this code, and check these documents.
 | `.github/workflows/ci.yml` | [Releasing](releasing.md) |
 | `.github/workflows/claim.yml` | [The claim bot](claim-bot.md) |
 | `.github/workflows/discord.yml` | [Releasing](releasing.md) |
+| `.github/workflows/parity-notice.yml` | [parity-live-12](research/parity-live-12.md) |
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
 | `.github/workflows/test-build-links.yml` | [Releasing](releasing.md) |
 | `.github/workflows/test-build.yml` | [Releasing](releasing.md) |
@@ -113,12 +116,18 @@ Change this code, and check these documents.
 | `crates/engine/src/buses.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Device groups](spec/device-groups.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md), [MCP server](mcp.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/engine/src/follow.rs` | [Clip launching](spec/clip-launching.md) |
+| `crates/engine/src/follow_tests.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/launcher.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
 | `crates/engine/src/lib.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md) |
 | `crates/engine/src/plugin.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/engine/src/swap.rs` | [Architecture](architecture.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
+| `crates/flp/src/event.rs` | [FL Studio project (`.flp`) format](spec/flp-format.md) |
+| `crates/flp/src/lib.rs` | [FL Studio project (`.flp`) format](spec/flp-format.md) |
+| `crates/flp/tests/corpus.rs` | [Making the `.flp` test corpus](spec/flp-corpus.md), [FL Studio project (`.flp`) format](spec/flp-format.md) |
+| `crates/flp/tests/fixtures.rs` | [FL Studio project (`.flp`) format](spec/flp-format.md) |
 | `crates/ipc/**` | [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md) |
 | `crates/ipc/src/region.rs` | [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/library/**` | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md) |
@@ -148,6 +157,7 @@ Change this code, and check these documents.
 | `crates/session/src/commands.rs` | [0002: Every action is a command](decisions/0002-commands.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/session/src/devices.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Device groups](spec/device-groups.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/session/src/files.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md), [Stems files](spec/stems-format.md) |
+| `crates/session/src/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/src/lib.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0010: Suhina's own project files (.suhina)](decisions/0010-project-files.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/library.rs` | [0002: Every action is a command](decisions/0002-commands.md), [0012: The file library: an index on disk, watched](decisions/0012-file-library.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/session/src/plugins.rs` | [0002: Every action is a command](decisions/0002-commands.md) |
@@ -156,6 +166,7 @@ Change this code, and check these documents.
 | `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
 | `crates/session/src/soundmap.rs` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
+| `crates/session/tests/follow.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
 | `crates/soundmap/**` | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md), [Sample map](spec/sample-map.md) |
@@ -167,6 +178,7 @@ Change this code, and check these documents.
 | `crates/ui/src/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
 | `crates/ui/src/detail_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
+| `crates/ui/src/follow_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |

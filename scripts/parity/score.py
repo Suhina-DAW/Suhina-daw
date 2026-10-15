@@ -101,7 +101,10 @@ CHAPTERS = [
      "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
      "running plug-ins' state as heard; no per-track or group bounce, no paste."),
     (21, "Comping", 6, 0.00, "absent", "No take lanes, no comping."),
-    (22, "Stem Separation", 8, 0.00, "planned", "Roadmap item (Demucs candidate, weights unaudited)."),
+    (22, "Stem Separation", 8, 0.00, "planned",
+     "Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, "
+     "resampling) exists in crates/separation with a test backend; no model and nothing a user "
+     "can run yet."),
     (23, "Working with Instruments and Effects (Device View)", 34, 0.30, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. Missing A/B, "

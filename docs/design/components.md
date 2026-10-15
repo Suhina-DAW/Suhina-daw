@@ -199,7 +199,8 @@ a lane between 20 and 26 px shows the first row clipped.
 ### Value field (slider)
 
 A number field that is its own slider: drag vertically to change (Shift for fine steps),
-double-click to reset (typing a value is planned).
+double-click to reset (typing a value is planned). A track's volume and pan are heard while
+dragging, and a drag is one undo step.
 
 | Part | Volume | Pan | Send |
 |---|---|---|---|
