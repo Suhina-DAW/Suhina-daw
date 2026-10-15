@@ -180,11 +180,12 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 
 - **Previews.** With `--audio`, `preview.play {path, from?, track?, gain?}` previews a sample or
   a MIDI file after the main channel (a MIDI file through `track`'s instrument, or the FM synth);
-  `preview.stop` stops it; `launcher.state` reports `preview`. `preview.noteOn {track, key,
-  velocity?}` plays one key through the track's instrument and holds it, as the piano roll's key
-  column does, until `preview.noteOff {track, key?}` lets that key go, or every held preview note
-  when `key` is left out. Both are transport commands: the project, its undo history and the
-  transport are untouched.
+  `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
+  work, through an output of their own that closes before a project opens one (ADR 0011).
+  `preview.noteOn {track, key, velocity?}` plays one key through the track's instrument and
+  holds it, as the piano roll's key column does, until `preview.noteOff {track, key?}` lets that
+  key go, or every held preview note when `key` is left out. Both are transport commands: the
+  project, its undo history and the transport are untouched.
 
 - **CPU load.** `launcher.state` reports `cpu`: the audio engine's share of wall time spent
   rendering, in percent, measured over windows of 0.2 s and smoothed so it settles within about

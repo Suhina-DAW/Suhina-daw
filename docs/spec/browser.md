@@ -87,7 +87,8 @@ Three sections, each title in small hint text:
   opened or saved; anything else when it is added to a project (dropped, or added with Enter or
   a double-click). Previewing does not count.
 - **Folders:** the added folders by name, each with a mark when it is not plain (`…` while
-  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it).
+  scanning, `poll` when it is polled, `gone` when missing), then **+ Add folder**: a field where a path is typed (Enter adds it), with a **Browse…** button
+  at its end that picks the folder in the system's folder dialog instead.
   A folder dragged from the system onto the window is added too (and the browser shows). A folder's right-click menu
   has Refresh, Pin and Remove from the browser.
 
@@ -171,8 +172,13 @@ with the part played so far brighter and a playhead.
   plug-in, when that track has one; otherwise through the FM synth with its first voice. All
   of the file's MIDI tracks sound together, at 120 BPM or the file's first tempo.
 - A file that cannot be read shows "Cannot preview: <reason>" in the strip and nothing plays.
-  The status bar says so too, and says why when nothing can preview at all: no project is open
-  (previews play through the active project's audio output), or the project has no audio output.
+  The status bar says so too, and says why when nothing can preview at all: there is no audio
+  output here, or the active project has no audio output.
+- **With no project open** the browser works as with one: browsing, searching, the sample map
+  and previews. Previews then play through an output of their own, opened on the chosen device
+  at the first preview and closed before a project opens its output, so only one is ever open
+  ([ADR 0011](../decisions/0011-preview-and-added-audio.md) › Previews with no project open).
+  Adding to a track needs a project.
 
 The browser is not the only place a preview starts: the piano roll's key column plays a note
 through the track's instrument while a key is held, with the same voice and the same commands

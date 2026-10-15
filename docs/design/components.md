@@ -19,9 +19,14 @@ covers:
   - crates/ui/src/detail_view.rs
   - crates/ui/src/follow_view.rs
   - crates/ui/src/project_dialog.rs
+  - crates/ui/src/start_panel.rs
+  - crates/ui/src/pick.rs
   - crates/ui/src/browser_view.rs
   - crates/ui/src/loading_dialog.rs
   - crates/ui/src/missing_files.rs
+  - crates/ui/src/splash.rs
+  - crates/ui/src/logo.rs
+  - assets/brand/**
 ---
 
 # Components
@@ -44,7 +49,7 @@ replaces them.
     (bar numbers in the ruler too);
   - 9 px only for tags beside a name: a device's kind, a clip's gain, key labels in the clip
     editor;
-  - 13 px only for a page title (Settings) and the drop overlay.
+  - 13 px only for a page title (Settings), the drop overlay and the name on the splash.
 - Text colours: `text.primary` for values and names, `text.secondary` for labels,
   `text.hint` for inactive and hints. The one pure white (`#FFFFFF`) is the name of a playing
   or recording clip.
@@ -264,7 +269,9 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | Page | Setting | Values |
 |---|---|---|
 | General | When opening a project | Ask (default), New tab, Replace |
-| General | Projects folder, Templates folder | A 300 px field each; empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
+| General | At start | Panel (default), New, Template, Last: what opens when Suhina starts without a project given (ADR 0010); Panel is the [start panel](#start-panel) |
+| General | Start template | Shown with At start › Template: a 300 px field, a template's file name in the templates folder or a path, ending in a 60 px **Browse…** button (the system's file dialog) |
+| General | Projects folder, Templates folder | A 300 px field each, ending in a 60 px **Browse…** button (the system's folder dialog); empty uses `Documents/Suhina/Projects` and `…/Templates`, shown as the hint |
 | General › Backups | Backups | A 260 px dropdown: Before critical operations, Every minute, Every 5 minutes (default), 10, 15, 30 or 60 minutes, Every 4 hours, Never ([spec](../spec/backups.md)) |
 | General › Backups | Clean up backups | On (default): the newest 20 backups of each project are kept; Off |
 | General › Backups | Last backup | The active project's newest backup, its time and file, as the row's note; "None written for this project yet" |
@@ -335,12 +342,13 @@ shortcuts wait while it shows.
 | Part | Spec |
 |---|---|
 | New (left half) | "New" heading (10 px `text.hint` over a `border` hairline); a 20 px row "New blank project" with "4 tracks, 2 returns, 8 scenes" on the right; "From a template" and the templates folder's `.suhina`, `.locr` (saved before October 2026) and `.als` files by name, 20 px rows that scroll, "Suhina project" or "Live Set" on the right; "No templates yet: File › Save as template" when there are none; the folder at the bottom in 10 px `text.hint` |
-| Open (right half) | A path field (hint "Path to a .suhina or .als file"; Enter opens; quotes around a pasted path are dropped) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
+| Open (right half) | A path field (hint "Path to a .suhina or .als file"; Enter opens; quotes around a pasted path are dropped), a 64 px **Browse…** button (the system's file dialog, offering `.suhina`, `.locr` and `.als`; the dialog stays behind it, and a project chosen opens) and a 56 px Open button; "Recent": the projects opened and saved lately, newest first (12 kept), the name and its folder, or "Nothing opened yet" |
 | Rows | Hover `panel.hoverBackground`; name 11 px `text.primary`, note 10 px `text.hint` |
 
 A new project opens in a new tab. Save (Ctrl+S) writes the project's own `.suhina` file (or the `.locr` it was opened from); the first
 time, Save as (Ctrl+Shift+S) and Save as template ask in a 420 px prompt: Name and Folder fields
-(the projects folder, the project's own folder, or the templates folder), the file that will be
+(the projects folder, the project's own folder, or the templates folder; Folder ends in a 64 px
+**Browse…** button, the system's folder dialog), the file that will be
 written under them (in the recording red when it is there already and will be replaced), Cancel
 and Save (Enter). A name with `/`, `\` or `:` cannot be saved.
 
@@ -356,6 +364,27 @@ dialog in the same style ([spec](../spec/backups.md) › The offer on start): "S
 *name* was saved." and "A backup from *date time* is newer than the project file." in 11 px
 `text.primary`, and Ignore, Show the folder and Open the backup (Enter) at the bottom right, 120 ×
 18 px each; Escape and Close ignore it. Several backups are offered one after another.
+
+**Browse…** buttons ask the desktop app to show the system's own dialog (`pick.rs`; the app uses
+`rfd`: the native dialogs on Windows and macOS, the desktop portal on Linux) and put what is
+chosen in the field; cancelling leaves it as it was. The dialog opens in the field's folder
+(the projects or templates folder) when it is there. Every path can still be typed.
+
+## Start panel
+
+While no project is open, the area right of the browser shows the start panel (`start_panel.rs`)
+on `window.background`: at start when Settings › General › At start is Panel (the default), and
+after the last project is closed. Its content is at most 820 px wide, centred, 24 px from the
+top. Files dropped anywhere on it open as on the rest of the window.
+
+| Part | Spec |
+|---|---|
+| Actions | Three 132 × 24 px buttons along the top, 6 px apart: **New project** (a blank one), **From a template** (shows the Templates tab), **Open…** (the system's file dialog; a project chosen opens) |
+| List | A `panel.background` card with a 1 px `border`: the tabs **Recent** and **Templates** (11 px, the chosen one `text.primary` over a 2 px `accent` line, the other `text.hint`) and a search field up to 200 px wide on the right (hint "Search") that filters both lists by name, ignoring case |
+| Recent | The projects opened and saved lately, newest first, as 20 px rows: the name, and on the right when it was last saved in words ("Just now", "5 minutes ago", "Yesterday", "3 weeks ago", "Last year"), or its folder when that cannot be read; the whole path as the tooltip. A click opens it as File › Open would; right-click › **Remove from list** takes it off `recent.txt`. "No projects yet: start a new one, or drop a project here" when there are none |
+| Templates | The templates folder's projects as in the project dialog; a click makes a new project from one; the folder in 10 px `text.hint` at the bottom |
+| Audio | A 240 px card on the right: "Audio" heading, Output, Sample rate and Buffer as the settings choose them ("Default" when unset), and an **Audio settings…** button that opens Settings › Audio. Below 560 px of width it goes under the list |
+| Footer | "Suhina" and the version on the left, "Drop a project or a Live Set (.als) here to open it" on the right, 10 px `text.hint` |
 
 ## Device panel
 
@@ -380,6 +409,27 @@ until none is loading or it is sent to the background; a project opened next sho
 | Panel | 360 px wide, centred, `panel.background`, 1 px `border.strong` border; 20 px `control.background` title "Loading plug-ins · <project>" in 11 px `text.primary` |
 | Progress | A 4 px bar, `control.background`, filled with `accent` for the share ready; under it 16 px rows in 10 px: "N of M ready, K not installed" `text.secondary`, "Loading <name>" `text.hint` (six, then "and N more"), "Could not start <name>" `recording` |
 | Button | 150 × 18 px, bottom right, as the device panel's: "Continue in the background"; Escape does the same. The project plays meanwhile |
+
+## Splash
+
+Shown while Suhina starts (`crates/ui/src/splash.rs`), drawn inside the main window over its
+first frames rather than in a window of its own: a second window would need its own GL or wgpu
+context, the slowest part of starting, and one window that shrinks and grows would fight the
+main window's remembered size and position (and Wayland lets a program neither place nor
+re-decorate its window). The window opens; the splash is drawn for at least two whole frames and
+0.2 s, so it is on screen; then the desktop app starts the browser's library, the sample map and
+the project asked for, and the splash fades out over the window that is ready. Frames alone are
+not enough: on macOS the first frames are drawn before the window has come on screen, so a
+splash that went after them was never seen.
+
+| Part | Spec |
+|---|---|
+| Behind | The whole window `window.background`; clicks there do nothing until it has gone |
+| Panel | 300 × 200 px (smaller in a smaller window), centred, `panel.background`, 1 px `border.strong` border |
+| Logo | The Suhina logo (`assets/brand/suhina-logo.svg`) 200 px wide (24 px clear of the panel's sides in a narrower one), its centre 12 px above the middle; the name in `text.primary`, the wave in its own `#FFD97D`. The app fills the file's paths itself (`crates/ui/src/logo.rs`, tiny-skia) at the screen's pixel density; if that fails, "Suhina" in 13 px `text.primary` instead |
+| Version | "Version x.y.z" (the app's `CARGO_PKG_VERSION`), 10 px mono `text.secondary`, under the logo |
+| Status | "Starting", 10 px `text.hint`, centred at the bottom |
+| Going | Fades out in 120 ms once the start-up work has run, it has been shown for 1 s, and 0.3 s have passed since the first frame after that work (where the window comes on screen only once the work is done, it is still seen there); at once with animations off |
 
 ## Clip properties
 

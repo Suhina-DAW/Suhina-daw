@@ -17,8 +17,8 @@ use crate::widgets;
 const WIDTH: f32 = 620.0;
 const HEIGHT: f32 = 380.0;
 const SAVE_WIDTH: f32 = 420.0;
-const LINE: f32 = 20.0;
-const BUTTON: Vec2 = Vec2::new(96.0, 18.0);
+pub(crate) const LINE: f32 = 20.0;
+pub(crate) const BUTTON: Vec2 = Vec2::new(96.0, 18.0);
 
 /// What the project dialog keeps between frames.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -33,6 +33,8 @@ pub struct DialogState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lists {
     pub recent: Vec<PathBuf>,
+    /// When each recent project was last saved, where it could be read.
+    pub saved: Vec<Option<std::time::SystemTime>>,
     pub templates: Vec<PathBuf>,
     pub templates_folder: String,
 }
@@ -43,6 +45,8 @@ pub enum Choice {
     Open(PathBuf),
     NewBlank,
     NewFromTemplate(PathBuf),
+    /// Browse…: the system's dialog for a project to open.
+    Browse,
     Close,
 }
 
@@ -104,7 +108,11 @@ fn draw(ui: &mut Ui, area: Rect, state: &mut DialogState, lists: &Lists) -> Opti
     heading(&painter, right, "Open");
     let y = right.top() + LINE;
     let open_button = Rect::from_min_size(Pos2::new(right.right() - 56.0, y + 1.0), Vec2::new(56.0, BUTTON.y));
-    let field = Rect::from_min_max(Pos2::new(right.left(), y), Pos2::new(open_button.left() - 4.0, y + 20.0));
+    let browse = Rect::from_min_size(Pos2::new(open_button.left() - 4.0 - 64.0, y + 1.0), Vec2::new(64.0, BUTTON.y));
+    if button(ui, &painter, browse, "Browse…", "Browse for a project") {
+        choice = Some(Choice::Browse);
+    }
+    let field = Rect::from_min_max(Pos2::new(right.left(), y), Pos2::new(browse.left() - 4.0, y + 20.0));
     let edit = ui.put(
         field,
         egui::TextEdit::singleline(&mut state.path).hint_text("Path to a .suhina or .als file").font(small.clone()),
@@ -160,6 +168,8 @@ pub struct SavePrompt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SaveChoice {
     Save(PathBuf),
+    /// Browse… beside the folder: the system's dialog for it; the prompt stays.
+    BrowseFolder,
     Cancel,
 }
 
@@ -183,10 +193,16 @@ fn draw_save(ui: &mut Ui, area: Rect, prompt: &mut SavePrompt) -> Option<SaveCho
     let small = theme::ui_font(theme::TEXT_SMALL);
     let label_width = 52.0;
     let mut y = panel.top() + ROW + PAD;
+    let mut browse_folder = false;
     let mut field = |ui: &mut Ui, label: &str, value: &mut String, focus: bool| {
         let r = Rect::from_min_size(Pos2::new(panel.left() + PAD, y), Vec2::new(panel.width() - 2.0 * PAD, LINE));
         widgets::text_in(&painter, r, Align2::LEFT_CENTER, label, small.clone(), theme::text_secondary());
-        let input = Rect::from_min_max(Pos2::new(r.left() + label_width, r.top()), r.max);
+        let mut input = Rect::from_min_max(Pos2::new(r.left() + label_width, r.top()), r.max);
+        if label == "Folder" {
+            let browse = Rect::from_min_size(Pos2::new(r.right() - 64.0, r.top() + 1.0), Vec2::new(64.0, BUTTON.y));
+            browse_folder = button(ui, &painter, browse, "Browse…", "Browse for the folder");
+            input.max.x = browse.left() - 4.0;
+        }
         let edit = ui.put(input, egui::TextEdit::singleline(value).font(small.clone()));
         edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, label));
         if focus {
@@ -217,6 +233,9 @@ fn draw_save(ui: &mut Ui, area: Rect, prompt: &mut SavePrompt) -> Option<SaveCho
     }
     if closed.is_some() {
         return Some(SaveChoice::Cancel);
+    }
+    if browse_folder {
+        return Some(SaveChoice::BrowseFolder);
     }
     match path {
         Some(path) if saved || entered => Some(SaveChoice::Save(path)),
@@ -466,14 +485,14 @@ impl CloseChoice for UnsavedChoice {
     }
 }
 
-fn heading(painter: &egui::Painter, at: Rect, text: &str) {
+pub(crate) fn heading(painter: &egui::Painter, at: Rect, text: &str) {
     let r = Rect::from_min_size(at.min, Vec2::new(at.width(), LINE));
     widgets::text_in(painter, r, Align2::LEFT_CENTER, text, theme::ui_font(theme::TEXT_SMALL), theme::text_hint());
     painter.hline(r.x_range(), r.bottom() - 2.5, theme::hairline(theme::border()));
 }
 
 /// A row to click: a name, and a note on the right.
-fn row(ui: &Ui, painter: &egui::Painter, rect: Rect, name: &str, note: &str, label: &str) -> egui::Response {
+pub(crate) fn row(ui: &Ui, painter: &egui::Painter, rect: Rect, name: &str, note: &str, label: &str) -> egui::Response {
     let response = widgets::button_area(ui, rect, Id::new(("dialog-row", label)), label);
     let fill = motion::mix(theme::panel_background(), theme::panel_hover(), widgets::hover(ui, &response));
     painter.rect_filled(rect, 0.0, fill);
@@ -487,7 +506,7 @@ fn row(ui: &Ui, painter: &egui::Painter, rect: Rect, name: &str, note: &str, lab
     response
 }
 
-fn button(ui: &Ui, painter: &egui::Painter, rect: Rect, text: &str, label: &str) -> bool {
+pub(crate) fn button(ui: &Ui, painter: &egui::Painter, rect: Rect, text: &str, label: &str) -> bool {
     let response = widgets::button_area(ui, rect, Id::new(("dialog-button", label)), label);
     let fill = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
     painter.rect_filled(rect, 0.0, fill);
@@ -497,7 +516,7 @@ fn button(ui: &Ui, painter: &egui::Painter, rect: Rect, text: &str, label: &str)
     response.clicked()
 }
 
-fn scrolled(ui: &mut Ui, rect: Rect, salt: &str, add: impl FnOnce(&mut Ui)) {
+pub(crate) fn scrolled(ui: &mut Ui, rect: Rect, salt: &str, add: impl FnOnce(&mut Ui)) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         egui::ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -506,12 +525,12 @@ fn scrolled(ui: &mut Ui, rect: Rect, salt: &str, add: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn stem(path: &Path) -> String {
+pub(crate) fn stem(path: &Path) -> String {
     path.file_stem().map_or_else(|| path.display().to_string(), |s| s.to_string_lossy().into_owned())
 }
 
 /// What a template file is, by its extension.
-fn kind(path: &Path) -> String {
+pub(crate) fn kind(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
         Some("als") => "Live Set".into(),
         _ => "Suhina project".into(),
@@ -547,6 +566,7 @@ mod tests {
                 PathBuf::from("templates/Old.als"),
             ],
             templates_folder: "templates".into(),
+            ..Lists::default()
         };
         let mut harness = dialog(lists);
         harness.run();

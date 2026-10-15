@@ -405,3 +405,82 @@ fn a_reopen_keeps_the_marker_the_launched_clips_and_the_quantization() {
     let monitor = projects.session_mut(None).unwrap().player().unwrap().monitor();
     assert_eq!(monitor.column(1).unwrap().playing, Some(0));
 }
+
+fn temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("suhina-audio-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A mono WAV file of a second at a steady level of 0.5.
+fn wav(dir: &std::path::Path) -> String {
+    let path = dir.join("listen.wav");
+    let spec =
+        hound::WavSpec { channels: 1, sample_rate: SR, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+    let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+    for _ in 0..SR {
+        writer.write_sample(0.5f32).unwrap();
+    }
+    writer.finalize().unwrap();
+    path.display().to_string()
+}
+
+/// A MIDI file with one note, middle C for a beat.
+fn midi(dir: &std::path::Path) -> String {
+    let path = dir.join("tune.mid");
+    let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01\0\x60".to_vec();
+    let events = [0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0, 0x00, 0xFF, 0x2F, 0x00];
+    bytes.extend_from_slice(b"MTrk");
+    bytes.extend_from_slice(&(events.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(&events);
+    std::fs::write(&path, bytes).unwrap();
+    path.display().to_string()
+}
+
+#[test]
+fn previews_play_with_no_project_open_on_an_output_of_their_own() {
+    let dir = temp_dir("preview");
+    let (mut projects, stand) = with_stand(None);
+    assert!(projects.preview_session().is_none());
+    run(&mut projects, "preview.stop", json!({})).unwrap();
+    assert!(stand.opened.lock().unwrap().is_empty(), "stopping opens no output");
+
+    let out = run(&mut projects, "preview.play", json!({ "path": wav(&dir), "gain": 0.0 })).unwrap();
+    assert_eq!(out["kind"], "sample");
+    assert_eq!(stand.opened.lock().unwrap().len(), 1, "one output, opened on the first preview");
+    {
+        let mut renderers = stand.renderers.lock().unwrap();
+        let mut block = vec![0.0f32; 1024];
+        renderers.last_mut().unwrap().process(&mut block);
+        assert!(block[600].abs() > 0.4, "the preview is heard: {}", block[600]);
+    }
+    let out = run(&mut projects, "preview.play", json!({ "path": midi(&dir) })).unwrap();
+    assert_eq!(out["kind"], "midi");
+    run(&mut projects, "preview.stop", json!({})).unwrap();
+    assert_eq!(stand.opened.lock().unwrap().len(), 1, "later previews use the same output");
+    assert!(projects.preview_session().is_some_and(|s| s.player().is_some()));
+    assert!(run(&mut projects, "transport.play", json!({})).is_err(), "only previews run with no project");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_preview_output_closes_before_a_project_or_another_output_opens() {
+    let dir = temp_dir("preview-close");
+    let (mut projects, stand) = with_stand(None);
+    run(&mut projects, "preview.play", json!({ "path": wav(&dir) })).unwrap();
+    projects.close_preview_output();
+    assert!(projects.preview_session().is_none(), "closed before a project's output opens");
+
+    run(&mut projects, "preview.play", json!({ "path": wav(&dir) })).unwrap();
+    run(&mut projects, "audio.setOutput", json!({ "buffer_frames": 256 })).unwrap();
+    assert!(projects.preview_session().is_none(), "another output: it opens there when next needed");
+    run(&mut projects, "preview.play", json!({ "path": wav(&dir) })).unwrap();
+    let last = stand.opened.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(last.0.buffer_frames, Some(256));
+
+    projects.add(Session::new(project()), None).unwrap();
+    assert!(projects.preview_session().is_some_and(|s| s.player().is_none()), "the project's session now");
+    run(&mut projects, "preview.play", json!({ "path": wav(&dir) })).unwrap_err();
+    let _ = std::fs::remove_dir_all(&dir);
+}

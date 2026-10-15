@@ -62,6 +62,9 @@ pub struct Projects {
     pub(crate) backups: crate::backup::Backups,
     /// The MIDI input ports and where they send their notes (ADR 0017).
     midi: crate::midi::MidiInputs,
+    /// With no project open, the empty session previews play in, with a player of its own
+    /// (ADR 0011); made on the first preview and dropped before a project opens its output.
+    preview: Option<Session>,
 }
 
 /// How often an output whose device reported an error is opened again.
@@ -213,6 +216,8 @@ impl Projects {
     /// it is (the playhead, playing or stopped, and the metronome) and the plug-ins running.
     /// Nothing happens while no project plays. Returns a notice as [`Projects::open_output`].
     pub fn reopen_output(&mut self) -> Result<Option<String>, CommandError> {
+        // The preview output opens on the new choice when next needed.
+        self.close_preview_output();
         let Some(system) = self.audio.clone() else { return Ok(None) };
         let choice = self.output_choice.clone();
         let Ok(session) = self.session_mut(None) else { return Ok(None) };
@@ -257,9 +262,48 @@ impl Projects {
         let name = name
             .or_else(|| session.source().and_then(|s| s.file_stem()).map(|s| s.to_string_lossy().into_owned()))
             .unwrap_or_else(|| format!("Untitled {}", id.0));
+        self.close_preview_output();
         self.open.push(Open { id, name, session });
         self.activate(id);
         Ok(id)
+    }
+
+    /// The session previews play in: the active project's, or with none open the empty one of
+    /// the previews' own, once it has been made ([`Projects::preview_session_mut`]).
+    pub fn preview_session(&self) -> Option<&Session> {
+        match self.active {
+            Some(id) => self.get(id),
+            None => self.preview.as_ref(),
+        }
+    }
+
+    /// The session previews play in, as [`Projects::preview_session`]; with no project open,
+    /// the previews' own empty session is made and its player opened on the chosen output
+    /// when there is none yet. Only one output is ever open: this one exists only while no
+    /// project is, and a project's output opens after it is closed (ADR 0011).
+    pub fn preview_session_mut(&mut self) -> Result<&mut Session, CommandError> {
+        if self.active.is_some() {
+            return self.session_mut(None);
+        }
+        if self.preview.as_ref().is_none_or(|s| s.player().is_none()) {
+            let system = self.audio.clone().ok_or("no audio output here: open or make a project to preview")?;
+            let choice = self.output_choice.clone();
+            let mut session = Session::new(suhina_model::Project::default());
+            session
+                .replace_player(|project, audio, previous| {
+                    system.open(project, audio, &choice, previous).map(|opened| opened.player)
+                })
+                .map_err(|e| CommandError(format!("no audio output: {e}")))?;
+            self.preview = Some(session);
+        }
+        self.preview.as_mut().ok_or_else(no_project)
+    }
+
+    /// Closes the output previews play on while no project is open, so a project can open its
+    /// own (a device may only be open once). The desktop app calls it before opening a project's
+    /// output; adding a project and choosing another output do too.
+    pub fn close_preview_output(&mut self) {
+        self.preview = None;
     }
 
     pub fn active(&self) -> Option<ProjectId> {
@@ -485,6 +529,14 @@ impl Projects {
             check_params(id, spec.params, params)?;
             return (spec.run)(self, params);
         }
+        // With no project open, previews play in the previews' own session.
+        if project.is_none() && self.active.is_none() && PREVIEW_COMMANDS.contains(&id) {
+            // Nothing plays yet: stopping opens no output.
+            if id == "preview.stop" && self.preview.is_none() {
+                return Ok(json!({ "stopped": true }));
+            }
+            return self.preview_session_mut()?.execute(id, params);
+        }
         // A command may need a plug-in that has started meanwhile, or add one.
         self.poll_plugins();
         let target = project.or(self.active);
@@ -577,6 +629,9 @@ fn check_params(id: &str, expected: &[Param], params: &Value) -> Result<(), Comm
     }
     Ok(())
 }
+
+/// The commands that run with no project open, in the previews' own session.
+const PREVIEW_COMMANDS: [&str; 2] = ["preview.play", "preview.stop"];
 
 fn no_project() -> CommandError {
     CommandError("no project is open".into())
