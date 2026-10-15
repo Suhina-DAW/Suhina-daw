@@ -128,6 +128,14 @@ class Discord(unittest.TestCase):
         self.assertIn(f"…and {40 - shown} more", post)
         self.assertTrue(post.endswith("2 internal changes (documentation, CI, scripts, tests) not listed."))
 
+    def test_links_the_rolling_nightly_by_default(self):
+        post = rn.discord_post([], 0, "base", REPO, "v")
+        self.assertIn("<https://github.com/o/r/releases/tag/nightly>", post)
+
+    def test_links_the_nights_own_release(self):
+        post = rn.discord_post([], 0, "base", REPO, "v", "nightly-20261013")
+        self.assertIn("<https://github.com/o/r/releases/tag/nightly-20261013>", post)
+
     def test_short_lists_are_whole(self):
         post = rn.discord_post(["A (#1)", "B (#2)"], 0, "base", REPO, "v")
         self.assertEqual(post.count("\n- "), 2)
